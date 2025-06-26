@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 #define MAX_LINE 2048
-#define MODULE_COUNT 9
+#define MODULE_COUNT 11
 
 typedef struct {
     const char* name;
@@ -22,7 +22,9 @@ int main() {
         {"vram",     "VRAM"},
         {"renderer", "Renderer"},
         {"bios",     "BIOS"},
-        {"debugger", "Debugger"}
+        {"debugger", "Debugger"},
+        {"interconnect", "INTERCONNECT"},
+        {"timers", "TIMER"}
     };
 
     FILE* misc = fopen("misc_log.txt", "w");

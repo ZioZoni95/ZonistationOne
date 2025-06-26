@@ -108,7 +108,10 @@ static void trigger_interrupt(Cdrom* cdrom, uint8_t int_code) {
         uint8_t flag_bit = 1 << (int_code - 1);
         cdrom->interrupt_flags |= flag_bit;
         if (cdrom->interrupt_enable & flag_bit) {
-            interconnect_request_irq(cdrom->inter, IRQ_CDROM);
+            printf("[CDROM] Requesting IRQ2 (CDROM) via trigger_interrupt (int_code=%u, enable=0x%02x, flags=0x%02x)\n", int_code, cdrom->interrupt_enable, cdrom->interrupt_flags);
+            interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
+        } else {
+            printf("[CDROM] IRQ2 (CDROM) NOT requested: int_code=%u, enable=0x%02x, flags=0x%02x\n", int_code, cdrom->interrupt_enable, cdrom->interrupt_flags);
         }
     }
 }
@@ -211,6 +214,7 @@ static void cmd_test(Cdrom* cdrom) {
     // Test commands are weird, they often seem to respond with INT3 and then the result
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
+    printf("[CDROM] Test command: Pushed status 0x%02x to response FIFO\n", cdrom->status);
     trigger_interrupt(cdrom, 3);
 
     switch (sub_command) {
@@ -220,6 +224,7 @@ static void cmd_test(Cdrom* cdrom) {
             fifo_push(&cdrom->response_fifo, 0x12); // Month
             fifo_push(&cdrom->response_fifo, 0x20); // Day
             fifo_push(&cdrom->response_fifo, 0xC2); // Version (from SCPH1001)
+            printf("[CDROM] Test(0x20): Queued BIOS date/version response\n");
             break;
         default:
              printf("  CDROM Test: Unhandled sub 0x%02x\n", sub_command);
@@ -228,6 +233,11 @@ static void cmd_test(Cdrom* cdrom) {
     }
     // Unlike other commands, TEST seems to complete immediately.
     // We don't use the scheduler.
+    update_status_register(cdrom);
+    printf("[CDROM] Test command: Updated status register after response\n");
+    // Explicitly request IRQ2 for test completion (simulate INT2/3 as needed)
+    printf("[CDROM] Explicitly requesting IRQ2 (CDROM) after Test command\n");
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM-Test");
 }
 
 // Stubs for other commands - no changes needed yet
@@ -443,14 +453,56 @@ static void cmd_read_n(Cdrom* cdrom) {
 // ADDED completion handler
 static void cmd_read_n_complete(Cdrom* cdrom) {
     printf("  CDROM ReadN - Complete\n");
-    // This is a dummy read. We don't load from the file yet.
-    // We just signal that data is ready.
     cdrom->status &= ~STAT_BUSY;
+
+    // --- Actual sector reading implementation ---
+    if (!cdrom->disc_present || !cdrom->disc_file) {
+        printf("  CDROM ReadN: No disc present!\n");
+        cdrom->current_state = CD_STATE_ERROR;
+        // Set error status and trigger INT5
+        update_status_register(cdrom);
+        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+        fifo_push(&cdrom->response_fifo, 0x80); // Error code: No Disc
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+        trigger_interrupt(cdrom, 5); // INT5: Error
+        return;
+    }
+
+    // Seek to the correct LBA in the .bin file
+    long sector_offset = (long)cdrom->target_lba * CD_USER_DATA_SIZE;
+    if (fseek(cdrom->disc_file, sector_offset, SEEK_SET) != 0) {
+        printf("  CDROM ReadN: fseek failed for LBA %u!\n", cdrom->target_lba);
+        cdrom->current_state = CD_STATE_ERROR;
+        update_status_register(cdrom);
+        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+        fifo_push(&cdrom->response_fifo, 0x81); // Error code: Seek error
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+        trigger_interrupt(cdrom, 5); // INT5: Error
+        return;
+    }
+
+    size_t bytes_read = fread(cdrom->data_buffer, 1, CD_USER_DATA_SIZE, cdrom->disc_file);
+    if (bytes_read != CD_USER_DATA_SIZE) {
+        printf("  CDROM ReadN: fread failed or incomplete for LBA %u!\n", cdrom->target_lba);
+        cdrom->current_state = CD_STATE_ERROR;
+        update_status_register(cdrom);
+        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+        fifo_push(&cdrom->response_fifo, 0x82); // Error code: Read error
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+        trigger_interrupt(cdrom, 5); // INT5: Error
+        return;
+    }
+
+    cdrom->data_buffer_count = CD_USER_DATA_SIZE;
+    cdrom->data_buffer_read_ptr = 0;
     cdrom->status |= STAT_DTEN; // Set Data FIFO not empty flag
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 1); // INT1: Data Ready
     cdrom->current_state = CD_STATE_READING;
+
+    // Increment LBA for continuous reading
+    cdrom->target_lba++;
 }
 
 static void cmd_seek_l(Cdrom* cdrom) {
@@ -481,15 +533,90 @@ static void cmd_stop(Cdrom* cdrom) {
 
 // cdrom_step: No changes needed
 void cdrom_step(Cdrom* cdrom, uint32_t cycles) {
-    if (cdrom->cycles_until_event > 0) {
-        if (cycles >= cdrom->cycles_until_event) {
-            cdrom->cycles_until_event = 0;
-            if (cdrom->pending_completion_handler) {
-                cdrom->pending_completion_handler(cdrom);
-                cdrom->pending_completion_handler = NULL;
+    static uint32_t sector_timer = 0;
+    if (cdrom->current_state == CD_STATE_READING) {
+        sector_timer += cycles;
+        // 33868800 / 75 = ~451,584 cycles per sector at 1x speed
+        while (sector_timer >= 451584) {
+            sector_timer -= 451584;
+            // Only deliver a new sector if the previous one has been read out
+            if (cdrom->data_buffer_read_ptr >= cdrom->data_buffer_count) {
+                // Read next sector from disc
+                if (!cdrom->disc_present || !cdrom->disc_file) {
+                    printf("  [CDROM] Continuous Read: No disc present!\n");
+                    cdrom->current_state = CD_STATE_ERROR;
+                    update_status_register(cdrom);
+                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->response_fifo, 0x80); // Error code: No Disc
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    return;
+                }
+                long sector_offset = (long)cdrom->target_lba * CD_USER_DATA_SIZE;
+                if (fseek(cdrom->disc_file, sector_offset, SEEK_SET) != 0) {
+                    printf("  [CDROM] Continuous Read: fseek failed for LBA %u!\n", cdrom->target_lba);
+                    cdrom->current_state = CD_STATE_ERROR;
+                    update_status_register(cdrom);
+                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->response_fifo, 0x81); // Error code: Seek error
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    return;
+                }
+                size_t bytes_read = fread(cdrom->data_buffer, 1, CD_USER_DATA_SIZE, cdrom->disc_file);
+                if (bytes_read != CD_USER_DATA_SIZE) {
+                    printf("  [CDROM] Continuous Read: fread failed or incomplete for LBA %u!\n", cdrom->target_lba);
+                    cdrom->current_state = CD_STATE_ERROR;
+                    update_status_register(cdrom);
+                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->response_fifo, 0x82); // Error code: Read error
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    return;
+                }
+                cdrom->data_buffer_count = CD_USER_DATA_SIZE;
+                cdrom->data_buffer_read_ptr = 0;
+                cdrom->status |= STAT_DTEN;
+                update_status_register(cdrom);
+                fifo_push(&cdrom->response_fifo, cdrom->status);
+                printf("  [CDROM] Delivering sector LBA %u, INT1\n", cdrom->target_lba);
+                trigger_interrupt(cdrom, 1); // INT1: Data Ready
+                cdrom->target_lba++;
+            } else {
+                // Wait for the CPU to read out the previous sector
+                break;
             }
-        } else {
-            cdrom->cycles_until_event -= cycles;
         }
+    } else {
+        sector_timer = 0; // Reset timer if not reading
     }
+}
+
+void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd) {
+    // 1. Set busy flag immediately
+    cdrom->status |= STAT_BUSY;
+    printf("[CDROM] CMD: 0x%02X (Set busy flag)\n", cmd);
+
+    // 2. Populate response FIFO (example for Test command 0x19)
+    fifo_clear(&cdrom->response_fifo);
+    switch (cmd) {
+        case 0x19: // Test
+            fifo_push(&cdrom->response_fifo, 0x00); // Example: status OK
+            printf("[CDROM] Test command response: 0x00\n");
+            break;
+        // Add other commands as needed
+        default:
+            fifo_push(&cdrom->response_fifo, 0x00); // Default response
+            printf("[CDROM] Default command response: 0x00\n");
+            break;
+    }
+
+    // 3. Clear busy flag and parameter FIFO after processing
+    cdrom->status &= ~STAT_BUSY;
+    fifo_clear(&cdrom->param_fifo);
+    printf("[CDROM] CMD: 0x%02X (Clear busy flag, param FIFO)\n", cmd);
+
+    // 4. Request IRQ2 (CDROM) after command completion
+    printf("[CDROM] Requesting IRQ2 (CDROM)\n");
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }

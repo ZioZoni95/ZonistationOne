@@ -202,10 +202,21 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value);
 /**
  * @brief Called by peripherals to signal an interrupt request.
  * Sets the corresponding bit in the I_STAT register.
+ * Used by peripherals (e.g., CDROM) to request IRQ2. Logs the source.
  * @param inter Pointer to the Interconnect instance.
  * @param irq_line The interrupt line number (0-10) to request.
+ * @param source The source of the interrupt request.
  */
-void interconnect_request_irq(Interconnect* inter, uint32_t irq_line);
+void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source);
+
+/**
+ * @brief Called by peripherals to clear an interrupt request.
+ * Clears the corresponding bit in the I_STAT register.
+ * @param inter Pointer to the Interconnect instance.
+ * @param irq_line The interrupt line number (0-10) to clear.
+ * @param source The source of the interrupt request.
+ */
+void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source);
 
 
 #endif // INTERCONNECT_H

@@ -144,6 +144,7 @@ uint8_t cdrom_read_register(Cdrom* cdrom, uint32_t addr);
 /**
  * @brief Writes an 8-bit value to a CD-ROM controller register address.
  * Handles register indexing and triggers command execution.
+ * NOTE: Responsible for triggering IRQ2 (CDROM) after command execution if needed.
  * @param cdrom Pointer to the Cdrom state structure.
  * @param addr The physical address being accessed (1F801800h - 1F801803h).
  * @param value The 8-bit value to write.
@@ -159,11 +160,14 @@ void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value);
  */
 bool cdrom_load_disc(Cdrom* cdrom, const char* bin_filename);
 
-// TODO: Add function prototype for stepping CDROM state machine/timing if needed
 /**
  * @brief Steps the CD-ROM state machine, handling command delays and completion.
+ * NOTE: This function must be called regularly from the main loop to ensure CDROM IRQs are triggered.
  * @param cdrom Pointer to the Cdrom state structure.
  * @param cycles The number of CPU cycles that have passed since the last step.
  */
 void cdrom_step(Cdrom* cdrom, uint32_t cycles);
+
+void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd);
+
 #endif // CDROM_H

@@ -137,6 +137,7 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             t->counter = value;
             break;
         case TMR_REG_MODE: // 0x4: Mode Register
+            printf("[TIMER] Write Mode Timer%d: 0x%04x\n", timer_index, value);
             t->mode = value;
             // Update internal derived state whenever mode changes
             timer_update_internal_state(t);
@@ -172,7 +173,8 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  */
 void timers_step(Timers* timers, uint32_t cpu_cycles) {
     if (cpu_cycles == 0) return;
-
+    static int frame_counter = 0;
+    frame_counter++;
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];
 
@@ -226,6 +228,10 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         // --- 3. Increment Counter and Check for Events ---
         uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
+        // --- LOGGING: Print timer state every 60 frames ---
+        if (frame_counter % 60 == 0) {
+            printf("[TIMER] Timer%d: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
+        }
 
         // Check for target reached
         if (old_counter < t->target && t->counter >= t->target) {
@@ -250,7 +256,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             // Set the interrupt request bit in the mode register
             t->mode |= (1 << 10);
             // Request the interrupt line from the interconnect
-            interconnect_request_irq(timers->inter, IRQ_TIMER0 + i);
+            interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
 
         // --- 5. Handle Counter Reset ---
