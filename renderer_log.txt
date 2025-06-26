@@ -1,0 +1,2148 @@
+  Initializing Renderer...
+Initializing Renderer...
+Renderer Initialized Successfully.
+Renderer: Setting Draw Offset (0, 1), forcing draw first.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 241), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 1), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 241), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 6 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 18 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Renderer: Setting Draw Offset (0, 0), forcing draw first.
+Renderer: Drawing 36 vertices...
+Renderer: Draw finished, vertex count reset.
+Renderer: Display requested.
+Renderer: Buffering Quad (Start Index: 0)
+Renderer: Buffering Quad (Start Index: 6)
+Renderer: Buffering Triangle (Start Index: 12)
+Renderer: Buffering Triangle (Start Index: 15)
+Renderer: Buffering Quad (Start Index: 18)
+Renderer: Buffering Quad (Start Index: 24)
+Renderer: Buffering Quad (Start Index: 30)
+Destroying Renderer...
+Renderer Destroyed.
