@@ -590,8 +590,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     }
     // CDROM Registers
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        printf("~ Write8 to CDROM Reg (0x%08x) = 0x%02x (Ignoring)\n", physical_addr, value);
-        // TODO: Implement CDROM register writes
+        cdrom_write_register(&inter->cdrom, physical_addr, value);
         return;
     }
 

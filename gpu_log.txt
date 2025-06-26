@@ -1,0 +1,3831 @@
+GPU Initializing...
+GPU Initialized (State reset, VRAM initialized).
+Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, IRQ states set).
+GPU: Soft Reset (GP1 Cmd 0x00)
+GPU Initializing...
+GPU Initialized (State reset, VRAM initialized).
+~ Read32 from GPUREAD (0x1f801810)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=241 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=1 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=241 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=1 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: Soft Reset (GP1 Cmd 0x00)
+GPU Initializing...
+GPU Initialized (State reset, VRAM initialized).
+~ Read32 from GPUREAD (0x1f801810)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: Display Enable = Enabled (GP1 Cmd 0x03)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+~ Read32 from GPUREAD (0x1f801810)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ebca4
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eccf4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000ea884
+DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+DMA GPU Linked List: Finished.
+GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+GPU: Display Mode set (GP1 Cmd 0x08)
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+DMA GPU Linked List: Starting at 0x000eb8d4
+DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+DMA GPU Linked List: Finished.
+GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+GPU: Acknowledge IRQ (GP1 Cmd 0x02)
+GPU: Reset Command Buffer (GP1 Cmd 0x01)
+~ Read32 from GPUREAD (0x1f801810)
+GPU: Display Mode set (GP1 Cmd 0x08)

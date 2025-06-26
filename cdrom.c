@@ -250,9 +250,15 @@ static void cmd_pause_complete(Cdrom* cdrom) {
     trigger_interrupt(cdrom, 2);
 }
 
-// --- Main command dispatcher (no changes needed) ---
+// --- Main command dispatcher: Only block if busy, not if interrupt pending ---
 static void cdrom_handle_command(Cdrom* cdrom, uint8_t command) {
+    if (cdrom->status & STAT_BUSY) {
+        printf("CDROM: Command 0x%02x IGNORED (busy)\n", command);
+        return;
+    }
     cdrom->pending_command = command;
+    cdrom->status |= STAT_BUSY;
+    update_status_register(cdrom);
     switch (command) {
         case CDC_GETSTAT: cmd_get_stat(cdrom); break;
         case CDC_SETLOC:  cmd_set_loc(cdrom); break;
@@ -266,10 +272,11 @@ static void cdrom_handle_command(Cdrom* cdrom, uint8_t command) {
         case CDC_GETID:   cmd_get_id(cdrom); break;
         default:
             fprintf(stderr, "CDROM Error: Unhandled command 0x%02x\n", command);
+            cdrom->status &= ~STAT_BUSY;
+            update_status_register(cdrom);
             break;
     }
 }
-
 
 // --- Core Public Functions ---
 
@@ -291,6 +298,8 @@ static void cmd_set_loc(Cdrom* cdrom) {
     printf("~ CDROM CMD: SetLoc (0x02)\n");
     if (cdrom->param_fifo.count < 3) {
         printf("  ERROR: SetLoc requires 3 parameters.\n");
+        cdrom->status &= ~STAT_BUSY;
+        update_status_register(cdrom);
         return;
     }
     uint8_t m = bcd_to_int(fifo_pop(&cdrom->param_fifo));
@@ -298,17 +307,16 @@ static void cmd_set_loc(Cdrom* cdrom) {
     uint8_t f = bcd_to_int(fifo_pop(&cdrom->param_fifo));
     cdrom->target_lba = (m * 60 * 75) + (s * 75) + f - 150;
     printf("  Set LBA to %u (M:%u S:%u F:%u)\n", cdrom->target_lba, m, s, f);
-
     cdrom->current_state = CD_STATE_CMD_EXEC;
-    cdrom->status |= STAT_BUSY;
+    // Set busy flag already set by dispatcher
     cdrom_schedule_event(cdrom, 10000, cmd_set_loc_complete);
 }
 
 // ADDED completion handler
 static void cmd_set_loc_complete(Cdrom* cdrom) {
     printf("~ CDROM CMD set_loc_complete)\n");
-
     cdrom->status &= ~STAT_BUSY;
+    fifo_clear(&cdrom->param_fifo);
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 3); // INT3
@@ -366,32 +374,58 @@ uint8_t cdrom_read_register(Cdrom* cdrom, uint32_t addr) {
     return 0;
 }
 
-// cdrom_write_register: No changes needed
+// cdrom_write_register: Real fix for register/index handling and command acceptance
 void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
-    printf("CDROM Write: Index=%d, Offset=0x%x, Value=0x%02x\n", cdrom->index, addr & 3, value);
     uint8_t offset = addr & 3;
-    uint8_t reg_index = cdrom->index;
-
-    if (offset == CDREG_INDEX) {
-        cdrom->index = value & 3;
-        return;
-    }
+    uint8_t reg_index = cdrom->index & 0x3; // Always mask to 2 bits
+    printf("CDROM Write: Index=%d, Offset=0x%x, Value=0x%02x\n", reg_index, offset, value);
 
     switch (offset) {
+        case CDREG_INDEX:
+            printf("  -> Set Index to %d\n", value & 3);
+            cdrom->index = value & 3; // Only change index here
+            return;
         case CDREG_COMMAND:
-            if (reg_index == 0) cdrom_handle_command(cdrom, value);
+            if (reg_index == 0) {
+                if (!(cdrom->status & STAT_BUSY)) {
+                    printf("  -> Command Write: 0x%02x (ACCEPTED)\n", value);
+                    cdrom_handle_command(cdrom, value);
+                } else {
+                    printf("  -> Command Write: 0x%02x IGNORED (busy)\n", value);
+                }
+            } else {
+                printf("  -> Ignored Command Write (Index != 0)\n");
+            }
             break;
         case CDREG_PARAMETER:
-            if (reg_index == 0) fifo_push(&cdrom->param_fifo, value);
+            if (reg_index == 0) {
+                printf("  -> Parameter FIFO Write: 0x%02x\n", value);
+                fifo_push(&cdrom->param_fifo, value);
+            } else {
+                printf("  -> Ignored Parameter Write (Index != 0)\n");
+            }
             break;
         case CDREG_REQUEST:
-            if (reg_index == 0) { // Request
-                if (value & 0x80) fifo_clear(&cdrom->param_fifo);
-            } else if (reg_index == 1) { // Interrupt
+            if (reg_index == 0) {
+                printf("  -> Request Write: 0x%02x\n", value);
+                if (value & 0x80) {
+                    printf("    -> Clear Parameter FIFO\n");
+                    fifo_clear(&cdrom->param_fifo);
+                }
+            } else if (reg_index == 1) {
+                printf("  -> IRQ Enable/Flags Write: 0x%02x\n", value);
                 cdrom->interrupt_enable = value & 0x1F;
                 cdrom->interrupt_flags &= ~(value & 0x1F);
-                if (value & 0x40) cdrom->interrupt_flags = 0;
+                if (value & 0x40) {
+                    printf("    -> Clear All Interrupt Flags\n");
+                    cdrom->interrupt_flags = 0;
+                }
+            } else {
+                printf("  -> Ignored Request Write (Index != 0/1)\n");
             }
+            break;
+        default:
+            printf("  -> Unknown Write\n");
             break;
     }
 }

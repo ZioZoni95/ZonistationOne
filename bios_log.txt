@@ -1,0 +1,4 @@
+Attempting to load BIOS from: roms/SCPH1001.BIN
+  Loading BIOS...
+BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
+Warning: Could not load game disc. Running BIOS only.
