@@ -8,6 +8,7 @@
 #include <stdlib.h> // For exit()
 #include <string.h> // For memset
 #include "renderer.h"
+#include "log.h"
 // vram.h is implicitly included via gpu.h
 
 // --- Forward Declarations for GP0 Handlers (Internal linkage) ---
@@ -58,7 +59,7 @@ static void clear_gp0_command_buffer(Gpu* gpu) {
  */
 static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_command_buffer.count >= MAX_GPU_COMMAND_WORDS) {
-        fprintf(stderr, "FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x\n", gpu->gp0_current_opcode);
+        LOG_ERROR("FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x\n", gpu->gp0_current_opcode);
         // Consider triggering a CPU exception or other error handling
         exit(EXIT_FAILURE); // Exit for now, as this indicates a major issue
     }
@@ -70,7 +71,7 @@ static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
 
 /** GP1(0x00): Soft Reset */
 static void gp1_reset(Gpu* gpu, uint32_t value) {
-    printf("GPU: Soft Reset (GP1 Cmd 0x00)\n");
+    LOG_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
     (void)value; // value is unused for this command
     // Re-initialize GPU state AND the VRAM state by calling gpu_init
     gpu_init(gpu);
@@ -78,7 +79,7 @@ static void gp1_reset(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x01): Reset Command Buffer */
 static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
-     printf("GPU: Reset Command Buffer (GP1 Cmd 0x01)\n");
+    LOG_INFO("GPU: Reset Command Buffer (GP1 Cmd 0x01)\n");
     (void)value; // value is unused for this command
     clear_gp0_command_buffer(gpu);
     gpu->gp0_words_remaining = 0;
@@ -90,7 +91,7 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x02): Acknowledge GPU Interrupt */
 static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
-     printf("GPU: Acknowledge IRQ (GP1 Cmd 0x02)\n");
+    LOG_INFO("GPU: Acknowledge IRQ (GP1 Cmd 0x02)\n");
      (void)value; // value is unused for this command
      gpu->interrupt = false; // Clear the interrupt flag (STAT[24])
 }
@@ -99,7 +100,7 @@ static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
 static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     // Bit 0: 0 = Enable Display, 1 = Disable Display
     gpu->display_disabled = (value & 1);
-    printf("GPU: Display Enable = %s (GP1 Cmd 0x03)\n", gpu->display_disabled ? "Disabled" : "Enabled");
+    LOG_INFO("GPU: Display Enable = %s (GP1 Cmd 0x03)\n", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
 /** GP1(0x04): DMA Direction / Request settings */
@@ -111,7 +112,7 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
         case 2: gpu->dma_setting = GPU_DMA_CpuToGp0; break;
         case 3: gpu->dma_setting = GPU_DMA_VRamToCpu; break;
     }
-     printf("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
+    LOG_INFO("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
 }
 
 /** GP1(0x05): Start of Display area in VRAM */
@@ -120,7 +121,7 @@ static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
     // Bits 10-18: Y start coordinate in VRAM (512 height)
     gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
-    printf("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)\n",
+    LOG_INFO("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)\n",
         gpu->display_vram_x_start, gpu->display_vram_y_start);
 }
 
@@ -130,7 +131,7 @@ static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
     // Bits 12-23: Hsync End coordinate (dotclock units)
     gpu->display_horiz_start = (uint16_t)(value & 0xFFF);
     gpu->display_horiz_end = (uint16_t)((value >> 12) & 0xFFF);
-    printf("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)\n",
+    LOG_INFO("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)\n",
         gpu->display_horiz_start, gpu->display_horiz_end);
 }
 
@@ -140,7 +141,7 @@ static void gp1_display_vertical_range(Gpu* gpu, uint32_t value) {
     // Bits 10-19: Vsync End coordinate (scanline units)
     gpu->display_line_start = (uint16_t)(value & 0x3FF);
     gpu->display_line_end = (uint16_t)((value >> 10) & 0x3FF);
-     printf("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)\n",
+    LOG_INFO("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)\n",
         gpu->display_line_start, gpu->display_line_end);
 }
 
@@ -160,9 +161,9 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     gpu->interlaced = ((value >> 5) & 1);
     // Bit 7: Unsupported "Reverseflag"
     if ((value >> 7) & 1) {
-        fprintf(stderr, "Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
+        LOG_WARN("Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
     }
-    printf("GPU: Display Mode set (GP1 Cmd 0x08)\n");
+    LOG_INFO("GPU: Display Mode set (GP1 Cmd 0x08)\n");
 }
 
 
@@ -175,14 +176,14 @@ static void gp0_nop(Gpu* gpu) {
 
 /** GP0(0x01): Clear Cache (Texture Cache Invalidation) */
 static void gp0_clear_cache(Gpu* gpu) {
-    printf("GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)\n");
+    LOG_INFO("GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)\n");
     (void)gpu;
 }
 
 /** GP0(0x02): Fill Rectangle in VRAM */
 static void gp0_fill_rectangle(Gpu* gpu) {
     // TODO: Implement VRAM fill using color (word 0), coords (word 1), dimensions (word 2)
-    printf("GP0(0x02): Fill Rectangle (Not Implemented Yet)\n");
+    LOG_INFO("GP0(0x02): Fill Rectangle (Not Implemented Yet)\n");
     (void)gpu;
 }
 
@@ -196,7 +197,7 @@ static void gp0_draw_mode(Gpu* gpu) {
         case 0: gpu->texture_depth = T4Bit; break;
         case 1: gpu->texture_depth = T8Bit; break;
         case 2: gpu->texture_depth = T15Bit; break;
-        default: printf("Warn: GP0(E1) Unknown texture depth %d\n", (value >> 7) & 3); break;
+        default: LOG_WARN("Warn: GP0(E1) Unknown texture depth %d\n", (value >> 7) & 3); break;
     }
     gpu->dithering = ((value >> 9) & 1);
     gpu->draw_to_display = ((value >> 10) & 1);
@@ -261,7 +262,7 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
 /** GP0(0x28): Monochrome Opaque Quad */
 static void gp0_quad_mono_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 5) {
-         fprintf(stderr, "GP0(0x28) Error: Expected 5 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0x28) Error: Expected 5 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     RendererColor c = { .r=(GLubyte)(gpu->gp0_command_buffer.buffer[0]&0xFF), .g=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>8)&0xFF), .b=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>16)&0xFF) };
     RendererColor colors[4] = {c, c, c, c};
     RendererPosition positions[4];
@@ -273,7 +274,7 @@ static void gp0_quad_mono_opaque(Gpu* gpu) {
 /** GP0(0x2C): Textured Opaque Quadrilateral with Blend */
 static void gp0_quad_texture_blend_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 9) {
-         fprintf(stderr, "GP0(0x2C) Error: Expected 9 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0x2C) Error: Expected 9 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     RendererPosition p[4]; uint32_t uv[4]; uint16_t clut, texpage;
     p[0] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]>>16) }; uv[0]=gpu->gp0_command_buffer.buffer[2];
     p[1] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]>>16) }; uv[1]=gpu->gp0_command_buffer.buffer[4];
@@ -290,7 +291,7 @@ static void gp0_quad_texture_blend_opaque(Gpu* gpu) {
 /** GP0(0x38): Shaded Opaque Quad */
 static void gp0_quad_shaded_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 8) {
-         fprintf(stderr, "GP0(0x38) Error: Expected 8 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0x38) Error: Expected 8 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     RendererColor c[4]; RendererPosition p[4];
     for (int i = 0; i < 4; ++i) {
         uint32_t cw=gpu->gp0_command_buffer.buffer[i*2]; uint32_t vw=gpu->gp0_command_buffer.buffer[i*2+1];
@@ -303,7 +304,7 @@ static void gp0_quad_shaded_opaque(Gpu* gpu) {
 /** GP0(0x30): Shaded Opaque Triangle */
 static void gp0_triangle_shaded_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 6) {
-         fprintf(stderr, "GP0(0x30) Error: Expected 6 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0x30) Error: Expected 6 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     RendererColor c[3]; RendererPosition p[3];
     for (int i = 0; i < 3; ++i) {
         uint32_t cw=gpu->gp0_command_buffer.buffer[i*2]; uint32_t vw=gpu->gp0_command_buffer.buffer[i*2+1];
@@ -316,7 +317,7 @@ static void gp0_triangle_shaded_opaque(Gpu* gpu) {
 /** GP0(0xA0): Copy Rectangle (CPU/DMA to VRAM) - Setup Phase */
 static void gp0_image_load(Gpu* gpu) {
      if (gpu->gp0_command_buffer.count < 3) {
-         fprintf(stderr, "GP0(0xA0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0xA0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     uint32_t dest_coord = gpu->gp0_command_buffer.buffer[1];
     uint32_t dimensions = gpu->gp0_command_buffer.buffer[2];
     gpu->vram_load_x = (uint16_t)(dest_coord & 0x3FF); // X coord is 10 bits
@@ -336,11 +337,11 @@ static void gp0_image_load(Gpu* gpu) {
     uint32_t image_size_pixels_rounded = (image_size_pixels + 1) & ~1; // Round up for pairs
     uint32_t words_to_load = image_size_pixels_rounded / 2;            // Each word contains 2 pixels
 
-    printf("GP0(0xA0): Setup Image Load to VRAM (%u,%u) Size=(%ux%u) -> Expecting %u words\n",
+    LOG_INFO("GP0(0xA0): Setup Image Load to VRAM (%u,%u) Size=(%ux%u) -> Expecting %u words\n",
            gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, words_to_load);
 
     if (words_to_load == 0 || ((uint64_t)words_to_load * 4) > VRAM_SIZE) { // Basic sanity check
-        fprintf(stderr, "Warning: Invalid image load size %u words requested.\n", words_to_load);
+        LOG_WARN("Warning: Invalid image load size %u words requested.\n", words_to_load);
         gpu->gp0_words_remaining = 0; gpu->gp0_mode = GP0_MODE_COMMAND; return; }
 
     gpu->gp0_words_remaining = words_to_load;
@@ -351,12 +352,12 @@ static void gp0_image_load(Gpu* gpu) {
 /** GP0(0xC0): Copy Rectangle (VRAM to CPU/DMA) */
 static void gp0_image_store(Gpu* gpu) {
      if (gpu->gp0_command_buffer.count < 3) {
-         fprintf(stderr, "GP0(0xC0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count); return; }
+         LOG_ERROR("GP0(0xC0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count); return; }
     // TODO: Implement VRAM read logic & buffering for GPUREAD
     uint32_t dimensions = gpu->gp0_command_buffer.buffer[2];
     uint16_t w = (uint16_t)(dimensions & 0x3FF); // Width is 10 bits
     uint16_t h = (uint16_t)((dimensions >> 16) & 0x1FF); // Height is 9 bits
-    printf("GP0(0xC0): Image Store (%ux%u) - VRAM Read Not Implemented\n", w, h);
+    LOG_INFO("GP0(0xC0): Image Store (%ux%u) - VRAM Read Not Implemented\n", w, h);
     (void)gpu;
 }
 
@@ -367,7 +368,7 @@ static void gp0_image_store(Gpu* gpu) {
  * @brief Initializes the GPU state, including VRAM and default register values.
  */
 void gpu_init(Gpu* gpu) {
-    printf("GPU Initializing...\n");
+    LOG_INFO("GPU Initializing...\n");
     vram_init(&gpu->vram); // Init VRAM first
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
@@ -392,7 +393,7 @@ void gpu_init(Gpu* gpu) {
     gpu->gp0_command_method = NULL;
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
-    printf("GPU Initialized (State reset, VRAM initialized).\n");
+    LOG_INFO("GPU Initialized (State reset, VRAM initialized).\n");
 }
 
 /** Processes commands/data sent to GP0 port */
@@ -457,12 +458,12 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
             case 0xE5: expected_len = 1; handler = gp0_drawing_offset; break;
             case 0xE6: expected_len = 1; handler = gp0_mask_bit_setting; break;
             default:
-                fprintf(stderr, "GPU Error: Unhandled GP0 Opcode 0x%02x (Cmd 0x%08x)\n", opcode, command);
+                LOG_ERROR("GPU Error: Unhandled GP0 Opcode 0x%02x (Cmd 0x%08x)\n", opcode, command);
                 expected_len = 1; handler = gp0_nop; gpu->gp0_current_opcode = 0xFF; break; }
 
         // Sanity check length
         if (expected_len == 0 || expected_len > MAX_GPU_COMMAND_WORDS) {
-             fprintf(stderr, "GPU Error: Cmd 0x%02x invalid length %u\n", opcode, expected_len);
+             LOG_ERROR("GPU Error: Cmd 0x%02x invalid length %u\n", opcode, expected_len);
              expected_len = 1; handler = gp0_nop; gpu->gp0_current_opcode = 0xFF; }
 
         gpu->gp0_words_remaining = expected_len;
@@ -478,7 +479,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
          if (gpu->gp0_command_method != NULL) {
              (gpu->gp0_command_method)(gpu); // Call the stored function pointer
          } else {
-             fprintf(stderr,"GPU Error: NULL handler for GP0 opcode 0x%02x\n", gpu->gp0_current_opcode);
+             LOG_ERROR("GPU Error: NULL handler for GP0 opcode 0x%02x\n", gpu->gp0_current_opcode);
          }
          // If we didn't just finish setting up IMAGE_LOAD mode, reset for next command
          if (gpu->gp0_mode == GP0_MODE_COMMAND) {
@@ -503,7 +504,7 @@ void gpu_gp1(Gpu* gpu, uint32_t command) {
         case 0x08: gp1_display_mode(gpu, command); break;
         // Add cases for 0x09 (Get GPU Info), 0x10-0x1F (GPU Info responses) if needed
         default:
-            fprintf(stderr, "Error: Unhandled GP1 command: Opcode 0x%02x, Value 0x%08x\n", opcode, command);
+            LOG_ERROR("Error: Unhandled GP1 command: Opcode 0x%02x, Value 0x%08x\n", opcode, command);
             break;
     }
 }
@@ -555,8 +556,7 @@ uint32_t gpu_read_status(Gpu* gpu) {
 
 /** Reads data from the GPUREAD port (e.g., after Image Store command) */
 uint32_t gpu_read_data(Gpu* gpu) {
-      // TODO: Implement reading data prepared by GP0(C0) Image Store
-      fprintf(stderr, "GPU Read Data (GPUREAD) - Not Implemented, returning 0\n");
+    LOG_WARN("GPU Read Data (GPUREAD) - Not Implemented, returning 0\n");
       (void)gpu; // Suppress unused warning
       return 0; // Return dummy data for now
 }

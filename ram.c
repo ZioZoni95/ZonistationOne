@@ -1,4 +1,5 @@
 #include "ram.h"
+#include "log.h"
 #include <stdio.h>  // For fprintf, stderr (optional error checking)
 #include <string.h> // For memset
 
@@ -8,7 +9,7 @@ void ram_init(Ram* ram) {
     // Fill RAM with a "garbage" value (0xCA) to simulate uninitialized state
     // and potentially help catch reads from uninitialized memory.
     memset(ram->data, 0xCA, RAM_SIZE);
-    printf("RAM Initialized (%d bytes, filled with 0xCA).\n", RAM_SIZE);
+    LOG_INFO("RAM Initialized (%d bytes, filled with 0xCA).", RAM_SIZE);
 }
 
 // Helper for bounds checking
@@ -22,7 +23,7 @@ static inline int is_out_of_bounds(uint32_t offset, uint32_t access_size) {
 // Based on Guide Section 2.34 load32 [cite: 461]
 uint32_t ram_load32(Ram* ram, uint32_t offset) {
     if (is_out_of_bounds(offset, 4)) {
-        fprintf(stderr, "RAM Load32 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Load32 out of bounds: offset 0x%x", offset);
         return 0; // Or handle error appropriately
     }
     uint32_t b0 = ram->data[offset + 0];
@@ -36,7 +37,7 @@ uint32_t ram_load32(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.34 store32 [cite: 462]
 void ram_store32(Ram* ram, uint32_t offset, uint32_t value) {
      if (is_out_of_bounds(offset, 4)) {
-        fprintf(stderr, "RAM Store32 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Store32 out of bounds: offset 0x%x", offset);
         return; // Or handle error appropriately
     }
     ram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -49,7 +50,7 @@ void ram_store32(Ram* ram, uint32_t offset, uint32_t value) {
 // Based on Guide Section 2.80 store16 (adapted for load) / 2.82 LHU [cite: 1011, 1045]
 uint16_t ram_load16(Ram* ram, uint32_t offset) {
      if (is_out_of_bounds(offset, 2)) {
-        fprintf(stderr, "RAM Load16 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Load16 out of bounds: offset 0x%x", offset);
         return 0;
     }
     uint16_t b0 = ram->data[offset + 0];
@@ -61,7 +62,7 @@ uint16_t ram_load16(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.80 store16 [cite: 1011]
 void ram_store16(Ram* ram, uint32_t offset, uint16_t value) {
     if (is_out_of_bounds(offset, 2)) {
-        fprintf(stderr, "RAM Store16 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Store16 out of bounds: offset 0x%x", offset);
         return;
     }
     ram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -72,7 +73,7 @@ void ram_store16(Ram* ram, uint32_t offset, uint16_t value) {
 // Based on Guide Section 2.49 load8 [cite: 593]
 uint8_t ram_load8(Ram* ram, uint32_t offset) {
     if (is_out_of_bounds(offset, 1)) {
-        fprintf(stderr, "RAM Load8 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Load8 out of bounds: offset 0x%x", offset);
         return 0;
     }
     return ram->data[offset];
@@ -82,7 +83,7 @@ uint8_t ram_load8(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.49 store8 [cite: 591]
 void ram_store8(Ram* ram, uint32_t offset, uint8_t value) {
     if (is_out_of_bounds(offset, 1)) {
-        fprintf(stderr, "RAM Store8 out of bounds: offset 0x%x\n", offset);
+        LOG_WARN("RAM Store8 out of bounds: offset 0x%x", offset);
         return;
     }
     ram->data[offset] = value;

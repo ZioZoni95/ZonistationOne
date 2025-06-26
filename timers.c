@@ -5,6 +5,7 @@
 #include "gpu.h"
 #include <string.h>
 #include <math.h> // For floor()
+#include "log.h"
 
 #define PSX_CPU_HZ 33868800.0
 #define PSX_SYSCLK_HZ PSX_CPU_HZ // System Clock is the same as the CPU clock for timers
@@ -46,7 +47,7 @@ static void timer_update_internal_state(Timer* timer) {
  * @param inter Pointer to the Interconnect (needed for requesting interrupts).
  */
 void timers_init(Timers* timers, struct Interconnect* inter) {
-    printf("Initializing Timers...\n");
+    LOG_INFO("Initializing Timers...\n");
     timers->inter = inter; // Store interconnect pointer
 
     // Initialize all three timers
@@ -76,7 +77,7 @@ void timers_init(Timers* timers, struct Interconnect* inter) {
  */
 uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
     if (timer_index < 0 || timer_index > 2) {
-        fprintf(stderr, "Timer Read Error: Invalid timer index %d\n", timer_index);
+        LOG_ERROR("Timer Read Error: Invalid timer index %d\n", timer_index);
         return 0;
     }
     Timer* t = &timers->timers[timer_index];
@@ -99,7 +100,7 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
         case TMR_REG_TARGET: // 0x8: Target Value
             return t->target;
         default:
-            fprintf(stderr, "Timer Read Error: Unhandled timer%d offset 0x%x\n", timer_index, offset);
+            LOG_ERROR("Timer Read Error: Unhandled timer%d offset 0x%x\n", timer_index, offset);
             return 0;
     }
 }
@@ -127,7 +128,7 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
  */
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
      if (timer_index < 0 || timer_index > 2) {
-        fprintf(stderr, "Timer Write Error: Invalid timer index %d\n", timer_index);
+        LOG_ERROR("Timer Write Error: Invalid timer index %d\n", timer_index);
         return;
     }
     Timer* t = &timers->timers[timer_index];
@@ -137,7 +138,7 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             t->counter = value;
             break;
         case TMR_REG_MODE: // 0x4: Mode Register
-            printf("[TIMER] Write Mode Timer%d: 0x%04x\n", timer_index, value);
+            LOG_INFO("Write Mode Timer%d: 0x%04x\n", timer_index, value);
             t->mode = value;
             // Update internal derived state whenever mode changes
             timer_update_internal_state(t);
@@ -146,7 +147,7 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             t->target = value;
             break;
         default:
-            fprintf(stderr, "Timer Write Error: Unhandled timer%d offset 0x%x = 0x%04x\n", timer_index, offset, value);
+            LOG_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x = 0x%04x\n", timer_index, offset, value);
             break;
     }
 }
@@ -229,33 +230,38 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
         // --- LOGGING: Print timer state every 60 frames ---
-        if (frame_counter % 60 == 0) {
-            printf("[TIMER] Timer%d: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
-        }
+        // Commented out or demoted to LOG_DEBUG to avoid massive logs
+        // if (frame_counter % 60 == 0) {
+        //     LOG_DEBUG("Timer%d: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
+        // }
 
         // Check for target reached
         if (old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
+            LOG_INFO("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target);
         }
 
         // Check for overflow (0xFFFF -> 0x0000)
         if (t->counter < old_counter) { // Simple wrap-around check
             t->reached_ffff_flag = true;
+            LOG_INFO("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d\n", i, t->counter, t->mode, t->irq_on_ffff);
         }
 
         // --- 4. Handle Interrupts ---
         bool irq = false;
+        const char* irq_reason = NULL;
         if (t->irq_on_target && t->reached_target_flag) {
             irq = true;
+            irq_reason = "target";
         }
         if (t->irq_on_ffff && t->reached_ffff_flag) {
             irq = true;
+            irq_reason = irq_reason ? "target+overflow" : "overflow";
         }
 
         if (irq) {
-            // Set the interrupt request bit in the mode register
             t->mode |= (1 << 10);
-            // Request the interrupt line from the interconnect
+            LOG_INFO("Timer%d IRQ requested (reason: %s)\n", i, irq_reason);
             interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
 
