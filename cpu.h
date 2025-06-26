@@ -4,6 +4,7 @@
 #include <stdbool.h> // For bool type
 #include <stdint.h>  // For uint32_t, int32_t etc.
 #include "interconnect.h" // Needs definition of Interconnect for the pointer member
+#include "gte.h" // GTE (Geometry Transformation Engine)
 
 // Forward declaration for Cpu struct
 // This is needed because handle_bios_syscall uses a Cpu* pointer before Cpu is fully defined.
@@ -105,7 +106,11 @@ typedef struct Cpu {
     // --- Connection to Memory System ---
     Interconnect* inter;    // Pointer to the interconnect module for memory accesses.
 
+    // --- Instruction Cache ---
     ICacheLine icache[ICACHE_NUM_LINES];
+
+    // --- GTE (Geometry Transformation Engine) ---
+    Gte gte;                // GTE coprocessor state
 
 } Cpu;
 

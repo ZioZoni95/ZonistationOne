@@ -4,13 +4,14 @@
 #include <limits.h> // If needed for overflow checks (though __builtin is used)
 #include <string.h> // For memcpy
 #include <stdbool.h>// For bool type
+#include "log.h"
 
 // --- CPU Initialization ---
 /**
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
-    printf("Initializing CPU...\n");
+    LOG_INFO("Initializing CPU...\n");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
     cpu->next_pc = cpu->pc + 4;   // Initial next PC
@@ -42,7 +43,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
-    printf("  Initializing I-Cache...\n");
+    LOG_INFO("  Initializing I-Cache...\n");
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
         cpu->icache[i].tag = 0xFFFFFFFF; // Initialize tag to an invalid pattern
         for (int j = 0; j < ICACHE_LINE_WORDS; ++j) {
@@ -51,7 +52,11 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
         }
     }
 
-    printf("CPU Initialized: PC=0x%08x, NextPC=0x%08x, SR=0x%08x\n", cpu->pc, cpu->next_pc, cpu->sr);
+    // Initialize GTE
+    LOG_INFO("  Initializing GTE...\n");
+    gte_init(&cpu->gte);
+
+    LOG_INFO("CPU Initialized: PC=0x%08x, NextPC=0x%08x, SR=0x%08x\n", cpu->pc, cpu->next_pc, cpu->sr);
 }
 
 
@@ -62,7 +67,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
 uint32_t cpu_reg(Cpu* cpu, RegisterIndex index) {
     // No need to check index 0 specifically, as cpu->regs[0] is always 0.
     if (index >= 32) {
-        fprintf(stderr, "GPR read index out of bounds: %u\n", index);
+        LOG_ERROR("GPR read index out of bounds: %u\n", index);
         return 0; // Or trigger an internal error
     }
     return cpu->regs[index];
@@ -73,7 +78,7 @@ uint32_t cpu_reg(Cpu* cpu, RegisterIndex index) {
  */
 void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value) {
     if (index >= 32) {
-        fprintf(stderr, "GPR write index out of bounds: %u\n", index);
+        LOG_ERROR("GPR write index out of bounds: %u\n", index);
         return;
     }
     // Write to output register file, *except* for R0
@@ -131,7 +136,7 @@ static bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     // Minimal debug print for exceptions
-    printf("!!! CPU Exception: Cause=0x%02x, PC=0x%08x, InDelaySlot=%d !!!\n",
+    LOG_INFO("!!! CPU Exception: Cause=0x%02x, PC=0x%08x, InDelaySlot=%d !!!\n",
            cause, cpu->current_pc, cpu->in_delay_slot);
 
     // Determine exception handler address based on SR bit 22 (BEV)
@@ -211,7 +216,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
 
     // Check PC alignment before fetch
     if (cpu->current_pc % 4 != 0) {
-        fprintf(stderr, "PC Alignment Error: PC=0x%08x\n", cpu->current_pc);
+        LOG_ERROR("PC Alignment Error: PC=0x%08x\n", cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         return;
     }
@@ -450,8 +455,7 @@ static void op_ori(Cpu* cpu, uint32_t instruction) {
 
 static void op_sw(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) { // Check cache isolation bit
-        // Debug print kept as it indicates unusual state
-      //  printf("~ SW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr);
+        LOG_DEBUG("~ SW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr);
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -505,8 +509,7 @@ static void op_cop0(Cpu* cpu, uint32_t instruction) {
             }
             break;
         default:
-             // Other COP0 ops (TLBR, TLBWI, TLBP etc.) are for MMU, trigger exception
-             fprintf(stderr, "Warning: Unhandled COP0 instruction: 0x%08x (CopOp=%u) at PC=0x%08x\n", instruction, cop_opcode, cpu->current_pc);
+             LOG_WARN("Warning: Unhandled COP0 instruction: 0x%08x (CopOp=%u) at PC=0x%08x\n", instruction, cop_opcode, cpu->current_pc);
              cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION); // Or maybe COPROCESSOR_ERROR? Illegal seems better.
             break;
     }
@@ -519,7 +522,7 @@ static void op_mtc0(Cpu* cpu, uint32_t instruction) {
 
     switch (cop_r) {
         case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) fprintf(stderr, "Warning: MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
+             if (value != 0) LOG_WARN("Warning: MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
              // No state change for now
              break;
         case 12: // SR (Status Register)
@@ -531,12 +534,12 @@ static void op_mtc0(Cpu* cpu, uint32_t instruction) {
              // Mask other bits.
              cpu->cause = (cpu->cause & ~0x300) | (value & 0x300);
              if ((value & ~0x300) != 0) {
-                 fprintf(stderr, "Warning: MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x\n", value, cpu->current_pc);
+                 LOG_WARN("Warning: MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x\n", value, cpu->current_pc);
              }
              break;
         // EPC (Reg 14) is read-only. Other registers are typically MMU-related or unused.
         default:
-            fprintf(stderr, "Warning: MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
+            LOG_WARN("Warning: MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
             break;
     }
 }
@@ -546,6 +549,13 @@ static void op_rfe(Cpu* cpu, uint32_t instruction) {
     uint32_t mode_stack = cpu->sr & 0x3f;
     cpu->sr &= ~0x3f;
     cpu->sr |= (mode_stack >> 2) & 0x3f; // Following guide's code
+    
+    // RFE should also restore PC from EPC (Exception Program Counter)
+    // This is critical for returning from exception handlers
+    cpu->pc = cpu->epc;
+    cpu->next_pc = cpu->pc + 4;
+    
+    LOG_DEBUG("RFE: Restored PC=0x%08x from EPC=0x%08x, SR=0x%08x\n", cpu->pc, cpu->epc, cpu->sr);
 }
 
 static void op_bne(Cpu* cpu, uint32_t instruction) {
@@ -566,8 +576,7 @@ static void op_addi(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed addition
     if (__builtin_add_overflow(rs_value, imm_se, &result)) {
-        // Debug print kept as it indicates an exception condition
-        fprintf(stderr, "ADDI Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, imm_se, cpu->current_pc);
+        LOG_ERROR("ADDI Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, imm_se, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); // Trigger overflow exception
     } else {
         cpu_set_reg(cpu, rt, (uint32_t)result);
@@ -576,7 +585,7 @@ static void op_addi(Cpu* cpu, uint32_t instruction) {
 
 static void op_lw(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) { // Check cache isolation
-        printf("~ LW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ LW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -606,7 +615,7 @@ static void op_addu(Cpu* cpu, uint32_t instruction) {
 
 static void op_sh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ SH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ SH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -633,7 +642,7 @@ static void op_andi(Cpu* cpu, uint32_t instruction) {
 
 static void op_sb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ SB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ SB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -654,7 +663,7 @@ static void op_jr(Cpu* cpu, uint32_t instruction) {
 
 static void op_lb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ LB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -690,9 +699,7 @@ static void op_mfc0(Cpu* cpu, uint32_t instruction) {
         case 14: value_read = cpu->epc; break; // EPC
         // Add reads for other COP0 registers if needed (mostly MMU/debug related)
         default:
-            // Keep warning for unhandled read
-            fprintf(stderr, "Warning: MFC0 read from unhandled COP0 Register %u (PC=0x%08x)\n",
-                    cop_r_src, cpu->current_pc);
+            LOG_WARN("Warning: MFC0 read from unhandled COP0 Register %u (PC=0x%08x)\n", cop_r_src, cpu->current_pc);
             // Should it trigger an exception? Probably not, just return garbage/0.
             break;
     }
@@ -717,8 +724,7 @@ static void op_add(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed addition
     if (__builtin_add_overflow(rs_value, rt_value, &result)) {
-        // Keep exception print
-        fprintf(stderr, "ADD Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
+        LOG_ERROR("ADD Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); // Trigger overflow exception
     } else {
         cpu_set_reg(cpu, rd, (uint32_t)result);
@@ -747,7 +753,7 @@ static void op_blez(Cpu* cpu, uint32_t instruction) {
 
 static void op_lbu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LBU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ LBU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -919,7 +925,7 @@ static void op_syscall(Cpu* cpu, uint32_t instruction) {
     // syscall implemented yet. In that case, trigger a full exception
     // so we can see it in the logs and debug it.
     if (!was_handled) {
-        printf("Unhandled BIOS Syscall: 0x%02x, triggering full exception.\n", syscall_num);
+        LOG_ERROR("Unhandled BIOS Syscall: 0x%02x, triggering full exception.\n", syscall_num);
         cpu_exception(cpu, EXCEPTION_SYSCALL);
     }
     // If it was handled, we do nothing and simply proceed to the next instruction.
@@ -950,7 +956,7 @@ static void op_mthi(Cpu* cpu, uint32_t instruction) {
 // Load Halfword Unsigned
 static void op_lhu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LHU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ LHU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -968,7 +974,7 @@ static void op_lhu(Cpu* cpu, uint32_t instruction) {
 // Load Halfword (Signed)
 static void op_lh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+        LOG_DEBUG("~ LH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -1039,7 +1045,7 @@ static void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 static void op_break(Cpu* cpu, uint32_t /* instruction */) {
     // Keep essential debug print
-    printf("BREAK instruction executed (PC=0x%08x)\n", cpu->current_pc);
+    LOG_INFO("BREAK instruction executed (PC=0x%08x)\n", cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 
@@ -1067,8 +1073,7 @@ static void op_sub(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed subtraction
     if (__builtin_sub_overflow(rs_value, rt_value, &result)) {
-        // Keep exception print
-        fprintf(stderr, "SUB Signed Overflow: %d - %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
+        LOG_ERROR("SUB Signed Overflow: %d - %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); //
     } else {
         cpu_set_reg(cpu, rd, (uint32_t)result);
@@ -1085,32 +1090,31 @@ static void op_xori(Cpu* cpu, uint32_t instruction) {
 
 // Coprocessor 1 (FPU) Opcode - Triggers exception
 static void op_cop1(Cpu* cpu, uint32_t instruction) {
-    // Keep warning/exception for unimplemented hardware
-    fprintf(stderr, "Warning: Unsupported COP1 (FPU) instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported COP1 (FPU) instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Coprocessor 2 (GTE) Opcode - Currently unimplemented
 static void op_cop2(Cpu* cpu, uint32_t instruction) {
-    // Keep error and exit for unimplemented GTE
-    fprintf(stderr, "FATAL ERROR: Unhandled GTE (COP2) instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
-    exit(1); //
+    LOG_DEBUG("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    
+    // Execute the GTE instruction
+    uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
+    
+    // TODO: Handle GTE busy state and timing if needed
+    // For now, we'll just continue execution
 }
 
 // Coprocessor 3 Opcode - Triggers exception
 static void op_cop3(Cpu* cpu, uint32_t instruction) {
-    // Keep warning/exception for unimplemented hardware
-    fprintf(stderr, "Warning: Unsupported COP3 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported COP3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Left (Handles unaligned loads)
 static void op_lwl(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+        LOG_DEBUG("~ LWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
@@ -1140,7 +1144,7 @@ static void op_lwl(Cpu* cpu, uint32_t instruction) {
 // Load Word Right (Handles unaligned loads)
 static void op_lwr(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        printf("~ LWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+        LOG_DEBUG("~ LWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
@@ -1170,7 +1174,7 @@ static void op_lwr(Cpu* cpu, uint32_t instruction) {
 // Store Word Left (Handles unaligned stores)
 static void op_swl(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        printf("~ SWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+        LOG_DEBUG("~ SWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction); // Register containing data to store
@@ -1197,7 +1201,7 @@ static void op_swl(Cpu* cpu, uint32_t instruction) {
 // Store Word Right (Handles unaligned stores)
 static void op_swr(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        printf("~ SWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+        LOG_DEBUG("~ SWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction); // Register containing data to store
@@ -1223,64 +1227,62 @@ static void op_swr(Cpu* cpu, uint32_t instruction) {
 
 // Load Word Coprocessor 0 - Not supported
 static void op_lwc0(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported LWC0 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported LWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Coprocessor 1 (FPU) - Not supported
 static void op_lwc1(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported LWC1 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported LWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Coprocessor 2 (GTE) - Unimplemented
 static void op_lwc2(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "FATAL ERROR: Unhandled GTE LWC2 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
-    exit(1); //
+    uint32_t cpu_r_dest = instr_t(instruction); // Target CPU register
+    uint32_t gte_r_src = instr_d(instruction);  // Source GTE register
+    uint32_t value_read = gte_read_data_register(&cpu->gte, gte_r_src);
+    
+    // Schedule load for delay slot
+    cpu->load_reg_idx = cpu_r_dest;
+    cpu->load_value = value_read;
 }
 
 // Load Word Coprocessor 3 - Not supported
 static void op_lwc3(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported LWC3 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported LWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 0 - Not supported
 static void op_swc0(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported SWC0 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported SWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 1 (FPU) - Not supported
 static void op_swc1(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported SWC1 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported SWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 2 (GTE) - Unimplemented
 static void op_swc2(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "FATAL ERROR: Unhandled GTE SWC2 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
-    exit(1); //
+    uint32_t cpu_r_src = instr_t(instruction); // Source CPU register
+    uint32_t gte_r_dest = instr_d(instruction); // Target GTE register
+    uint32_t value = cpu_reg(cpu, cpu_r_src);
+    
+    gte_write_data_register(&cpu->gte, gte_r_dest, value);
 }
 
 // Store Word Coprocessor 3 - Not supported
 static void op_swc3(Cpu* cpu, uint32_t instruction) {
-    fprintf(stderr, "Warning: Unsupported SWC3 instruction: 0x%08x (PC=0x%08x)\n",
-            instruction, cpu->current_pc);
+    LOG_WARN("Warning: Unsupported SWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Illegal/Unhandled Instruction Handler
 static void op_illegal(Cpu* cpu, uint32_t instruction) {
-    // Keep essential error print for illegal instructions
-    fprintf(stderr, "Error: Illegal/Unhandled instruction 0x%08x encountered at PC=0x%08x\n",
-            instruction, cpu->current_pc);
+    LOG_ERROR("Error: Illegal/Unhandled instruction 0x%08x encountered at PC=0x%08x\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION); //
 }

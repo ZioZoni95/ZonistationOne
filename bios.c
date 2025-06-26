@@ -1,5 +1,6 @@
 #include "bios.h"       // Include the corresponding header file
 #include <stdio.h>      // For file operations (fopen, fread, fclose, perror, fprintf)
+#include "log.h"
 
 // Loads the BIOS ROM content from a file specified by 'path' into the Bios struct.
 // Based on Guide Section 2.7 Loading the BIOS [cite: 117]
@@ -8,8 +9,7 @@ int bios_load(Bios* bios, const char* path) {
     FILE *file = fopen(path, "rb");
     // Check if the file was opened successfully.
     if (!file) {
-        // If fopen failed, print an error message (e.g., "No such file or directory").
-        perror("Error opening BIOS file");
+        LOG_ERROR("Error opening BIOS file: %s\n", path);
         return 0; // Indicate failure.
     }
 
@@ -26,8 +26,7 @@ int bios_load(Bios* bios, const char* path) {
 
     // Check if the number of bytes read matches the expected BIOS size.
     if (bytes_read != BIOS_SIZE) {
-        // If not, print an error message indicating the mismatch.
-        fprintf(stderr, "Error reading BIOS file: Read %zu bytes, expected %d\n",
+        LOG_ERROR("Error reading BIOS file: Read %zu bytes, expected %d\n",
                 bytes_read, BIOS_SIZE);
         return 0; // Indicate failure.
     }
@@ -36,7 +35,7 @@ int bios_load(Bios* bios, const char* path) {
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
     // Print a success message including the path and size.
-    printf("BIOS loaded successfully from %s (%d bytes)\n", path, BIOS_SIZE);
+    LOG_INFO("BIOS loaded successfully from %s (%d bytes)\n", path, BIOS_SIZE);
     // Return 1 to indicate success.
     return 1;
 }
@@ -47,7 +46,7 @@ int bios_load(Bios* bios, const char* path) {
 uint32_t bios_load32(Bios* bios, uint32_t offset) {
     // Basic bounds check: Ensure reading 4 bytes starting at 'offset' stays within the BIOS_SIZE.
     if (offset > BIOS_SIZE - 4) { // Check if offset + 3 would exceed bounds
-         fprintf(stderr, "BIOS read out of bounds: offset 0x%x\n", offset);
+         LOG_ERROR("BIOS read out of bounds: offset 0x%x\n", offset);
          // A real emulator might trigger an exception here. For now, return 0.
          return 0; // Placeholder error value
     }

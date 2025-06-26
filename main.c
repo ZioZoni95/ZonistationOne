@@ -23,6 +23,7 @@
 #include "ram.h"
 #include "renderer.h"
 #include "cdrom.h" // <<< UPDATED: Added include for the CD-ROM component
+#include "log.h"
 
 
 
@@ -39,7 +40,7 @@ int main(int argc, char *argv[]) {
     freopen("emulator_log.txt", "a", stderr);
     setbuf(stdout, NULL); // Disable buffering to see logs in real-time.
     setbuf(stderr, NULL);
-    printf("--- Log Started ---\n");
+    LOG_INFO("--- Log Started ---");
 
     // --- Configuration ---
     // Allow setting the BIOS path via command-line argument.
@@ -48,13 +49,13 @@ int main(int argc, char *argv[]) {
     // This value might need tuning for performance vs. accuracy.
     const uint32_t cycles_per_frame = 33868800 / 60; // PSX CPU speed / NTSC refresh rate
 
-    printf("--- ZoniStation One Emulator ---\n");
-    printf("Attempting to load BIOS from: %s\n", bios_path);
+    LOG_INFO("--- ZoniStation One Emulator ---");
+    LOG_INFO("Attempting to load BIOS from: %s", bios_path);
 
     // --- SDL & OpenGL Initialization ---
-    printf("Initializing SDL Video...\n");
+    LOG_INFO("Initializing SDL Video...");
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        fprintf(stderr, "SDL_Init Error: %s\n", SDL_GetError());
+        LOG_ERROR("SDL_Init Error: %s", SDL_GetError());
         return 1;
     }
 
@@ -63,7 +64,7 @@ int main(int argc, char *argv[]) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
-    printf("Creating SDL Window (1024x512, OpenGL)...\n");
+    LOG_INFO("Creating SDL Window (1024x512, OpenGL)...");
     SDL_Window* window = SDL_CreateWindow(
         "ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -71,36 +72,36 @@ int main(int argc, char *argv[]) {
         SDL_WINDOW_OPENGL
     );
     if (!window) {
-        fprintf(stderr, "SDL_CreateWindow Error: %s\n", SDL_GetError());
+        LOG_ERROR("SDL_CreateWindow Error: %s", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    printf("Creating OpenGL Context...\n");
+    LOG_INFO("Creating OpenGL Context...");
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
     if (!gl_context) {
-        fprintf(stderr, "SDL_GL_CreateContext Error: %s\n", SDL_GetError());
+        LOG_ERROR("SDL_GL_CreateContext Error: %s", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
 
     // Initialize GLEW *after* the OpenGL context is created.
-    printf("Initializing GLEW...\n");
+    LOG_INFO("Initializing GLEW...");
     glewExperimental = GL_TRUE;
     GLenum glewError = glewInit();
     if (glewError != GLEW_OK) {
-        fprintf(stderr, "Error initializing GLEW! %s\n", glewGetErrorString(glewError));
+        LOG_ERROR("Error initializing GLEW! %s", glewGetErrorString(glewError));
         SDL_GL_DeleteContext(gl_context);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
-    printf("GLEW Initialized. OpenGL Version: %s\n", glGetString(GL_VERSION));
+    LOG_INFO("GLEW Initialized. OpenGL Version: %s", glGetString(GL_VERSION));
     check_gl_error("After GLEW Init");
 
     // --- Emulator Component Initialization ---
-    printf("Initializing Emulator Components...\n");
+    LOG_INFO("Initializing Emulator Components...");
 
     Bios bios_data;
     Ram ram_memory;
@@ -108,11 +109,11 @@ int main(int argc, char *argv[]) {
     Cpu cpu_state;
 
     // 1. Initialize RAM
-    printf("  Initializing RAM...\n");
+    LOG_INFO("  Initializing RAM...");
     ram_init(&ram_memory);
 
     // 2. Load BIOS
-    printf("  Loading BIOS...\n");
+    LOG_INFO("  Loading BIOS...");
     if (!bios_load(&bios_data, bios_path)) {
         // Cleanup on failure
         SDL_GL_DeleteContext(gl_context);
@@ -122,13 +123,13 @@ int main(int argc, char *argv[]) {
     }
 
     // 3. Initialize Interconnect (connects all hardware components)
-    printf("  Initializing Interconnect...\n");
+    LOG_INFO("  Initializing Interconnect...");
     interconnect_init(&interconnect_state, &bios_data, &ram_memory);
 
     // 4. Initialize the Renderer (using the instance inside the GPU)
-    printf("  Initializing Renderer...\n");
+    LOG_INFO("  Initializing Renderer...");
     if (!renderer_init(&interconnect_state.gpu.renderer)) {
-        fprintf(stderr, "Failed to initialize renderer!\n");
+        LOG_ERROR("Failed to initialize renderer!");
         // Cleanup on failure
         SDL_GL_DeleteContext(gl_context);
         SDL_DestroyWindow(window);
@@ -140,18 +141,18 @@ int main(int argc, char *argv[]) {
     // NOTE: Replace "path/to/your/game.bin" with an actual game image.
     // If no disc is loaded, the emulator will just run the BIOS.
     if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crash Bandicoot.bin")) {
-        printf("Warning: Could not load game disc. Running BIOS only.\n");
+        LOG_INFO("Warning: Could not load game disc. Running BIOS only.");
     }
 
 
     // 6. Initialize CPU (pass it the fully connected interconnect)
-    printf("  Initializing CPU...\n");
+    LOG_INFO("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
 
-    printf("All Emulator Components Initialized.\n");
+    LOG_INFO("All Emulator Components Initialized.");
 
     // --- Main Emulation Loop ---
-    printf("Starting Emulation Loop...\n");
+    LOG_INFO("Starting Emulation Loop...");
     bool should_quit = false;
     SDL_Event event;
     uint64_t total_cycles = 0;
@@ -160,11 +161,11 @@ int main(int argc, char *argv[]) {
         // --- Handle Input/Window Events ---
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
-                printf("SDL_QUIT event received.\n");
+                LOG_INFO("SDL_QUIT event received.");
                 should_quit = true;
             } else if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    printf("Escape key pressed. Quitting.\n");
+                    LOG_INFO("Escape key pressed. Quitting.");
                     should_quit = true;
                 }
             }
@@ -198,16 +199,16 @@ int main(int argc, char *argv[]) {
     }
 
     // --- Cleanup ---
-    printf("Emulation loop finished. Cleaning up...\n");
+    LOG_INFO("Emulation loop finished. Cleaning up...");
 
     renderer_destroy(&interconnect_state.gpu.renderer);
-    printf("Destroying SDL GL Context and Window...\n");
+    LOG_INFO("Destroying SDL GL Context and Window...");
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    printf("SDL Quit.\n");
+    LOG_INFO("SDL Quit.");
 
-    printf("--- ZoniStation One Emulator Finished ---\n");
+    LOG_INFO("--- ZoniStation One Emulator Finished ---");
     fclose(log_file); // Close the log file
     return 0;
 }
