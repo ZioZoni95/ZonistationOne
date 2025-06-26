@@ -182,10 +182,11 @@ int main(int argc, char *argv[]) {
         // <<< UPDATED: Step the CD-ROM scheduler >>>
         // This is critical for handling timed CD-ROM commands. It must be called
         // regularly, passing the number of CPU cycles that have just run.
-        interconnect_request_irq(&interconnect_state, IRQ_VBLANK);
+        // NOTE: This is required for CDROM IRQ2 (CDROM) to be triggered and for command completion.
+        interconnect_request_irq(&interconnect_state, IRQ_VBLANK, "VBlank");
 
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
-
+        timers_step(&interconnect_state.timers_state, cycles_per_frame);
 
         total_cycles += cycles_per_frame;
 

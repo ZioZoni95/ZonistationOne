@@ -62,20 +62,27 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 /**
  * @brief Allows peripherals to signal an interrupt request.
  * Sets the corresponding bit in the I_STAT register (irq_status).
+ * Used by peripherals (e.g., CDROM) to request IRQ2. Logs the source.
  * @param inter Pointer to the Interconnect instance.
  * @param irq_line The interrupt line number (0-10).
+ * @param source The source of the interrupt request.
  */
-void interconnect_request_irq(Interconnect* inter, uint32_t irq_line) {
-    if (irq_line <= IRQ_PIO) { // Check if line is valid (0-10)
-        uint16_t old_stat = inter->irq_status;
-        inter->irq_status |= (1 << irq_line); // Set the corresponding bit
-        if (old_stat != inter->irq_status) {
-            // Optional: Print only when status actually changes
-            printf("IRQ Requested: Line %u. I_STAT is now 0x%04x\n", irq_line, inter->irq_status);
-        }
+void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
+    uint16_t prev = inter->irq_status;
+    if (!(prev & (1 << irq_line))) {
+        inter->irq_status |= (1 << irq_line);
+        printf("[IRQ] Request IRQ%u from %s: I_STAT 0x%04x -> 0x%04x\n", irq_line, source, prev, inter->irq_status);
     } else {
-        fprintf(stderr, "Warning: Invalid IRQ line %u requested by peripheral.\n", irq_line);
+        // Already set, do not re-trigger (edge-triggered)
+        // printf("[IRQ] IRQ%u already set by %s.\n", irq_line, source);
     }
+}
+
+// Helper to clear an IRQ (for explicit logging, though BIOS usually does this via I_STAT write)
+void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
+    uint16_t prev = inter->irq_status;
+    inter->irq_status &= ~(1 << irq_line);
+    printf("[IRQ] Clear IRQ%u from %s: I_STAT 0x%04x -> 0x%04x\n", irq_line, source, prev, inter->irq_status);
 }
 
 
@@ -88,6 +95,14 @@ void interconnect_request_irq(Interconnect* inter, uint32_t irq_line) {
  * @return The 32-bit value read.
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
+    uint32_t physical_addr = mask_region(address);
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO READ32 at 0x%08x\n", physical_addr);
+    }
+    // CDROM 32-bit access logging
+    if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+        printf("[INTERCONNECT] CDROM register READ32 at 0x%08x (UNEXPECTED SIZE)\n", physical_addr);
+    }
     // Check for 32-bit alignment (Word access)
     if (address % 4 != 0) {
         // TODO: This should trigger an Address Error Load exception in the CPU.
@@ -95,8 +110,6 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         // For now, just return a garbage value, but an exception is correct.
         return 0xBADBAD32; // Placeholder for unaligned access
     }
-
-    uint32_t physical_addr = mask_region(address);
 
     // --- Hardware Register Checks (Specific Addresses First) ---
 
@@ -181,7 +194,6 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
          return 0xFFFFFFFF; // Expansion 1 returns all Fs when empty
     }
 
-
     // --- Fallback for Unhandled Addresses ---
     fprintf(stderr, "Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)\n",
             physical_addr, address);
@@ -195,14 +207,20 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
  * @return The 16-bit value read.
  */
 uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
+    uint32_t physical_addr = mask_region(address);
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO READ16 at 0x%08x\n", physical_addr);
+    }
+    // CDROM 16-bit access logging
+    if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+        printf("[INTERCONNECT] CDROM register READ16 at 0x%08x (UNEXPECTED SIZE)\n", physical_addr);
+    }
      // Check for 16-bit alignment (Halfword access)
      if (address % 2 != 0) {
         // TODO: Trigger Address Error Load exception
         fprintf(stderr, "Unaligned load16 address: 0x%08x\n", address);
         return 0xBADB; // Placeholder
     }
-    uint32_t physical_addr = mask_region(address);
-
 // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
@@ -271,7 +289,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
          return 0xFFFF; // Expansion 1 returns all Fs when empty
     }
 
-
+    // --- Fallback ---
     fprintf(stderr, "Unhandled physical memory read16 at address: 0x%08x (Mapped from 0x%08x)\n", physical_addr, address);
     return 0;
 }
@@ -284,18 +302,20 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
  */
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO READ8 at 0x%08x\n", physical_addr);
+    }
     // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         // 8-bit reads from timers are generally undefined or read partial registers.
         fprintf(stderr, "Warning: Unhandled 8-bit read from Timer range: 0x%08x\n", physical_addr);
         return 0; // Return 0 for safety
     }
-    // CDROM Registers (Example)
+    // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        // printf("~ Read8 from CDROM Reg (0x%08x): Returning 0 (Placeholder)\n", physical_addr); // Often noisy
-        // TODO: Implement proper CDROM status/response reads
-        return 0; // Placeholder response
+        // For 8-bit reads
+        printf("[INTERCONNECT] CDROM register READ8 at 0x%08x\n", physical_addr);
+        return cdrom_read_register(&inter->cdrom, physical_addr);
     }
 
     // Expansion 1 Region
@@ -326,6 +346,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // Other regions (SPU, Timers, GPU, DMA, Exp2, MemCtrl) are less likely for 8-bit reads
 
+    // --- Fallback ---
     fprintf(stderr, "Unhandled physical memory read8 at address: 0x%08x (Mapped from 0x%08x)\n", physical_addr, address);
     return 0;
 }
@@ -340,15 +361,20 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
  * @param value The 32-bit value to write.
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
+    uint32_t physical_addr = mask_region(address);
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO WRITE32 at 0x%08x: value=0x%08x\n", physical_addr, value);
+    }
+    // CDROM 32-bit access logging
+    if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+        printf("[INTERCONNECT] CDROM register WRITE32 at 0x%08x = 0x%08x (UNEXPECTED SIZE)\n", physical_addr, value);
+    }
     // Check alignment
     if (address % 4 != 0) {
         // TODO: Trigger Address Error Store exception
         fprintf(stderr, "Unaligned store32 address: 0x%08x = 0x%08x\n", address, value);
         return;
     }
-
-    uint32_t physical_addr = mask_region(address);
-
 
     // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
@@ -366,7 +392,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         // Writing acknowledges (clears) specified interrupt flags
         uint16_t ack_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
-        inter->irq_status &= ~ack_mask; // Clear bits that are set in value
+        interconnect_clear_irq(inter, 0, "CPU");
         printf("~ Write32 to IRQ_STATUS (Ack): Value=0x%08x -> I_STAT=0x%04x\n", value, inter->irq_status);
         return;
     }
@@ -471,7 +497,6 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         return;
     }
 
-
     // --- Fallback ---
     fprintf(stderr, "Unhandled physical memory write32 at address: 0x%08x = 0x%08x (Mapped from 0x%08x)\n",
             physical_addr, value, address);
@@ -484,14 +509,20 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
  * @param value The 16-bit value to write.
  */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
+    uint32_t physical_addr = mask_region(address);
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x\n", physical_addr, value);
+    }
+    // CDROM 16-bit access logging
+    if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+        printf("[INTERCONNECT] CDROM register WRITE16 at 0x%08x = 0x%04x (UNEXPECTED SIZE)\n", physical_addr, value);
+    }
     // Check alignment
     if (address % 2 != 0) {
         // TODO: Trigger Address Error Store exception
         fprintf(stderr, "Unaligned store16 address: 0x%08x = 0x%04x\n", address, value);
         return;
     }
-    uint32_t physical_addr = mask_region(address);
-
     // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
@@ -505,7 +536,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         uint16_t ack_mask = value & 0x7FF;
-        inter->irq_status &= ~ack_mask;
+        interconnect_clear_irq(inter, 0, "CPU");
         printf("~ Write16 to IRQ_STATUS (Ack): Value=0x%04x -> I_STAT=0x%04x\n", value, inter->irq_status);
         return;
     }
@@ -580,7 +611,9 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
  */
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     uint32_t physical_addr = mask_region(address);
-
+    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
+        printf("[INTERCONNECT] IO WRITE8 at 0x%08x: value=0x%02x\n", physical_addr, value);
+    }
     // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         // 8-bit writes to timers are generally undefined or write partial registers.
@@ -588,8 +621,10 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         // Ignoring is safest for now.
         return;
     }
-    // CDROM Registers
+    // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+        // For 8-bit writes
+        printf("[INTERCONNECT] CDROM register WRITE8 at 0x%08x = 0x%02x\n", physical_addr, value);
         cdrom_write_register(&inter->cdrom, physical_addr, value);
         return;
     }
