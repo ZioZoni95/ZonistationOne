@@ -1,4 +1,4 @@
-# Gemini PS1 Emulator
+#  PS1 Emulator
 
 A work-in-progress PlayStation 1 emulator, inspired by nocash and PSX-Spex documentation.
 
