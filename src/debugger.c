@@ -6,6 +6,7 @@
 // #include "cpu.h"   // This include is now redundant here, but harmless
 #include <stdio.h>
 #include <string.h>
+#include "log.h"
 
 // NOTE: All function definitions use 'Cpu*' to match the prototypes
 //       which now see the typedef via debugger.h including cpu.h.
@@ -14,6 +15,7 @@
  * @brief Initializes the debugger state.
  */
 void debugger_init(Debugger* dbg) {
+    LOG_DEBUGGER_INFO("Debugger initialized");
     printf("Initializing Debugger...\n");
     dbg->breakpoint_count = 0;
     dbg->read_watchpoint_count = 0;

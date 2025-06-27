@@ -4,13 +4,13 @@
 
 // Loads the BIOS ROM content from a file specified by 'path' into the Bios struct.
 // Based on Guide Section 2.7 Loading the BIOS [cite: 117]
-int bios_load(Bios* bios, const char* path) {
+bool bios_load(Bios* bios, const char* path) {
     // Attempt to open the specified file in binary read mode ("rb").
     FILE *file = fopen(path, "rb");
     // Check if the file was opened successfully.
     if (!file) {
-        LOG_ERROR("Error opening BIOS file: %s\n", path);
-        return 0; // Indicate failure.
+        LOG_BIOS_ERROR("Error opening BIOS file: %s\n", path);
+        return false; // Indicate failure.
     }
 
     // Read data from the file directly into the 'data' buffer within the Bios struct.
@@ -26,18 +26,19 @@ int bios_load(Bios* bios, const char* path) {
 
     // Check if the number of bytes read matches the expected BIOS size.
     if (bytes_read != BIOS_SIZE) {
-        LOG_ERROR("Error reading BIOS file: Read %zu bytes, expected %d\n",
+        LOG_BIOS_ERROR("Error reading BIOS file: Read %zu bytes, expected %d\n",
                 bytes_read, BIOS_SIZE);
-        return 0; // Indicate failure.
+        return false; // Indicate failure.
     }
 
     // Optional: Verify the BIOS checksum against known values (Guide Table 3) [cite: 115]
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
     // Print a success message including the path and size.
-    LOG_INFO("BIOS loaded successfully from %s (%d bytes)\n", path, BIOS_SIZE);
-    // Return 1 to indicate success.
-    return 1;
+    LOG_BIOS_INFO("BIOS initialized");
+    LOG_BIOS_INFO("BIOS loaded successfully from %s (%d bytes)\n", path, BIOS_SIZE);
+    // Return true to indicate success.
+    return true;
 }
 
 // Reads a 32-bit value from the loaded BIOS data at a specific 'offset'.
@@ -46,7 +47,7 @@ int bios_load(Bios* bios, const char* path) {
 uint32_t bios_load32(Bios* bios, uint32_t offset) {
     // Basic bounds check: Ensure reading 4 bytes starting at 'offset' stays within the BIOS_SIZE.
     if (offset > BIOS_SIZE - 4) { // Check if offset + 3 would exceed bounds
-         LOG_ERROR("BIOS read out of bounds: offset 0x%x\n", offset);
+         LOG_BIOS_ERROR("BIOS read out of bounds: offset 0x%x\n", offset);
          // A real emulator might trigger an exception here. For now, return 0.
          return 0; // Placeholder error value
     }
@@ -57,7 +58,11 @@ uint32_t bios_load32(Bios* bios, uint32_t offset) {
     uint32_t b2 = bios->data[offset + 2];
     uint32_t b3 = bios->data[offset + 3]; // Most significant byte
 
-    // Combine the bytes into a 32-bit value, respecting little-endian order.
-    // b0 is the lowest byte, b3 is the highest. Shift and OR them together. [cite: 124]
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    static int bios_debug_count = 0;
+    if (bios_debug_count < 1000) {
+        LOG_BIOS_DEBUG("bios_load32: offset=0x%X value=0x%08X\n", offset, value);
+        bios_debug_count++;
+    }
+    return value;
 }

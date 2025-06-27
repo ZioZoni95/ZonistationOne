@@ -1,13 +1,14 @@
 # Makefile for PS1 Emulator and log splitter
 
 # Source files for the emulator
-EMU_SRCS = main.c cpu.c bios.c interconnect.c ram.c dma.c gpu.c renderer.c vram.c debugger.c timers.c cdrom.c gte.c log.c
+EMU_SRCS = src/main.c src/cpu.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/gte.c src/log.c
 EMU_OBJS = $(EMU_SRCS:.c=.o)
 EMU_BIN = myps1_emu
 
 # Compiler and flags
 CC = gcc
 CFLAGS = -std=c99 -g -Wall -Wextra \
+	-Iinclude \
 	-lSDL2 -lGL -lGLEW -lm
 
 # Log level is now set at runtime via log_set_level()
@@ -24,4 +25,5 @@ split_log: split_log.c
 
 # Clean build artifacts
 clean:
-	rm -f $(EMU_BIN) split_log *.o *.txt 
+	rm -f $(EMU_BIN) split_log *.o *.txt \
+	logs/*.txt logs/*_old.txt 
