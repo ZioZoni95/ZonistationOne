@@ -39,7 +39,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->in_delay_slot = false;   // Not initially in a delay slot
 
     // Initialize Coprocessor 0 Registers
-    cpu->sr = 0;            // Status Register (initial state varies, BIOS sets it)
+    cpu->sr = 0x00000000;    // Status Register: Start with interrupts DISABLED (IEC=0)
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
@@ -107,7 +107,7 @@ void cpu_branch(Cpu* cpu, uint32_t offset_se) {
  * @brief Handles specific BIOS A, B, and C function calls.
  * @return Returns true if the syscall was handled, false otherwise.
  */
-static bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
+bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
     switch (syscall_num) {
         case 0x01: // EnterCriticalSection
             cpu->sr &= ~1; // Disable interrupts
@@ -135,6 +135,10 @@ static bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
  * @brief Handles CPU exceptions (Interrupts, Syscalls, Errors, etc.).
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
+    LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x\n", cause, cpu->pc);
+    if (cause == EXCEPTION_INTERRUPT) {
+        LOG_INFO("[CPU] Entered interrupt handler (IRQ)\n");
+    }
     // Minimal debug print for exceptions
     LOG_INFO("!!! CPU Exception: Cause=0x%02x, PC=0x%08x, InDelaySlot=%d !!!\n",
            cause, cpu->current_pc, cpu->in_delay_slot);
@@ -177,9 +181,56 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         // in the immediate term, letting the BIOS progress.
         cpu->pc = cpu->epc + 4; // Return to the instruction *after* the SYSCALL
         cpu->next_pc = cpu->pc + 4; // Set next_pc sequentially
+        LOG_INFO("[CPU] Exception handled, returning to PC=0x%08x\n", cpu->pc);
         return; // Exit exception handling, as syscall is "handled" directly
     }
     // --- END SYSCALL MODIFICATION ---
+
+    // --- IMPORTANT MODIFICATION: INTERRUPT Specific Dispatch ---
+    if (cause == EXCEPTION_INTERRUPT) {
+        // For INTERRUPTs, we need to acknowledge the interrupt by writing to I_STAT
+        // This mimics what the BIOS exception handler would do
+        uint16_t current_status = cpu->inter->irq_status;
+        uint16_t current_mask = cpu->inter->irq_mask;
+        uint16_t pending_interrupts = current_status & current_mask;
+        
+        LOG_INFO("[CPU] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x\n", 
+                current_status, current_mask, pending_interrupts);
+        
+        // Acknowledge all pending interrupts by writing to I_STAT
+        // According to PSX-Spex: Writing 1 to a bit clears that interrupt
+        if (pending_interrupts != 0) {
+            // Write to I_STAT to acknowledge (clear) the pending interrupts
+            interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, pending_interrupts);
+            LOG_INFO("[CPU] Acknowledged interrupts: 0x%04x\n", pending_interrupts);
+        }
+
+        // --- STRICT PSX-Spex/nocash: GTE/COP2 Command Handling ---
+        // If the instruction at EPC is a GTE/COP2 command (opcode 0x4Axxxxxx), increment EPC by 4
+        // See: https://psx-spx.consoledev.net/cpuspecifications/#interrupts-vs-gte-commands
+        uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
+        if ((epc_instr & 0xFE000000) == 0x4A000000) {
+            LOG_INFO("[CPU] Interrupt occurred on GTE/COP2 command at EPC=0x%08x, skipping to EPC+4\n", cpu->epc);
+            cpu->epc += 4;
+        }
+        // --- END STRICT GTE HANDLING ---
+        
+        // Return to the instruction that was interrupted
+        // The `rfe` instruction in the real BIOS's exception handler would normally do this.
+        cpu->pc = cpu->epc; // Return to the interrupted instruction
+        cpu->next_pc = cpu->pc + 4; // Set next_pc sequentially
+        
+        // Restore interrupt enable state (IEC=1) to allow future interrupts
+        // This mimics the RFE instruction behavior
+        uint32_t mode_stack = cpu->sr & 0x3f;    // Get bits 5:0 (KU/IE stack)
+        cpu->sr &= ~0x3f;                       // Clear bits 5:0
+        cpu->sr |= (mode_stack >> 2) & 0x3f;    // Shift stack right, popping into KUc/IEc
+        
+        LOG_INFO("[CPU] Returning from interrupt: PC=0x%08x, EPC=0x%08x, SR=0x%08x", cpu->pc, cpu->epc, cpu->sr);
+        LOG_INFO("[CPU] Exception handled, returning to PC=0x%08x\n", cpu->pc);
+        return; // Exit exception handling, as interrupt is "handled" directly
+    }
+    // --- END INTERRUPT MODIFICATION ---
 
     // For all other exceptions, jump to the generic exception handler vector.
     cpu->pc = handler_addr;
@@ -192,6 +243,23 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
  * @brief Executes one full CPU cycle.
  */
 void cpu_run_next_instruction(Cpu* cpu) {
+    static uint64_t instruction_counter = 0;
+    static uint32_t last_pc = 0;
+    static uint64_t stuck_counter = 0;
+    instruction_counter++;
+    if (cpu->pc == last_pc) {
+        stuck_counter++;
+        if (stuck_counter % 1000000 == 0) {
+            LOG_INFO("[CPU] Stuck: PC=0x%08x for %llu instructions", cpu->pc, stuck_counter);
+        }
+    } else {
+        stuck_counter = 0;
+        last_pc = cpu->pc;
+    }
+    // Only log progress every 100,000 instructions to avoid log spam in BIOS loops
+    if (instruction_counter % 100000 == 0) {
+        LOG_INFO("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
+    }
 
     // --- 1. Check for Interrupts ---
     // Must happen before fetching the next instruction.
@@ -199,8 +267,15 @@ void cpu_run_next_instruction(Cpu* cpu) {
     uint16_t mask = cpu->inter->irq_mask;
     bool interrupts_globally_enabled = (cpu->sr & 1) != 0; // Check SR[0] (IEC)
 
+    // Add detailed interrupt logging
+    if ((status & mask) != 0) {
+        LOG_INFO("[CPU] Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x\n", 
+                status, mask, interrupts_globally_enabled, (status & mask));
+    }
+
     if ((status & mask) != 0 && interrupts_globally_enabled) {
         // Trigger Interrupt exception (Cause Code 0)
+        LOG_INFO("[CPU] Triggering Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x\n", status, mask);
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return; // Skip instruction execution, jump to handler
     }
@@ -248,6 +323,11 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // Ensure R0 in the output set is still 0 for the next cycle.
     // (cpu_set_reg already handles this, but double-checking doesn't hurt)
     cpu->out_regs[REG_ZERO] = 0;
+
+    // After executing each instruction (e.g., at the end of cpu_run_next_instruction):
+    if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0) {
+        cpu_exception(cpu, EXCEPTION_INTERRUPT);
+    }
 }
 
 /**
@@ -258,7 +338,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
  * @param vaddr The virtual address of the instruction to fetch.
  * @return The 32-bit instruction word.
  */
-static uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
+uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
     // --- Cache Bypass Check ---
     // KSEG1 region (0xA0000000 - 0xBFFFFFFF) is un-cached.
     // Check the top 3 bits. If they are 101 (binary), it's KSEG1.
@@ -440,22 +520,22 @@ void decode_and_execute(Cpu* cpu, uint32_t instruction) {
 // --- Individual Instruction Implementations ---
 // (Keep essential debug prints only: exceptions, cache isolation, GTE/COP errors)
 
-static void op_lui(Cpu* cpu, uint32_t instruction) {
+void op_lui(Cpu* cpu, uint32_t instruction) {
     uint32_t imm = instr_imm(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rt, imm << 16);
 }
 
-static void op_ori(Cpu* cpu, uint32_t instruction) {
+void op_ori(Cpu* cpu, uint32_t instruction) {
     uint32_t imm = instr_imm(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     cpu_set_reg(cpu, rt, cpu_reg(cpu, rs) | imm);
 }
 
-static void op_sw(Cpu* cpu, uint32_t instruction) {
+void op_sw(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) { // Check cache isolation bit
-        LOG_DEBUG("~ SW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr);
+        LOG_TRACE("~ SW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr);
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -466,7 +546,7 @@ static void op_sw(Cpu* cpu, uint32_t instruction) {
     interconnect_store32(cpu->inter, address, value); // Alignment checked in interconnect
 }
 
-static void op_sll(Cpu* cpu, uint32_t instruction) {
+void op_sll(Cpu* cpu, uint32_t instruction) {
     // NOP is SLL R0, R0, 0. Check for it to avoid calculation.
     if (instruction == 0) return; // Common NOP
     uint32_t shamt = instr_shift(instruction);
@@ -475,28 +555,28 @@ static void op_sll(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rt) << shamt);
 }
 
-static void op_addiu(Cpu* cpu, uint32_t instruction) {
+void op_addiu(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     cpu_set_reg(cpu, rt, cpu_reg(cpu, rs) + imm_se); // Unsigned addition wraps naturally
 }
 
-static void op_j(Cpu* cpu, uint32_t instruction) {
+void op_j(Cpu* cpu, uint32_t instruction) {
     uint32_t target_imm = instr_imm_jump(instruction);
     // Combine upper 4 bits of current PC+4 with target
     cpu->next_pc = (cpu->current_pc & 0xF0000000) | (target_imm << 2);
     cpu->branch_taken = true;
 }
 
-static void op_or(Cpu* cpu, uint32_t instruction) {
+void op_or(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rs) | cpu_reg(cpu, rt));
 }
 
-static void op_cop0(Cpu* cpu, uint32_t instruction) {
+void op_cop0(Cpu* cpu, uint32_t instruction) {
     uint32_t cop_opcode = instr_cop_opcode(instruction); // Bits 25:21 specify COP0 op
     switch (cop_opcode) {
         case 0b00000: op_mfc0(cpu, instruction); break; // MFC0
@@ -515,7 +595,7 @@ static void op_cop0(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_mtc0(Cpu* cpu, uint32_t instruction) {
+void op_mtc0(Cpu* cpu, uint32_t instruction) {
     uint32_t cpu_r = instr_t(instruction); // Source CPU register
     uint32_t cop_r = instr_d(instruction); // Destination COP0 register
     uint32_t value = cpu_reg(cpu, cpu_r);
@@ -544,21 +624,18 @@ static void op_mtc0(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_rfe(Cpu* cpu, uint32_t instruction) {
-    // RFE restores the previous KU/IE bits from the stack in SR
+void op_rfe(Cpu* cpu, uint32_t instruction) {
+    uint32_t old_sr = cpu->sr;
+    uint32_t old_pc = cpu->pc;
+    uint32_t old_epc = cpu->epc;
     uint32_t mode_stack = cpu->sr & 0x3f;
     cpu->sr &= ~0x3f;
     cpu->sr |= (mode_stack >> 2) & 0x3f; // Following guide's code
-    
-    // RFE should also restore PC from EPC (Exception Program Counter)
-    // This is critical for returning from exception handlers
-    cpu->pc = cpu->epc;
-    cpu->next_pc = cpu->pc + 4;
-    
-    LOG_DEBUG("RFE: Restored PC=0x%08x from EPC=0x%08x, SR=0x%08x\n", cpu->pc, cpu->epc, cpu->sr);
+    LOG_INFO("[RFE] Executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, old_pc, old_epc);
+    // NOTE: Do NOT jump to EPC here! The BIOS handler must do the jump after RFE.
 }
 
-static void op_bne(Cpu* cpu, uint32_t instruction) {
+void op_bne(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -568,7 +645,7 @@ static void op_bne(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_addi(Cpu* cpu, uint32_t instruction) {
+void op_addi(Cpu* cpu, uint32_t instruction) {
     int32_t imm_se = (int32_t)instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
@@ -583,7 +660,7 @@ static void op_addi(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_lw(Cpu* cpu, uint32_t instruction) {
+void op_lw(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) { // Check cache isolation
         LOG_DEBUG("~ LW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -599,21 +676,21 @@ static void op_lw(Cpu* cpu, uint32_t instruction) {
     cpu->load_value = value_loaded;
 }
 
-static void op_sltu(Cpu* cpu, uint32_t instruction) {
+void op_sltu(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rd, (cpu_reg(cpu, rs) < cpu_reg(cpu, rt)) ? 1 : 0);
 }
 
-static void op_addu(Cpu* cpu, uint32_t instruction) {
+void op_addu(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rs) + cpu_reg(cpu, rt));
 }
 
-static void op_sh(Cpu* cpu, uint32_t instruction) {
+void op_sh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ SH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -626,21 +703,21 @@ static void op_sh(Cpu* cpu, uint32_t instruction) {
     interconnect_store16(cpu->inter, address, value); // Alignment checked in interconnect
 }
 
-static void op_jal(Cpu* cpu, uint32_t instruction) {
+void op_jal(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, REG_RA, cpu->pc + 4); // Link Register $31 gets PC+8 (address after delay slot)
     uint32_t target_imm = instr_imm_jump(instruction);
     cpu->next_pc = (cpu->current_pc & 0xF0000000) | (target_imm << 2); // Same target calculation as J
     cpu->branch_taken = true;
 }
 
-static void op_andi(Cpu* cpu, uint32_t instruction) {
+void op_andi(Cpu* cpu, uint32_t instruction) {
     uint32_t imm = instr_imm(instruction); // Zero-extended immediate
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     cpu_set_reg(cpu, rt, cpu_reg(cpu, rs) & imm);
 }
 
-static void op_sb(Cpu* cpu, uint32_t instruction) {
+void op_sb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ SB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -653,7 +730,7 @@ static void op_sb(Cpu* cpu, uint32_t instruction) {
     interconnect_store8(cpu->inter, address, value);
 }
 
-static void op_jr(Cpu* cpu, uint32_t instruction) {
+void op_jr(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t target_address = cpu_reg(cpu, rs);
     cpu->next_pc = target_address;
@@ -661,7 +738,7 @@ static void op_jr(Cpu* cpu, uint32_t instruction) {
     // Alignment check will happen on fetch in the next cycle
 }
 
-static void op_lb(Cpu* cpu, uint32_t instruction) {
+void op_lb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -678,7 +755,7 @@ static void op_lb(Cpu* cpu, uint32_t instruction) {
     cpu->load_value = value_sign_extended;
 }
 
-static void op_beq(Cpu* cpu, uint32_t instruction) {
+void op_beq(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -688,7 +765,7 @@ static void op_beq(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_mfc0(Cpu* cpu, uint32_t instruction) {
+void op_mfc0(Cpu* cpu, uint32_t instruction) {
     uint32_t cpu_r_dest = instr_t(instruction); // Target CPU register
     uint32_t cop_r_src = instr_d(instruction);  // Source COP0 register
     uint32_t value_read = 0; // Default value if read fails or is unhandled
@@ -708,14 +785,14 @@ static void op_mfc0(Cpu* cpu, uint32_t instruction) {
     cpu->load_value = value_read;
 }
 
-static void op_and(Cpu* cpu, uint32_t instruction) {
+void op_and(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rs) & cpu_reg(cpu, rt));
 }
 
-static void op_add(Cpu* cpu, uint32_t instruction) {
+void op_add(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -731,7 +808,7 @@ static void op_add(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_bgtz(Cpu* cpu, uint32_t instruction) {
+void op_bgtz(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rs = instr_s(instruction);
     // Comparison is signed
@@ -741,7 +818,7 @@ static void op_bgtz(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_blez(Cpu* cpu, uint32_t instruction) {
+void op_blez(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rs = instr_s(instruction);
     // Comparison is signed
@@ -751,7 +828,7 @@ static void op_blez(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_lbu(Cpu* cpu, uint32_t instruction) {
+void op_lbu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LBU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -768,7 +845,7 @@ static void op_lbu(Cpu* cpu, uint32_t instruction) {
     cpu->load_value = value_zero_extended;
 }
 
-static void op_jalr(Cpu* cpu, uint32_t instruction) {
+void op_jalr(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction); // Register containing target address
     uint32_t rd = instr_d(instruction); // Register to store return address (defaults to $ra=31 if rd=0?)
     uint32_t target_address = cpu_reg(cpu, rs);
@@ -783,7 +860,7 @@ static void op_jalr(Cpu* cpu, uint32_t instruction) {
 }
 
 // Handles BGEZ, BLTZ, BGEZAL, BLTZAL based on bits 20 and 16
-static void op_bxx(Cpu* cpu, uint32_t instruction) {
+void op_bxx(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction);
     uint32_t rs = instr_s(instruction);
     int is_bgez = (instruction >> 16) & 1; // Bit 16: 1=BGEZ, 0=BLTZ
@@ -809,7 +886,7 @@ static void op_bxx(Cpu* cpu, uint32_t instruction) {
     }
 }
 
-static void op_slti(Cpu* cpu, uint32_t instruction) {
+void op_slti(Cpu* cpu, uint32_t instruction) {
     int32_t imm_se = (int32_t)instr_imm_se(instruction); // Immediate is signed
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
@@ -817,14 +894,14 @@ static void op_slti(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, rt, ((int32_t)cpu_reg(cpu, rs) < imm_se) ? 1 : 0);
 }
 
-static void op_subu(Cpu* cpu, uint32_t instruction) {
+void op_subu(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rs) - cpu_reg(cpu, rt)); // Unsigned wraps
 }
 
-static void op_sra(Cpu* cpu, uint32_t instruction) {
+void op_sra(Cpu* cpu, uint32_t instruction) {
     uint32_t shamt = instr_shift(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rd = instr_d(instruction);
@@ -834,7 +911,7 @@ static void op_sra(Cpu* cpu, uint32_t instruction) {
 }
 
 // Signed division
-static void op_div(Cpu* cpu, uint32_t instruction) {
+void op_div(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     int32_t n = (int32_t)cpu_reg(cpu, rs); // Numerator
@@ -856,7 +933,7 @@ static void op_div(Cpu* cpu, uint32_t instruction) {
 }
 
 // Unsigned division
-static void op_divu(Cpu* cpu, uint32_t instruction) {
+void op_divu(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t n = cpu_reg(cpu, rs);
@@ -873,14 +950,14 @@ static void op_divu(Cpu* cpu, uint32_t instruction) {
 }
 
 // Move From LO
-static void op_mflo(Cpu* cpu, uint32_t instruction) {
+void op_mflo(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     cpu_set_reg(cpu, rd, cpu->lo); //
     // TODO: Should stall if previous DIV/MULT not finished.
 }
 
 // Shift Right Logical
-static void op_srl(Cpu* cpu, uint32_t instruction) {
+void op_srl(Cpu* cpu, uint32_t instruction) {
     uint32_t shamt = instr_shift(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rd = instr_d(instruction);
@@ -889,7 +966,7 @@ static void op_srl(Cpu* cpu, uint32_t instruction) {
 }
 
 // Set if Less Than Immediate Unsigned
-static void op_sltiu(Cpu* cpu, uint32_t instruction) {
+void op_sltiu(Cpu* cpu, uint32_t instruction) {
     uint32_t imm_se = instr_imm_se(instruction); // Immediate is sign-extended
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
@@ -898,7 +975,7 @@ static void op_sltiu(Cpu* cpu, uint32_t instruction) {
 }
 
 // Set on Less Than (Signed)
-static void op_slt(Cpu* cpu, uint32_t instruction) {
+void op_slt(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -907,14 +984,15 @@ static void op_slt(Cpu* cpu, uint32_t instruction) {
 }
 
 // Move From HI
-static void op_mfhi(Cpu* cpu, uint32_t instruction) {
+void op_mfhi(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     cpu_set_reg(cpu, rd, cpu->hi); //
     // TODO: Should stall if previous DIV/MULT not finished.
 }
 
 // System Call
-static void op_syscall(Cpu* cpu, uint32_t instruction) {
+void op_syscall(Cpu* cpu, uint32_t instruction) {
+    (void)instruction;
     // Get the syscall number from register $a0
     uint32_t syscall_num = cpu_reg(cpu, 4); 
 
@@ -932,7 +1010,7 @@ static void op_syscall(Cpu* cpu, uint32_t instruction) {
 }
 
 // Bitwise Not Or
-static void op_nor(Cpu* cpu, uint32_t instruction) {
+void op_nor(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -940,21 +1018,21 @@ static void op_nor(Cpu* cpu, uint32_t instruction) {
 }
 
 // Move To LO
-static void op_mtlo(Cpu* cpu, uint32_t instruction) {
+void op_mtlo(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     cpu->lo = cpu_reg(cpu, rs); //
     // TODO: Writing HI/LO can interfere with ongoing DIV/MULT. Ignored for now.
 }
 
 // Move To HI
-static void op_mthi(Cpu* cpu, uint32_t instruction) {
+void op_mthi(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     cpu->hi = cpu_reg(cpu, rs); //
     // TODO: Timing/interlock implications ignored.
 }
 
 // Load Halfword Unsigned
-static void op_lhu(Cpu* cpu, uint32_t instruction) {
+void op_lhu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LHU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -972,7 +1050,7 @@ static void op_lhu(Cpu* cpu, uint32_t instruction) {
 }
 
 // Load Halfword (Signed)
-static void op_lh(Cpu* cpu, uint32_t instruction) {
+void op_lh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
         return;
@@ -990,7 +1068,7 @@ static void op_lh(Cpu* cpu, uint32_t instruction) {
 }
 
 // Shift Left Logical Variable
-static void op_sllv(Cpu* cpu, uint32_t instruction) {
+void op_sllv(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction); // Register containing shift amount
     uint32_t rt = instr_t(instruction); // Register to shift
@@ -1000,7 +1078,7 @@ static void op_sllv(Cpu* cpu, uint32_t instruction) {
 }
 
 // Shift Right Arithmetic Variable
-static void op_srav(Cpu* cpu, uint32_t instruction) {
+void op_srav(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction); // Register containing shift amount
     uint32_t rt = instr_t(instruction); // Register to shift
@@ -1011,7 +1089,7 @@ static void op_srav(Cpu* cpu, uint32_t instruction) {
 }
 
 // Shift Right Logical Variable
-static void op_srlv(Cpu* cpu, uint32_t instruction) {
+void op_srlv(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction); // Register containing shift amount
     uint32_t rt = instr_t(instruction); // Register to shift
@@ -1021,7 +1099,7 @@ static void op_srlv(Cpu* cpu, uint32_t instruction) {
 }
 
 // Multiply Unsigned
-static void op_multu(Cpu* cpu, uint32_t instruction) {
+void op_multu(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     // Perform 64-bit multiplication
@@ -1035,7 +1113,7 @@ static void op_multu(Cpu* cpu, uint32_t instruction) {
 }
 
 // Bitwise Exclusive Or
-static void op_xor(Cpu* cpu, uint32_t instruction) {
+void op_xor(Cpu* cpu, uint32_t instruction) {
      uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -1043,14 +1121,15 @@ static void op_xor(Cpu* cpu, uint32_t instruction) {
 }
 
 // Breakpoint
-static void op_break(Cpu* cpu, uint32_t /* instruction */) {
+void op_break(Cpu* cpu, uint32_t instruction) {
+    (void)instruction;
     // Keep essential debug print
     LOG_INFO("BREAK instruction executed (PC=0x%08x)\n", cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 
 // Multiply (Signed)
-static void op_mult(Cpu* cpu, uint32_t instruction) {
+void op_mult(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
     // Perform 64-bit signed multiplication
@@ -1064,7 +1143,7 @@ static void op_mult(Cpu* cpu, uint32_t instruction) {
 }
 
 // Subtract (Signed, with Overflow check)
-static void op_sub(Cpu* cpu, uint32_t instruction) {
+void op_sub(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
@@ -1081,7 +1160,7 @@ static void op_sub(Cpu* cpu, uint32_t instruction) {
 }
 
 // Bitwise Exclusive Or Immediate
-static void op_xori(Cpu* cpu, uint32_t instruction) {
+void op_xori(Cpu* cpu, uint32_t instruction) {
     uint32_t imm = instr_imm(instruction); // Zero-extended immediate
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
@@ -1089,14 +1168,14 @@ static void op_xori(Cpu* cpu, uint32_t instruction) {
 }
 
 // Coprocessor 1 (FPU) Opcode - Triggers exception
-static void op_cop1(Cpu* cpu, uint32_t instruction) {
+void op_cop1(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported COP1 (FPU) instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Coprocessor 2 (GTE) Opcode - Currently unimplemented
-static void op_cop2(Cpu* cpu, uint32_t instruction) {
-    LOG_DEBUG("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+void op_cop2(Cpu* cpu, uint32_t instruction) {
+    LOG_TRACE("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     
     // Execute the GTE instruction
     uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
@@ -1106,13 +1185,13 @@ static void op_cop2(Cpu* cpu, uint32_t instruction) {
 }
 
 // Coprocessor 3 Opcode - Triggers exception
-static void op_cop3(Cpu* cpu, uint32_t instruction) {
+void op_cop3(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported COP3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Left (Handles unaligned loads)
-static void op_lwl(Cpu* cpu, uint32_t instruction) {
+void op_lwl(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
@@ -1142,7 +1221,7 @@ static void op_lwl(Cpu* cpu, uint32_t instruction) {
 }
 
 // Load Word Right (Handles unaligned loads)
-static void op_lwr(Cpu* cpu, uint32_t instruction) {
+void op_lwr(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ LWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
@@ -1172,7 +1251,7 @@ static void op_lwr(Cpu* cpu, uint32_t instruction) {
 }
 
 // Store Word Left (Handles unaligned stores)
-static void op_swl(Cpu* cpu, uint32_t instruction) {
+void op_swl(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ SWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
@@ -1199,7 +1278,7 @@ static void op_swl(Cpu* cpu, uint32_t instruction) {
 }
 
 // Store Word Right (Handles unaligned stores)
-static void op_swr(Cpu* cpu, uint32_t instruction) {
+void op_swr(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
         LOG_DEBUG("~ SWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
     }
@@ -1226,19 +1305,19 @@ static void op_swr(Cpu* cpu, uint32_t instruction) {
 }
 
 // Load Word Coprocessor 0 - Not supported
-static void op_lwc0(Cpu* cpu, uint32_t instruction) {
+void op_lwc0(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported LWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Coprocessor 1 (FPU) - Not supported
-static void op_lwc1(Cpu* cpu, uint32_t instruction) {
+void op_lwc1(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported LWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Coprocessor 2 (GTE) - Unimplemented
-static void op_lwc2(Cpu* cpu, uint32_t instruction) {
+void op_lwc2(Cpu* cpu, uint32_t instruction) {
     uint32_t cpu_r_dest = instr_t(instruction); // Target CPU register
     uint32_t gte_r_src = instr_d(instruction);  // Source GTE register
     uint32_t value_read = gte_read_data_register(&cpu->gte, gte_r_src);
@@ -1249,25 +1328,25 @@ static void op_lwc2(Cpu* cpu, uint32_t instruction) {
 }
 
 // Load Word Coprocessor 3 - Not supported
-static void op_lwc3(Cpu* cpu, uint32_t instruction) {
+void op_lwc3(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported LWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 0 - Not supported
-static void op_swc0(Cpu* cpu, uint32_t instruction) {
+void op_swc0(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported SWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 1 (FPU) - Not supported
-static void op_swc1(Cpu* cpu, uint32_t instruction) {
+void op_swc1(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported SWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 2 (GTE) - Unimplemented
-static void op_swc2(Cpu* cpu, uint32_t instruction) {
+void op_swc2(Cpu* cpu, uint32_t instruction) {
     uint32_t cpu_r_src = instr_t(instruction); // Source CPU register
     uint32_t gte_r_dest = instr_d(instruction); // Target GTE register
     uint32_t value = cpu_reg(cpu, cpu_r_src);
@@ -1276,13 +1355,13 @@ static void op_swc2(Cpu* cpu, uint32_t instruction) {
 }
 
 // Store Word Coprocessor 3 - Not supported
-static void op_swc3(Cpu* cpu, uint32_t instruction) {
+void op_swc3(Cpu* cpu, uint32_t instruction) {
     LOG_WARN("Warning: Unsupported SWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Illegal/Unhandled Instruction Handler
-static void op_illegal(Cpu* cpu, uint32_t instruction) {
+void op_illegal(Cpu* cpu, uint32_t instruction) {
     LOG_ERROR("Error: Illegal/Unhandled instruction 0x%08x encountered at PC=0x%08x\n", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION); //
 }

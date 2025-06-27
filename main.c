@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <sys/stat.h> // For file size checking
+#include <unistd.h>   // For access(), rename()
 
 // --- Graphics/Windowing Includes ---
 // Uses SDL2 for window creation, event handling, and OpenGL context management.
@@ -29,22 +31,66 @@
 
 
 int main(int argc, char *argv[]) {
+    // --- Argument Parsing ---
+    // Usage: ./myps1_emu [--debug|--quiet] <BIOS_PATH>
+    const char* bios_path = NULL;
+    int log_level = LOG_LEVEL_INFO;
+    bool show_help = false;
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--debug") == 0) {
+            log_level = LOG_LEVEL_DEBUG;
+        } else if (strcmp(argv[i], "--quiet") == 0) {
+            log_level = LOG_LEVEL_WARN;
+        } else if (strcmp(argv[i], "--trace") == 0) {
+            log_level = LOG_LEVEL_TRACE;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            show_help = true;
+        } else if (!bios_path) {
+            bios_path = argv[i];
+        } else {
+            printf("Unknown option: %s\n", argv[i]);
+            printf("Usage: %s [--debug|--trace|--quiet] <BIOS_PATH>\n", argv[0]);
+            return 1;
+        }
+    }
+    if (show_help) {
+        printf("Usage: %s [--debug|--trace|--quiet] <BIOS_PATH>\n", argv[0]);
+        printf("  --debug   Set log level to DEBUG (verbose output)\n");
+        printf("  --trace   Set log level to TRACE (ultra-verbose, per-instruction/cycle)\n");
+        printf("  --quiet   Set log level to WARN (minimal output)\n");
+        printf("  --help    Show this help message\n");
+        printf("  <BIOS_PATH> Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
+        return 0;
+    }
+    if (!bios_path) {
+        bios_path = "roms/SCPH1001.BIN";
+    }
+    log_set_level(log_level);
+    LOG_INFO("Emulator started");
+
     // --- File Logging Setup ---
-    // Redirect stdout and stderr to a log file for easier debugging.
-    FILE *log_file = freopen("emulator_log.txt", "w", stdout);
+    // Log file rotation: if emulator_log.txt > 50MB, move to emulator_log.old.txt
+    const char* log_filename = "emulator_log.txt";
+    struct stat st;
+    if (stat(log_filename, &st) == 0 && st.st_size > 50 * 1024 * 1024) {
+        // Remove old backup if it exists
+        unlink("emulator_log.old.txt");
+        // Rename current log to backup
+        rename(log_filename, "emulator_log.old.txt");
+    }
+    FILE *log_file = freopen(log_filename, "w", stdout);
     if (log_file == NULL) {
         perror("Failed to open log file for stdout");
         return 1;
     }
     // Append stderr to the same file.
-    freopen("emulator_log.txt", "a", stderr);
+    freopen(log_filename, "a", stderr);
     setbuf(stdout, NULL); // Disable buffering to see logs in real-time.
     setbuf(stderr, NULL);
     LOG_INFO("--- Log Started ---");
 
     // --- Configuration ---
-    // Allow setting the BIOS path via command-line argument.
-    const char* bios_path = (argc > 1) ? argv[1] : "roms/SCPH1001.BIN";
     // Define a number of CPU cycles to run per frame. This helps pace the emulation.
     // This value might need tuning for performance vs. accuracy.
     const uint32_t cycles_per_frame = 33868800 / 60; // PSX CPU speed / NTSC refresh rate
@@ -140,7 +186,7 @@ int main(int argc, char *argv[]) {
     // 5. Load a game disc into the CD-ROM drive
     // NOTE: Replace "path/to/your/game.bin" with an actual game image.
     // If no disc is loaded, the emulator will just run the BIOS.
-    if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crash Bandicoot.bin")) {
+    if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crassh Bandicoot.bin")) {
         LOG_INFO("Warning: Could not load game disc. Running BIOS only.");
     }
 
@@ -184,8 +230,6 @@ int main(int argc, char *argv[]) {
         // This is critical for handling timed CD-ROM commands. It must be called
         // regularly, passing the number of CPU cycles that have just run.
         // NOTE: This is required for CDROM IRQ2 (CDROM) to be triggered and for command completion.
-        interconnect_request_irq(&interconnect_state, IRQ_VBLANK, "VBlank");
-
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
 
@@ -210,5 +254,6 @@ int main(int argc, char *argv[]) {
 
     LOG_INFO("--- ZoniStation One Emulator Finished ---");
     fclose(log_file); // Close the log file
+    LOG_INFO("Emulator stopped");
     return 0;
 }

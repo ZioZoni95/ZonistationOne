@@ -6,6 +6,8 @@
 #include <stdlib.h> // For exit if needed
 #include "log.h"
 
+// Logging: Only use LOG_ERROR/LOG_FATAL for unrecoverable errors, LOG_INFO for disc load success.
+
 // --- Sector Structure Constants ---
 #define CD_RAW_SECTOR_SIZE 2352
 #define CD_USER_DATA_SIZE 2048
@@ -34,7 +36,6 @@ static void cmd_set_loc(Cdrom* cdrom);
 static void cmd_read_n(Cdrom* cdrom);
 static void cmd_pause(Cdrom* cdrom);
 static void cmd_seek_l(Cdrom* cdrom);
-static void cmd_test(Cdrom* cdrom);
 static void cmd_set_mode(Cdrom* cdrom);
 static void cmd_stop(Cdrom* cdrom);
 
@@ -164,6 +165,7 @@ static void cmd_init_complete(Cdrom* cdrom) {
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 2); // INT2: Command Complete
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 // <<< MODIFIED: Implemented two-stage GetID >>>
@@ -207,42 +209,7 @@ static void cmd_get_id_complete(Cdrom* cdrom) {
         trigger_interrupt(cdrom, 2); // INT2: Command Complete
     }
     cdrom->current_state = CD_STATE_IDLE;
-}
-
-// <<< MODIFIED: Implemented Test(0x20) >>>
-static void cmd_test(Cdrom* cdrom) {
-    uint8_t sub_command = fifo_pop(&cdrom->param_fifo);
-    LOG_INFO("~ CDROM CMD: Test (0x19), Sub: 0x%02x\n", sub_command);
-    
-    fifo_clear(&cdrom->response_fifo);
-    
-    // Test commands are weird, they often seem to respond with INT3 and then the result
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    LOG_DEBUG("[CDROM] Test command: Pushed status 0x%02x to response FIFO\n", cdrom->status);
-    trigger_interrupt(cdrom, 3);
-
-    switch (sub_command) {
-        case 0x20: // Get BIOS Date/Version
-            LOG_DEBUG("  CDROM Test(0x20): Get BIOS Date\n");
-            fifo_push(&cdrom->response_fifo, 0x94); // Year
-            fifo_push(&cdrom->response_fifo, 0x12); // Month
-            fifo_push(&cdrom->response_fifo, 0x20); // Day
-            fifo_push(&cdrom->response_fifo, 0xC2); // Version (from SCPH1001)
-            LOG_DEBUG("[CDROM] Test(0x20): Queued BIOS date/version response\n");
-            break;
-        default:
-             LOG_DEBUG("  CDROM Test: Unhandled sub 0x%02x\n", sub_command);
-             fifo_push(&cdrom->response_fifo, 0x00); // Placeholder
-             break;
-    }
-    // Unlike other commands, TEST seems to complete immediately.
-    // We don't use the scheduler.
-    update_status_register(cdrom);
-    LOG_DEBUG("[CDROM] Test command: Updated status register after response\n");
-    // Explicitly request IRQ2 for test completion (simulate INT2/3 as needed)
-    LOG_INFO("[CDROM] Explicitly requesting IRQ2 (CDROM) after Test command\n");
-    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM-Test");
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 // Stubs for other commands - no changes needed yet
@@ -263,6 +230,7 @@ static void cmd_pause_complete(Cdrom* cdrom) {
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 2);
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 // --- Main command dispatcher: Only block if busy, not if interrupt pending ---
@@ -336,6 +304,7 @@ static void cmd_set_loc_complete(Cdrom* cdrom) {
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 3); // INT3
     cdrom->current_state = CD_STATE_IDLE;
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 
@@ -396,11 +365,11 @@ uint8_t cdrom_read_register(Cdrom* cdrom, uint32_t addr) {
 void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
     uint8_t offset = addr & 3;
     uint8_t reg_index = cdrom->index & 0x3; // Always mask to 2 bits
-    LOG_DEBUG("CDROM Write: Index=%d, Offset=0x%x, Value=0x%02x\n", reg_index, offset, value);
+    LOG_TRACE("CDROM Write: Index=%d, Offset=0x%x, Value=0x%02x\n", reg_index, offset, value);
 
     switch (offset) {
         case CDREG_INDEX:
-            LOG_DEBUG("  -> Set Index to %d\n", value & 3);
+            LOG_TRACE("  -> Set Index to %d\n", value & 3);
             cdrom->index = value & 3; // Only change index here
             return;
         case CDREG_COMMAND:
@@ -412,38 +381,38 @@ void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
                     LOG_WARN("  -> Command Write: 0x%02x IGNORED (busy)\n", value);
                 }
             } else {
-                LOG_DEBUG("  -> Ignored Command Write (Index != 0)\n");
+                LOG_TRACE("  -> Ignored Command Write (Index != 0)\n");
             }
             break;
         case CDREG_PARAMETER:
             if (reg_index == 0) {
-                LOG_DEBUG("  -> Parameter FIFO Write: 0x%02x\n", value);
+                LOG_TRACE("  -> Parameter FIFO Write: 0x%02x\n", value);
                 fifo_push(&cdrom->param_fifo, value);
             } else {
-                LOG_DEBUG("  -> Ignored Parameter Write (Index != 0)\n");
+                LOG_TRACE("  -> Ignored Parameter Write (Index != 0)\n");
             }
             break;
         case CDREG_REQUEST:
             if (reg_index == 0) {
-                LOG_DEBUG("  -> Request Write: 0x%02x\n", value);
+                LOG_TRACE("  -> Request Write: 0x%02x\n", value);
                 if (value & 0x80) {
-                    LOG_DEBUG("    -> Clear Parameter FIFO\n");
+                    LOG_TRACE("    -> Clear Parameter FIFO\n");
                     fifo_clear(&cdrom->param_fifo);
                 }
             } else if (reg_index == 1) {
-                LOG_DEBUG("  -> IRQ Enable/Flags Write: 0x%02x\n", value);
+                LOG_TRACE("  -> IRQ Enable/Flags Write: 0x%02x\n", value);
                 cdrom->interrupt_enable = value & 0x1F;
                 cdrom->interrupt_flags &= ~(value & 0x1F);
                 if (value & 0x40) {
-                    LOG_DEBUG("    -> Clear All Interrupt Flags\n");
+                    LOG_TRACE("    -> Clear All Interrupt Flags\n");
                     cdrom->interrupt_flags = 0;
                 }
             } else {
-                LOG_DEBUG("  -> Ignored Request Write (Index != 0/1)\n");
+                LOG_TRACE("  -> Ignored Request Write (Index != 0/1)\n");
             }
             break;
         default:
-            LOG_DEBUG("  -> Unknown Write\n");
+            LOG_TRACE("  -> Unknown Write\n");
             break;
     }
 }
@@ -511,6 +480,7 @@ static void cmd_read_n_complete(Cdrom* cdrom) {
 
     // Increment LBA for continuous reading
     cdrom->target_lba++;
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 static void cmd_seek_l(Cdrom* cdrom) {
@@ -528,6 +498,7 @@ static void cmd_set_mode(Cdrom* cdrom) {
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 3); // INT3
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 static void cmd_stop(Cdrom* cdrom) {
@@ -537,6 +508,7 @@ static void cmd_stop(Cdrom* cdrom) {
     update_status_register(cdrom);
     fifo_push(&cdrom->response_fifo, cdrom->status);
     trigger_interrupt(cdrom, 2); // INT2
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }
 
 // cdrom_step: No changes needed
@@ -626,5 +598,34 @@ void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd) {
 
     // 4. Request IRQ2 (CDROM) after command completion
     LOG_INFO("[CDROM] Requesting IRQ2 (CDROM)\n");
+    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
+}
+
+void cmd_test(Cdrom* cdrom) {
+    uint8_t sub_command = fifo_pop(&cdrom->param_fifo);
+    LOG_INFO("~ CDROM CMD: Test (0x19), Sub: 0x%02x\n", sub_command);
+    fifo_clear(&cdrom->response_fifo);
+    // --- nocash/PSX-Spex: Test(0x20) must return status, year, month, day, version ---
+    // 1. Push status (with RSLRDY set) and trigger INT3 (response ready)
+    update_status_register(cdrom);
+    fifo_push(&cdrom->response_fifo, cdrom->status | STAT_RSLRDY); // status byte
+    update_status_register(cdrom);
+    trigger_interrupt(cdrom, 3); // INT3: Response ready
+    // 2. Push result bytes (year, month, day, version) or placeholder
+    if (sub_command == 0x20) {
+        fifo_push(&cdrom->response_fifo, 0x94); // Year
+        fifo_push(&cdrom->response_fifo, 0x12); // Month
+        fifo_push(&cdrom->response_fifo, 0x20); // Day
+        fifo_push(&cdrom->response_fifo, 0xC2); // Version (from SCPH1001)
+        LOG_DEBUG("[CDROM] Test(0x20): Queued BIOS date/version response\n");
+    } else {
+        fifo_push(&cdrom->response_fifo, 0x00); // Placeholder for unknown subcommands
+    }
+    update_status_register(cdrom);
+    // 3. Trigger INT2 (command complete) after result is available
+    trigger_interrupt(cdrom, 2); // INT2: Command complete
+    LOG_INFO("[CDROM] Test(0x%02x): Response FIFO now has %d bytes\n", sub_command, cdrom->response_fifo.count);
+    // --- End nocash/PSX-Spex compliance ---
+    cdrom->current_state = CD_STATE_IDLE;
     interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
 }

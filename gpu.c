@@ -9,7 +9,10 @@
 #include <string.h> // For memset
 #include "renderer.h"
 #include "log.h"
+#include "interconnect.h"
 // vram.h is implicitly included via gpu.h
+
+// Logging: Only use LOG_ERROR/LOG_INFO as per new log system. No per-draw logs.
 
 // --- Forward Declarations for GP0 Handlers (Internal linkage) ---
 static void gp0_nop(Gpu* gpu);
@@ -74,7 +77,7 @@ static void gp1_reset(Gpu* gpu, uint32_t value) {
     LOG_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
     (void)value; // value is unused for this command
     // Re-initialize GPU state AND the VRAM state by calling gpu_init
-    gpu_init(gpu);
+    gpu_init(gpu, gpu->inter);
 }
 
 /** GP1(0x01): Reset Command Buffer */
@@ -367,7 +370,7 @@ static void gp0_image_store(Gpu* gpu) {
 /**
  * @brief Initializes the GPU state, including VRAM and default register values.
  */
-void gpu_init(Gpu* gpu) {
+void gpu_init(Gpu* gpu, Interconnect* inter) {
     LOG_INFO("GPU Initializing...\n");
     vram_init(&gpu->vram); // Init VRAM first
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
@@ -393,6 +396,7 @@ void gpu_init(Gpu* gpu) {
     gpu->gp0_command_method = NULL;
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
+    gpu->inter = inter;
     LOG_INFO("GPU Initialized (State reset, VRAM initialized).\n");
 }
 
@@ -559,4 +563,9 @@ uint32_t gpu_read_data(Gpu* gpu) {
     LOG_WARN("GPU Read Data (GPUREAD) - Not Implemented, returning 0\n");
       (void)gpu; // Suppress unused warning
       return 0; // Return dummy data for now
+}
+
+void gpu_trigger_vblank_irq(Gpu* gpu) {
+    LOG_INFO("[GPU] VBlank IRQ0 requested\n");
+    interconnect_request_irq(gpu->inter, IRQ_VBLANK, "GPU VBlank");
 }

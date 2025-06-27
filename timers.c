@@ -13,13 +13,16 @@
 #define DOTCLOCK_PAL_HZ 25200000.0 // PAL frequency, for completeness
 #define HBLANK_NTSC_HZ 15625.0 // Horizontal blanking frequency for NTSC
 
+// Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
 /**
  * @brief Helper function to decode the mode register into internal state flags.
  * Called whenever the mode register is written.
+ * @param timers Pointer to the Timers structure.
  * @param timer Pointer to the Timer instance to update.
+ * @param timer_index Index of the timer (0, 1, or 2).
  */
-static void timer_update_internal_state(Timer* timer) {
+static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_index) {
     uint16_t mode = timer->mode;
 
     timer->sync_enable       = (mode & (1 << 0)) != 0;
@@ -58,7 +61,7 @@ void timers_init(Timers* timers, struct Interconnect* inter) {
         t->mode    = 0;
         t->target  = 0;
         // Reset internal emulation state
-        timer_update_internal_state(t); // Decode the initial mode (0)
+        timer_update_internal_state(timers, t, i); // Decode the initial mode (0)
         // Ensure flags start clear
         t->reached_target_flag = false;
         t->reached_ffff_flag   = false;
@@ -138,10 +141,12 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             t->counter = value;
             break;
         case TMR_REG_MODE: // 0x4: Mode Register
-            LOG_INFO("Write Mode Timer%d: 0x%04x\n", timer_index, value);
+            if (timer_index == 0) {
+                LOG_INFO("[Timer0] Mode set: 0x%04x\n", value);
+            }
             t->mode = value;
             // Update internal derived state whenever mode changes
-            timer_update_internal_state(t);
+            timer_update_internal_state(timers, t, timer_index);
             break;
         case TMR_REG_TARGET: // 0x8: Target Value
             t->target = value;
@@ -229,39 +234,44 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         // --- 3. Increment Counter and Check for Events ---
         uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
-        // --- LOGGING: Print timer state every 60 frames ---
-        // Commented out or demoted to LOG_DEBUG to avoid massive logs
-        // if (frame_counter % 60 == 0) {
-        //     LOG_DEBUG("Timer%d: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
-        // }
-
-        // Check for target reached
+        // Only log when a VBlank IRQ is actually triggered (Timer0, i==0)
+        if (i == 0 && (t->irq_on_target || t->irq_on_ffff) && (old_counter < t->target && t->counter >= t->target)) {
+            LOG_INFO("[Timer0/VBlank] IRQ triggered: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d", t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
+        }
+        // Suppress all other logs if mode=0 and no IRQ is enabled
+        if (i == 0 && t->mode == 0 && !(t->irq_on_target || t->irq_on_ffff)) {
+            continue;
+        }
+        // Demote other timer logs to LOG_DEBUG
         if (old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
-            LOG_INFO("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d\n", i, t->counter, t->target, t->mode, t->irq_on_target);
+            LOG_DEBUG("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d", i, t->counter, t->target, t->mode, t->irq_on_target);
         }
-
-        // Check for overflow (0xFFFF -> 0x0000)
-        if (t->counter < old_counter) { // Simple wrap-around check
+        if (t->counter < old_counter) {
             t->reached_ffff_flag = true;
-            LOG_INFO("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d\n", i, t->counter, t->mode, t->irq_on_ffff);
+            LOG_DEBUG("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d", i, t->counter, t->mode, t->irq_on_ffff);
         }
 
         // --- 4. Handle Interrupts ---
         bool irq = false;
         const char* irq_reason = NULL;
-        if (t->irq_on_target && t->reached_target_flag) {
-            irq = true;
-            irq_reason = "target";
-        }
-        if (t->irq_on_ffff && t->reached_ffff_flag) {
-            irq = true;
-            irq_reason = irq_reason ? "target+overflow" : "overflow";
+        
+        // Only generate interrupts if the timer has been properly configured by BIOS
+        // According to nocash, timers should not generate interrupts until mode is set
+        if (t->mode != 0) { // Only if BIOS has written to mode register
+            if (t->irq_on_target && t->reached_target_flag) {
+                irq = true;
+                irq_reason = "target";
+            }
+            if (t->irq_on_ffff && t->reached_ffff_flag) {
+                irq = true;
+                irq_reason = irq_reason ? "target+overflow" : "overflow";
+            }
         }
 
         if (irq) {
             t->mode |= (1 << 10);
-            LOG_INFO("Timer%d IRQ requested (reason: %s)\n", i, irq_reason);
+            LOG_DEBUG("Timer%d IRQ requested (reason: %s)", i, irq_reason);
             interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
 
@@ -270,6 +280,10 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             t->counter = 0;
             // IMPORTANT: Per specs, sticky flags are only reset by writing to the Mode register,
             // so we don't clear them here. This is correct.
+        }
+
+        if (i == 0 && irq) {
+            LOG_INFO("[Timer0] IRQ4 requested (reason: %s)\n", irq_reason);
         }
     }
 }

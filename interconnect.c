@@ -3,8 +3,15 @@
 #include <stdbool.h>
 #include "log.h"
 
-// Forward declaration for the internal DMA transfer function
-static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index);
+// DMA and GPU region access logs are extremely frequent and only useful for deep debugging.
+// Suppress at INFO/DEBUG, only log at TRACE, and rate-limit. Keep summary/activation logs at INFO/DEBUG.
+static uint64_t dma_read32_count = 0;
+static uint32_t last_dma_read32_addr = 0;
+static uint32_t last_dma_read32_offset = 0;
+static uint64_t dma_write32_count = 0;
+static uint32_t last_dma_write32_addr = 0;
+static uint32_t last_dma_write32_offset = 0;
+static uint32_t last_dma_write32_value = 0;
 
 // --- Rate-limited log counters for IO accesses ---
 #if LOG_LEVEL >= LOG_LEVEL_INFO
@@ -41,6 +48,7 @@ uint32_t mask_region(uint32_t addr) {
     return addr & REGION_MASK[index];
 }
 
+static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index);
 
 // --- Initialization ---
 /**
@@ -55,14 +63,14 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     inter->bios = bios;
     inter->ram = ram;
     dma_init(&inter->dma); // Initialize DMA controller state
-    gpu_init(&inter->gpu); // Initialize GPU state (now contains Renderer)
+    gpu_init(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
 
     cdrom_init(&inter->cdrom,inter);
 
     // Initialize Interrupt Controller state
     inter->irq_status = 0; // No pending interrupts
-    inter->irq_mask = 0;   // All interrupts masked
+    inter->irq_mask = 0x0000;   // Start with all interrupts masked, BIOS will enable as needed
     
     // Initialize Timer state <<< ADD THIS CALL
     timers_init(&inter->timers_state, inter);
@@ -81,21 +89,17 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    uint16_t prev = inter->irq_status;
-    if (!(prev & (1 << irq_line))) {
-        inter->irq_status |= (1 << irq_line);
-        LOG_INFO("[IRQ] Request IRQ%u from %s: I_STAT 0x%04x -> 0x%04x\n", irq_line, source, prev, inter->irq_status);
-    } else {
-        // Already set, do not re-trigger (edge-triggered)
-        // LOG_INFO("[IRQ] IRQ%u already set by %s.\n", irq_line, source);
+    (void)source;
+    inter->irq_status |= (1 << irq_line);
+    if (irq_line <= 6) {
+        LOG_INFO("[IRQ] IRQ%u requested\n", irq_line);
     }
 }
 
 // Helper to clear an IRQ (for explicit logging, though BIOS usually does this via I_STAT write)
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    uint16_t prev = inter->irq_status;
+    (void)source;
     inter->irq_status &= ~(1 << irq_line);
-    LOG_INFO("[IRQ] Clear IRQ%u from %s: I_STAT 0x%04x -> 0x%04x\n", irq_line, source, prev, inter->irq_status);
 }
 
 
@@ -109,7 +113,7 @@ void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* 
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_DEBUG("[INTERCONNECT] IO READ32 at 0x%08x\n", physical_addr);
+    LOG_TRACE("[INTERCONNECT] IO READ32 at 0x%08x\n", physical_addr);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read32_count % 10000 == 0) {
@@ -177,7 +181,14 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     // DMA Region (0x1f801080 - 0x1f8010FF)
     if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
         uint32_t offset = physical_addr - DMA_START;
-        LOG_INFO("~ Read32 from DMA region: Addr=0x%08x Offset=0x%x\n", physical_addr, offset);
+        dma_read32_count++;
+        if (log_get_level() >= LOG_LEVEL_TRACE) {
+            if ((dma_read32_count % 1000 == 0) || (physical_addr != last_dma_read32_addr) || (offset != last_dma_read32_offset)) {
+                LOG_TRACE("~ Read32 from DMA region: Addr=0x%08x Offset=0x%x (count=%llu)", physical_addr, offset, dma_read32_count);
+                last_dma_read32_addr = physical_addr;
+                last_dma_read32_offset = offset;
+            }
+        }
         return dma_read(&inter->dma, offset); // Delegate to DMA module
     }
 
@@ -226,7 +237,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
  */
 uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_DEBUG("[INTERCONNECT] IO READ16 at 0x%08x\n", physical_addr);
+    LOG_TRACE("[INTERCONNECT] IO READ16 at 0x%08x\n", physical_addr);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read16_count % 10000 == 0) {
@@ -325,7 +336,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
  */
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_DEBUG("[INTERCONNECT] IO READ8 at 0x%08x\n", physical_addr);
+    LOG_TRACE("[INTERCONNECT] IO READ8 at 0x%08x\n", physical_addr);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read8_count % 10000 == 0) {
@@ -394,7 +405,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
     uint32_t physical_addr = mask_region(address);
-    LOG_DEBUG("[INTERCONNECT] IO WRITE32 at 0x%08x: value=0x%08x\n", physical_addr, value);
+    LOG_TRACE("[INTERCONNECT] IO WRITE32 at 0x%08x: value=0x%08x\n", physical_addr, value);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_write32_count % 10000 == 0) {
@@ -429,11 +440,11 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         // Writing acknowledges (clears) specified interrupt flags
         // According to PSX-Spex: Writing 1 to a bit clears that interrupt
-        uint16_t ack_mask = value & 0x7FF;
+        uint16_t ack_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
         uint16_t prev_status = inter->irq_status;
         inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
-        LOG_INFO("~ Write32 to IRQ_STATUS (Ack): Value=0x%08x, I_STAT: 0x%04x -> 0x%04x\n", 
-                value, prev_status, inter->irq_status);
+        LOG_INFO("[IRQ][I_STAT] Write32: Value=0x%08x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)\n", 
+                value, ack_mask, prev_status, inter->irq_status, __func__);
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
@@ -452,12 +463,16 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // GPU Registers
     if (physical_addr == GPU_GP0_ADDR) { // 0x1f801810 (Write = GP0)
-        // LOG_INFO("~ Write32 GP0 = 0x%08x\n", value); // Can be noisy
+        if (log_get_level() >= LOG_LEVEL_TRACE) {
+            LOG_TRACE("~ Write32 GP0 = 0x%08x", value);
+        }
         gpu_gp0(&inter->gpu, value); // Delegate to GPU module
         return;
     }
     if (physical_addr == GPU_GP1_ADDR) { // 0x1f801814 (Write = GP1)
-        // LOG_INFO("~ Write32 GP1 = 0x%08x\n", value); // Can be noisy
+        if (log_get_level() >= LOG_LEVEL_TRACE) {
+            LOG_TRACE("~ Write32 GP1 = 0x%08x", value);
+        }
         gpu_gp1(&inter->gpu, value); // Delegate to GPU module
         return;
     }
@@ -468,6 +483,15 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     // DMA Region
     if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
         uint32_t offset = physical_addr - DMA_START;
+        dma_write32_count++;
+        if (log_get_level() >= LOG_LEVEL_TRACE) {
+            if ((dma_write32_count % 1000 == 0) || (physical_addr != last_dma_write32_addr) || (offset != last_dma_write32_offset) || (value != last_dma_write32_value)) {
+                LOG_TRACE("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x (count=%llu)", physical_addr, offset, value, dma_write32_count);
+                last_dma_write32_addr = physical_addr;
+                last_dma_write32_offset = offset;
+                last_dma_write32_value = value;
+            }
+        }
         LOG_INFO("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x\n", physical_addr, offset, value);
         bool channel_became_active = dma_write(&inter->dma, offset, value); // Delegate
 
@@ -542,6 +566,12 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
             physical_addr, value, address);
 }
 
+// Add static counters and last-value tracking for rate-limiting noisy IO WRITE16 logs
+// 0x1f801da8 is an SPU register polled/written in tight BIOS/game loops. Logging is only useful for SPU debugging.
+// Suppress all logs for this address except at TRACE level, and even then, rate-limit.
+static uint64_t write16_da8_count = 0;
+static uint16_t last_write16_da8_value = 0;
+
 /**
  * @brief Handles 16-bit memory writes from the CPU.
  * @param inter The Interconnect instance.
@@ -550,8 +580,18 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
  */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
     uint32_t physical_addr = mask_region(address);
-    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-        LOG_INFO("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x\n", physical_addr, value);
+    if (physical_addr == 0x1f801da8) {
+        write16_da8_count++;
+        if (log_get_level() >= LOG_LEVEL_TRACE) {
+            // In TRACE mode, print every 1000th access or when value changes
+            if ((write16_da8_count % 1000 == 0) || (value != last_write16_da8_value)) {
+                LOG_TRACE("[INTERCONNECT] IO WRITE16 at 0x1f801da8: value=0x%04x (count=%llu)", value, write16_da8_count);
+                last_write16_da8_value = value;
+            }
+        }
+        // Suppress at all other log levels
+    } else {
+        LOG_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
     }
     // CDROM 16-bit access logging
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
@@ -575,9 +615,12 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
      }
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
+        // Writing acknowledges (clears) specified interrupt flags
+        // According to PSX-Spex: Writing 1 to a bit clears that interrupt
         uint16_t ack_mask = value & 0x7FF;
-        interconnect_clear_irq(inter, 0, "CPU");
-        LOG_INFO("~ Write16 to IRQ_STATUS (Ack): Value=0x%04x -> I_STAT=0x%04x\n", value, inter->irq_status);
+        uint16_t prev_status = inter->irq_status;
+        inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
+        LOG_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)\n", value, ack_mask, prev_status, inter->irq_status, __func__);
         return;
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
@@ -593,11 +636,15 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
 
     // Timer Region
-     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-         LOG_INFO("~ Write16 to TIMERS region: Addr 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
-         // TODO: Implement Timer register writes (Mode, Target are 16-bit)
-         return;
-     }
+    if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
+        uint32_t timer_base_offset = physical_addr - TIMERS_START;
+        int timer_index = timer_base_offset / 0x10;
+        uint32_t register_offset = physical_addr & 0xF;
+
+        // LOG_INFO("~ Write16 to Timer %d Offset 0x%x = 0x%04x\n", timer_index, register_offset, value);
+        timer_write16(&inter->timers_state, timer_index, register_offset, value);
+        return; // Handled
+    }
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
@@ -635,6 +682,14 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     if ((physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) ||
         (physical_addr >= EXPANSION_2_START && physical_addr <= EXPANSION_2_END)) {
         LOG_INFO("~ Write16 to Expansion region: Address 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
+        return;
+    }
+
+    // Logging: Suppress IO WRITE16 logs for polled SPU/controller addresses unless LOG_LEVEL_DEBUG is enabled.
+    // This prevents log flooding from BIOS polling loops.
+    if ((physical_addr >= 0x1f801d80 && physical_addr <= 0x1f801dbf) ||
+        physical_addr == 0x1f801da8 || physical_addr == 0x1f801daa || physical_addr == 0x1f801dac || physical_addr == 0x1f801dae) {
+        LOG_DEBUG("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
         return;
     }
 

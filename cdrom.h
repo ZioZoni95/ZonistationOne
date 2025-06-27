@@ -31,7 +31,7 @@ struct Cdrom;
 #define CDC_PAUSE       0x09 // Pause playback/reading, sends response
 #define CDC_INIT        0x0A // Initialize controller/drive state
 #define CDC_SEEKL       0x15 // Seek to LBA (Logical - data track only?)
-#define CDC_TEST        0x19 // Test commands (various subfunctions)
+#define CDC_TEST        0x19 // Test commands (various subfunctions, see nocash/PSX-Spex for response sequence)
 #define CDC_GETID       0x1A // Get drive ID (returns SCEx string / No Disc / Licensed status)
 #define CDC_STOP        0x08 // Stop CD-DA playback/Read <<< Add this if missing
 
@@ -169,5 +169,13 @@ bool cdrom_load_disc(Cdrom* cdrom, const char* bin_filename);
 void cdrom_step(Cdrom* cdrom, uint32_t cycles);
 
 void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd);
+
+/**
+ * @brief Handles the Test command (0x19) and its subcommands, strictly following nocash/PSX-Spex:
+ * - Response FIFO must contain status, then result bytes (e.g., BIOS date/version for sub 0x20)
+ * - Status register must reflect RSLRDY and not busy after command
+ * - INT3 (response ready) and INT2 (command complete) must be triggered in correct order
+ */
+void cmd_test(struct Cdrom* cdrom);
 
 #endif // CDROM_H
