@@ -9,9 +9,10 @@
  * @param vram Pointer to the Vram struct to initialize.
  */
 void vram_init(Vram* vram) {
+    LOG_VRAM_INFO("VRAM initialized");
     // Fill VRAM with zeros initially. Unlike RAM, VRAM often starts cleared.
     memset(vram->data, 0x00, VRAM_SIZE);
-    LOG_INFO("VRAM Initialized (%d bytes, filled with 0x00).", VRAM_SIZE);
+    LOG_VRAM_INFO("VRAM Initialized (%d bytes, filled with 0x00).", VRAM_SIZE);
 }
 
 // Helper for bounds checking (inline for potential performance)
@@ -24,12 +25,12 @@ static inline int is_out_of_bounds(uint32_t offset, uint32_t access_size) {
 // Reads a 32-bit value from VRAM (Little-Endian)
 uint32_t vram_load32(Vram* vram, uint32_t offset) {
     if (offset % 4 != 0) {
-         LOG_WARN("VRAM Load32 unaligned: offset 0x%x", offset);
+         LOG_VRAM_WARN("VRAM Load32 unaligned: offset 0x%x", offset);
         // You might handle this differently (e.g., return garbage or specific behavior)
         // but for now, we'll proceed, acknowledging it's likely unintended.
     }
      if (is_out_of_bounds(offset, 4)) {
-        LOG_ERROR("VRAM Load32 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Load32 out of bounds: offset 0x%x", offset);
         return 0; // Or handle error appropriately
     }
     uint32_t b0 = vram->data[offset + 0];
@@ -42,11 +43,11 @@ uint32_t vram_load32(Vram* vram, uint32_t offset) {
 // Writes a 32-bit value to VRAM (Little-Endian)
 void vram_store32(Vram* vram, uint32_t offset, uint32_t value) {
      if (offset % 4 != 0) {
-         LOG_WARN("VRAM Store32 unaligned: offset 0x%x", offset);
+         LOG_VRAM_WARN("VRAM Store32 unaligned: offset 0x%x", offset);
         // Proceeding, but acknowledging potential issue.
     }
      if (is_out_of_bounds(offset, 4)) {
-        LOG_ERROR("VRAM Store32 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Store32 out of bounds: offset 0x%x", offset);
         return; // Or handle error appropriately
     }
     vram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -58,11 +59,11 @@ void vram_store32(Vram* vram, uint32_t offset, uint32_t value) {
 // Reads a 16-bit value from VRAM (Little-Endian) - Primary access method
 uint16_t vram_load16(Vram* vram, uint32_t offset) {
      if (offset % 2 != 0) {
-         LOG_WARN("VRAM Load16 unaligned: offset 0x%x", offset);
+         LOG_VRAM_WARN("VRAM Load16 unaligned: offset 0x%x", offset);
         // Proceeding, but this is usually an error for pixel access.
      }
      if (is_out_of_bounds(offset, 2)) {
-        LOG_ERROR("VRAM Load16 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Load16 out of bounds: offset 0x%x", offset);
         return 0;
     }
     uint16_t b0 = vram->data[offset + 0];
@@ -73,11 +74,11 @@ uint16_t vram_load16(Vram* vram, uint32_t offset) {
 // Writes a 16-bit value to VRAM (Little-Endian) - Primary access method
 void vram_store16(Vram* vram, uint32_t offset, uint16_t value) {
      if (offset % 2 != 0) {
-         LOG_WARN("VRAM Store16 unaligned: offset 0x%x", offset);
+         LOG_VRAM_WARN("VRAM Store16 unaligned: offset 0x%x", offset);
         // Proceeding, but this is usually an error for pixel access.
     }
     if (is_out_of_bounds(offset, 2)) {
-        LOG_ERROR("VRAM Store16 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Store16 out of bounds: offset 0x%x", offset);
         return;
     }
     vram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -87,7 +88,7 @@ void vram_store16(Vram* vram, uint32_t offset, uint16_t value) {
 // Reads an 8-bit value from VRAM
 uint8_t vram_load8(Vram* vram, uint32_t offset) {
     if (is_out_of_bounds(offset, 1)) {
-        LOG_ERROR("VRAM Load8 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Load8 out of bounds: offset 0x%x", offset);
         return 0;
     }
     return vram->data[offset];
@@ -96,7 +97,7 @@ uint8_t vram_load8(Vram* vram, uint32_t offset) {
 // Writes an 8-bit value to VRAM
 void vram_store8(Vram* vram, uint32_t offset, uint8_t value) {
     if (is_out_of_bounds(offset, 1)) {
-        LOG_ERROR("VRAM Store8 out of bounds: offset 0x%x", offset);
+        LOG_VRAM_ERROR("VRAM Store8 out of bounds: offset 0x%x", offset);
         return;
     }
     vram->data[offset] = value;

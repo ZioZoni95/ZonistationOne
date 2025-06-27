@@ -62,6 +62,7 @@ void dma_channel_done(DmaChannel* ch) {
 
 // Initializes the DMA state to reset values.
 void dma_init(Dma* dma) {
+    LOG_DMA_INFO("DMA initialized");
     // DPCR reset value
     dma->control = 0x07654321;
 

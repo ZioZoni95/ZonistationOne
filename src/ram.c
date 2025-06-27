@@ -6,6 +6,7 @@
 // Initializes the RAM memory, filling it with a recognizable pattern.
 // Based on Guide Section 2.34 [cite: 460]
 void ram_init(Ram* ram) {
+    LOG_RAM_INFO("RAM initialized");
     // Fill RAM with a "garbage" value (0xCA) to simulate uninitialized state
     // and potentially help catch reads from uninitialized memory.
     memset(ram->data, 0xCA, RAM_SIZE);

@@ -36,9 +36,15 @@ int main(int argc, char *argv[]) {
     const char* bios_path = NULL;
     int log_level = LOG_LEVEL_INFO;
     bool show_help = false;
+    bool log_single_file = false;
+    int log_rate_limit_n = 0;
 
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--debug") == 0) {
+        if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
+            log_rate_limit_n = atoi(argv[i] + 17);
+        } else if (strcmp(argv[i], "--log-single-file") == 0) {
+            log_single_file = true;
+        } else if (strcmp(argv[i], "--debug") == 0) {
             log_level = LOG_LEVEL_DEBUG;
         } else if (strcmp(argv[i], "--quiet") == 0) {
             log_level = LOG_LEVEL_WARN;
@@ -50,18 +56,24 @@ int main(int argc, char *argv[]) {
             bios_path = argv[i];
         } else {
             printf("Unknown option: %s\n", argv[i]);
-            printf("Usage: %s [--debug|--trace|--quiet] <BIOS_PATH>\n", argv[0]);
+            printf("Usage: %s [--debug|--trace|--quiet|--log-rate-limit=N|--log-single-file] <BIOS_PATH>\n", argv[0]);
             return 1;
         }
     }
     if (show_help) {
-        printf("Usage: %s [--debug|--trace|--quiet] <BIOS_PATH>\n", argv[0]);
-        printf("  --debug   Set log level to DEBUG (verbose output)\n");
-        printf("  --trace   Set log level to TRACE (ultra-verbose, per-instruction/cycle)\n");
-        printf("  --quiet   Set log level to WARN (minimal output)\n");
-        printf("  --help    Show this help message\n");
-        printf("  <BIOS_PATH> Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
+        printf("Usage: %s [--debug|--trace|--quiet|--log-rate-limit=N|--log-single-file] <BIOS_PATH>\n", argv[0]);
+        printf("  --debug            Set log level to DEBUG (verbose output)\n");
+        printf("  --trace            Set log level to TRACE (ultra-verbose, per-instruction/cycle)\n");
+        printf("  --quiet            Set log level to WARN (minimal output)\n");
+        printf("  --log-rate-limit=N Only log the first N debug/trace messages per component, then every Nth after that\n");
+        printf("  --log-single-file  Log everything to emulator_log.txt (disables per-component logs in logs/)\n");
+        printf("                    (Default: per-component logs in logs/ directory)\n");
+        printf("  --help             Show this help message\n");
+        printf("  <BIOS_PATH>        Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
         return 0;
+    }
+    if (log_rate_limit_n > 0) {
+        log_set_rate_limit(1, log_rate_limit_n);
     }
     if (!bios_path) {
         bios_path = "roms/SCPH1001.BIN";
@@ -71,24 +83,23 @@ int main(int argc, char *argv[]) {
 
     // --- File Logging Setup ---
     // Log file rotation: if emulator_log.txt > 50MB, move to emulator_log.old.txt
-    const char* log_filename = "emulator_log.txt";
-    struct stat st;
-    if (stat(log_filename, &st) == 0 && st.st_size > 50 * 1024 * 1024) {
-        // Remove old backup if it exists
-        unlink("emulator_log.old.txt");
-        // Rename current log to backup
-        rename(log_filename, "emulator_log.old.txt");
+    if (log_single_file) {
+        const char* log_filename = "emulator_log.txt";
+        struct stat st;
+        if (stat(log_filename, &st) == 0 && st.st_size > 50 * 1024 * 1024) {
+            unlink("emulator_log.old.txt");
+            rename(log_filename, "emulator_log.old.txt");
+        }
+        FILE *log_file = freopen(log_filename, "w", stdout);
+        if (log_file == NULL) {
+            perror("Failed to open log file for stdout");
+            return 1;
+        }
+        freopen(log_filename, "a", stderr);
+        setbuf(stdout, NULL);
+        setbuf(stderr, NULL);
+        LOG_INFO("--- Log Started ---");
     }
-    FILE *log_file = freopen(log_filename, "w", stdout);
-    if (log_file == NULL) {
-        perror("Failed to open log file for stdout");
-        return 1;
-    }
-    // Append stderr to the same file.
-    freopen(log_filename, "a", stderr);
-    setbuf(stdout, NULL); // Disable buffering to see logs in real-time.
-    setbuf(stderr, NULL);
-    LOG_INFO("--- Log Started ---");
 
     // --- Configuration ---
     // Define a number of CPU cycles to run per frame. This helps pace the emulation.
@@ -233,6 +244,9 @@ int main(int argc, char *argv[]) {
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
 
+        // Trigger VBlank IRQ0 at the end of each frame
+        gpu_trigger_vblank_irq(&interconnect_state.gpu);
+
         total_cycles += cycles_per_frame;
 
         // --- Render and Display Frame ---
@@ -253,7 +267,6 @@ int main(int argc, char *argv[]) {
     LOG_INFO("SDL Quit.");
 
     LOG_INFO("--- ZoniStation One Emulator Finished ---");
-    fclose(log_file); // Close the log file
     LOG_INFO("Emulator stopped");
     return 0;
 }

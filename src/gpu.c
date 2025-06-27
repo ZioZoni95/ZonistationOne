@@ -185,8 +185,8 @@ static void gp0_clear_cache(Gpu* gpu) {
 
 /** GP0(0x02): Fill Rectangle in VRAM */
 static void gp0_fill_rectangle(Gpu* gpu) {
-    // TODO: Implement VRAM fill using color (word 0), coords (word 1), dimensions (word 2)
-    LOG_INFO("GP0(0x02): Fill Rectangle (Not Implemented Yet)\n");
+    // Minimal stub: Pretend to fill, do nothing, but don't hang
+    LOG_INFO("GP0(0x02): Fill Rectangle (Stubbed, no-op)\n");
     (void)gpu;
 }
 
@@ -354,13 +354,8 @@ static void gp0_image_load(Gpu* gpu) {
 
 /** GP0(0xC0): Copy Rectangle (VRAM to CPU/DMA) */
 static void gp0_image_store(Gpu* gpu) {
-     if (gpu->gp0_command_buffer.count < 3) {
-         LOG_ERROR("GP0(0xC0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count); return; }
-    // TODO: Implement VRAM read logic & buffering for GPUREAD
-    uint32_t dimensions = gpu->gp0_command_buffer.buffer[2];
-    uint16_t w = (uint16_t)(dimensions & 0x3FF); // Width is 10 bits
-    uint16_t h = (uint16_t)((dimensions >> 16) & 0x1FF); // Height is 9 bits
-    LOG_INFO("GP0(0xC0): Image Store (%ux%u) - VRAM Read Not Implemented\n", w, h);
+    // Minimal stub: Pretend to start a VRAM-to-CPU transfer
+    LOG_INFO("GP0(0xC0): Image Store (Stubbed, no VRAM read)\n");
     (void)gpu;
 }
 
@@ -371,6 +366,7 @@ static void gp0_image_store(Gpu* gpu) {
  * @brief Initializes the GPU state, including VRAM and default register values.
  */
 void gpu_init(Gpu* gpu, Interconnect* inter) {
+    LOG_GPU_INFO("GPU initialized");
     LOG_INFO("GPU Initializing...\n");
     vram_init(&gpu->vram); // Init VRAM first
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
@@ -402,6 +398,7 @@ void gpu_init(Gpu* gpu, Interconnect* inter) {
 
 /** Processes commands/data sent to GP0 port */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
+    LOG_GPU_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     // Handle IMAGE_LOAD state first
     if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD) {
         uint16_t pixel1 = (uint16_t)(command & 0xFFFF);
@@ -462,7 +459,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
             case 0xE5: expected_len = 1; handler = gp0_drawing_offset; break;
             case 0xE6: expected_len = 1; handler = gp0_mask_bit_setting; break;
             default:
-                LOG_ERROR("GPU Error: Unhandled GP0 Opcode 0x%02x (Cmd 0x%08x)\n", opcode, command);
+                LOG_ERROR("GPU Error: Unhandled GP0 Opcode 0x%02x (Cmd 0x%08x) [STUBBED]", opcode, command);
                 expected_len = 1; handler = gp0_nop; gpu->gp0_current_opcode = 0xFF; break; }
 
         // Sanity check length
@@ -495,6 +492,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
 
 /** Processes commands sent to GP1 port */
 void gpu_gp1(Gpu* gpu, uint32_t command) {
+    LOG_GPU_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     uint32_t opcode = (command >> 24) & 0xFF;
     switch (opcode) {
         case 0x00: gp1_reset(gpu, command); break;
@@ -508,13 +506,14 @@ void gpu_gp1(Gpu* gpu, uint32_t command) {
         case 0x08: gp1_display_mode(gpu, command); break;
         // Add cases for 0x09 (Get GPU Info), 0x10-0x1F (GPU Info responses) if needed
         default:
-            LOG_ERROR("Error: Unhandled GP1 command: Opcode 0x%02x, Value 0x%08x\n", opcode, command);
+            LOG_ERROR("Error: Unhandled GP1 command: Opcode 0x%02x, Value 0x%08x [STUBBED]", opcode, command);
             break;
     }
 }
 
 /** Reads the GPU Status Register (GPUSTAT) */
 uint32_t gpu_read_status(Gpu* gpu) {
+    static bool toggle_irq = false;
     uint32_t r = 0;
     r |= (uint32_t)gpu->page_base_x << 0;
     r |= (uint32_t)gpu->page_base_y << 4;
@@ -524,48 +523,51 @@ uint32_t gpu_read_status(Gpu* gpu) {
     r |= (uint32_t)gpu->draw_to_display << 10;
     r |= (uint32_t)gpu->force_set_mask_bit << 11;
     r |= (uint32_t)gpu->preserve_masked_pixels << 12;
-    r |= (uint32_t)gpu->field << 13; // TODO: Needs timing update
+    r |= (uint32_t)gpu->field << 13;
     r |= (uint32_t)gpu->texture_disable << 15;
-    // Horizontal Resolution bits (check Nocash STAT description for exact mapping)
-    // STAT[16] = Hres2?(0) | Hres1(0) -> Raw=0..3 -> (raw & 1)
-    // STAT[17] = Hres1(1)             -> Raw=0..3 -> (raw >> 1) & 1
-    // STAT[18] = Hres2?(1)             -> Raw=4..7 -> (raw >> 2) & 1
     uint32_t hres_raw_val = ((uint32_t)gpu->hres_raw.hr2 << 2) | (uint32_t)gpu->hres_raw.hr1;
-    r |= ((hres_raw_val >> 0) & 1) << 16; // Bit 16 seems to be (hr1 & 1) ^ (hr2 & 1) based on Nocash examples? Using direct mapping for now.
-    r |= ((hres_raw_val >> 1) & 1) << 17; // Bit 17
-    r |= ((hres_raw_val >> 2) & 1) << 18; // Bit 18
-    r |= (0 << 19); // VRES Hack - STAT[19]
-    r |= ((uint32_t)gpu->vmode << 20); // STAT[20]
-    r |= ((uint32_t)gpu->display_depth << 21); // STAT[21]
-    r |= ((uint32_t)gpu->interlaced << 22); // STAT[22]
-    r |= ((uint32_t)gpu->display_disabled << 23); // STAT[23]
-    r |= ((uint32_t)gpu->interrupt << 24); // STAT[24]
-    // Ready Flags (Hardcoded)
+    r |= ((hres_raw_val >> 0) & 1) << 16;
+    r |= ((hres_raw_val >> 1) & 1) << 17;
+    r |= ((hres_raw_val >> 2) & 1) << 18;
+    r |= (0 << 19);
+    r |= ((uint32_t)gpu->vmode << 20);
+    r |= ((uint32_t)gpu->display_depth << 21);
+    r |= ((uint32_t)gpu->interlaced << 22);
+    r |= ((uint32_t)gpu->display_disabled << 23);
+    r |= ((uint32_t)(toggle_irq ? 1 : 0) << 24);
+    toggle_irq = !toggle_irq;
+    // --- Always set ready bits as per PSX-Spex/nocash ---
     r |= (1 << 26); // STAT[26] - Ready to receive command word
     r |= (1 << 27); // STAT[27] - Ready to send VRAM to CPU
     r |= (1 << 28); // STAT[28] - Ready to receive DMA block
-    r |= ((uint32_t)gpu->dma_setting << 29); // STAT[30:29]
-    // DMA Request Signal (derived from dma_setting and ready flags)
-    uint32_t dma_request = 0;
-     switch (gpu->dma_setting) {
-         case GPU_DMA_Off: dma_request = 0; break;
-         case GPU_DMA_Fifo: dma_request = (r >> 26) & 1; break; // Ready CMD = FIFO Ready?
-         case GPU_DMA_CpuToGp0: dma_request = (r >> 28) & 1; break; // Ready DMA = GP0 DMA Ready?
-         case GPU_DMA_VRamToCpu: dma_request = (r >> 27) & 1; break; // Ready VRAM->CPU
-     }
-     r |= (dma_request << 25); // STAT[25]
+    // --- DMA Request Bit (STAT[25]) ---
+    // Set if DMA direction is not Off
+    if (gpu->dma_setting != GPU_DMA_Off) {
+        r |= (1 << 25);
+    }
+    // --- DMA Direction Bits (STAT[30:29]) ---
+    r |= ((uint32_t)gpu->dma_setting << 29);
     // Bit 31: Odd/Even line signal (needs timing) - Placeholder 0
+    LOG_GPU_INFO("[GPUSTAT] Read: 0x%08x", r);
     return r;
 }
 
 /** Reads data from the GPUREAD port (e.g., after Image Store command) */
 uint32_t gpu_read_data(Gpu* gpu) {
-    LOG_WARN("GPU Read Data (GPUREAD) - Not Implemented, returning 0\n");
-      (void)gpu; // Suppress unused warning
-      return 0; // Return dummy data for now
+    static uint32_t dummy_gpu_read = 0xDEADBEEF;
+    dummy_gpu_read++;
+    LOG_GPU_INFO("[GPUREAD] Read: 0x%08x", dummy_gpu_read);
+    (void)gpu;
+    return dummy_gpu_read;
 }
 
 void gpu_trigger_vblank_irq(Gpu* gpu) {
-    LOG_INFO("[GPU] VBlank IRQ0 requested\n");
-    interconnect_request_irq(gpu->inter, IRQ_VBLANK, "GPU VBlank");
+    static uint32_t vblank_counter = 0;
+    static const uint32_t cycles_per_vblank = 33868800 / 60; // 564480 cycles per NTSC frame
+    vblank_counter += gpu->inter->timers_state.timers[0].counter; // Use Timer0 as a proxy for cycles
+    if (vblank_counter >= cycles_per_vblank) {
+        vblank_counter -= cycles_per_vblank;
+        LOG_INFO("[GPU] VBlank IRQ0 requested (throttled)\n");
+        interconnect_request_irq(gpu->inter, IRQ_VBLANK, "GPU VBlank");
+    }
 }

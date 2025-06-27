@@ -11,6 +11,7 @@
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
+    LOG_CPU_INFO("CPU initialized");
     LOG_INFO("Initializing CPU...\n");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
@@ -135,6 +136,8 @@ bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
  * @brief Handles CPU exceptions (Interrupts, Syscalls, Errors, etc.).
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
+    // Log all exception entries in nocash/PSX-Spex style
+    LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cpu->cause == EXCEPTION_LOAD_ADDRESS_ERROR || cpu->cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->epc : 0, cpu->in_delay_slot);
     LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x\n", cause, cpu->pc);
     if (cause == EXCEPTION_INTERRUPT) {
         LOG_INFO("[CPU] Entered interrupt handler (IRQ)\n");
@@ -182,6 +185,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         cpu->pc = cpu->epc + 4; // Return to the instruction *after* the SYSCALL
         cpu->next_pc = cpu->pc + 4; // Set next_pc sequentially
         LOG_INFO("[CPU] Exception handled, returning to PC=0x%08x\n", cpu->pc);
+        LOG_CPU_IMPORTANT("@PSX-Spex SYSCALL: Returning to EPC+4=0x%08x", cpu->epc + 4);
         return; // Exit exception handling, as syscall is "handled" directly
     }
     // --- END SYSCALL MODIFICATION ---
@@ -210,7 +214,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         // See: https://psx-spx.consoledev.net/cpuspecifications/#interrupts-vs-gte-commands
         uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
         if ((epc_instr & 0xFE000000) == 0x4A000000) {
-            LOG_INFO("[CPU] Interrupt occurred on GTE/COP2 command at EPC=0x%08x, skipping to EPC+4\n", cpu->epc);
+            LOG_CPU_IMPORTANT("@PSX-Spex GTE interrupt quirk: EPC advanced to 0x%08x", cpu->epc + 4);
             cpu->epc += 4;
         }
         // --- END STRICT GTE HANDLING ---
@@ -226,7 +230,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         cpu->sr &= ~0x3f;                       // Clear bits 5:0
         cpu->sr |= (mode_stack >> 2) & 0x3f;    // Shift stack right, popping into KUc/IEc
         
-        LOG_INFO("[CPU] Returning from interrupt: PC=0x%08x, EPC=0x%08x, SR=0x%08x", cpu->pc, cpu->epc, cpu->sr);
+        LOG_CPU_IMPORTANT("@PSX-Spex RFE: Returning from interrupt to EPC=0x%08x SR=0x%08x", cpu->epc, cpu->sr);
         LOG_INFO("[CPU] Exception handled, returning to PC=0x%08x\n", cpu->pc);
         return; // Exit exception handling, as interrupt is "handled" directly
     }
@@ -298,6 +302,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
 
     // Fetch instruction word from memory via interconnect
     uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc); // <<< NEW LINE
+    LOG_CPU_TRACE("PC=0x%08x, instruction=0x%08x", cpu->current_pc, instruction);
 
     // --- 4. Update Delay Slot State & Advance PC ---
     cpu->in_delay_slot = cpu->branch_taken; // Are we in a delay slot caused by the *previous* instruction?
@@ -631,7 +636,7 @@ void op_rfe(Cpu* cpu, uint32_t instruction) {
     uint32_t mode_stack = cpu->sr & 0x3f;
     cpu->sr &= ~0x3f;
     cpu->sr |= (mode_stack >> 2) & 0x3f; // Following guide's code
-    LOG_INFO("[RFE] Executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, old_pc, old_epc);
+    LOG_CPU_IMPORTANT("@PSX-Spex RFE: Executed, SR before=0x%08x after=0x%08x PC=0x%08x EPC=0x%08x", old_sr, cpu->sr, old_pc, old_epc);
     // NOTE: Do NOT jump to EPC here! The BIOS handler must do the jump after RFE.
 }
 
@@ -1123,8 +1128,7 @@ void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 void op_break(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    // Keep essential debug print
-    LOG_INFO("BREAK instruction executed (PC=0x%08x)\n", cpu->current_pc);
+    LOG_CPU_IMPORTANT("@nocash BREAK OPCODE: EPC=0x%08x PC=0x%08x");
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 

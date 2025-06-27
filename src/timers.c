@@ -50,7 +50,7 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
  * @param inter Pointer to the Interconnect (needed for requesting interrupts).
  */
 void timers_init(Timers* timers, struct Interconnect* inter) {
-    LOG_INFO("Initializing Timers...\n");
+    LOG_TIMERS_INFO("Timers initialized");
     timers->inter = inter; // Store interconnect pointer
 
     // Initialize all three timers
@@ -80,7 +80,7 @@ void timers_init(Timers* timers, struct Interconnect* inter) {
  */
 uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
     if (timer_index < 0 || timer_index > 2) {
-        LOG_ERROR("Timer Read Error: Invalid timer index %d\n", timer_index);
+        LOG_TIMERS_ERROR("Timer Read Error: Invalid timer index %d\n", timer_index);
         return 0;
     }
     Timer* t = &timers->timers[timer_index];
@@ -103,7 +103,7 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
         case TMR_REG_TARGET: // 0x8: Target Value
             return t->target;
         default:
-            LOG_ERROR("Timer Read Error: Unhandled timer%d offset 0x%x\n", timer_index, offset);
+            LOG_TIMERS_ERROR("Timer Read Error: Unhandled timer%d offset 0x%x\n", timer_index, offset);
             return 0;
     }
 }
@@ -131,7 +131,7 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
  */
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
      if (timer_index < 0 || timer_index > 2) {
-        LOG_ERROR("Timer Write Error: Invalid timer index %d\n", timer_index);
+        LOG_TIMERS_ERROR("Timer Write Error: Invalid timer index %d\n", timer_index);
         return;
     }
     Timer* t = &timers->timers[timer_index];
@@ -142,17 +142,19 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             break;
         case TMR_REG_MODE: // 0x4: Mode Register
             if (timer_index == 0) {
-                LOG_INFO("[Timer0] Mode set: 0x%04x\n", value);
+                LOG_TIMERS_INFO("[Timer0] Mode set: 0x%04x\n", value);
+                if (value != 0) {
+                    LOG_TIMERS_INFO("[Timer0] Mode enabled (nonzero): 0x%04x\n", value);
+                }
             }
             t->mode = value;
-            // Update internal derived state whenever mode changes
             timer_update_internal_state(timers, t, timer_index);
             break;
         case TMR_REG_TARGET: // 0x8: Target Value
             t->target = value;
             break;
         default:
-            LOG_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x = 0x%04x\n", timer_index, offset, value);
+            LOG_TIMERS_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x = 0x%04x\n", timer_index, offset, value);
             break;
     }
 }
@@ -236,20 +238,20 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         t->counter += whole_ticks;
         // Only log when a VBlank IRQ is actually triggered (Timer0, i==0)
         if (i == 0 && (t->irq_on_target || t->irq_on_ffff) && (old_counter < t->target && t->counter >= t->target)) {
-            LOG_INFO("[Timer0/VBlank] IRQ triggered: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d", t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
+            LOG_TIMERS_INFO("[Timer0/VBlank] IRQ triggered: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d", t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
         }
         // Suppress all other logs if mode=0 and no IRQ is enabled
         if (i == 0 && t->mode == 0 && !(t->irq_on_target || t->irq_on_ffff)) {
             continue;
         }
-        // Demote other timer logs to LOG_DEBUG
+        // Demote other timer logs to LOG_TIMERS_DEBUG
         if (old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
-            LOG_DEBUG("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d", i, t->counter, t->target, t->mode, t->irq_on_target);
+            LOG_TIMERS_DEBUG("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d", i, t->counter, t->target, t->mode, t->irq_on_target);
         }
         if (t->counter < old_counter) {
             t->reached_ffff_flag = true;
-            LOG_DEBUG("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d", i, t->counter, t->mode, t->irq_on_ffff);
+            LOG_TIMERS_DEBUG("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d", i, t->counter, t->mode, t->irq_on_ffff);
         }
 
         // --- 4. Handle Interrupts ---
@@ -271,7 +273,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
 
         if (irq) {
             t->mode |= (1 << 10);
-            LOG_DEBUG("Timer%d IRQ requested (reason: %s)", i, irq_reason);
+            LOG_TIMERS_DEBUG("Timer%d IRQ requested (reason: %s)", i, irq_reason);
             interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
 
@@ -283,7 +285,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         }
 
         if (i == 0 && irq) {
-            LOG_INFO("[Timer0] IRQ4 requested (reason: %s)\n", irq_reason);
+            LOG_TIMERS_INFO("[Timer0] IRQ4 requested (reason: %s)\n", irq_reason);
         }
     }
 }

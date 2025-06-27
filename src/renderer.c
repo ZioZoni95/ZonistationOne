@@ -160,6 +160,7 @@ static GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
 // --- Renderer Implementation ---
 
 bool renderer_init(Renderer* renderer) {
+    LOG_RENDERER_INFO("Renderer initialized");
     LOG_INFO("Initializing Renderer...\n");
     renderer->initialized = false;
     renderer->vertex_count = 0;

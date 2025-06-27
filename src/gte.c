@@ -11,6 +11,8 @@
 // --- GTE Initialization ---
 
 void gte_init(Gte* gte) {
+    LOG_GTE_INFO("GTE initialized");
+    
     LOG_INFO("Initializing GTE...\n");
     
     // Clear all data registers

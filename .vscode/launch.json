@@ -9,7 +9,7 @@
       "stopAtEntry": false,
       "externalConsole": false,
       "cwd": "/home/antoninoc/gemini_PS1emulator",
-      "program": "/home/antoninoc/gemini_PS1emulator/build/Debug/outDebug",
+      "program": "/home/antoninoc/gemini_PS1emulator/myps1_emu",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
