@@ -5,6 +5,9 @@
 #ifndef GPU_H
 #define GPU_H
 
+struct Interconnect; // Forward declaration
+typedef struct Interconnect Interconnect;
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "renderer.h" // Includes OpenGL renderer definitions
@@ -147,10 +150,11 @@ typedef struct Gpu { // Define struct Gpu
     // --- Renderer ---
     Renderer renderer;                 // Handles OpenGL drawing operations
 
+    Interconnect* inter; // Pointer to the interconnect for IRQs
 } Gpu;
 
 // --- Function Prototypes ---
-void gpu_init(Gpu* gpu);
+void gpu_init(Gpu* gpu, Interconnect* inter);
 void gpu_gp0(Gpu* gpu, uint32_t command); // Handles commands/data sent to GP0 port
 void gpu_gp1(Gpu* gpu, uint32_t command); // Handles commands sent to GP1 port
 uint32_t gpu_read_status(Gpu* gpu);       // Reads the GPUSTAT register value

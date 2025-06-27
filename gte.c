@@ -130,55 +130,66 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
 // --- GTE Operation Implementations (Stubs) ---
 
 void gte_rtps(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: RTPS (Perspective Transformation Single Point) - TODO: Implement\n");
     // TODO: Implement perspective transformation for single point
     // This transforms a 3D point to 2D screen coordinates
 }
 
 void gte_rtpt(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: RTPT (Perspective Transformation Triangle) - TODO: Implement\n");
     // TODO: Implement perspective transformation for triangle
     // This transforms three 3D points to 2D screen coordinates
 }
 
 void gte_nclip(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: NCLIP (Normal Clipping) - TODO: Implement\n");
     // TODO: Implement normal clipping
     // This calculates the cross product of two vectors for clipping
 }
 
 void gte_mvmva(Gte* gte, uint32_t instruction) {
+    (void)gte;
+    (void)instruction;
     LOG_DEBUG("GTE: MVMVA (Matrix-Vector Multiplication) - TODO: Implement\n");
     // TODO: Implement matrix-vector multiplication
     // This performs various matrix operations based on instruction bits
 }
 
 void gte_sqr(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: SQR (Square Root) - TODO: Implement\n");
     // TODO: Implement square root calculation
 }
 
 void gte_op(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: OP (Outer Product) - TODO: Implement\n");
     // TODO: Implement outer product calculation
 }
 
 void gte_dcpl(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: DCPL (Depth Cueing) - TODO: Implement\n");
     // TODO: Implement depth cueing
 }
 
 void gte_intpl(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: INTPL (Interpolation) - TODO: Implement\n");
     // TODO: Implement interpolation
 }
 
 void gte_avsz3(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: AVSZ3 (Average Z 3 points) - TODO: Implement\n");
     // TODO: Implement average Z calculation for 3 points
 }
 
 void gte_avsz4(Gte* gte) {
+    (void)gte;
     LOG_DEBUG("GTE: AVSZ4 (Average Z 4 points) - TODO: Implement\n");
     // TODO: Implement average Z calculation for 4 points
 } 

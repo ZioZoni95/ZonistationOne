@@ -2,6 +2,8 @@
 #include <stdio.h> // For fprintf, stderr
 #include "log.h"
 
+// Logging: Only use LOG_ERROR for DMA hardware faults. No per-transfer logs.
+
 // Helper function to get channel control register value
 // REMOVED 'static'
 uint32_t channel_get_control(DmaChannel* ch) {
@@ -173,3 +175,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
     }
     return channel_became_active;
 }
+
+// At the end of interconnect_perform_dma (or equivalent), after marking the channel as done:
+// if (dma->channel_irq_enable & (1 << channel_index)) {
+//     interconnect_request_irq(dma->inter, IRQ_DMA, "DMA");
+// }
