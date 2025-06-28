@@ -235,6 +235,8 @@ int main(int argc, char *argv[]) {
         // you would loop that call `cycles_per_frame` times.
         for (uint32_t i = 0; i < cycles_per_frame; ++i) {
              cpu_run_next_instruction(&cpu_state);
+             // Step timers with each CPU cycle for proper timing
+             timers_step(&interconnect_state.timers_state, 1);
         }
 
         // <<< UPDATED: Step the CD-ROM scheduler >>>
@@ -242,7 +244,9 @@ int main(int argc, char *argv[]) {
         // regularly, passing the number of CPU cycles that have just run.
         // NOTE: This is required for CDROM IRQ2 (CDROM) to be triggered and for command completion.
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
-        timers_step(&interconnect_state.timers_state, cycles_per_frame);
+
+        // Check if BIOS needs boot helper for interrupt configuration
+        interconnect_check_bios_boot(&interconnect_state);
 
         // Trigger VBlank IRQ0 at the end of each frame
         gpu_trigger_vblank_irq(&interconnect_state.gpu);

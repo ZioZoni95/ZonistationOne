@@ -66,3 +66,12 @@ uint32_t bios_load32(Bios* bios, uint32_t offset) {
     }
     return value;
 }
+
+// Reads a 16-bit value from the loaded BIOS data at a specific 'offset'.
+// Handles little-endian conversion. [cite: 124]
+// Based on Guide Section 2.7 load16 example [cite: 121]
+uint16_t bios_load16(Bios* bios, uint32_t offset) {
+    uint8_t b0 = bios->data[offset];
+    uint8_t b1 = bios->data[offset + 1];
+    return (uint16_t)(b0 | (b1 << 8));
+}

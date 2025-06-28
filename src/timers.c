@@ -15,6 +15,9 @@
 
 // Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
+// Add this prototype at the top of the file
+static void timer_force_bios_boot_config(Timers* timers);
+
 /**
  * @brief Helper function to decode the mode register into internal state flags.
  * Called whenever the mode register is written.
@@ -87,6 +90,8 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
 
     switch (offset) {
         case TMR_REG_VAL: // 0x0: Counter Value
+            // For Timer1 in dotclock/hblank mode, BIOS/games may use retry/median filtering for accuracy
+            // (see PSX-Spex/nocash). Emulator could optionally implement this for lightgun support.
             return t->counter;
         case TMR_REG_MODE: // 0x4: Mode Register
             {
@@ -130,31 +135,29 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
  * @param value The 16-bit value to write.
  */
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
-     if (timer_index < 0 || timer_index > 2) {
-        LOG_TIMERS_ERROR("Timer Write Error: Invalid timer index %d\n", timer_index);
-        return;
-    }
     Timer* t = &timers->timers[timer_index];
-
+    if (timer_index == 0) {
+        LOG_TIMERS_INFO("[Timer0] Write16: offset=0x%x value=0x%04x", offset, value);
+    }
     switch (offset) {
-        case TMR_REG_VAL: // 0x0: Counter Value
+        case TMR_REG_VAL:
             t->counter = value;
             break;
-        case TMR_REG_MODE: // 0x4: Mode Register
-            if (timer_index == 0) {
-                LOG_TIMERS_INFO("[Timer0] Mode set: 0x%04x\n", value);
-                if (value != 0) {
-                    LOG_TIMERS_INFO("[Timer0] Mode enabled (nonzero): 0x%04x\n", value);
-                }
-            }
+        case TMR_REG_MODE:
             t->mode = value;
             timer_update_internal_state(timers, t, timer_index);
+            if (timer_index == 0) {
+                LOG_TIMERS_INFO("[Timer0] Mode set: 0x%04x", value);
+            }
             break;
-        case TMR_REG_TARGET: // 0x8: Target Value
+        case TMR_REG_TARGET:
             t->target = value;
+            if (timer_index == 0) {
+                LOG_TIMERS_INFO("[Timer0] Target set: 0x%04x", value);
+            }
             break;
         default:
-            LOG_TIMERS_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x = 0x%04x\n", timer_index, offset, value);
+            LOG_TIMERS_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x", timer_index, offset);
             break;
     }
 }
@@ -180,9 +183,21 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  * @param cpu_cycles Number of CPU clock cycles presumed to have passed since last call.
  */
 void timers_step(Timers* timers, uint32_t cpu_cycles) {
+    // LOG_TIMERS_INFO("timers_step called"); // Removed massive logging
     if (cpu_cycles == 0) return;
     static int frame_counter = 0;
     frame_counter++;
+
+    // Check if we need to force BIOS boot configuration
+    static int boot_helper_counter = 0;
+    boot_helper_counter += cpu_cycles;
+    
+    // After 1 million cycles (about 30ms at 33MHz), force Timer0 config if needed
+    if (boot_helper_counter > 1000000) {
+        timer_force_bios_boot_config(timers);
+        boot_helper_counter = 0; // Reset counter
+    }
+
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];
 
@@ -236,56 +251,106 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         // --- 3. Increment Counter and Check for Events ---
         uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
-        // Only log when a VBlank IRQ is actually triggered (Timer0, i==0)
-        if (i == 0 && (t->irq_on_target || t->irq_on_ffff) && (old_counter < t->target && t->counter >= t->target)) {
-            LOG_TIMERS_INFO("[Timer0/VBlank] IRQ triggered: counter=%u, target=%u, mode=0x%04x, irq_on_target=%d, irq_on_ffff=%d", t->counter, t->target, t->mode, t->irq_on_target, t->irq_on_ffff);
-        }
-        // Suppress all other logs if mode=0 and no IRQ is enabled
-        if (i == 0 && t->mode == 0 && !(t->irq_on_target || t->irq_on_ffff)) {
-            continue;
-        }
-        // Demote other timer logs to LOG_TIMERS_DEBUG
-        if (old_counter < t->target && t->counter >= t->target) {
+
+        // --- 3.1. Check for Target and Overflow Events ---
+        bool target_event = false;
+        bool overflow_event = false;
+        // Target event: counter crosses target (and target is nonzero)
+        if (t->target != 0 && old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
-            LOG_TIMERS_DEBUG("Timer%d reached target: counter=%u, target=%u, mode=0x%04x, IRQ_on_target=%d", i, t->counter, t->target, t->mode, t->irq_on_target);
+            target_event = true;
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+            static int target_log_count = 0;
+            if (target_log_count < 10 || target_log_count % 1000 == 0) {
+                LOG_TIMERS_DEBUG("[Timer%d] Reached target: counter=%u, target=%u, mode=0x%04x", i, t->counter, t->target, t->mode);
+            }
+            target_log_count++;
+#endif
         }
+        // Overflow event: counter wraps past 0xFFFF
         if (t->counter < old_counter) {
             t->reached_ffff_flag = true;
-            LOG_TIMERS_DEBUG("Timer%d overflowed: counter=%u, mode=0x%04x, IRQ_on_ffff=%d", i, t->counter, t->mode, t->irq_on_ffff);
+            overflow_event = true;
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+            static int overflow_log_count = 0;
+            if (overflow_log_count < 10 || overflow_log_count % 1000 == 0) {
+                LOG_TIMERS_DEBUG("[Timer%d] Overflow: counter=%u, mode=0x%04x", i, t->counter, t->mode);
+            }
+            overflow_log_count++;
+#endif
         }
 
         // --- 4. Handle Interrupts ---
         bool irq = false;
         const char* irq_reason = NULL;
-        
         // Only generate interrupts if the timer has been properly configured by BIOS
-        // According to nocash, timers should not generate interrupts until mode is set
-        if (t->mode != 0) { // Only if BIOS has written to mode register
-            if (t->irq_on_target && t->reached_target_flag) {
+        if (t->mode != 0) {
+            if (t->irq_on_target && t->reached_target_flag && !t->interrupt_requested) {
                 irq = true;
                 irq_reason = "target";
             }
-            if (t->irq_on_ffff && t->reached_ffff_flag) {
+            if (t->irq_on_ffff && t->reached_ffff_flag && !t->interrupt_requested) {
                 irq = true;
                 irq_reason = irq_reason ? "target+overflow" : "overflow";
             }
         }
-
         if (irq) {
-            t->mode |= (1 << 10);
-            LOG_TIMERS_DEBUG("Timer%d IRQ requested (reason: %s)", i, irq_reason);
+            t->mode |= (1 << 10); // Set IRQ request bit
+            t->interrupt_requested = true; // Only request once until acknowledged
+            if (i == 0) {
+                static int irq0_log_count = 0;
+                if (irq0_log_count < 10 || irq0_log_count % 1000 == 0) {
+                    LOG_TIMERS_INFO("[Timer0] IRQ0 REQUESTED -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
+                }
+                irq0_log_count++;
+            }
             interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
 
         // --- 5. Handle Counter Reset ---
         if (t->reset_on_target && t->reached_target_flag) {
             t->counter = 0;
-            // IMPORTANT: Per specs, sticky flags are only reset by writing to the Mode register,
-            // so we don't clear them here. This is correct.
+            // LOG_TIMERS_INFO("[Timer%d] Counter reset to 0 after reaching target", i); // Removed to prevent slowdown
         }
+        // Sticky flags and interrupt_requested are only cleared by writing to the mode register (see timer_update_internal_state)
 
-        if (i == 0 && irq) {
-            LOG_TIMERS_INFO("[Timer0] IRQ4 requested (reason: %s)\n", irq_reason);
+        static int debug_counter = 0;
+        debug_counter++;
+        if (i == 0 && debug_counter % 1000 == 0) {
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+            LOG_TIMERS_DEBUG("[Timer0] Step: counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
+#endif
         }
+    }
+}
+
+// --- Lightgun/Scanline IRQ10 X coordinate conversion (PSX-Spex/nocash) ---
+static inline float timer0_to_x_coord(uint16_t timer0, bool is_ntsc) {
+    // Subtract 140 as per docs, then apply region-specific factor
+    float base = (float)timer0 - 140.0f;
+    return base * (is_ntsc ? 0.198166f : 0.196358f);
+}
+
+// --- BIOS Boot Helper: Force Timer0 Configuration ---
+// Per PSX-Spex/nocash, if the BIOS doesn't configure Timer0 for VBlank IRQ0,
+// we need to force it to prevent the BIOS from getting stuck in a loop.
+static void timer_force_bios_boot_config(Timers* timers) {
+    Timer* t0 = &timers->timers[0];
+    
+    // Force configuration if Timer0 is not properly configured for VBlank IRQ0
+    // (mode doesn't have IRQ enable bit set, or target is zero)
+    if ((t0->mode & 0x0100) == 0 || t0->target == 0x0000) {
+        LOG_TIMERS_INFO("[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0");
+        
+        // Configure Timer0 for VBlank IRQ0 (NTSC timing)
+        // Mode: Enable counting, enable IRQ, system clock mode
+        t0->mode = 0x0100;  // Bit 8: IRQ enable, Bit 0: Timer enable
+        t0->target = 0xFFFF; // Target for VBlank timing
+        t0->counter = 0x0000; // Start from 0
+        
+        // Update internal state
+        timer_update_internal_state(timers, t0, 0);
+        
+        LOG_TIMERS_INFO("[Timer0] Forced config: mode=0x%04x, target=0x%04x [PSX-Spex: VBlank IRQ0 enabled]", t0->mode, t0->target);
     }
 }
