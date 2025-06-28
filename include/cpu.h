@@ -96,6 +96,7 @@ typedef struct Cpu {
     // --- Branch Delay Slot State ---
     bool branch_taken;      // True if the current instruction caused a jump/branch.
     bool in_delay_slot;     // True if the current instruction is executing in a branch delay slot.
+    bool exception_pending; // Set to true if an exception is raised during instruction execution
 
     // --- Coprocessor 0 (System Control Coprocessor) Registers ---
     uint32_t sr;            // COP0 Reg 12: Status Register (Interrupt enables, Cache isolation, etc.).

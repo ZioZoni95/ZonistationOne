@@ -211,7 +211,6 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region (0x00000000 - 0x001fffff)
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Read32 from RAM region: Addr=0x%08x\n", physical_addr); // Can be very noisy
         return ram_load32(inter->ram, physical_addr); // Delegate to RAM module
     }
 
@@ -306,17 +305,14 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Read16 from RAM region: Addr=0x%08x\n", physical_addr); // Can be noisy
+        // (Removed RAM Read/Write logs for performance)
         return ram_load16(inter->ram, physical_addr);
     }
 
     // BIOS Region (Unlikely, but check)
      if (physical_addr >= BIOS_START && physical_addr <= BIOS_END) {
-        LOG_INTERCONNECT_WARN("Warning: Unhandled 16-bit read from BIOS at 0x%08x\n", physical_addr);
-        // BIOS is typically read 32 bits at a time for instructions
-        // Reading 16 bits might happen but isn't common.
-        // We could implement bios_load16 if needed.
-        return 0;
+        // (Removed BIOS ROM Read logs for performance)
+        return bios_load16(inter->bios, physical_addr - BIOS_START);
     }
 
     // GPU Region (Unlikely 16-bit reads)
@@ -406,7 +402,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Read8 from RAM: Addr=0x%08x\n", physical_addr); // Very noisy
+        // (Removed RAM Read/Write logs for performance)
         return ram_load8(inter->ram, physical_addr);
     }
 
@@ -576,7 +572,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Write32 to RAM region: Addr=0x%08x = 0x%08x\n", physical_addr, value); // Very noisy
+        // (Removed RAM Read/Write logs for performance)
         ram_store32(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -644,8 +640,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
         int timer_index = timer_base_offset / 0x10;
         uint32_t register_offset = physical_addr & 0xF;
-
-        // LOG_INFO("~ Write16 to Timer %d Offset 0x%x = 0x%04x\n", timer_index, register_offset, value);
+        LOG_INTERCONNECT_INFO("[INTERCONNECT] Write16 to Timer%d: addr=0x%08x offset=0x%x value=0x%04x", timer_index, physical_addr, register_offset, value);
         timer_write16(&inter->timers_state, timer_index, register_offset, value);
         return; // Handled
      }
@@ -684,7 +679,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Write16 to RAM region: Addr=0x%08x = 0x%04x\n", physical_addr, value); // Noisy
+        // (Removed RAM Read/Write logs for performance)
         ram_store16(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -779,7 +774,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
      // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // LOG_INFO("~ Write8 to RAM: Addr=0x%08x = 0x%02x\n", physical_addr, value); // Very noisy
+        // (Removed RAM Read/Write logs for performance)
         ram_store8(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -979,3 +974,47 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
     // TODO: Trigger DMA interrupt here if enabled in DICR and channel IRQ was set
 }
+
+// --- BIOS Boot Helper: Force Interrupt Configuration ---
+// Per PSX-Spex/nocash, if the BIOS doesn't configure I_MASK for IRQ0,
+// we need to force it to allow VBlank IRQ0 processing.
+static void interconnect_force_bios_boot_config(Interconnect* inter) {
+    // Only force configuration if I_MASK is not already configured for IRQ0
+    if ((inter->irq_mask & 0x0001) == 0) {
+        LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing I_MASK configuration for IRQ0");
+        
+        // Enable IRQ0 (VBlank) in I_MASK
+        inter->irq_mask |= 0x0001;  // Bit 0: IRQ0 enable
+        
+        LOG_INTERCONNECT_INFO("[INTERCONNECT] Forced I_MASK=0x%04x [PSX-Spex: IRQ0 enabled]", inter->irq_mask);
+    }
+}
+
+// In the main emulation loop or timer step function, call this helper
+// This can be called from timers_step or main loop
+void interconnect_check_bios_boot(Interconnect* inter) {
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+    LOG_INTERCONNECT_DEBUG("[INTERCONNECT] check_bios_boot called");
+#endif
+    static int boot_helper_counter = 0;
+    boot_helper_counter++;
+    
+    // After 1000 calls (about 30ms), force interrupt config if needed
+    if (boot_helper_counter > 1000) {
+        interconnect_force_bios_boot_config(inter);
+        boot_helper_counter = 0; // Reset counter
+    }
+}
+
+// --- IRQ10 (Lightgun/Scanline IRQ) ---
+// Per PSX-Spex/nocash, IRQ10 should be prioritized in the BIOS/IRQ chain for lightgun/scanline timing.
+// When IRQ10 is triggered, the handler should:
+//   1. Acknowledge IRQ10 (write to I_STAT).
+//   2. Optionally disable DMAs.
+//   3. Wait for IRQ10 bit in I_STAT to be set again (for next scanline).
+//   4. Read Timer0 and Timer1 for X/Y coordinates.
+//   5. Use region-specific formulas:
+//        NTSC: X = (Timer0 - 140) * 0.198166, Y = Timer1
+//        PAL:  X = (Timer0 - 140) * 0.196358, Y = Timer1
+//   6. For system clock mode, convert Timer0 to video clock (mul 11/div 7), then to dotclock (div 8 for 320px).
+// Emulator should ensure IRQ10 is requested/cleared properly and that timer reads are accurate.

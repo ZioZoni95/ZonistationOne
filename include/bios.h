@@ -24,6 +24,11 @@ bool bios_load(Bios* bios, const char* path);
 // Based on Guide Section 2.7 load32 example [cite: 121]
 uint32_t bios_load32(Bios* bios, uint32_t offset);
 
+// Reads a 16-bit value from the loaded BIOS data at a specific 'offset'.
+// Handles little-endian conversion required by the MIPS architecture.
+// Based on Guide Section 2.7 load16 example [cite: 121]
+uint16_t bios_load16(Bios* bios, uint32_t offset);
+
 // Add bios_load8, bios_load16 later if needed or use generic load
 
 #endif // BIOS_H

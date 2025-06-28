@@ -136,6 +136,7 @@ bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
  * @brief Handles CPU exceptions (Interrupts, Syscalls, Errors, etc.).
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
+    cpu->exception_pending = true;
     // Log all exception entries in nocash/PSX-Spex style
     LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cpu->cause == EXCEPTION_LOAD_ADDRESS_ERROR || cpu->cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->epc : 0, cpu->in_delay_slot);
     LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x\n", cause, cpu->pc);
@@ -168,27 +169,6 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         cpu->epc = cpu->current_pc;     // EPC points to the faulting instruction
         cpu->cause &= ~(1 << 31);       // Ensure BD bit is clear
     }
-
-    // --- IMPORTANT MODIFICATION: SYSCALL Specific Dispatch ---
-    if (cause == EXCEPTION_SYSCALL) {
-        // For SYSCALLs, the BIOS expects a specific return behavior.
-        // It reads the syscall number from $v0, jumps to its handler,
-        // and then returns to EPC + 4 (instruction after SYSCALL).
-        // By handling the syscall here directly, we are mimicking the BIOS's dispatcher.
-        uint32_t syscall_num = cpu_reg(cpu, 2); // Get SYSCALL number from $v0
-        handle_bios_syscall(cpu, syscall_num); // Process the syscall
-
-        // After processing, immediately set PC to return from syscall.
-        // The `rfe` instruction in the real BIOS's exception handler would normally do this.
-        // By setting it here, we bypass the need to emulate that `rfe` logic for SYSCALLs
-        // in the immediate term, letting the BIOS progress.
-        cpu->pc = cpu->epc + 4; // Return to the instruction *after* the SYSCALL
-        cpu->next_pc = cpu->pc + 4; // Set next_pc sequentially
-        LOG_INFO("[CPU] Exception handled, returning to PC=0x%08x\n", cpu->pc);
-        LOG_CPU_IMPORTANT("@PSX-Spex SYSCALL: Returning to EPC+4=0x%08x", cpu->epc + 4);
-        return; // Exit exception handling, as syscall is "handled" directly
-    }
-    // --- END SYSCALL MODIFICATION ---
 
     // --- IMPORTANT MODIFICATION: INTERRUPT Specific Dispatch ---
     if (cause == EXCEPTION_INTERRUPT) {
@@ -247,6 +227,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
  * @brief Executes one full CPU cycle.
  */
 void cpu_run_next_instruction(Cpu* cpu) {
+    cpu->exception_pending = false; // Clear at start of cycle
     static uint64_t instruction_counter = 0;
     static uint32_t last_pc = 0;
     static uint64_t stuck_counter = 0;
@@ -278,8 +259,11 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
 
     if ((status & mask) != 0 && interrupts_globally_enabled) {
-        // Trigger Interrupt exception (Cause Code 0)
-        LOG_INFO("[CPU] Triggering Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x\n", status, mask);
+        static int irq_log_count = 0;
+        if (irq_log_count < 10 || irq_log_count % 1000 == 0) {
+            LOG_CPU_INFO("[CPU] Triggering Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x", status, mask);
+        }
+        irq_log_count++;
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return; // Skip instruction execution, jump to handler
     }
@@ -320,9 +304,9 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 6. Decode and Execute ---
     // This might update cpu->next_pc and set cpu->branch_taken = true
     decode_and_execute(cpu, instruction);
-
-    // Step timers forward by 1 'CPU cycle' (placeholder for real timing)
-    timers_step(&cpu->inter->timers_state, 1); // Pass 1 cycle for now
+    if (cpu->exception_pending) {
+        return; // Exception occurred, do not update PC/next_pc again
+    }
 
     // --- 7. Finalize State ---
     // Ensure R0 in the output set is still 0 for the next cycle.
@@ -1010,6 +994,7 @@ void op_syscall(Cpu* cpu, uint32_t instruction) {
     if (!was_handled) {
         LOG_ERROR("Unhandled BIOS Syscall: 0x%02x, triggering full exception.\n", syscall_num);
         cpu_exception(cpu, EXCEPTION_SYSCALL);
+        return; // <--- Ensure we do not continue executing after exception
     }
     // If it was handled, we do nothing and simply proceed to the next instruction.
 }
