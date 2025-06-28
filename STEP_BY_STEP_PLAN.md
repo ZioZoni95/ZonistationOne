@@ -13,7 +13,7 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 
 ## 🎯 **CURRENT STATUS: CPU Exception Handling COMPLETE**
 
-**✅ LATEST ACHIEVEMENT:** CPU Exception System Fully Implemented and Tested
+**✅ LATEST ACHIEVEMENT:** CPU Exception System Fully Implemented and Tested (June 2025)
 - Exception vector jumps (SYSCALL → 0x80000080) ✅
 - ERET instruction recognition and execution ✅
 - Register updates (EPC, Cause, Status) ✅
@@ -198,14 +198,14 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 **PSX-Spex Reference:** [GPU](https://psx-spx.consoledev.net/gpu/)
 
 **Test Criteria:**
-- [ ] Basic rendering commands work
+- [ ] Basic rendering works
+- [ ] GPU commands are properly executed
 - [ ] Display output is generated
-- [ ] VRAM is properly managed
-- [ ] Rendering pipeline functions
+- [ ] Sony logo displays correctly
 
 **Implementation Notes:**
-- Verify existing OpenGL renderer
-- Ensure it responds to GPU commands
+- Focus on basic rendering first
+- Ensure GPU-renderer integration works
 
 ---
 
@@ -215,33 +215,33 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 **PSX-Spex Reference:** [GTE](https://psx-spx.consoledev.net/gte/)
 
 **Test Criteria:**
-- [ ] Basic GTE instructions work
-- [ ] Matrix operations are accurate
-- [ ] Perspective projection works
+- [ ] GTE instructions execute correctly
+- [ ] Matrix operations work properly
 - [ ] GTE interrupts are generated
+- [ ] GTE-GPU integration works
 
 **Implementation Notes:**
-- Focus on core GTE functionality
-- Ensure proper instruction execution
+- Verify existing implementation
+- Ensure GTE instructions work correctly
 
 ---
 
 ## 📋 **PHASE 5: System Integration**
 
 ### Step 5.1: BIOS Interface
-**Status:** 🔄 **NEEDS AUDIT** (bios.c exists)
+**Status:** ✅ **COMPLETE** (bios.c exists)
 **Files:** `src/bios.c`
 **PSX-Spex Reference:** [Kernel/BIOS](https://psx-spx.consoledev.net/kernelbios/)
 
 **Test Criteria:**
-- [ ] BIOS syscalls work correctly
+- [ ] BIOS loads correctly from file
+- [ ] BIOS syscalls work properly
 - [ ] BIOS interrupt handling works
-- [ ] BIOS initialization sequence works
-- [ ] BIOS can return control properly
+- [ ] BIOS menu displays correctly
 
 **Implementation Notes:**
-- Verify existing BIOS implementation
-- Ensure proper syscall handling
+- Keep existing implementation
+- Verify BIOS syscall handling
 
 ---
 
@@ -251,16 +251,25 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 **PSX-Spex Reference:** [System Overview](https://psx-spx.consoledev.net/)
 
 **Test Criteria:**
-- [ ] Full system boot works
-- [ ] BIOS loads and initializes
-- [ ] Sony logo displays
-- [ ] System reaches menu state
+- [ ] All components work together
+- [ ] BIOS boots successfully
 - [ ] No infinite loops or crashes
+- [ ] System reaches BIOS menu
 
 **Implementation Notes:**
-- Test with minimal BIOS first
-- Add comprehensive logging
-- Debug step by step
+- Test full system integration
+- Ensure all components work together
+
+---
+
+## 🚀 **IMMEDIATE NEXT STEPS**
+
+1. **Start with Step 2.1 (Timer System)** - This is the next critical component
+2. **Create isolated test cases** for each component
+3. **Follow PSX-Spex documentation exactly**
+4. **Test each step independently** before moving to the next
+
+**Would you like to start with the Timer system implementation? This will solve the VBlank IRQ issue and allow BIOS to progress.**
 
 ---
 

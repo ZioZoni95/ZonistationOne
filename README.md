@@ -4,7 +4,7 @@ A work-in-progress PlayStation 1 emulator, inspired by nocash and PSX-Spex docum
 
 ## 🎯 **Current Status: CPU Exception Handling Complete**
 
-**Latest Achievement:** ✅ **CPU Exception System Fully Implemented and Tested**
+**Latest Achievement:** ✅ **CPU Exception System Fully Implemented and Tested (June 2025)**
 - Exception vector jumps (SYSCALL → 0x80000080) ✅
 - ERET instruction recognition and execution ✅
 - Register updates (EPC, Cause, Status) ✅
@@ -198,88 +198,50 @@ gdb ./myps1_emu
 (gdb) print cpu->epc
 ```
 
-**Memory Access Issues:**
+**Timer Issues:**
 ```sh
-(gdb) break interconnect_load32
-(gdb) break interconnect_store32
-# Check address and value
-(gdb) print addr
-(gdb) print value
+(gdb) break timer_update
+(gdb) run --debug
+# Check timer state
+(gdb) print *timer
 ```
 
-### Component-Specific Debugging
+## Project Status
 
-#### CPU Debugging
-- Use `--trace` to see every instruction executed
-- Check `logs/cpu.txt` for detailed CPU state
-- Key functions: `cpu_run_next_instruction`, `cpu_exception`, `decode_and_execute`
+### ✅ **Completed Components**
+- **CPU Exception Handling**: Fully implemented and tested
+- **Memory Management**: RAM and VRAM systems
+- **Basic Interconnect**: Memory-mapped I/O routing
+- **CDROM Controller**: Basic command handling
+- **BIOS Interface**: Loading and syscall support
 
-#### GPU Debugging
-- Check `logs/gpu.txt` for GPU commands
-- Key functions: `gpu_gp0`, `gpu_gp1`, `gpu_read_status`
-- Monitor GPUSTAT register reads
-
-#### BIOS Debugging
-- Check `logs/bios.txt` for syscall activity
-- Key functions: `bios_load32`, `handle_bios_syscall`
-
-#### Memory Debugging
-- Check `logs/interconnect.txt` for memory access patterns
-- Key functions: `interconnect_load32`, `interconnect_store32`
-
-### Performance Debugging
-
-```sh
-# Profile with gprof
-make clean
-make CFLAGS="-g -pg"
-./myps1_emu --debug
-gprof ./myps1_emu gmon.out > profile.txt
-
-# Check for memory leaks with valgrind
-valgrind --leak-check=full ./myps1_emu --debug
-```
-
-## Directory Structure
-
-- `src/` - C source files
-- `include/` - Header files
-- `tests/` - Component testing suite
-- `logs/` - Log output (created automatically)
-- `roms/` - BIOS and ROM images
-- `games/` - Game images
-
-## Documentation
-
-### **Current Status & Roadmaps**
-- `CURRENT_STATUS.md` - Current project status and next steps
-- `INTEGRATION_SUMMARY.md` - Detailed CPU exception handling integration
-- `COMPONENT_ANALYSIS.md` - Component-by-component analysis
-- `DETAILED_ANALYSIS_ROADMAP.md` - Development roadmap
-- `STEP_BY_STEP_PLAN.md` - Implementation plan
-- `DEBUG_PLAN.md` - Ongoing debug plan and progress
-
-### **External References**
-- [PSX-Spex](https://psx-spx.consoledev.net/)
-- [nocash PSX specs](https://problemkaputt.de/psx-spx.htm)
-
-## Development Status
-
-### **✅ Completed**
-- **CPU Exception Handling**: Full implementation with testing
-- **Exception Vector System**: Proper vector selection and jumps
-- **Instruction Recognition**: SYSCALL and ERET properly decoded
-- **Register Management**: EPC, Cause, Status updates
-
-### **🔄 Next Priority**
+### 🎯 **Next Priority**
 - **Timer 0 (VBlank)**: Implementation for proper interrupt timing
 - **GPU Integration**: Complete graphics pipeline
-- **DMA System**: Full memory transfer implementation
+- **DMA System**: Full DMA transfer implementation
+
+### 🔄 **Future Work**
+- **GTE Audit**: Geometry Transformation Engine verification
+- **Full System Integration**: End-to-end testing
+- **Game Compatibility**: Real game testing
+
+## Development Philosophy
+
+- **One component at a time** - Implement, test, and verify each component independently
+- **PSX-Spex compliance first** - Follow documentation exactly
+- **Minimal dependencies** - Each component should work with minimal assumptions
+- **Comprehensive testing** - Each step includes specific test criteria
 
 ## Contributing
 
-Pull requests and issues are welcome! Please see the documentation files for current focus and development plans.
+This is a personal project for learning PS1 emulation. The codebase follows PSX-Spex and nocash documentation for accuracy.
 
 ## License
 
-This project is for educational purposes. See PSX-Spex/nocash for documentation licensing. 
+This project is for educational purposes only. PlayStation is a trademark of Sony Interactive Entertainment.
+
+## References
+
+- [PSX-Spex Documentation](https://psx-spx.consoledev.net/)
+- [nocash PSX Documentation](http://problemkaputt.de/psx.htm)
+- [MIPS R3000A Architecture](https://en.wikipedia.org/wiki/MIPS_architecture) 
