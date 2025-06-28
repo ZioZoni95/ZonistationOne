@@ -1,6 +1,6 @@
 # ZoniStation One (PlayStation 1) Emulator
 
-A work-in-progress PlayStation 1 emulator, inspired by nocash and PSX-Spex documentation.
+A work-in-progress PlayStation 1 emulator fully written in C (-std99) , inspired by nocash and PSX-Spex documentation.
 
 ## 🎯 **Current Status: CPU Exception Handling Complete**
 
