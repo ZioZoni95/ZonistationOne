@@ -4,7 +4,7 @@ Based on PSX-Spex documentation and the CPU exception loop issue.
 
 ## 🎯 **CURRENT STATUS: CPU Exception Handling COMPLETE**
 
-**✅ ACHIEVED:** CPU Exception System Fully Implemented and Tested
+**✅ ACHIEVED:** CPU Exception System Fully Implemented and Tested (June 2025)
 - Exception vector jumps (SYSCALL → 0x80000080) ✅
 - ERET instruction recognition and execution ✅
 - Register updates (EPC, Cause, Status) ✅
