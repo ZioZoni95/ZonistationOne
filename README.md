@@ -1,6 +1,6 @@
 # ZoniStation One (PlayStation 1) Emulator
 
-A work-in-progress PlayStation 1 emulator, inspired by nocash and PSX-Spex documentation.
+A work-in-progress PlayStation 1 emulator fully written in C (-std99) , inspired by nocash and PSX-Spex documentation.
 
 ## 🎯 **Current Status: CPU Exception Handling Complete**
 
@@ -53,7 +53,7 @@ Runs CPU exception handling tests to verify implementation.
 | Option | Description |
 |--------|-------------|
 | `--debug` | Set log level to DEBUG (verbose output) |
-| `--trace` | Set log level to TRACE (ultra-verbose, per-instruction/cycle) |
+| `--trace` | Set log level to TRACE (ultra-verbose, per-instruction/cycle) (UNSTABLE! Cause Massive Logs use at own risk) |
 | `--quiet` | Set log level to WARN (minimal output) |
 | `--log-rate-limit=N` | Only log first N debug/trace messages per component, then every Nth |
 | `--log-single-file` | Log everything to `emulator_log.txt` (disables per-component logs) |
