@@ -2,7 +2,11 @@
 
 A work-in-progress PlayStation 1 emulator fully written in C (-std99) , inspired by nocash and PSX-Spex documentation.
 
-## 🎯 **Current Status: CPU Exception Handling Complete**
+## 🏁 **Current Status: Interconnect Fully Tested & Compliant (01 July 2025)**
+
+- ✅ **CPU Exception Handling:** Complete
+- ✅ **Interconnect:** Fully tested, nocash/PSX-Spex compliant (all regions, edge cases, open bus behaviors verified)
+- ⏳ **Next Priority:** Timer0/VBlank IRQ re-implementation
 
 **Latest Achievement:** ✅ **CPU Exception System Fully Implemented and Tested (June 2025)**
 - Exception vector jumps (SYSCALL → 0x80000080) ✅
@@ -244,4 +248,12 @@ This project is for educational purposes only. PlayStation is a trademark of Son
 
 - [PSX-Spex Documentation](https://psx-spx.consoledev.net/)
 - [nocash PSX Documentation](http://problemkaputt.de/psx.htm)
-- [MIPS R3000A Architecture](https://en.wikipedia.org/wiki/MIPS_architecture) 
+- [MIPS R3000A Architecture](https://en.wikipedia.org/wiki/MIPS_architecture)
+
+## Roadmap
+
+- [x] CPU Exception System (complete)
+- [x] Interconnect (fully tested, compliant as of 01 July 2025)
+- [ ] Timer0/VBlank IRQ (next priority)
+- [ ] GPU & Renderer Audit
+- [ ] System Integration Testing 
