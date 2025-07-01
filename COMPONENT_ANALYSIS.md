@@ -1,5 +1,16 @@
 # PS1 Emulator - Component Analysis & Restart Plan
 
+_Last updated: 01 July 2025_
+
+## 🏁 PRIORITY LIST (01 July 2025)
+
+1. **Timer0 / VBlank IRQ0 (CRITICAL)**
+   - Re-implement and verify VBlank IRQ0 generation and handling
+2. **GPU & Renderer Audit**
+   - Audit GPUSTAT, command parsing, and interrupt logic
+3. **System Integration Testing**
+   - Verify BIOS boot and integration after Timer0 fix
+
 ## 📊 **CURRENT PROJECT ANALYSIS**
 
 Based on PSX-Spex documentation and your existing codebase, here's what you have and what needs to be re-implemented:
@@ -323,4 +334,9 @@ Based on PSX-Spex documentation and your existing codebase, here's what you have
 3. **Follow PSX-Spex documentation exactly**
 4. **Test each step independently** before moving to the next
 
-**Would you like to start with the Timer re-implementation? This will solve the VBlank IRQ issue and allow BIOS to progress.** 
+**Would you like to start with the Timer re-implementation? This will solve the VBlank IRQ issue and allow BIOS to progress.**
+
+## ✅ COMPONENT STATUS UPDATE (01 July 2025)
+- Interconnect: COMPLETE & nocash/PSX-Spex compliant (all tested regions, open bus, and edge cases pass)
+- Ready for integration with other components.
+- Next: Timer0/VBlank IRQ. 
