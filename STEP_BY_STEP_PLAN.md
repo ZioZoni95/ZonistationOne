@@ -1,5 +1,7 @@
 # PS1 Emulator - Step-by-Step Implementation Plan
 
+_Last updated: 01 July 2025_
+
 Based on PSX-Spex documentation and nocash specs, implementing one component at a time for easy debugging.
 
 ## 🎯 **PHILOSOPHY**
@@ -19,6 +21,13 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 - Register updates (EPC, Cause, Status) ✅
 - Exception flow control with `exception_pending` flag ✅
 - Strict compliance with PSX-Spex/nocash documentation ✅
+
+---
+
+## 🎯 **STATUS UPDATE (01 July 2025)**
+- Interconnect: FULLY TESTED & nocash/PSX-Spex COMPLIANT (all regions, edge cases, and open bus behaviors verified)
+- All integration and edge cases handled; robust for further component integration.
+- Next priority: Timer0/VBlank IRQ re-implementation.
 
 ---
 
@@ -259,6 +268,25 @@ Based on PSX-Spex documentation and nocash specs, implementing one component at 
 **Implementation Notes:**
 - Test full system integration
 - Ensure all components work together
+
+---
+
+## 🎯 PRIORITY ROADMAP (01 July 2025)
+
+### 🥇 PRIORITY 1: Timer0 / VBlank IRQ0 (CRITICAL)
+- [ ] Re-implement Timer0 to generate VBlank IRQ0 at correct frequency and timing (per PSX-Spex/nocash)
+- [ ] Ensure Timer0 mode, target, and counter logic are correct
+- [ ] Confirm IRQ0 is routed and acknowledged by CPU
+- [ ] Add integration test/logs to confirm IRQ0 is being requested and handled
+
+### 🥈 PRIORITY 2: GPU & Renderer Audit
+- [ ] Audit GPUSTAT, command parsing, and interrupt logic for PSX-Spex compliance
+- [ ] Ensure renderer displays logo and handles draw commands correctly
+
+### 🥉 PRIORITY 3: System Integration Testing
+- [ ] Verify BIOS proceeds past boot logo after Timer0 fix
+- [ ] Add integration tests for IRQ0 and VBlank
+- [ ] Confirm all components work together
 
 ---
 

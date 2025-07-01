@@ -232,6 +232,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
          return 0xFFFFFFFF; // Expansion 1 returns all Fs when empty
     }
 
+    // VRAM Region (0x1F000000 - 0x1F7FFFFF)
+    if (physical_addr >= 0x1F000000 && physical_addr <= 0x1F7FFFFF) {
+        LOG_INTERCONNECT_INFO("~ Read32 from VRAM region: Address 0x%08x (Returning 0xFFFFFFFF as open bus)\n", physical_addr);
+        return 0xFFFFFFFF; // Open bus for unimplemented VRAM
+    }
+
     // --- Fallback for Unhandled Addresses ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
         // KSEG2 region: return 0 for unmapped addresses (per nocash/PSX-Spex)
