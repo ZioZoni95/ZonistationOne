@@ -1,5 +1,16 @@
 # PS1 Emulator - Detailed Analysis & Strict Roadmap
 
+_Last updated: 01 July 2025_
+
+## 🏁 PRIORITY OVERVIEW (01 July 2025)
+
+1. **Timer0 / VBlank IRQ0 (CRITICAL)**
+   - Re-implement for correct VBlank IRQ0 timing and handling
+2. **GPU & Renderer Audit**
+   - Audit GPUSTAT, command parsing, and interrupt logic
+3. **System Integration Testing**
+   - Verify BIOS boot and integration after Timer0 fix
+
 ## 📊 **COMPREHENSIVE CODEBASE ANALYSIS**
 
 Based on thorough examination of your actual codebase against PSX-Spex documentation.
@@ -82,6 +93,11 @@ Based on thorough examination of your actual codebase against PSX-Spex documenta
 - Memory region mapping
 
 **Action:** Keep as-is, verify against PSX-Spex memory map
+
+## ✅ ROADMAP STATUS UPDATE (01 July 2025)
+- Interconnect: FULLY TESTED & nocash/PSX-Spex compliant (all regions, open bus, and edge cases verified)
+- Cleared for integration and next development phase.
+- Next: Timer0/VBlank IRQ.
 
 ---
 
