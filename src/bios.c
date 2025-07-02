@@ -36,7 +36,7 @@ bool bios_load(Bios* bios, const char* path) {
 
     // Print a success message including the path and size.
     LOG_BIOS_INFO("BIOS initialized");
-    LOG_BIOS_INFO("BIOS loaded successfully from %s (%d bytes)\n", path, BIOS_SIZE);
+    LOG_BIOS_INFO("BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
     // Return true to indicate success.
     return true;
 }

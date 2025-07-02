@@ -261,7 +261,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             target_event = true;
 #if LOG_LEVEL >= LOG_LEVEL_DEBUG
             static int target_log_count = 0;
-            if (target_log_count < 10 || target_log_count % 1000 == 0) {
+            if (target_log_count < 2 || target_log_count % 10000 == 0) {
                 LOG_TIMERS_DEBUG("[Timer%d] Reached target: counter=%u, target=%u, mode=0x%04x", i, t->counter, t->target, t->mode);
             }
             target_log_count++;
@@ -273,7 +273,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             overflow_event = true;
 #if LOG_LEVEL >= LOG_LEVEL_DEBUG
             static int overflow_log_count = 0;
-            if (overflow_log_count < 10 || overflow_log_count % 1000 == 0) {
+            if (overflow_log_count < 2 || overflow_log_count % 10000 == 0) {
                 LOG_TIMERS_DEBUG("[Timer%d] Overflow: counter=%u, mode=0x%04x", i, t->counter, t->mode);
             }
             overflow_log_count++;
@@ -299,8 +299,8 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             t->interrupt_requested = true; // Only request once until acknowledged
             if (i == 0) {
                 static int irq0_log_count = 0;
-                if (irq0_log_count < 10 || irq0_log_count % 1000 == 0) {
-                    LOG_TIMERS_INFO("[Timer0] IRQ0 REQUESTED -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
+                if (irq0_log_count < 2 || irq0_log_count % 10000 == 0) {
+                    LOG_TIMERS_DEBUG("[Timer0] IRQ0 REQUESTED -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
                 }
                 irq0_log_count++;
             }
