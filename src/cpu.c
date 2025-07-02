@@ -222,7 +222,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
     // Only log progress every 100,000 instructions to avoid log spam in BIOS loops
     if (instruction_counter % 100000 == 0) {
-        LOG_INFO("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
+        LOG_DEBUG("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
     }
 
     // --- 1. Check for Interrupts ---
@@ -1211,7 +1211,7 @@ void op_lwr(Cpu* cpu, uint32_t instruction) {
         case 1: merged_value = (current_rt_value & 0xFF000000) | (aligned_word >> 8);  break;
         case 2: merged_value = (current_rt_value & 0xFFFF0000) | (aligned_word >> 16); break;
         case 3: merged_value = (current_rt_value & 0xFFFFFF00) | (aligned_word >> 24); break;
-        default: merged_value = 0; /* Should not happen */ break;
+        default: merged_value = current_rt_value; /* Should not happen */ break;
     }
     // Schedule merged value for load delay slot
     cpu->load_reg_idx = rt;
