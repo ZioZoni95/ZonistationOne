@@ -201,3 +201,22 @@ LOG_DEBUG("BIOS: Acknowledging IRQ, I_STAT: 0x%04x -> 0x%04x", old_stat, new_sta
 ---
 _Last updated: June 2025 - CPU Exception Handling Complete_
 
+# Debug Plan
+
+## Current Focus
+- Timer0 IRQ0 logic: Fixed for nocash/PSX-Spex, but standalone test still fails.
+- Add debug output to Timer0 test, verify counter/target/IRQ logic.
+
+## Step-by-Step Debug
+1. **Timer0**: Add debug output, verify IRQ0 request on target crossing.
+2. **Interconnect**: Unit test IRQ request/acknowledge, I_STAT/I_MASK.
+3. **CPU**: Unit test IRQ exception, COP0 registers.
+4. **BIOS**: Integration test for BIOS boot loop with IRQ0.
+5. **DMA**: Unit/integration test for DMA IRQs.
+6. **GPU**: Integration test for VBlank/Timer0/IRQ0.
+
+## General Strategy
+- Test each component in isolation, then in integration.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix.
+

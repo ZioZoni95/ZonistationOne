@@ -88,3 +88,32 @@ TEST 2: ERET Instruction Recognition
 The CPU exception handling system is **fully implemented and tested**. The emulator has a solid foundation for continued development.
 
 **Status: READY FOR TIMER 0 IMPLEMENTATION** 🎯 
+
+## Timer0
+- IRQ0 logic updated for nocash/PSX-Spex (edge-triggered, target crossing).
+- Standalone test still fails to request IRQ0 (needs further debug).
+
+## Interconnect
+- Handles IRQ request/acknowledge, I_STAT/I_MASK logic.
+- Pending unit test for IRQ request/acknowledge.
+
+## CPU
+- Handles IRQ exceptions, COP0 registers, BIOS boot.
+- Pending unit test for IRQ exception on IRQ0.
+
+## BIOS
+- Loads, basic syscall stubs.
+- Pending integration test for BIOS boot loop with IRQ0.
+
+## DMA
+- Channel activation, transfer logic present.
+- Pending unit/integration test for DMA IRQs.
+
+## GPU
+- VBlank event, command processing present.
+- Pending integration test for VBlank/Timer0/IRQ0.
+
+## Next Steps
+- Test each component in isolation, then in integration.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix.

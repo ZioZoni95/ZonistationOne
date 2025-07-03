@@ -369,4 +369,30 @@ void test_interrupt_controller(void);
 3. **Test Interrupt Controller** - Ensure proper IRQ routing
 4. **Add Comprehensive Logging** - Track system state
 
-**Let's start with Step 2.1 (Timer System) as it's the most likely cause of the current issues!** 
+**Let's start with Step 2.1 (Timer System) as it's the most likely cause of the current issues!**
+
+## Step-by-Step Plan
+
+## 1. Timer0
+- Debug and verify IRQ0 request on target crossing (nocash/PSX-Spex compliant).
+- Add debug output, check counter/target/IRQ logic.
+
+## 2. Interconnect
+- Test IRQ request/acknowledge, I_STAT/I_MASK logic.
+
+## 3. CPU
+- Test IRQ exception, COP0 registers.
+
+## 4. BIOS
+- Test BIOS boot loop with IRQ0.
+
+## 5. DMA
+- Test DMA IRQs.
+
+## 6. GPU
+- Test VBlank/Timer0/IRQ0 integration.
+
+## General
+- Test each component in isolation, then in integration.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix. 

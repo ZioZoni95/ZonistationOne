@@ -176,3 +176,13 @@ The emulator is now ready for the next phase of development, with a solid founda
 ---
 
 **Status: READY FOR NEXT COMPONENT DEVELOPMENT** 🚀 
+
+## Current Status
+- Timer0 IRQ0 logic updated for nocash/PSX-Spex (edge-triggered, target crossing).
+- Standalone test still fails to request IRQ0 (needs further debug).
+
+## Integration Plan
+- Test and verify each component (timers, interconnect, cpu, bios, dma, gpu) in isolation and integration.
+- After unit tests, verify all components work together.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix. 
