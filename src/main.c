@@ -235,9 +235,9 @@ int main(int argc, char *argv[]) {
         // you would loop that call `cycles_per_frame` times.
         for (uint32_t i = 0; i < cycles_per_frame; ++i) {
              cpu_run_next_instruction(&cpu_state);
-             // Step timers with each CPU cycle for proper timing
-             timers_step(&interconnect_state.timers_state, 1);
         }
+        // Step timers once per frame with the total cycles executed
+        timers_step(&interconnect_state.timers_state, cycles_per_frame);
 
         // <<< UPDATED: Step the CD-ROM scheduler >>>
         // This is critical for handling timed CD-ROM commands. It must be called

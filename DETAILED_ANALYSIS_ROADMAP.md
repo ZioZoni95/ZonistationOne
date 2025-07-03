@@ -359,4 +359,21 @@ Based on thorough examination of your actual codebase against PSX-Spex documenta
 3. **It allows BIOS to progress**
 4. **It's a focused, manageable task**
 
-**Would you like to start with the Timer re-implementation?** 
+**Would you like to start with the Timer re-implementation?**
+
+## Current Focus
+- Timer0 IRQ0 logic: Fixed for nocash/PSX-Spex, but standalone test still fails.
+- Add debug output, verify counter/target/IRQ logic.
+
+## Component Roadmap
+1. **Timer0**: Debug and verify IRQ0 request on target crossing.
+2. **Interconnect**: Test IRQ request/acknowledge, I_STAT/I_MASK.
+3. **CPU**: Test IRQ exception, COP0 registers.
+4. **BIOS**: Test BIOS boot loop with IRQ0.
+5. **DMA**: Test DMA IRQs.
+6. **GPU**: Test VBlank/Timer0/IRQ0 integration.
+
+## Integration
+- After unit tests, verify all components work together.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix. 

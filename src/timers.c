@@ -7,6 +7,11 @@
 #include <math.h> // For floor()
 #include "log.h"
 
+// Stub for log_component if not defined (for standalone test build)
+#ifndef log_component
+#define log_component(...)
+#endif
+
 #define PSX_CPU_HZ 33868800.0
 #define PSX_SYSCLK_HZ PSX_CPU_HZ // System Clock is the same as the CPU clock for timers
 #define DOTCLOCK_NTSC_HZ 25175000.0
@@ -255,71 +260,49 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         // --- 3.1. Check for Target and Overflow Events ---
         bool target_event = false;
         bool overflow_event = false;
-        // Target event: counter crosses target (and target is nonzero)
+        // Target event: counter crosses or equals target (and target is nonzero)
         if (t->target != 0 && old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
             target_event = true;
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-            static int target_log_count = 0;
-            if (target_log_count < 2 || target_log_count % 10000 == 0) {
-                LOG_TIMERS_DEBUG("[Timer%d] Reached target: counter=%u, target=%u, mode=0x%04x", i, t->counter, t->target, t->mode);
-            }
-            target_log_count++;
-#endif
         }
         // Overflow event: counter wraps past 0xFFFF
         if (t->counter < old_counter) {
             t->reached_ffff_flag = true;
             overflow_event = true;
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-            static int overflow_log_count = 0;
-            if (overflow_log_count < 2 || overflow_log_count % 10000 == 0) {
-                LOG_TIMERS_DEBUG("[Timer%d] Overflow: counter=%u, mode=0x%04x", i, t->counter, t->mode);
-            }
-            overflow_log_count++;
-#endif
         }
 
-        // --- 4. Handle Interrupts ---
+        // --- 4. Handle Interrupts (nocash/PSX-Spex compliant) ---
         bool irq = false;
         const char* irq_reason = NULL;
-        // Only generate interrupts if the timer has been properly configured by BIOS
         if (t->mode != 0) {
-            if (t->irq_on_target && t->reached_target_flag && !t->interrupt_requested) {
-                irq = true;
-                irq_reason = "target";
+            // Only request IRQ0 on edge: when target is crossed, IRQ enable, IRQ on target, and not already requested
+            bool irq_on_target = (t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested);
+            if (i == 0 && irq_on_target) {
+                t->interrupt_requested = true;
+                LOG_TIMERS_INFO("[Timer0] IRQ0 REQUESTED (edge) -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
+                interconnect_request_irq(timers->inter, 0, "Timer0");
             }
-            if (t->irq_on_ffff && t->reached_ffff_flag && !t->interrupt_requested) {
+            // (Other timers: handle IRQ on target/overflow as needed)
+            if ((t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested) ||
+                (t->irq_on_ffff && overflow_event && !t->interrupt_requested)) {
                 irq = true;
-                irq_reason = irq_reason ? "target+overflow" : "overflow";
+                irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
             }
         }
-        if (irq) {
+        if (irq && i != 0) {
             t->mode |= (1 << 10); // Set IRQ request bit
-            t->interrupt_requested = true; // Only request once until acknowledged
-            if (i == 0) {
-                static int irq0_log_count = 0;
-                if (irq0_log_count < 2 || irq0_log_count % 10000 == 0) {
-                    LOG_TIMERS_DEBUG("[Timer0] IRQ0 REQUESTED -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
-                }
-                irq0_log_count++;
-            }
+            t->interrupt_requested = true;
+            LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
             interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
         }
-
         // --- 5. Handle Counter Reset ---
         if (t->reset_on_target && t->reached_target_flag) {
             t->counter = 0;
-            // LOG_TIMERS_INFO("[Timer%d] Counter reset to 0 after reaching target", i); // Removed to prevent slowdown
         }
         // Sticky flags and interrupt_requested are only cleared by writing to the mode register (see timer_update_internal_state)
-
-        static int debug_counter = 0;
-        debug_counter++;
-        if (i == 0 && debug_counter % 1000 == 0) {
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-            LOG_TIMERS_DEBUG("[Timer0] Step: counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
-#endif
+        // Log every Timer0 step for debugging
+        if (i == 0) {
+            LOG_TIMERS_INFO("[Timer0][STEP] Counter=%u, Target=%u, Mode=0x%04x", t->counter, t->target, t->mode);
         }
     }
 }
@@ -343,8 +326,8 @@ static void timer_force_bios_boot_config(Timers* timers) {
         LOG_TIMERS_INFO("[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0");
         
         // Configure Timer0 for VBlank IRQ0 (NTSC timing)
-        // Mode: Enable counting, enable IRQ, system clock mode
-        t0->mode = 0x0100;  // Bit 8: IRQ enable, Bit 0: Timer enable
+        // Mode: Enable counting, enable IRQ, IRQ on target
+        t0->mode = 0x0110;  // Bit 8: IRQ enable, Bit 4: IRQ on target, Bit 0: Timer enable
         t0->target = 0xFFFF; // Target for VBlank timing
         t0->counter = 0x0000; // Start from 0
         

@@ -96,7 +96,11 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
     (void)source;
+    uint16_t prev = inter->irq_status;
     inter->irq_status |= (1 << irq_line);
+    if (irq_line == 0) {
+        LOG_INTERCONNECT_INFO("[IRQ] IRQ0 requested by %s (I_STAT: 0x%04x -> 0x%04x)", source, prev, inter->irq_status);
+    }
     if (irq_line <= 6) {
         LOG_INTERCONNECT_INFO("[IRQ] IRQ%u requested\n", irq_line);
     }
@@ -474,13 +478,11 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        // Writing acknowledges (clears) specified interrupt flags
-        // According to PSX-Spex: Writing 1 to a bit clears that interrupt
-        uint16_t ack_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
-        uint16_t prev_status = inter->irq_status;
-        inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
-        LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write32: Value=0x%08x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)\n", 
-                value, ack_mask, prev_status, inter->irq_status, __func__);
+        uint16_t prev = inter->irq_status;
+        inter->irq_status &= ~(value & 0xFFFF);
+        if ((prev & 0x1) && !(inter->irq_status & 0x1)) {
+            LOG_INTERCONNECT_INFO("[IRQ] IRQ0 acknowledged/cleared by BIOS (I_STAT: 0x%04x -> 0x%04x)", prev, inter->irq_status);
+        }
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
