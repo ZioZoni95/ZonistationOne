@@ -339,4 +339,34 @@ Based on PSX-Spex documentation and your existing codebase, here's what you have
 ## ✅ COMPONENT STATUS UPDATE (01 July 2025)
 - Interconnect: COMPLETE & nocash/PSX-Spex compliant (all tested regions, open bus, and edge cases pass)
 - Ready for integration with other components.
-- Next: Timer0/VBlank IRQ. 
+- Next: Timer0/VBlank IRQ.
+
+## Timer0 (timers.c, timers.h)
+- Status: IRQ0 logic updated for nocash/PSX-Spex (edge-triggered, target crossing).
+- Test: Standalone test still fails to request IRQ0 (needs further debug).
+- Next: Add debug output, verify counter/target/IRQ logic.
+
+## Interconnect (interconnect.c, interconnect.h)
+- Status: Handles IRQ request/acknowledge, I_STAT/I_MASK logic.
+- Test: Pending unit test for IRQ request/acknowledge.
+
+## CPU (cpu.c, cpu.h)
+- Status: Handles IRQ exceptions, COP0 registers, BIOS boot.
+- Test: Pending unit test for IRQ exception on IRQ0.
+
+## BIOS (bios.c, bios.h)
+- Status: Loads, basic syscall stubs.
+- Test: Pending integration test for BIOS boot loop with IRQ0.
+
+## DMA (dma.c, dma.h)
+- Status: Channel activation, transfer logic present.
+- Test: Pending unit/integration test for DMA IRQs.
+
+## GPU (gpu.c)
+- Status: VBlank event, command processing present.
+- Test: Pending integration test for VBlank/Timer0/IRQ0.
+
+## Plan
+- Test each component in isolation, then in integration.
+- Follow nocash/PSX-Spex for all logic and test cases.
+- Update this file after each test/fix. 
