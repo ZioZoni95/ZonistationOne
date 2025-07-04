@@ -15,28 +15,18 @@ struct Interconnect;
 #define TMR_REG_MODE   0x4 // Mode Register (16-bit R/W)
 #define TMR_REG_TARGET 0x8 // Target Value Register (16-bit R/W)
 
-// --- Timer Mode Register Bits ---
-// (Based on Nocash PSX Spec and common knowledge)
-// Bit 0: Sync Enable (0=Pause during sync, 1=Reset counter to 0 at sync) - Requires Sync Mode > 0
-// Bit 1-2: Sync Mode:
-//          0: Pause counter during H/Vblank or use external signal
-//          1: Reset counter to 0 at Hblank (Timer 0, 1 only?)
-//          2: Reset counter to 0 at Hblank and pause outside Hblank (Timer 0, 1 only?)
-//          3: Pause counter until Hblank occurs once, then free-run.
-// Bit 3: Reset counter to 0 when Target is reached (0=No, 1=Yes)
-// Bit 4: IRQ when Target value is reached (0=Disable, 1=Enable)
-// Bit 5: IRQ when Counter overflows (reaches 0xFFFF) (0=Disable, 1=Enable)
-// Bit 6: IRQ Repeat Mode (0=One-shot, 1=Repeatedly)
-// Bit 7: IRQ Pulse Mode (0=Short pulse, 1=Toggle) - Affects I_STAT bit
-// Bit 8-9: Clock Source Select:
-//          0: System Clock (CPU Freq / 4 ?)
-//          1: Dot Clock (GPU clock, frequency depends on video mode)
-//          2: Dot Clock / 8 (Timer 2 only?)
-//          3: Hblank (Timer 1 only?)
-// Bit 10: IRQ Request (Read-Only, reflects interrupt status)
-// Bit 11: Reached Target (Read-Only, sticky until Mode write acknowledges)
-// Bit 12: Reached 0xFFFF (Read-Only, sticky until Mode write acknowledges)
-// Bit 13-15: Unknown/Unused
+// --- Timer Mode Register Bits (per nocash/PSX-Spex) ---
+// Bit 0: Sync Enable
+// Bit 1-2: Sync Mode
+// Bit 3: Reset on Target
+// Bit 4: IRQ on Target
+// Bit 5: IRQ on 0xFFFF
+// Bit 6: IRQ Repeat
+// Bit 7: IRQ Pulse
+// Bit 8-9: Clock Source
+// Bit 10: IRQ Request (read-only)
+// Bit 11: Reached Target (sticky)
+// Bit 12: Reached 0xFFFF (sticky)
 
 // --- Structure for a Single Timer ---
 typedef struct {
@@ -130,5 +120,12 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  */
 void timers_step(Timers* timers, uint32_t cycles);
 
+// --- BIOS Timer Functions (stubs, not used by BIOS itself) ---
+int bios_init_timer(int t, uint16_t reload, uint16_t flags);
+int bios_get_timer(int t);
+int bios_enable_timer_irq(int t);
+int bios_disable_timer_irq(int t);
+int bios_restart_timer(int t);
+int bios_ChangeClearRCnt(int t, int flag);
 
 #endif // TIMERS_H

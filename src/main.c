@@ -27,8 +27,19 @@
 #include "cdrom.h" // <<< UPDATED: Added include for the CD-ROM component
 #include "log.h"
 
-
-
+/*
+ * Command Line Logging Options:
+ *   --debug            Set log level to DEBUG (verbose output)
+ *   --trace            Set log level to TRACE (ultra-verbose, per-instruction/cycle)
+ *   --quiet            Set log level to WARN (minimal output)
+ *   --log-rate-limit=N Only log the first N debug/trace messages per component, then every Nth after that
+ *   --log-single-file  Log everything to emulator_log.txt (disables per-component logs in logs/)
+ *
+ * Examples:
+ *   ./myps1_emu --debug
+ *   ./myps1_emu --trace --log-rate-limit=1000
+ *   ./myps1_emu --debug --log-single-file
+ */
 
 int main(int argc, char *argv[]) {
     // --- Argument Parsing ---

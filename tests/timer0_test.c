@@ -23,8 +23,8 @@ int main() {
 
     // Set Timer0 mode: 0x0110 (IRQ enable, IRQ on target, timer enable)
     timer_write16(&timers, 0, TMR_REG_MODE, 0x0110);
-    // Set Timer0 target: 0xFFFF
-    timer_write16(&timers, 0, TMR_REG_TARGET, 0xFFFF);
+    // Set Timer0 target: 10000
+    timer_write16(&timers, 0, TMR_REG_TARGET, 10000);
     // Start counter at 0
     timer_write16(&timers, 0, TMR_REG_VAL, 0x0000);
 

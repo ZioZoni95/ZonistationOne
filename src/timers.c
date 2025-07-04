@@ -7,11 +7,6 @@
 #include <math.h> // For floor()
 #include "log.h"
 
-// Stub for log_component if not defined (for standalone test build)
-#ifndef log_component
-#define log_component(...)
-#endif
-
 #define PSX_CPU_HZ 33868800.0
 #define PSX_SYSCLK_HZ PSX_CPU_HZ // System Clock is the same as the CPU clock for timers
 #define DOTCLOCK_NTSC_HZ 25175000.0
@@ -151,6 +146,7 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
         case TMR_REG_MODE:
             t->mode = value;
             timer_update_internal_state(timers, t, timer_index);
+            LOG_TIMERS_INFO("[Timer%d] Mode register written: 0x%04x", timer_index, value);
             if (timer_index == 0) {
                 LOG_TIMERS_INFO("[Timer0] Mode set: 0x%04x", value);
             }
@@ -272,31 +268,34 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         }
 
         // --- 4. Handle Interrupts (nocash/PSX-Spex compliant) ---
-        bool irq = false;
-        const char* irq_reason = NULL;
-        if (t->mode != 0) {
-            // Only request IRQ0 on edge: when target is crossed, IRQ enable, IRQ on target, and not already requested
-            bool irq_on_target = (t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested);
-            if (i == 0 && irq_on_target) {
+        if (i == 0) {
+            // Timer0: Only request IRQ0 on edge (target event), with correct enables, and not already requested
+            if (target_event && (t->mode & 0x100) && (t->mode & 0x10) && !t->interrupt_requested) {
                 t->interrupt_requested = true;
                 LOG_TIMERS_INFO("[Timer0] IRQ0 REQUESTED (edge) -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
                 interconnect_request_irq(timers->inter, 0, "Timer0");
             }
+        } else {
             // (Other timers: handle IRQ on target/overflow as needed)
-            if ((t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested) ||
-                (t->irq_on_ffff && overflow_event && !t->interrupt_requested)) {
-                irq = true;
-                irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
+            bool irq = false;
+            const char* irq_reason = NULL;
+            if (t->mode != 0) {
+                if ((t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested) ||
+                    (t->irq_on_ffff && overflow_event && !t->interrupt_requested)) {
+                    irq = true;
+                    irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
+                }
             }
-        }
-        if (irq && i != 0) {
-            t->mode |= (1 << 10); // Set IRQ request bit
-            t->interrupt_requested = true;
-            LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
-            interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
+            if (irq) {
+                t->mode |= (1 << 10); // Set IRQ request bit
+                t->interrupt_requested = true;
+                LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
+                interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
+            }
         }
         // --- 5. Handle Counter Reset ---
         if (t->reset_on_target && t->reached_target_flag) {
+            LOG_TIMERS_INFO("[Timer0] Counter reset on target! Counter=%u, Target=%u, Mode=0x%04x", t->counter, t->target, t->mode);
             t->counter = 0;
         }
         // Sticky flags and interrupt_requested are only cleared by writing to the mode register (see timer_update_internal_state)
@@ -337,3 +336,12 @@ static void timer_force_bios_boot_config(Timers* timers) {
         LOG_TIMERS_INFO("[Timer0] Forced config: mode=0x%04x, target=0x%04x [PSX-Spex: VBlank IRQ0 enabled]", t0->mode, t0->target);
     }
 }
+
+// --- BIOS Timer Functions (stubs, not used by BIOS itself) ---
+// See PSX-Spex kernelbios for details
+int bios_init_timer(int t, uint16_t reload, uint16_t flags) { (void)t; (void)reload; (void)flags; return 1; }
+int bios_get_timer(int t) { (void)t; return 0; }
+int bios_enable_timer_irq(int t) { (void)t; return 1; }
+int bios_disable_timer_irq(int t) { (void)t; return 1; }
+int bios_restart_timer(int t) { (void)t; return 1; }
+int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
