@@ -2,6 +2,9 @@
 
 A work-in-progress PlayStation 1 emulator fully written in C (-std99) , inspired by nocash and PSX-Spex documentation.
 
+**Reference Implementation:**
+- This project also uses [PCSX ReARMed](https://github.com/notaz/pcsx_rearmed) as a reference for understanding PlayStation hardware behavior and emulation techniques. No code is copied; PCSX ReARMed is used solely for learning, debugging, and cross-checking emulator logic.
+
 ## 🏁 **Current Status: Interconnect Fully Tested & Compliant (01 July 2025)**
 
 - ✅ **CPU Exception Handling:** Complete
