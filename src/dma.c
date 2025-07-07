@@ -171,12 +171,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 if (channel_became_active) {
                     // --- Event-driven GPU DMA (Channel 2) ---
                     if (channel_index == 2) { // GPU DMA
-                        LOG_DMA_INFO("[DMA] GPU DMA started: Scheduling event-driven transfer");
-                        uint32_t cycles = estimate_dma_cycles(ch);
-                        eventq_schedule(dma->inter, EVQ_DMA_GPU, cycles);
-                        // Do NOT complete the transfer here; let the event handler do it
+                        LOG_DMA_INFO("[DMA] Scheduling GPU DMA event for channel 2");
                     }
-                    // TODO: Add similar logic for other DMA channels (CDROM, SPU, OTC)
                 }
                 break;
             default:
@@ -193,6 +189,14 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 dma->force_irq = (value >> 15) & 1;
                 dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
                 dma->master_irq_enable = (value >> 23) & 1;
+                LOG_DMA_INFO("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
+                // --- PCSX ReARMed-style immediate IRQ3 assertion after DICR write ---
+                // If the DMA transfer for channel 2 (GPU) is already done, and the BIOS enables IRQ3 after the fact,
+                // we must immediately assert IRQ3 if the condition is true (see nocash/PCSX ReARMed behavior)
+                if ((dma->channel_irq_flags & (1 << 2)) && dma->master_irq_enable) {
+                    dma->master_irq_flag = 1;
+                    interconnect_request_irq(dma->inter, IRQ_DMA, "DMA IRQ3 (DICR write, PCSX ReARMed style)");
+                }
                 // --- DMA IRQ acknowledge logic ---
                 uint8_t ack_flags = (uint8_t)((value >> 24) & 0x7F);
                 if (ack_flags) {
