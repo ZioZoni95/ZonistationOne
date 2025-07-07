@@ -158,4 +158,10 @@ void timers_on_vblank(Timers* timers);
 
 void timers_schedule_next_event(Timers* timers, int timer_index);
 
+// --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
+void timer0_event_handler(struct Interconnect* sys);
+void timer1_event_handler(struct Interconnect* sys);
+void timer2_event_handler(struct Interconnect* sys);
+// --- END: PCSX ReARMed-inspired Timer Event Handlers ---
+
 #endif // TIMERS_H

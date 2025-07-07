@@ -1126,8 +1126,6 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
     LOG_DMA_INFO("--- Finished DMA Transfer Processing for Channel %d ---\n", channel_index);
-
-    // TODO: Trigger DMA interrupt here if enabled in DICR and channel IRQ was set
 }
 
 // --- BIOS Boot Helper: Force Interrupt Configuration ---
@@ -1208,4 +1206,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
     else {
         LOG_DMA_WARN("[DMA] GPU DMA: Unknown mode or direction (sync=%d, dir=%d)", ch->sync, ch->direction);
     }
+
+    // --- End of GPU DMA transfer logic ---
+    // (Reverted: No DMA IRQ3 signaling here)
 }

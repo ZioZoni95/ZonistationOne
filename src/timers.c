@@ -158,7 +158,16 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
         t->mode = value;
         t->interrupt_requested = false; // Clear IRQ state on mode write
         t->reached_target_flag = false;
-        timer_update_internal_state(timers, t, 0);
+        t->reached_ffff_flag = false;
+        t->mode &= ~(1 << 10); // Clear IRQ request bit
+        timer_update_internal_state(timers, t, timer_index);
+        // Re-assert IRQ if condition is still true after mode write
+        if (((t->irq_on_target && t->counter == t->target) ||
+             (t->irq_on_ffff && t->counter == 0xFFFF)) && (t->mode & 0x100)) {
+            t->interrupt_requested = true;
+            t->mode |= (1 << 10);
+            interconnect_request_irq(timers->inter, t->irq, "Timer re-assert after mode write");
+        }
         return;
     }
     switch (offset) {
@@ -242,44 +251,8 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
             continue;
         }
         timers->fractional_ticks[i] = ticks_to_add - (double)whole_ticks;
-        uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
-        bool target_event = false;
-        bool overflow_event = false;
-        if (t->target != 0 && old_counter < t->target && t->counter >= t->target) {
-            t->reached_target_flag = true;
-            target_event = true;
-        }
-        if (t->counter < old_counter) {
-            t->reached_ffff_flag = true;
-            overflow_event = true;
-        }
-        // IRQ logic using t->irq
-        bool irq = false;
-        const char* irq_reason = NULL;
-        if (t->mode != 0) {
-            if (((t->irq_on_target && target_event && (t->mode & 0x100)) ||
-                 (t->irq_on_ffff && overflow_event)) && !t->interrupt_requested) {
-                irq = true;
-                irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
-            }
-        }
-        if (irq) {
-            t->mode |= (1 << 10);
-            t->interrupt_requested = true;
-            LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
-            interconnect_request_irq(timers->inter, t->irq, "Timer");
-        }
-        if (t->reset_on_target && t->reached_target_flag) {
-            LOG_TIMERS_INFO("[Timer%d] Counter reset on target! Counter=%u, Target=%u, Mode=0x%04x", i, t->counter, t->target, t->mode);
-            t->counter = 0;
-        }
-        if (target_event || overflow_event) {
-            timers_schedule_next_event(timers, i);
-        }
-        if (i == 0) {
-            LOG_TIMERS_INFO("[Timer0][STEP] Counter=%u, Target=%u, Mode=0x%04x", t->counter, t->target, t->mode);
-        }
+        // Do NOT set IRQs or schedule events here; event handler will do it
     }
 }
 
@@ -352,11 +325,41 @@ int bios_disable_timer_irq(int t) { (void)t; return 1; }
 int bios_restart_timer(int t) { (void)t; return 1; }
 int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
 
-// --- BEGIN: Logic adapted from PCSX ReARMed (https://github.com/notaz/pcsx_rearmed) ---
+// --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
-// This logic ensures Timer IRQs are only requested if not already requested,
-// and are cleared when acknowledged, matching PS1 hardware behavior.
+// These handlers are called by the event queue when a timer event fires.
+static void timer_event_handler(Timers* timers, int timer_index) {
+    Timer* t = &timers->timers[timer_index];
+    // Set sticky flag for target or overflow
+    if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
+        t->reached_target_flag = true;
+    }
+    if (t->counter == 0xFFFF) {
+        t->reached_ffff_flag = true;
+    }
+    // Only request IRQ if not already requested and enabled
+    bool irq_enabled = (t->irq_on_target && t->reached_target_flag) || (t->irq_on_ffff && t->reached_ffff_flag);
+    if (irq_enabled && !t->interrupt_requested && (t->mode & 0x100)) {
+        t->interrupt_requested = true;
+        t->mode |= (1 << 10); // Set IRQ request bit
+        interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
+    }
+    // Reset counter if needed
+    if (t->reset_on_target && t->reached_target_flag) {
+        t->counter = 0;
+        t->reached_target_flag = false;
+    }
+    // Schedule next event
+    timers_schedule_next_event(timers, timer_index);
+}
 
+// Expose C-callable wrappers for event_scheduler.c
+void timer0_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->timers_state, 0); }
+void timer1_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->timers_state, 1); }
+void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->timers_state, 2); }
+// --- END: PCSX ReARMed-inspired Timer Event Handlers ---
+
+// VBlank event handler for event_scheduler.c
 void timers_on_vblank(Timers* timers) {
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
@@ -366,11 +369,9 @@ void timers_on_vblank(Timers* timers) {
     eventq_schedule(timers->inter, EVQ_TIMER0, VBLANK_CYCLES);
     // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
     if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
-        LOG_TIMERS_INFO("[Timer0][PCSX ReARMed] Requesting IRQ0 (mode=0x%04x)", t0->mode);
-        interconnect_request_irq(timers->inter, 0, "Timer0 event (PCSX ReARMed logic)");
+        interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
         t0->mode |= (1 << 10); // Set IRQ request bit
     }
 }
-// --- END: Logic adapted from PCSX ReARMed ---
