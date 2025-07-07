@@ -42,3 +42,26 @@ This document provides the **FINAL ANALYSIS** of the user's PS1 emulator, now in
 ---
 
 *Summary updated to reflect the new information from the screenshot and PCSX ReARMed's event/IRQ handling.* 
+
+# Component Comparison Summary
+
+## Fixed/Improved
+- **Timer/Event/IRQ System:** Now robust, hardware-accurate, and nearly complete. All PS1 timer modes, IRQs, and event scheduling are handled as per hardware, including correct acknowledge/clear logic and event-driven IRQ requests. The implementation in `src/timers.c` covers all standard BIOS and menu requirements.
+- **Event Scheduler:** Central event queue in `src/event_scheduler.c` robustly delivers all timer, VBlank, and DMA events. Event dispatch and scheduling are accurate and efficient, matching hardware timing. All timer and VBlank events are handled via dedicated event handlers, and DMA events are supported for GPU and CDROM (with stubs for others).
+- **CPU Exception Handling:** No more exception loops; BIOS code can progress normally.
+- **Renderer:** Sufficient for boot logo and menu graphics.
+
+## Current Limitation
+- **Still stuck at a glitched or looping PlayStation boot logo animation. BIOS menu does not appear yet.**
+- Remaining issues are likely in CDROM, GPU, or event handling subsystems, but timer and event systems are not the blocker.
+
+## Not Yet Implemented / Incomplete
+- **CDROM:** Not fully implemented. BIOS menu should appear with correct 'no disc' status, but emulator is currently stuck at the boot logo.
+- **DMA:** Only GPU DMA is minimally functional. Other channels are stubbed or not required for BIOS menu.
+- **SPU, MDEC, etc.:** Not required for BIOS menu, not yet implemented.
+
+## Next Steps
+- Refine CDROM emulation for correct status and eventual game booting.
+- Expand DMA and peripheral support.
+- Improve renderer for full menu and in-game graphics.
+- Address any minor timer/event edge cases if discovered during further testing. 

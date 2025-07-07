@@ -14,6 +14,13 @@
 
 // Logging: Only use LOG_ERROR/LOG_INFO as per new log system. No per-draw logs.
 
+// Example: Replace LOG_GPU_INFO or LOG_GPU_DEBUG for frequent register accesses and commands with LOG_GPU_TRACE or wrap in a higher debug level check.
+#ifdef LOG_GPU_TRACE
+#define LOG_GPU_TRACE_ENABLED 1
+#else
+#define LOG_GPU_TRACE_ENABLED 0
+#endif
+
 // --- Forward Declarations for GP0 Handlers (Internal linkage) ---
 static void gp0_nop(Gpu* gpu);
 static void gp0_clear_cache(Gpu* gpu);

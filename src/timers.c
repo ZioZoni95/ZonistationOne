@@ -6,12 +6,15 @@
 #include <string.h>
 #include <math.h> // For floor()
 #include "log.h"
+#include "event_scheduler.h" // For eventq_schedule
 
 #define PSX_CPU_HZ 33868800.0
 #define PSX_SYSCLK_HZ PSX_CPU_HZ // System Clock is the same as the CPU clock for timers
 #define DOTCLOCK_NTSC_HZ 25175000.0
 #define DOTCLOCK_PAL_HZ 25200000.0 // PAL frequency, for completeness
 #define HBLANK_NTSC_HZ 15625.0 // Horizontal blanking frequency for NTSC
+// --- VBlank timing constant (NTSC: 33868800 / 60) ---
+#define VBLANK_CYCLES 564480
 
 // Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
@@ -26,6 +29,7 @@ static void timer_force_bios_boot_config(Timers* timers);
  * @param timer_index Index of the timer (0, 1, or 2).
  */
 static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_index) {
+    (void)timer_index;
     uint16_t mode = timer->mode;
 
     timer->sync_enable       = (mode & (1 << 0)) != 0;
@@ -41,10 +45,16 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
     // Also clear our internal tracking flags.
     timer->reached_target_flag = false;
     timer->reached_ffff_flag   = false;
-    // Clear the request flag as well, it will be re-asserted if conditions still met
     timer->interrupt_requested = false;
     // Clear Mode[10] interrupt request flag in the actual hardware register value
     timer->mode &= ~(1 << 10);
+    // After clearing, if timer is still at target/overflow and IRQ enabled, re-assert IRQ
+    if ((timer->irq_on_target && timer->counter == timer->target && (timer->mode & 0x100)) ||
+        (timer->irq_on_ffff && timer->counter == 0xFFFF && (timer->mode & 0x100))) {
+        timer->interrupt_requested = true;
+        timer->mode |= (1 << 10);
+        interconnect_request_irq(timers->inter, 0, "Timer0 (re-assert after mode write)");
+    }
 }
 
 /**
@@ -59,17 +69,21 @@ void timers_init(Timers* timers, struct Interconnect* inter) {
     // Initialize all three timers
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];
-        // Reset hardware registers
         t->counter = 0;
         t->mode    = 0;
         t->target  = 0;
-        // Reset internal emulation state
-        timer_update_internal_state(timers, t, i); // Decode the initial mode (0)
-        // Ensure flags start clear
+        timer_update_internal_state(timers, t, i);
         t->reached_target_flag = false;
         t->reached_ffff_flag   = false;
         t->interrupt_requested = false;
         timers->fractional_ticks[i] = 0.0;
+        // Set new fields
+        t->rate = (i == 2) ? 8 : 1; // Default: Timer2 is /8, others are /1
+        t->irq = (i == 0) ? TIMER0_IRQ : (i == 1) ? TIMER1_IRQ : TIMER2_IRQ;
+        t->counter_state = TIMER_COUNT_TO_OVERFLOW;
+        t->irq_state = 0;
+        t->cycle = 0;
+        t->cycle_start = 0;
     }
 }
 
@@ -184,126 +198,110 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  * @param cpu_cycles Number of CPU clock cycles presumed to have passed since last call.
  */
 void timers_step(Timers* timers, uint32_t cpu_cycles) {
-    // LOG_TIMERS_INFO("timers_step called"); // Removed massive logging
     if (cpu_cycles == 0) return;
     static int frame_counter = 0;
     frame_counter++;
-
-    // Check if we need to force BIOS boot configuration
     static int boot_helper_counter = 0;
     boot_helper_counter += cpu_cycles;
-    
-    // After 1 million cycles (about 30ms at 33MHz), force Timer0 config if needed
     if (boot_helper_counter > 1000000) {
         timer_force_bios_boot_config(timers);
-        boot_helper_counter = 0; // Reset counter
+        boot_helper_counter = 0;
     }
-
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];
-
-        // --- 1. Determine if timer is paused by Sync Mode ---
         bool is_paused = false;
-        if (t->sync_enable) {
-            // NOTE: Full sync implementation requires GPU timing signals.
-            // For now, we assume mode 0 (pause) and that they are not paused,
-            // as this is enough to get past the BIOS hang.
-            // A full implementation would check if we are currently inside VBlank/HBlank.
-            is_paused = false; 
-        }
-
-        if (is_paused) {
-            continue; // Timer is paused, do nothing for it this step.
-        }
+        if (t->sync_enable) is_paused = false;
+        if (is_paused) continue;
         double timer_clock_hz = 0.0;
-
-        
-        // --- 2. Determine Clock Source and Ticks to Add ---
-        double ticks_to_add = timers->fractional_ticks[i]; // Start with leftover fraction from last step
-
-        // Timer 0: System Clock or Dot Clock
+        double ticks_to_add = timers->fractional_ticks[i];
         if (i == 0) {
-            timer_clock_hz = (t->clock_source == 0) ? PSX_SYSCLK_HZ : DOTCLOCK_NTSC_HZ; // Simplified NTSC
+            timer_clock_hz = (t->clock_source == 0) ? PSX_SYSCLK_HZ : DOTCLOCK_NTSC_HZ;
             ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
-        }
-        // Timer 1: System Clock or H-Blank
-        else if (i == 1) {
-            if (t->clock_source <= 1) { // 0 or 1
-                 timer_clock_hz = PSX_SYSCLK_HZ; // Sources 0 and 1 are System Clock for Timer 1
-                 ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
-            } else { // Source 2 or 3 is H-Blank
-                // TODO: This requires accurate GPU dot/line counting. For now, we can approximate.
+        } else if (i == 1) {
+            if (t->clock_source <= 1) {
+                timer_clock_hz = PSX_SYSCLK_HZ;
+                ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
+            } else {
                 ticks_to_add += (double)cpu_cycles * (HBLANK_NTSC_HZ / PSX_CPU_HZ);
             }
+        } else {
+            timer_clock_hz = (t->clock_source <= 1) ? PSX_SYSCLK_HZ : (PSX_SYSCLK_HZ / 8.0);
+            ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
         }
-        // Timer 2: System Clock or System Clock / 8
-        else { // i == 2
-             timer_clock_hz = (t->clock_source <= 1) ? PSX_SYSCLK_HZ : (PSX_SYSCLK_HZ / 8.0);
-             ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
-        }
-
         uint32_t whole_ticks = (uint32_t)floor(ticks_to_add);
         if (whole_ticks == 0) {
-             timers->fractional_ticks[i] = ticks_to_add; // Save fraction and continue
-             continue;
+            timers->fractional_ticks[i] = ticks_to_add;
+            continue;
         }
-        timers->fractional_ticks[i] = ticks_to_add - (double)whole_ticks; // Keep the new remainder
-
-        // --- 3. Increment Counter and Check for Events ---
+        timers->fractional_ticks[i] = ticks_to_add - (double)whole_ticks;
         uint32_t old_counter = t->counter;
         t->counter += whole_ticks;
-
-        // --- 3.1. Check for Target and Overflow Events ---
         bool target_event = false;
         bool overflow_event = false;
-        // Target event: counter crosses or equals target (and target is nonzero)
         if (t->target != 0 && old_counter < t->target && t->counter >= t->target) {
             t->reached_target_flag = true;
             target_event = true;
         }
-        // Overflow event: counter wraps past 0xFFFF
         if (t->counter < old_counter) {
             t->reached_ffff_flag = true;
             overflow_event = true;
         }
-
-        // --- 4. Handle Interrupts (nocash/PSX-Spex compliant) ---
-        if (i == 0) {
-            // Timer0: Only request IRQ0 on edge (target event), with correct enables, and not already requested
-            if (target_event && (t->mode & 0x100) && (t->mode & 0x10) && !t->interrupt_requested) {
-                t->interrupt_requested = true;
-                LOG_TIMERS_INFO("[Timer0] IRQ0 REQUESTED (edge) -- counter=%u, target=%u, mode=0x%04x", t->counter, t->target, t->mode);
-                interconnect_request_irq(timers->inter, 0, "Timer0");
-            }
-        } else {
-            // (Other timers: handle IRQ on target/overflow as needed)
-            bool irq = false;
-            const char* irq_reason = NULL;
-            if (t->mode != 0) {
-                if ((t->irq_on_target && target_event && (t->mode & 0x100) && !t->interrupt_requested) ||
-                    (t->irq_on_ffff && overflow_event && !t->interrupt_requested)) {
-                    irq = true;
-                    irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
-                }
-            }
-            if (irq) {
-                t->mode |= (1 << 10); // Set IRQ request bit
-                t->interrupt_requested = true;
-                LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
-                interconnect_request_irq(timers->inter, IRQ_TIMER0 + i, "Timer");
+        // IRQ logic using t->irq
+        bool irq = false;
+        const char* irq_reason = NULL;
+        if (t->mode != 0) {
+            if (((t->irq_on_target && target_event && (t->mode & 0x100)) ||
+                 (t->irq_on_ffff && overflow_event)) && !t->interrupt_requested) {
+                irq = true;
+                irq_reason = (target_event && overflow_event) ? "target+overflow" : (target_event ? "target" : "overflow");
             }
         }
-        // --- 5. Handle Counter Reset ---
+        if (irq) {
+            t->mode |= (1 << 10);
+            t->interrupt_requested = true;
+            LOG_TIMERS_INFO("[Timer%d] IRQ requested (%s) -- counter=%u, target=%u, mode=0x%04x", i, irq_reason, t->counter, t->target, t->mode);
+            interconnect_request_irq(timers->inter, t->irq, "Timer");
+        }
         if (t->reset_on_target && t->reached_target_flag) {
-            LOG_TIMERS_INFO("[Timer0] Counter reset on target! Counter=%u, Target=%u, Mode=0x%04x", t->counter, t->target, t->mode);
+            LOG_TIMERS_INFO("[Timer%d] Counter reset on target! Counter=%u, Target=%u, Mode=0x%04x", i, t->counter, t->target, t->mode);
             t->counter = 0;
         }
-        // Sticky flags and interrupt_requested are only cleared by writing to the mode register (see timer_update_internal_state)
-        // Log every Timer0 step for debugging
+        if (target_event || overflow_event) {
+            timers_schedule_next_event(timers, i);
+        }
         if (i == 0) {
             LOG_TIMERS_INFO("[Timer0][STEP] Counter=%u, Target=%u, Mode=0x%04x", t->counter, t->target, t->mode);
         }
     }
+}
+
+// --- Event scheduling for timers ---
+void timers_schedule_next_event(Timers* timers, int timer_index) {
+    Timer* t = &timers->timers[timer_index];
+    uint32_t cycles_until_event = 0;
+    if (t->reset_on_target && t->target != 0) {
+        if (t->counter < t->target)
+            cycles_until_event = t->target - t->counter;
+        else
+            cycles_until_event = 0x10000 - t->counter + t->target;
+    } else {
+        cycles_until_event = 0x10000 - t->counter;
+    }
+    double clock_div = (t->rate == 8) ? 8.0 : (t->rate == 5) ? 5.0 : 1.0;
+    uint32_t cpu_cycles = (uint32_t)(cycles_until_event * clock_div);
+    eventq_schedule(timers->inter, EVQ_TIMER0 + timer_index, cpu_cycles);
+}
+
+// --- Frame/line timing functions ---
+uint32_t timers_calculate_frame_cycles(void) {
+    // NTSC: 33868800 / 60, PAL: 33868800 / 50
+    // TODO: Use region flag if available
+    return (uint32_t)(PSX_CPU_HZ / 60.0);
+}
+
+uint32_t timers_calculate_line_cycles(void) {
+    // NTSC: 33868800 / (60 * 263)
+    return (uint32_t)(PSX_CPU_HZ / (60.0 * 263.0));
 }
 
 // --- Lightgun/Scanline IRQ10 X coordinate conversion (PSX-Spex/nocash) ---
@@ -345,3 +343,25 @@ int bios_enable_timer_irq(int t) { (void)t; return 1; }
 int bios_disable_timer_irq(int t) { (void)t; return 1; }
 int bios_restart_timer(int t) { (void)t; return 1; }
 int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
+
+// --- BEGIN: Adapted from PCSX ReARMed (https://github.com/notaz/pcsx_rearmed) ---
+// Copyright (c) PCSX ReARMed authors. Used under open source license.
+// This logic ensures Timer0 is reset and IRQ0 is requested on every VBlank,
+// as required for correct PS1 BIOS and game behavior.
+void timers_on_vblank(Timers* timers) {
+    Timer* t0 = &timers->timers[0];
+    t0->counter = 0;
+    t0->reached_target_flag = false;
+    // Only clear interrupt_requested if the IRQ was acknowledged (handled in interconnect)
+    // Schedule next Timer0 event for the next VBlank interval
+    eventq_schedule(timers->inter, EVQ_TIMER0, VBLANK_CYCLES);
+    // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
+    if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
+        LOG_TIMERS_INFO("[Timer0][PCSX ReARMed] Requesting IRQ0 (mode=0x%04x)", t0->mode);
+        interconnect_request_irq(timers->inter, 0, "Timer0 event (PCSX ReARMed logic)");
+        t0->interrupt_requested = true;
+        t0->reached_target_flag = true;
+        t0->mode |= (1 << 10); // Set IRQ request bit
+    }
+}
+// --- END: Adapted from PCSX ReARMed ---

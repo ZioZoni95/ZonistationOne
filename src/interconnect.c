@@ -2,6 +2,9 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "log.h"
+#include "dma.h"
+#include "gpu.h"
+#include "ram.h"
 
 // At the top, after #include "log.h":
 #ifndef LOG_DMA_INFO
@@ -10,6 +13,13 @@
 #define LOG_DMA_TRACE(...)  log_component("dma", LOG_LEVEL_TRACE, __VA_ARGS__)
 #define LOG_DMA_WARN(...)   log_component("dma", LOG_LEVEL_WARN, __VA_ARGS__)
 #define LOG_DMA_ERROR(...)  log_component("dma", LOG_LEVEL_ERROR, __VA_ARGS__)
+#endif
+
+// Example: Replace LOG_INTERCONNECT_INFO or LOG_INTERCONNECT_DEBUG for frequent register accesses with LOG_INTERCONNECT_TRACE or wrap in a higher debug level check.
+#ifdef LOG_INTERCONNECT_TRACE
+#define LOG_INTERCONNECT_TRACE_ENABLED 1
+#else
+#define LOG_INTERCONNECT_TRACE_ENABLED 0
 #endif
 
 // DMA and GPU region access logs are extremely frequent and only useful for deep debugging.
@@ -45,6 +55,11 @@ const uint32_t REGION_MASK[8] = {
     0xffffffff, 0xffffffff                          // KSEG2 (0xC0000000 - 0xFFFFFFFF) - No mask
 };
 
+// --- Hardware Register Block (0x1f801000 - 0x1f801fff) ---
+// Adapted from PCSX ReARMed (https://github.com/notaz/pcsx_rearmed)
+// Copyright (c) PCSX ReARMed authors. Used under open source license for compatibility.
+static uint8_t hwregs[0x1000] = {0};
+
 /**
  * @brief Maps a CPU virtual address to a physical address by masking region bits.
  * KSEG2 addresses are returned unchanged.
@@ -77,7 +92,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     LOG_INTERCONNECT_INFO("Interconnect initialized");
     inter->bios = bios;
     inter->ram = ram;
-    dma_init(&inter->dma); // Initialize DMA controller state
+    dma_init(&inter->dma, inter); // Initialize DMA controller state
     gpu_init_full(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
 
@@ -170,7 +185,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return (uint32_t)inter->irq_status;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        LOG_INTERCONNECT_INFO("~ Read32 from IRQ_MASK (0x1f801074): Returning 0x%04x\n", inter->irq_mask);
+        LOG_INTERCONNECT_TRACE("Read32 from IRQ_MASK (0x1f801074): Returning 0x%04x", inter->irq_mask);
         return (uint32_t)inter->irq_mask;
     }
 
@@ -251,6 +266,13 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return 0xFFFFFFFF; // Open bus for unimplemented VRAM
     }
 
+    // --- Hardware Register Checks (Specific Addresses First) ---
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Read32 at 0x%08x", physical_addr); // Uncomment for deep debug
+        return *(uint32_t *)&hwregs[offset];
+    }
+
     // --- Fallback for Unhandled Addresses ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
         // KSEG2 region: return 0 for unmapped addresses (per nocash/PSX-Spex)
@@ -303,7 +325,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         return inter->irq_status;
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        LOG_INTERCONNECT_INFO("~ Read16 from IRQ_MASK (0x1f801074): Returning 0x%04x\n", inter->irq_mask);
+        LOG_INTERCONNECT_TRACE("Read16 from IRQ_MASK (0x1f801074): Returning 0x%04x", inter->irq_mask);
         return inter->irq_mask;
      }
 
@@ -350,6 +372,13 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
          LOG_INTERCONNECT_INFO("~ Read16 from Expansion 1 region: Address 0x%08x (Returning 0xFFFF)\n", physical_addr);
          return 0xFFFF; // Expansion 1 returns all Fs when empty
+    }
+
+    // --- Hardware Register Checks (Specific Addresses First) ---
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Read16 at 0x%08x", physical_addr); // Uncomment for deep debug
+        return *(uint16_t *)&hwregs[offset];
     }
 
     // --- Fallback ---
@@ -426,6 +455,13 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     }
 
     // Other regions (SPU, Timers, GPU, DMA, Exp2, MemCtrl) are less likely for 8-bit reads
+
+    // --- Hardware Register Checks (Specific Addresses First) ---
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Read8 at 0x%08x", physical_addr); // Uncomment for deep debug
+        return hwregs[offset];
+    }
 
     // --- Fallback ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
@@ -555,7 +591,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         // Handle specific MemCtrl writes, ignore others silently for now
         switch (physical_addr) {
             case EXPANSION_1_BASE_ADDR: // 0x1f801000
-                if (value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
+                if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
                 break;
             case EXPANSION_2_BASE_ADDR: // 0x1f801004
@@ -567,7 +603,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
                 break;
             // IRQ regs handled above
             default:
-                LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
         }
         return;
@@ -604,6 +640,36 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     if ((physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) ||
         (physical_addr >= EXPANSION_2_START && physical_addr <= EXPANSION_2_END)) {
         LOG_INTERCONNECT_INFO("~ Write32 to Expansion region: Address 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+        return;
+    }
+
+    // --- Hardware Register Checks (Specific Addresses First) ---
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Write32 at 0x%08x = 0x%08x", physical_addr, value); // Uncomment for deep debug
+        *(uint32_t *)&hwregs[offset] = value;
+        return;
+    }
+
+    // --- then generic MEM_CONTROL region handler ...
+    if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
+        switch (physical_addr) {
+            case EXPANSION_1_BASE_ADDR: // 0x1f801000
+                if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
+                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case EXPANSION_2_BASE_ADDR: // 0x1f801004
+                 if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
+                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case RAM_SIZE_ADDR: // 0x1f801060
+                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+            // IRQ regs handled above
+            default:
+                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+        }
         return;
     }
 
@@ -667,12 +733,25 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         uint16_t ack_mask = value & 0x7FF;
         uint16_t prev_status = inter->irq_status;
         inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
+        // Also clear timer interrupt_requested flags and mode[10] for Timer0, Timer1, Timer2
+        if (ack_mask & (1 << TIMER0_IRQ)) {
+            inter->timers_state.timers[0].interrupt_requested = false;
+            inter->timers_state.timers[0].mode &= ~(1 << 10);
+        }
+        if (ack_mask & (1 << TIMER1_IRQ)) {
+            inter->timers_state.timers[1].interrupt_requested = false;
+            inter->timers_state.timers[1].mode &= ~(1 << 10);
+        }
+        if (ack_mask & (1 << TIMER2_IRQ)) {
+            inter->timers_state.timers[2].interrupt_requested = false;
+            inter->timers_state.timers[2].mode &= ~(1 << 10);
+        }
         LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)\n", value, ack_mask, prev_status, inter->irq_status, __func__);
         return;
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
         inter->irq_mask = value & 0x7FF;
-        LOG_INTERCONNECT_INFO("~ Write16 to IRQ_MASK: Value=0x%04x -> I_MASK=0x%04x\n", value, inter->irq_mask);
+        LOG_INTERCONNECT_TRACE("Write16 to IRQ_MASK: Value=0x%04x -> I_MASK=0x%04x", value, inter->irq_mask);
         return;
      }
 
@@ -737,6 +816,36 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     if ((physical_addr >= 0x1f801d80 && physical_addr <= 0x1f801dbf) ||
         physical_addr == 0x1f801da8 || physical_addr == 0x1f801daa || physical_addr == 0x1f801dac || physical_addr == 0x1f801dae) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
+        return;
+    }
+
+    // Handle MEM_CONTROL before generic region
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Write16 at 0x%08x = 0x%04x", physical_addr, value); // Uncomment for deep debug
+        *(uint16_t *)&hwregs[offset] = value;
+        return;
+    }
+
+    // --- then generic MEM_CONTROL region handler ...
+    if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
+        switch (physical_addr) {
+            case EXPANSION_1_BASE_ADDR: // 0x1f801000
+                if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
+                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case EXPANSION_2_BASE_ADDR: // 0x1f801004
+                 if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
+                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case RAM_SIZE_ADDR: // 0x1f801060
+                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+            // IRQ regs handled above
+            default:
+                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+        }
         return;
     }
 
@@ -810,6 +919,36 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     // Expansion 1 Region
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
         LOG_INTERCONNECT_INFO("~ Write8 to Expansion 1 region: Address 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value);
+        return;
+    }
+
+    // Handle MEM_CONTROL before generic region
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
+        uint32_t offset = physical_addr - 0x1f801000;
+        // LOG_INTERCONNECT_TRACE("[HWREG] Write8 at 0x%08x = 0x%02x", physical_addr, value); // Uncomment for deep debug
+        hwregs[offset] = value;
+        return;
+    }
+
+    // --- then generic MEM_CONTROL region handler ...
+    if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
+        switch (physical_addr) {
+            case EXPANSION_1_BASE_ADDR: // 0x1f801000
+                if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
+                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case EXPANSION_2_BASE_ADDR: // 0x1f801004
+                 if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
+                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                break;
+            case RAM_SIZE_ADDR: // 0x1f801060
+                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+            // IRQ regs handled above
+            default:
+                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                break;
+        }
         return;
     }
 
@@ -1022,15 +1161,51 @@ void interconnect_check_bios_boot(Interconnect* inter) {
     }
 }
 
-// --- IRQ10 (Lightgun/Scanline IRQ) ---
-// Per PSX-Spex/nocash, IRQ10 should be prioritized in the BIOS/IRQ chain for lightgun/scanline timing.
-// When IRQ10 is triggered, the handler should:
-//   1. Acknowledge IRQ10 (write to I_STAT).
-//   2. Optionally disable DMAs.
-//   3. Wait for IRQ10 bit in I_STAT to be set again (for next scanline).
-//   4. Read Timer0 and Timer1 for X/Y coordinates.
-//   5. Use region-specific formulas:
-//        NTSC: X = (Timer0 - 140) * 0.198166, Y = Timer1
-//        PAL:  X = (Timer0 - 140) * 0.196358, Y = Timer1
-//   6. For system clock mode, convert Timer0 to video clock (mul 11/div 7), then to dotclock (div 8 for 320px).
-// Emulator should ensure IRQ10 is requested/cleared properly and that timer reads are accurate.
+// Helper: Perform the actual GPU DMA transfer for channel 2
+void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
+    LOG_DMA_INFO("[DMA] Performing GPU DMA transfer (mode=%d, direction=%d)", ch->sync, ch->direction);
+    // FROM_RAM: RAM -> GPU (Image Load)
+    if (ch->direction == FROM_RAM) {
+        uint32_t addr = ch->base_addr & 0x001FFFFC; // 2MB RAM, word aligned
+        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+        if (words == 0) words = 1;
+        for (uint32_t i = 0; i < words; ++i) {
+            uint32_t data_word = ram_load32(sys->ram, addr);
+            gpu_gp0(&sys->gpu, data_word); // Send to GP0 (Image Load)
+            addr += 4;
+        }
+        LOG_DMA_INFO("[DMA] GPU DMA (FROM_RAM) transferred %u words", words);
+    }
+    // TO_RAM: GPU -> RAM (Image Read)
+    else if (ch->direction == TO_RAM) {
+        uint32_t addr = ch->base_addr & 0x001FFFFC;
+        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+        if (words == 0) words = 1;
+        for (uint32_t i = 0; i < words; ++i) {
+            uint32_t data_word = gpu_read_data(&sys->gpu);
+            ram_store32(sys->ram, addr, data_word);
+            addr += 4;
+        }
+        LOG_DMA_INFO("[DMA] GPU DMA (TO_RAM) transferred %u words", words);
+    }
+    // LINKED_LIST: GPU command list
+    else if (ch->sync == LINKED_LIST) {
+        uint32_t addr = ch->base_addr & 0x001FFFFC;
+        uint32_t safety = 0;
+        while (safety++ < 0x10000) { // Safety limit to avoid infinite loops
+            uint32_t header = ram_load32(sys->ram, addr);
+            uint32_t count = (header >> 24) & 0xFF;
+            for (uint32_t i = 0; i < count; ++i) {
+                addr = (addr + 4) & 0x001FFFFC;
+                uint32_t cmd = ram_load32(sys->ram, addr);
+                gpu_gp0(&sys->gpu, cmd);
+            }
+            if (header & 0x800000) break; // End of list
+            addr = header & 0x001FFFFC;
+        }
+        LOG_DMA_INFO("[DMA] GPU DMA (LINKED_LIST) processed command list");
+    }
+    else {
+        LOG_DMA_WARN("[DMA] GPU DMA: Unknown mode or direction (sync=%d, dir=%d)", ch->sync, ch->direction);
+    }
+}

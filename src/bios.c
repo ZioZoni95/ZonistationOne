@@ -2,6 +2,13 @@
 #include <stdio.h>      // For file operations (fopen, fread, fclose, perror, fprintf)
 #include "log.h"
 
+// Example: Replace LOG_BIOS_INFO or LOG_BIOS_DEBUG for frequent memory accesses with LOG_BIOS_TRACE or wrap in a higher debug level check.
+#ifdef LOG_BIOS_TRACE
+#define LOG_BIOS_TRACE_ENABLED 1
+#else
+#define LOG_BIOS_TRACE_ENABLED 0
+#endif
+
 // Loads the BIOS ROM content from a file specified by 'path' into the Bios struct.
 // Based on Guide Section 2.7 Loading the BIOS [cite: 117]
 bool bios_load(Bios* bios, const char* path) {
@@ -61,6 +68,10 @@ uint32_t bios_load32(Bios* bios, uint32_t offset) {
     uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
     static int bios_debug_count = 0;
     if (bios_debug_count < 1000) {
+        // For frequent bios_load32/16/8, only log at TRACE level:
+        #if LOG_BIOS_TRACE_ENABLED
+            LOG_BIOS_TRACE("bios_load32: offset=0x%X value=0x%08X", offset, value);
+        #endif
         LOG_BIOS_DEBUG("bios_load32: offset=0x%X value=0x%08X\n", offset, value);
         bios_debug_count++;
     }

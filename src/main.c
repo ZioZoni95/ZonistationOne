@@ -28,6 +28,9 @@
 #include "log.h"
 #include "event_scheduler.h" // <<< ADDED: Include for event scheduling
 
+// Add prototype to fix implicit declaration warning
+void interconnect_check_bios_boot(struct Interconnect* inter);
+
 /*
  * Command Line Logging Options:
  *   --debug            Set log level to DEBUG (verbose output)
@@ -218,12 +221,11 @@ int main(int argc, char *argv[]) {
     LOG_INFO("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
 
-    // --- Schedule Initial Events ---
-    // These constants must match those in event_scheduler.c
+    // --- Schedule Initial Events (using new event system) ---
     #define VBLANK_CYCLES 564480
-    #define TIMER0_CYCLES 1000
-    event_scheduler_schedule(&interconnect_state, EVENT_VBLANK, VBLANK_CYCLES);
-    event_scheduler_schedule(&interconnect_state, EVENT_TIMER0, TIMER0_CYCLES);
+    // Only schedule VBlank event at startup. Timer0 events are scheduled by timer logic when needed.
+    eventq_schedule(&interconnect_state, EVQ_VBLANK, VBLANK_CYCLES);
+    // eventq_schedule(&interconnect_state, EVQ_TIMER0, TIMER0_CYCLES); // REMOVED: Timer0 events are scheduled by timers_step()
 
     LOG_INFO("All Emulator Components Initialized.");
 
@@ -248,33 +250,20 @@ int main(int argc, char *argv[]) {
         }
 
         // --- Run Emulation for One Frame ---
-        
-        // Execute a frame's worth of CPU cycles.
-        // cpu_run_cycles is a hypothetical function. If you have cpu_run_next_instruction,
-        // you would loop that call `cycles_per_frame` times.
         for (uint32_t i = 0; i < cycles_per_frame; ++i) {
              cpu_run_next_instruction(&cpu_state);
         }
         // Step timers once per frame with the total cycles executed
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
-
-        // <<< UPDATED: Step the CD-ROM scheduler >>>
-        // This is critical for handling timed CD-ROM commands. It must be called
-        // regularly, passing the number of CPU cycles that have just run.
-        // NOTE: This is required for CDROM IRQ2 (CDROM) to be triggered and for command completion.
+        // Step the CD-ROM scheduler
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
-
         // Check if BIOS needs boot helper for interrupt configuration
         interconnect_check_bios_boot(&interconnect_state);
-
-        // Trigger VBlank IRQ0 at the end of each frame
-        gpu_trigger_vblank_irq(&interconnect_state.gpu);
-
+        // --- Dispatch all due events (timers, VBlank, DMA, etc) ---
+        eventq_dispatch_due(&interconnect_state);
+        // Remove direct VBlank IRQ or timer event logic from here (handled by event system)
         total_cycles += cycles_per_frame;
-
         // --- Render and Display Frame ---
-        // The GPU emulation sends drawing commands to the renderer during CPU execution.
-        // Here, we just need to swap the buffers to show the result on screen.
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
     }
