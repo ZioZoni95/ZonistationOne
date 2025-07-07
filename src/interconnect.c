@@ -3,6 +3,15 @@
 #include <stdbool.h>
 #include "log.h"
 
+// At the top, after #include "log.h":
+#ifndef LOG_DMA_INFO
+#define LOG_DMA_INFO(...)   log_component("dma", LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_DMA_DEBUG(...)  log_component("dma", LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_DMA_TRACE(...)  log_component("dma", LOG_LEVEL_TRACE, __VA_ARGS__)
+#define LOG_DMA_WARN(...)   log_component("dma", LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_DMA_ERROR(...)  log_component("dma", LOG_LEVEL_ERROR, __VA_ARGS__)
+#endif
+
 // DMA and GPU region access logs are extremely frequent and only useful for deep debugging.
 // Suppress at INFO/DEBUG, only log at TRACE, and rate-limit. Keep summary/activation logs at INFO/DEBUG.
 static uint64_t dma_read32_count = 0;
@@ -69,7 +78,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     inter->bios = bios;
     inter->ram = ram;
     dma_init(&inter->dma); // Initialize DMA controller state
-    gpu_init(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
+    gpu_init_full(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
 
     cdrom_init(&inter->cdrom,inter);
@@ -194,7 +203,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         dma_read32_count++;
         if (log_get_level() >= LOG_LEVEL_TRACE) {
             if ((dma_read32_count % 1000 == 0) || (physical_addr != last_dma_read32_addr) || (offset != last_dma_read32_offset)) {
-                LOG_INTERCONNECT_TRACE("~ Read32 from DMA region: Addr=0x%08x Offset=0x%x (count=%llu)", physical_addr, offset, dma_read32_count);
+                LOG_DMA_TRACE("~ Read32 from DMA region: Addr=0x%08x Offset=0x%x (count=%llu)", physical_addr, offset, dma_read32_count);
                 last_dma_read32_addr = physical_addr;
                 last_dma_read32_offset = offset;
             }
@@ -478,17 +487,16 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        uint16_t prev = inter->irq_status;
+        LOG_DEBUG("[IRQ] Write to I_STAT (IRQ_STATUS_ADDR): Value=0x%04x, Before=0x%04x", value, inter->irq_status);
+        // Clear bits in irq_status that are set in value
         inter->irq_status &= ~(value & 0xFFFF);
-        if ((prev & 0x1) && !(inter->irq_status & 0x1)) {
-            LOG_INTERCONNECT_INFO("[IRQ] IRQ0 acknowledged/cleared by BIOS (I_STAT: 0x%04x -> 0x%04x)", prev, inter->irq_status);
-        }
+        LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
         // Writing sets the interrupt mask
         inter->irq_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
-        LOG_INTERCONNECT_INFO("~ Write32 to IRQ_MASK: Value=0x%08x -> I_MASK=0x%04x\n", value, inter->irq_mask);
+        LOG_DEBUG("[IRQ] Write to I_MASK (IRQ_MASK_ADDR): Value=0x%04x, New I_MASK=0x%04x, IRQ0 enabled=%d", value, inter->irq_mask, (inter->irq_mask & 0x1) ? 1 : 0);
         return;
     }
 
@@ -524,19 +532,19 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         dma_write32_count++;
         if (log_get_level() >= LOG_LEVEL_TRACE) {
             if ((dma_write32_count % 1000 == 0) || (physical_addr != last_dma_write32_addr) || (offset != last_dma_write32_offset) || (value != last_dma_write32_value)) {
-                LOG_INTERCONNECT_TRACE("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x (count=%llu)", physical_addr, offset, value, dma_write32_count);
+                LOG_DMA_TRACE("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x (count=%llu)", physical_addr, offset, value, dma_write32_count);
                 last_dma_write32_addr = physical_addr;
                 last_dma_write32_offset = offset;
                 last_dma_write32_value = value;
             }
         }
-        LOG_INTERCONNECT_INFO("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x\n", physical_addr, offset, value);
+        LOG_DMA_INFO("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x\n", physical_addr, offset, value);
         bool channel_became_active = dma_write(&inter->dma, offset, value); // Delegate
 
         // If the write activated a channel control register, start the DMA transfer
         if (channel_became_active) {
              uint32_t channel_index = (offset >> 4) & 0x7;
-             LOG_INTERCONNECT_INFO("  DMA Channel %d activated by write to offset 0x%x.\n", channel_index, offset);
+             LOG_DMA_INFO("  DMA Channel %d activated by write to offset 0x%x.\n", channel_index, offset);
              interconnect_perform_dma(inter, channel_index);
         }
         return;
@@ -625,7 +633,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         if (log_get_level() >= LOG_LEVEL_TRACE) {
             // In TRACE mode, print every 1000th access or when value changes
             if ((write16_da8_count % 1000 == 0) || (value != last_write16_da8_value)) {
-                LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE16 at 0x1f801da8: value=0x%04x (count=%llu)", value, write16_da8_count);
+                LOG_DMA_TRACE("[INTERCONNECT] IO WRITE16 at 0x1f801da8: value=0x%04x (count=%llu)", value, write16_da8_count);
                 last_write16_da8_value = value;
             }
         }
@@ -847,7 +855,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
         return;
     }
 
-    LOG_INTERCONNECT_INFO("--- Starting DMA Transfer for Channel %d ---\n", channel_index);
+    LOG_DMA_INFO("--- Starting DMA Transfer for Channel %d ---\n", channel_index);
     DmaChannel* ch = &inter->dma.channels[channel_index];
     DmaSync sync_mode = ch->sync;
 
@@ -856,11 +864,11 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             // Primarily used for GPU Channel 2
             if (channel_index == 2 && ch->direction == FROM_RAM) {
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address from MADR
-                LOG_INTERCONNECT_INFO("DMA GPU Linked List: Starting at 0x%08x\n", addr);
+                LOG_DMA_INFO("DMA GPU Linked List: Starting at 0x%08x\n", addr);
                 while(1) {
                     // Check address bounds before reading header
                     if (addr >= RAM_SIZE) {
-                        LOG_INTERCONNECT_ERROR("DMA GPU LL Error: Header address 0x%08x out of RAM bounds.\n", addr);
+                        LOG_DMA_ERROR("DMA GPU LL Error: Header address 0x%08x out of RAM bounds.\n", addr);
                         break;
                     }
                     // Read header: size in high byte, next address in low 24 bits
@@ -874,7 +882,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                          for (uint32_t i = 0; i < num_words; ++i) {
                             addr = (addr + 4) & 0x00FFFFFC; // Advance address for command word
                             if (addr >= RAM_SIZE) { // Check bounds before reading command
-                                LOG_INTERCONNECT_ERROR("DMA GPU LL Error: Command address 0x%08x out of RAM bounds.\n", addr);
+                                LOG_DMA_ERROR("DMA GPU LL Error: Command address 0x%08x out of RAM bounds.\n", addr);
                                 next_addr = 0xFFFFFF; // Force stop after this packet
                                 break; // Exit inner loop
                             }
@@ -886,26 +894,26 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
                     // Check for end-of-list marker (Top bit of next_addr usually, or 0xFFFFFF) [cite: 1808]
                     if ((header & 0x800000) != 0) { // Check MSB of address field as per Mednafen comment
-                        LOG_INTERCONNECT_INFO("DMA GPU Linked List: End marker (0x800000) found in header 0x%08x.\n", header);
+                        LOG_DMA_INFO("DMA GPU Linked List: End marker (0x800000) found in header 0x%08x.\n", header);
                         break;
                     }
                     // Check for explicit 0xFFFFFF marker (safer)
                     if (next_addr == 0xFFFFFF) {
-                        LOG_INTERCONNECT_INFO("DMA GPU Linked List: End marker (0xFFFFFF) found.\n");
+                        LOG_DMA_INFO("DMA GPU Linked List: End marker (0xFFFFFF) found.\n");
                          break;
                     }
 
                     // Check next address validity before proceeding
                      if (next_addr >= RAM_SIZE) {
-                         LOG_INTERCONNECT_ERROR("DMA GPU LL Error: Next header address 0x%08x out of RAM bounds.\n", next_addr);
+                         LOG_DMA_ERROR("DMA GPU LL Error: Next header address 0x%08x out of RAM bounds.\n", next_addr);
                          break;
                      }
                     // Move to the next header address
                     addr = next_addr;
                 }
-                LOG_INTERCONNECT_INFO("DMA GPU Linked List: Finished.\n");
+                LOG_DMA_INFO("DMA GPU Linked List: Finished.\n");
             } else {
-                 LOG_INTERCONNECT_ERROR("Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).\n", channel_index, ch->direction);
+                 LOG_DMA_ERROR("Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).\n", channel_index, ch->direction);
             }
             break;
 
@@ -914,13 +922,13 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             {
                 uint32_t words_to_transfer = dma_get_transfer_size_words(ch);
                 if (words_to_transfer == 0) {
-                    LOG_INTERCONNECT_WARN("Warning: DMA Block/Request transfer started with zero size for channel %d.\n", channel_index);
+                    LOG_DMA_WARN("Warning: DMA Block/Request transfer started with zero size for channel %d.\n", channel_index);
                     break; // Nothing to do
                 }
 
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address
                 int32_t step = (ch->step == INCREMENT) ? 4 : -4;
-                LOG_INTERCONNECT_INFO("DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words\n",
+                LOG_DMA_INFO("DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words\n",
                        channel_index, (ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM"),
                        (sync_mode == MANUAL ? "MANUAL" : "REQUEST"), step, addr, words_to_transfer);
 
@@ -928,7 +936,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Ensure address stays within RAM bounds (mask low bits, check high bits)
                     uint32_t current_addr_masked = addr & 0x001FFFFC; // Mask address to stay within 2MB and word aligned
                     if (current_addr_masked >= RAM_SIZE) {
-                         LOG_INTERCONNECT_ERROR("DMA Block Error: Address 0x%08x (masked 0x%08x) out of RAM bounds on channel %d.\n", addr, current_addr_masked, channel_index);
+                         LOG_DMA_ERROR("DMA Block Error: Address 0x%08x (masked 0x%08x) out of RAM bounds on channel %d.\n", addr, current_addr_masked, channel_index);
                          break; // Stop transfer if address goes out of bounds
                     }
 
@@ -941,7 +949,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break;
                             // Add cases for other peripherals (CDROM, SPU, MDEC) here
                             default:
-                                LOG_INTERCONNECT_WARN("Warning: Unhandled DMA Block FROM_RAM transfer for channel %d, Addr=0x%08x, Data=0x%08x\n",
+                                LOG_DMA_WARN("Warning: Unhandled DMA Block FROM_RAM transfer for channel %d, Addr=0x%08x, Data=0x%08x\n",
                                        channel_index, current_addr_masked, data_word);
                                 break;
                         }
@@ -957,7 +965,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break;
                             // Add cases for other peripherals reading TO RAM (CDROM, SPU, MDEC)
                             default:
-                                LOG_INTERCONNECT_WARN("Warning: Unhandled DMA Block TO_RAM transfer for channel %d, Addr=0x%08x\n",
+                                LOG_DMA_WARN("Warning: Unhandled DMA Block TO_RAM transfer for channel %d, Addr=0x%08x\n",
                                        channel_index, current_addr_masked);
                                 break;
                         }
@@ -967,18 +975,18 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Advance address for next word
                     addr = (uint32_t)((int32_t)addr + step); // Apply step
                 }
-                 LOG_INTERCONNECT_INFO("DMA Block/Request: Finished transfer for channel %d.\n", channel_index);
+                 LOG_DMA_INFO("DMA Block/Request: Finished transfer for channel %d.\n", channel_index);
             }
             break;
 
         default: // Should not happen if sync enum is correct
-            LOG_INTERCONNECT_ERROR("Error: Unknown DMA Sync mode %d encountered for channel %d.\n", sync_mode, channel_index);
+            LOG_DMA_ERROR("Error: Unknown DMA Sync mode %d encountered for channel %d.\n", sync_mode, channel_index);
             break;
     }
 
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
-    LOG_INTERCONNECT_INFO("--- Finished DMA Transfer Processing for Channel %d ---\n", channel_index);
+    LOG_DMA_INFO("--- Finished DMA Transfer Processing for Channel %d ---\n", channel_index);
 
     // TODO: Trigger DMA interrupt here if enabled in DICR and channel IRQ was set
 }

@@ -159,5 +159,9 @@ void gpu_gp0(Gpu* gpu, uint32_t command); // Handles commands/data sent to GP0 p
 void gpu_gp1(Gpu* gpu, uint32_t command); // Handles commands sent to GP1 port
 uint32_t gpu_read_status(Gpu* gpu);       // Reads the GPUSTAT register value
 uint32_t gpu_read_data(Gpu* gpu);         // Reads data from GPUREAD port (e.g., after Image Store)
+// GPU initialization (full system reset, with VRAM)
+void gpu_init_full(Gpu* gpu, Interconnect* inter);
+// GPU soft reset (does NOT clear VRAM)
+void gpu_soft_reset(Gpu* gpu);
 
 #endif // GPU_H

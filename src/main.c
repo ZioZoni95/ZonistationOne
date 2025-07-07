@@ -26,6 +26,7 @@
 #include "renderer.h"
 #include "cdrom.h" // <<< UPDATED: Added include for the CD-ROM component
 #include "log.h"
+#include "event_scheduler.h" // <<< ADDED: Include for event scheduling
 
 /*
  * Command Line Logging Options:
@@ -217,10 +218,17 @@ int main(int argc, char *argv[]) {
     LOG_INFO("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
 
+    // --- Schedule Initial Events ---
+    // These constants must match those in event_scheduler.c
+    #define VBLANK_CYCLES 564480
+    #define TIMER0_CYCLES 1000
+    event_scheduler_schedule(&interconnect_state, EVENT_VBLANK, VBLANK_CYCLES);
+    event_scheduler_schedule(&interconnect_state, EVENT_TIMER0, TIMER0_CYCLES);
+
     LOG_INFO("All Emulator Components Initialized.");
 
     // --- Main Emulation Loop ---
-    LOG_INFO("Starting Emulation Loop...");
+    LOG_INFO("=== Main emulation loop starting ===");
     bool should_quit = false;
     SDL_Event event;
     uint64_t total_cycles = 0;

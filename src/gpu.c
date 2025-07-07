@@ -76,8 +76,8 @@ static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
 static void gp1_reset(Gpu* gpu, uint32_t value) {
     LOG_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
     (void)value; // value is unused for this command
-    // Re-initialize GPU state AND the VRAM state by calling gpu_init
-    gpu_init(gpu, gpu->inter);
+    // Only reset GPU state, do NOT clear VRAM
+    gpu_soft_reset(gpu);
 }
 
 /** GP1(0x01): Reset Command Buffer */
@@ -364,11 +364,12 @@ static void gp0_image_store(Gpu* gpu) {
 
 /**
  * @brief Initializes the GPU state, including VRAM and default register values.
+ * This is a full initialization (power-on or hard reset).
  */
-void gpu_init(Gpu* gpu, Interconnect* inter) {
-    LOG_GPU_INFO("GPU initialized");
-    LOG_INFO("GPU Initializing...\n");
-    vram_init(&gpu->vram); // Init VRAM first
+void gpu_init_full(Gpu* gpu, Interconnect* inter) {
+    LOG_GPU_INFO("GPU full initialization (with VRAM)");
+    LOG_INFO("GPU Initializing (full)...\n");
+    vram_init(&gpu->vram); // Init VRAM only on full reset
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
     gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
@@ -388,12 +389,46 @@ void gpu_init(Gpu* gpu, Interconnect* inter) {
     gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
     gpu->display_line_end = 0x100; gpu->field = Top;
     clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
-    gpu->gp0_mode = GP0_MODE_COMMAND; gpu->gp0_current_opcode = 0xFF;
+    gpu->gp0_mode = GP0_MODE_COMMAND;
     gpu->gp0_command_method = NULL;
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     gpu->inter = inter;
     LOG_INFO("GPU Initialized (State reset, VRAM initialized).\n");
+}
+
+/**
+ * @brief Soft reset of the GPU state (does NOT clear VRAM).
+ * Used for GP1(0x00) Soft Reset command.
+ */
+void gpu_soft_reset(Gpu* gpu) {
+    LOG_GPU_INFO("GPU soft reset (no VRAM)");
+    LOG_INFO("GPU Soft Reset (no VRAM clear)...\n");
+    // All state reset EXCEPT VRAM
+    gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
+    gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
+    gpu->texture_window_x_mask = 0; gpu->texture_window_y_mask = 0;
+    gpu->texture_window_x_offset = 0; gpu->texture_window_y_offset = 0;
+    gpu->dithering = false; gpu->draw_to_display = false;
+    gpu->texture_disable = false; gpu->rectangle_texture_x_flip = false;
+    gpu->rectangle_texture_y_flip = false; gpu->drawing_area_left = 0;
+    gpu->drawing_area_top = 0; gpu->drawing_area_right = 0;
+    gpu->drawing_area_bottom = 0; gpu->drawing_x_offset = 0;
+    gpu->drawing_y_offset = 0; gpu->force_set_mask_bit = false;
+    gpu->preserve_masked_pixels = false; gpu->dma_setting = GPU_DMA_Off;
+    gpu->display_disabled = true; gpu->display_vram_x_start = 0;
+    gpu->display_vram_y_start = 0; gpu->hres_raw = (HorizontalResRaw){0, 0};
+    gpu->vres = Y240Lines; gpu->vmode = Ntsc; gpu->interlaced = true;
+    gpu->display_depth = D15Bits; gpu->display_horiz_start = 0x200;
+    gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
+    gpu->display_line_end = 0x100; gpu->field = Top;
+    clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
+    gpu->gp0_mode = GP0_MODE_COMMAND;
+    gpu->gp0_command_method = NULL;
+    gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
+    gpu->vram_load_h = 0; gpu->vram_load_count = 0;
+    // gpu->inter remains unchanged
+    LOG_INFO("GPU Soft Reset complete (VRAM preserved).\n");
 }
 
 /** Processes commands/data sent to GP0 port */
