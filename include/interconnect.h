@@ -122,15 +122,14 @@ typedef struct Interconnect {
     Timers timers_state; // <<< ADD THIS MEMBER
     Cdrom cdrom;
 
-    // --- Event Scheduler State ---
-    // Bitfield: each bit represents a pending/scheduled event (see SystemEventType)
-    uint32_t evtq_pending;
-    // Array: target cycle for each event type (when the event should fire)
-    uint32_t evtq_target_cycle[EVENT_COUNT];
-    // The cycle at which the next event is scheduled (for efficient main loop checks)
-    uint32_t evtq_next_cycle;
-    // Global CPU cycle counter, incremented as the CPU executes instructions/blocks
-    uint32_t cpu_cycle_counter;
+    // --- Event System State (for event_scheduler) ---
+    // These fields are used by the central event/timing system to schedule and dispatch hardware events.
+    #define EVQ_MAX_EVENTS  EVQ_EVENT_COUNT
+
+    uint32_t evq_pending;                        // Bitfield: which events are currently pending
+    uint32_t evq_target_cycle[EVQ_MAX_EVENTS];   // Target cycle for each event
+    uint32_t evq_next_cycle;                     // Cycle of the next scheduled event
+    uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
     // --------------------------------
 
     // Add pointers/state for other peripherals here later (Timers, SPU, CDROM, etc.)

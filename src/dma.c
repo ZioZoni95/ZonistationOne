@@ -1,8 +1,17 @@
 #include "dma.h"
 #include <stdio.h> // For fprintf, stderr
 #include "log.h"
+#include "event_scheduler.h" // For eventq_schedule
+#include "interconnect.h"   // For Interconnect struct (needed for event system)
 
 // Logging: Only use LOG_ERROR for DMA hardware faults. No per-transfer logs.
+
+// Example: Replace LOG_DMA_INFO or LOG_DMA_DEBUG for frequent register accesses with LOG_DMA_TRACE or wrap in a higher debug level check.
+#ifdef LOG_DMA_TRACE
+#define LOG_DMA_TRACE_ENABLED 1
+#else
+#define LOG_DMA_TRACE_ENABLED 0
+#endif
 
 // Helper function to get channel control register value
 // REMOVED 'static'
@@ -59,10 +68,18 @@ void dma_channel_done(DmaChannel* ch) {
     // TODO: Handle setting/clearing interrupt flags in DICR here later
 }
 
+// Helper: Estimate cycles for a DMA transfer (very rough, tune as needed)
+static uint32_t estimate_dma_cycles(DmaChannel* ch) {
+    // PS1 DMA is fast, but not instant. Use 2 cycles per word as a starting point.
+    uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+    if (words == 0) words = 1;
+    return words * 2; // 2 cycles per word (tune as needed)
+}
 
 // Initializes the DMA state to reset values.
-void dma_init(Dma* dma) {
+void dma_init(Dma* dma, struct Interconnect* inter) {
     LOG_DMA_INFO("DMA initialized");
+    dma->inter = inter; // Store pointer to Interconnect
     // DPCR reset value
     dma->control = 0x07654321;
 
@@ -119,8 +136,8 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
                     dicr |= ((uint32_t)dma->channel_irq_enable << 16);
                     dicr |= ((uint32_t)dma->master_irq_enable << 23);
                     dicr |= ((uint32_t)dma->channel_irq_flags << 24);
-                    bool master_flag = dma->force_irq || (dma->master_irq_enable && ((dma->channel_irq_flags & dma->channel_irq_enable) != 0));
-                    dicr |= ((uint32_t)master_flag << 31);
+                    // Master IRQ flag (bit 31)
+                    dicr |= ((uint32_t)dma->master_irq_flag << 31);
                     return dicr;
                 }
             default:
@@ -151,9 +168,19 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 channel_set_control(ch, value);
                 // Check if this write activated the channel NOW
                 channel_became_active = dma_channel_is_active(ch);
+                if (channel_became_active) {
+                    // --- Event-driven GPU DMA (Channel 2) ---
+                    if (channel_index == 2) { // GPU DMA
+                        LOG_DMA_INFO("[DMA] GPU DMA started: Scheduling event-driven transfer");
+                        uint32_t cycles = estimate_dma_cycles(ch);
+                        eventq_schedule(dma->inter, EVQ_DMA_GPU, cycles);
+                        // Do NOT complete the transfer here; let the event handler do it
+                    }
+                    // TODO: Add similar logic for other DMA channels (CDROM, SPU, OTC)
+                }
                 break;
             default:
-                LOG_WARN("Warning: Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)\n", offset, value, channel_index, register_offset);
+                LOG_WARN("Warning: Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)", offset, value, channel_index, register_offset);
                 break;
         }
     } else { // Main DMA Register Access
@@ -166,14 +193,31 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 dma->force_irq = (value >> 15) & 1;
                 dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
                 dma->master_irq_enable = (value >> 23) & 1;
+                // --- DMA IRQ acknowledge logic ---
                 uint8_t ack_flags = (uint8_t)((value >> 24) & 0x7F);
-                dma->channel_irq_flags &= ~ack_flags;
+                if (ack_flags) {
+                    dma->channel_irq_flags &= ~ack_flags;
+                    // If any acknowledged channel was enabled, clear master IRQ flag
+                    if ((dma->channel_irq_enable & ack_flags) != 0) {
+                        dma->master_irq_flag = false;
+                        // Also clear IRQ3 (DMA IRQ) in irq_status
+                        if (dma->inter) {
+                            dma->inter->irq_status &= ~(1u << 3);
+                        }
+                    }
+                }
                 break;
             default:
-                LOG_ERROR("Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x\n", offset, value);
+                LOG_ERROR("Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);
                 break;
         }
     }
+
+    // For frequent DMA region accesses, only log at TRACE level:
+    #if LOG_DMA_TRACE_ENABLED
+        LOG_DMA_TRACE("Write32 to DMA region: Addr=0x%08x Offset=0x%02x = 0x%08x", offset, register_offset, value);
+    #endif
+
     return channel_became_active;
 }
 

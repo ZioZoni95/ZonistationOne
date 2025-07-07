@@ -6,9 +6,13 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 
 ## 🏁 Current Status (July 2025)
 
-- The emulator displays the PlayStation boot logo, but the animation is stuck and does not progress.
-- All core systems (CPU, GPU, VRAM, RAM, DMA, Renderer, CDROM, Interconnect, Timers) are working well enough to reach this point.
-- **Blocker:** The event/IRQ system is incomplete—BIOS is not receiving VBlank/timer IRQs as expected, so the animation cannot continue.
+- **Boots to PlayStation logo (glitched/stuck animation):** The emulator now reliably displays the PS1 boot animation, but the animation is glitched or stuck and does not progress to the BIOS menu.
+- **Timer and IRQ system**: Fully refactored for hardware-accurate event scheduling and interrupt delivery. No more interrupt storms or CPU exception loops.
+- **Event Scheduler**: All hardware events (VBlank, timers, DMA, etc.) are now delivered via a robust event queue.
+- **Main Loop**: Clean integration with the event system; no direct hardware event hacks remain.
+- **DMA**: Only GPU DMA is minimally functional; other DMA channels are stubbed or not required for BIOS menu.
+- **CDROM**: Not yet fully implemented; BIOS menu should still appear with correct 'no disc' status, but the emulator is currently stuck at the boot logo.
+- **Renderer**: Sufficient for logo and menu graphics.
 
 ### Component Status
 
@@ -103,4 +107,21 @@ This project is for educational purposes only. PlayStation is a trademark of Son
 
 ---
 
-*PCSX ReARMed is used as a reference for hardware behavior only. No code is copied; all code is original.* 
+*PCSX ReARMed is used as a reference for hardware behavior only. No code is copied; all code is original.*
+
+## Recent Fixes
+- Fixed timer IRQ acknowledge/clear logic to prevent interrupt storms.
+- IRQ requests are now only made when appropriate, matching hardware behavior.
+- Event scheduler and timer event delivery are robust and accurate.
+- Cleaned up all compiler warnings and errors.
+
+## Next Steps
+- Improve CDROM emulation to ensure correct 'no disc' status for BIOS menu.
+- Expand DMA and peripheral support for game booting.
+- Refine renderer for full menu and in-game graphics.
+
+## Limitations
+- Still stuck at a glitched or looping boot logo animation (not yet at BIOS menu).
+- No game booting yet (CDROM incomplete).
+- Some DMA channels and peripherals are stubbed.
+- BIOS menu may not appear if CDROM or GPU status is not correct. 

@@ -292,13 +292,19 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // (cpu_set_reg already handles this, but double-checking doesn't hurt)
     cpu->out_regs[REG_ZERO] = 0;
 
-    // --- Event Scheduler Integration ---
+    // --- Event System Integration ---
     // After each instruction, increment the global cycle counter in the interconnect.
     if (cpu->inter) {
         cpu->inter->cpu_cycle_counter++;
+        // Rate-limited sanity logging for Timer0 event scheduling/firing
+        static uint64_t sanity_log_counter = 0;
+        sanity_log_counter++;
+        if (sanity_log_counter < 10 || sanity_log_counter % 1000000 == 0) {
+            LOG_DEBUG("[SANITY] cpu_cycle_counter=%u, evq_target_cycle[TIMER0]=%u, evq_pending=0x%X", cpu->inter->cpu_cycle_counter, cpu->inter->evq_target_cycle[EVQ_TIMER0], cpu->inter->evq_pending);
+        }
         // If we've reached or passed the next scheduled event, dispatch due events.
-        if (cpu->inter->cpu_cycle_counter >= cpu->inter->evtq_next_cycle) {
-            event_scheduler_dispatch_due(cpu->inter);
+        if (cpu->inter->cpu_cycle_counter >= cpu->inter->evq_next_cycle) {
+            eventq_dispatch_due(cpu->inter);
         }
     }
 
@@ -603,6 +609,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_rfe(Cpu* cpu, uint32_t instruction) {
+    (void)instruction;
     uint32_t old_sr = cpu->sr;
     uint32_t old_pc = cpu->pc;
     uint32_t old_epc = cpu->epc;
@@ -1153,11 +1160,11 @@ void op_cop1(Cpu* cpu, uint32_t instruction) {
 
 // Coprocessor 2 (GTE) Opcode - Currently unimplemented
 void op_cop2(Cpu* cpu, uint32_t instruction) {
+    uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
+    (void)cycles;
     LOG_TRACE("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
     
     // Execute the GTE instruction
-    uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
-    
     // TODO: Handle GTE busy state and timing if needed
     // For now, we'll just continue execution
 }
