@@ -5,6 +5,7 @@
 #include "log.h"
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
+#include "timers.h"        // Add this include for timer event handler prototypes
 
 // ===============================
 // Event Scheduler Implementation
@@ -75,26 +76,32 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
  */
 void eventq_dispatch_due(struct Interconnect* sys) {
     uint32_t now = sys->cpu_cycle_counter;
-    uint32_t pending = sys->evq_pending;
-    static int timer0_fire_count = 0;
-    for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
-        if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
-            // --- Defensive, rate-limited logging for Timer0 event firing ---
-            if (event == EVQ_TIMER0) {
-                if (timer0_fire_count < 10 || timer0_fire_count % 1000 == 0) {
-                    LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X [count=%d]", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending, timer0_fire_count);
+    // Keep dispatching as long as any event is due
+    while (1) {
+        uint32_t pending = sys->evq_pending;
+        int any_fired = 0;
+        for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
+            if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
+                // Defensive, rate-limited logging for Timer0 event firing
+                if (event == EVQ_TIMER0) {
+                    static int timer0_fire_count = 0;
+                    if (timer0_fire_count < 10 || timer0_fire_count % 1000 == 0) {
+                        LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X [count=%d]", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending, timer0_fire_count);
+                    }
+                    timer0_fire_count++;
+                } else {
+                    LOG_EVENT_DEBUG("[EventQ] Firing event %d at cycle %u", event, now);
                 }
-                timer0_fire_count++;
-            } else {
-                LOG_EVENT_DEBUG("[EventQ] Firing event %d at cycle %u", event, now);
-            }
-            // Clear the pending bit
-            sys->evq_pending &= ~(1u << event);
-            // Call the event handler if registered
-            if (evq_handlers[event]) {
-                evq_handlers[event](sys);
+                sys->evq_pending &= ~(1u << event);
+                if (evq_handlers[event]) {
+                    evq_handlers[event](sys);
+                }
+                any_fired = 1;
             }
         }
+        if (!any_fired) break;
+        // After firing, update now in case event handler advanced cycles
+        now = sys->cpu_cycle_counter;
     }
     // Recalculate the next event cycle
     uint32_t soonest = UINT32_MAX;
@@ -129,53 +136,12 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     timers_on_vblank(&sys->timers_state);
 }
 
-static void evq_handle_timer0(struct Interconnect* sys) {
-    Timers* timers = &sys->timers_state;
-    Timer* t = &timers->timers[0];
-    LOG_EVENT_DEBUG("[Timer0][EVENT HANDLER] Called. Counter=%u, Target=%u, Mode=0x%04x, interrupt_requested=%d", t->counter, t->target, t->mode, t->interrupt_requested);
-    if (!t->interrupt_requested) {
-        t->interrupt_requested = true;
-        t->reached_target_flag = true;
-        t->mode |= (1 << 10);
-        LOG_EVENT_DEBUG("[Timer0][EVENT HANDLER] IRQ0 requested by Timer0 event handler");
-        interconnect_request_irq(sys, t->irq, "Timer0 event");
-    } else {
-        LOG_EVENT_DEBUG("[Timer0][EVENT HANDLER] IRQ0 NOT requested (already requested)");
-    }
-    // Do NOT reschedule Timer0 event here; wait for timer reset or mode write
-}
-
-static void evq_handle_timer1(struct Interconnect* sys) {
-    Timers* timers = &sys->timers_state;
-    Timer* t = &timers->timers[1];
-    LOG_EVENT_DEBUG("[Timer1][EVENT HANDLER] Called. Counter=%u, Target=%u, Mode=0x%04x, interrupt_requested=%d", t->counter, t->target, t->mode, t->interrupt_requested);
-    if (!t->interrupt_requested) {
-        t->interrupt_requested = true;
-        t->reached_target_flag = true;
-        t->mode |= (1 << 10);
-        LOG_EVENT_DEBUG("[Timer1][EVENT HANDLER] IRQ1 requested by Timer1 event handler");
-        interconnect_request_irq(sys, t->irq, "Timer1 event");
-    } else {
-        LOG_EVENT_DEBUG("[Timer1][EVENT HANDLER] IRQ1 NOT requested (already requested)");
-    }
-}
-
-static void evq_handle_timer2(struct Interconnect* sys) {
-    Timers* timers = &sys->timers_state;
-    Timer* t = &timers->timers[2];
-    LOG_EVENT_DEBUG("[Timer2][EVENT HANDLER] Called. Counter=%u, Target=%u, Mode=0x%04x, interrupt_requested=%d", t->counter, t->target, t->mode, t->interrupt_requested);
-    if (!t->interrupt_requested) {
-        t->interrupt_requested = true;
-        t->reached_target_flag = true;
-        t->mode |= (1 << 10);
-        LOG_EVENT_DEBUG("[Timer2][EVENT HANDLER] IRQ2 requested by Timer2 event handler");
-        interconnect_request_irq(sys, t->irq, "Timer2 event");
-    } else {
-        LOG_EVENT_DEBUG("[Timer2][EVENT HANDLER] IRQ2 NOT requested (already requested)");
-    }
-}
+static void evq_handle_timer0(struct Interconnect* sys) { timer0_event_handler(sys); }
+static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(sys); }
+static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
 
 static void evq_handle_dma_gpu(struct Interconnect* sys) {
+    LOG_EVENT_DEBUG("[DMA] Entered GPU DMA event handler");
     LOG_EVENT_DEBUG("[DMA] GPU DMA event handler called");
     Dma* dma = &sys->dma;
     DmaChannel* ch = &dma->channels[2]; // Channel 2: GPU
@@ -189,15 +155,18 @@ static void evq_handle_dma_gpu(struct Interconnect* sys) {
     // --- DMA IRQ logic (PCSX ReARMed style) ---
     // Set channel IRQ flag for channel 2
     dma->channel_irq_flags |= (1 << 2);
+    LOG_EVENT_DEBUG("[DMA] Channel 2 IRQ flag set: channel_irq_flags=0x%02x", dma->channel_irq_flags);
     // If channel IRQ enable and master IRQ enable are set, set master IRQ flag
     if ((dma->channel_irq_enable & (1 << 2)) && dma->master_irq_enable) {
         dma->master_irq_flag = true;
+        LOG_EVENT_DEBUG("[DMA] Master IRQ flag set: master_irq_flag=%d", dma->master_irq_flag);
     }
     // If master IRQ flag is set, set IRQ3 (DMA IRQ) in irq_status
     if (dma->master_irq_flag) {
         LOG_EVENT_DEBUG("[DMA] GPU DMA IRQ3 triggered (master IRQ flag set)");
         sys->irq_status |= (1u << 3); // IRQ3 is DMA
     }
+    LOG_EVENT_DEBUG("[DMA] Handler exit: channel_irq_enable=0x%02x, master_irq_enable=%d, master_irq_flag=%d, irq_status=0x%04x", dma->channel_irq_enable, dma->master_irq_enable, dma->master_irq_flag, sys->irq_status);
 }
 
 static void evq_handle_dma_cdrom(struct Interconnect* sys) {
