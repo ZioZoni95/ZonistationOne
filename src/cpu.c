@@ -182,6 +182,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
             LOG_INFO("[CPU] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x\n", 
                     current_status, current_mask, pending_interrupts);
             if (pending_interrupts != 0) {
+                // Only clear the IRQs that are both pending and acknowledged
                 interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, pending_interrupts);
                 LOG_INFO("[CPU] Acknowledged interrupts: 0x%04x\n", pending_interrupts);
             }
@@ -308,7 +309,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
         }
     }
 
-    // After executing each instruction (e.g., at the end of cpu_run_next_instruction):
+    // Restore original interrupt check at the end of cpu_run_next_instruction
     if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0) {
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
     }

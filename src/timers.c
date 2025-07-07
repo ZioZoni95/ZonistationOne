@@ -15,6 +15,7 @@
 #define HBLANK_NTSC_HZ 15625.0 // Horizontal blanking frequency for NTSC
 // --- VBlank timing constant (NTSC: 33868800 / 60) ---
 #define VBLANK_CYCLES 564480
+#define TIMER_MODE_OFFSET 0x4
 
 // Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
@@ -152,6 +153,13 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
     Timer* t = &timers->timers[timer_index];
     if (timer_index == 0) {
         LOG_TIMERS_INFO("[Timer0] Write16: offset=0x%x value=0x%04x", offset, value);
+    }
+    if (offset == TIMER_MODE_OFFSET) {
+        t->mode = value;
+        t->interrupt_requested = false; // Clear IRQ state on mode write
+        t->reached_target_flag = false;
+        timer_update_internal_state(timers, t, 0);
+        return;
     }
     switch (offset) {
         case TMR_REG_VAL:
@@ -344,10 +352,11 @@ int bios_disable_timer_irq(int t) { (void)t; return 1; }
 int bios_restart_timer(int t) { (void)t; return 1; }
 int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
 
-// --- BEGIN: Adapted from PCSX ReARMed (https://github.com/notaz/pcsx_rearmed) ---
+// --- BEGIN: Logic adapted from PCSX ReARMed (https://github.com/notaz/pcsx_rearmed) ---
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
-// This logic ensures Timer0 is reset and IRQ0 is requested on every VBlank,
-// as required for correct PS1 BIOS and game behavior.
+// This logic ensures Timer IRQs are only requested if not already requested,
+// and are cleared when acknowledged, matching PS1 hardware behavior.
+
 void timers_on_vblank(Timers* timers) {
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
@@ -364,4 +373,4 @@ void timers_on_vblank(Timers* timers) {
         t0->mode |= (1 << 10); // Set IRQ request bit
     }
 }
-// --- END: Adapted from PCSX ReARMed ---
+// --- END: Logic adapted from PCSX ReARMed ---
