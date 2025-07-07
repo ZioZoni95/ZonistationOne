@@ -17,7 +17,7 @@
 void debugger_init(Debugger* dbg) {
     LOG_DEBUGGER_INFO("Debugger initialized");
     if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        printf("Initializing Debugger...\n");
+    printf("Initializing Debugger...\n");
     }
     dbg->breakpoint_count = 0;
     dbg->read_watchpoint_count = 0;

@@ -36,17 +36,25 @@ typedef struct {
 
     // Internal emulation state derived from mode register & runtime behavior
     bool sync_enable;       // Mode[0]
-    uint8_t sync_mode;        // Mode[1-2]
+    uint8_t sync_mode;      // Mode[1-2]
     bool reset_on_target;   // Mode[3]
     bool irq_on_target;     // Mode[4]
     bool irq_on_ffff;       // Mode[5]
     bool irq_repeat;        // Mode[6]
     bool irq_pulse;         // Mode[7]
-    uint8_t clock_source;     // Mode[8-9]
+    uint8_t clock_source;   // Mode[8-9]
 
     bool interrupt_requested; // Internal flag: True if IRQ condition met this cycle
     bool reached_target_flag; // Internal sticky flag mirroring Mode[11]
-    bool reached_ffff_flag; // Internal sticky flag mirroring Mode[12]
+    bool reached_ffff_flag;   // Internal sticky flag mirroring Mode[12]
+
+    // --- Added for cycle-accurate emulation ---
+    uint32_t rate;           // Clock rate for this timer
+    uint32_t irq;            // IRQ line (4 for Timer0, 5 for Timer1, 6 for Timer2)
+    uint32_t counter_state;  // Counting mode (to target or overflow)
+    uint32_t irq_state;      // Current IRQ state (0 or 1)
+    uint32_t cycle;          // Current cycle count
+    uint32_t cycle_start;    // Cycle when timer was started
 
     // Variables for handling fractional clock cycles might be needed here later
     // double fractional_cycles;
@@ -63,6 +71,15 @@ typedef struct {
 
 } Timers;
 
+// --- Timer/IRQ/Mode Constants ---
+#define TIMER_COUNT_TO_OVERFLOW  0
+#define TIMER_COUNT_TO_TARGET    1
+#define TIMER0_IRQ  4
+#define TIMER1_IRQ  5
+#define TIMER2_IRQ  6
+#define TIMER_RATE_1     1
+#define TIMER_RATE_5     5
+#define TIMER_RATE_8     8
 
 // --- Function Prototypes ---
 
@@ -127,5 +144,18 @@ int bios_enable_timer_irq(int t);
 int bios_disable_timer_irq(int t);
 int bios_restart_timer(int t);
 int bios_ChangeClearRCnt(int t, int flag);
+
+// --- New Timer/Event Function Prototypes ---
+void timers_update(Timers* timers);  // Main update function for event system
+void timers_schedule_next(Timers* timers);  // Schedule next timer event
+uint32_t timers_calculate_frame_cycles(void);  // Frame timing
+uint32_t timers_calculate_line_cycles(void);   // Line timing
+
+// --- BEGIN: PCSX ReARMed-inspired logic ---
+// Called on every VBlank to reset Timer0 and schedule its event, ensuring correct VBlank/Timer0/IRQ0 coupling as required by the PS1 BIOS.
+void timers_on_vblank(Timers* timers);
+// --- END: PCSX ReARMed-inspired logic ---
+
+void timers_schedule_next_event(Timers* timers, int timer_index);
 
 #endif // TIMERS_H

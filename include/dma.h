@@ -21,6 +21,7 @@ typedef enum {
     LINKED_LIST = 2  // Used for GPU command lists
 } DmaSync;
 
+struct Interconnect; // Forward declaration
 
 // --- Structure for a single DMA Channel ---
 typedef struct {
@@ -61,10 +62,12 @@ typedef struct {
     // Array of 7 DMA Channels
     DmaChannel channels[7];
 
+    struct Interconnect* inter; // Pointer to Interconnect for event scheduling
+
 } Dma;
 
 // --- Function Prototypes ---
-void dma_init(Dma* dma);
+void dma_init(Dma* dma, struct Interconnect* inter);
 uint32_t dma_read(Dma* dma, uint32_t offset);
 // Return bool to indicate if a channel became active
 bool dma_write(Dma* dma, uint32_t offset, uint32_t value); // <-- Return type changed here
