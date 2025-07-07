@@ -13,7 +13,7 @@
 void gte_init(Gte* gte) {
     LOG_GTE_INFO("GTE initialized");
     
-    LOG_INFO("Initializing GTE...\n");
+    LOG_DEBUG("Initializing GTE...\n");
     
     // Clear all data registers
     memset(gte->data, 0, sizeof(gte->data));
@@ -25,7 +25,7 @@ void gte_init(Gte* gte) {
     gte->busy = false;
     gte->cycles_remaining = 0;
     
-    LOG_INFO("GTE Initialized\n");
+    LOG_DEBUG("GTE Initialized\n");
 }
 
 // --- GTE Register Access ---
@@ -68,7 +68,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
     uint32_t opcode = (instruction >> 20) & 0x3F; // Bits 25-20
     uint32_t cycles = 1; // Default cycle count
     
-    LOG_DEBUG("GTE: Executing instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
+    LOG_TRACE("GTE: Executing instruction 0x%08x (opcode 0x%02x)", instruction, opcode);
     
     switch (opcode) {
         case 0x01: // RTPS - Perspective Transformation (Single Point)

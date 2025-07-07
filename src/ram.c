@@ -10,7 +10,7 @@ void ram_init(Ram* ram) {
     // Fill RAM with a "garbage" value (0xCA) to simulate uninitialized state
     // and potentially help catch reads from uninitialized memory.
     memset(ram->data, 0xCA, RAM_SIZE);
-    LOG_INFO("RAM Initialized (%d bytes, filled with 0xCA).", RAM_SIZE);
+    LOG_DEBUG("RAM Initialized (%d bytes, filled with 0xCA).", RAM_SIZE);
 }
 
 // Helper for bounds checking

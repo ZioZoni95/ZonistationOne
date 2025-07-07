@@ -213,15 +213,15 @@ void cpu_run_next_instruction(Cpu* cpu) {
     instruction_counter++;
     if (cpu->pc == last_pc) {
         stuck_counter++;
-        if (stuck_counter % 1000000 == 0) {
-            LOG_INFO("[CPU] Stuck: PC=0x%08x for %llu instructions", cpu->pc, stuck_counter);
+        if (stuck_counter % 10000000 == 0) { // Increase interval for stuck log
+            LOG_DEBUG("[CPU] Stuck: PC=0x%08x for %llu instructions", cpu->pc, stuck_counter);
         }
     } else {
         stuck_counter = 0;
         last_pc = cpu->pc;
     }
-    // Only log progress every 100,000 instructions to avoid log spam in BIOS loops
-    if (instruction_counter % 100000 == 0) {
+    // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
+    if (instruction_counter % 1000000 == 0) {
         LOG_DEBUG("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
     }
 
@@ -231,9 +231,9 @@ void cpu_run_next_instruction(Cpu* cpu) {
     uint16_t mask = cpu->inter->irq_mask;
     bool interrupts_globally_enabled = (cpu->sr & 1) != 0; // Check SR[0] (IEC)
 
-    // Add detailed interrupt logging
-    if ((status & mask) != 0) {
-        LOG_INFO("[CPU] Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x\n", 
+    // Add detailed interrupt logging only at DEBUG level
+    if ((status & mask) != 0 && log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_DEBUG("[CPU] Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x\n", 
                 status, mask, interrupts_globally_enabled, (status & mask));
     }
 
@@ -291,6 +291,16 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // Ensure R0 in the output set is still 0 for the next cycle.
     // (cpu_set_reg already handles this, but double-checking doesn't hurt)
     cpu->out_regs[REG_ZERO] = 0;
+
+    // --- Event Scheduler Integration ---
+    // After each instruction, increment the global cycle counter in the interconnect.
+    if (cpu->inter) {
+        cpu->inter->cpu_cycle_counter++;
+        // If we've reached or passed the next scheduled event, dispatch due events.
+        if (cpu->inter->cpu_cycle_counter >= cpu->inter->evtq_next_cycle) {
+            event_scheduler_dispatch_due(cpu->inter);
+        }
+    }
 
     // After executing each instruction (e.g., at the end of cpu_run_next_instruction):
     if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0) {

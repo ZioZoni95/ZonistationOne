@@ -309,7 +309,7 @@ void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], Rendere
     }
 
     if (renderer->vertex_count + 3 > VERTEX_BUFFER_LEN) {
-        LOG_INFO("Renderer Info: Vertex buffer full (%u verts), forcing draw before push_triangle.\n", renderer->vertex_count);
+        LOG_DEBUG("Renderer: Vertex buffer full (%u verts), forcing draw before push_triangle.", renderer->vertex_count);
         renderer_draw(renderer);
         if (renderer->vertex_count + 3 > VERTEX_BUFFER_LEN) {
              LOG_ERROR("Renderer Error: Cannot push triangle, buffer still full after draw.\n");
@@ -318,7 +318,7 @@ void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], Rendere
     }
 
     // Copy data to CPU-side buffers
-    LOG_INFO("Renderer: Buffering Triangle (Start Index: %u)\n", renderer->vertex_count);
+    LOG_TRACE("Renderer: Buffering Triangle (Start Index: %u)", renderer->vertex_count);
     memcpy(&renderer->positions_data[renderer->vertex_count], pos, 3 * sizeof(RendererPosition));
     memcpy(&renderer->colors_data[renderer->vertex_count], col, 3 * sizeof(RendererColor));
 
@@ -370,22 +370,22 @@ void renderer_draw(Renderer* renderer) {
          return;
      }
      if (renderer->vertex_count == 0) {
-        // LOG_INFO("Renderer: Draw called with 0 vertices, skipping.\n"); // Optional info
+        // LOG_DEBUG("Renderer: Draw called with 0 vertices, skipping.\n"); // Optional debug
         return; // Nothing to draw
      }
 
-    LOG_INFO("Renderer: Drawing %u vertices...\n", renderer->vertex_count);
+    LOG_DEBUG("Renderer: Drawing %u vertices...", renderer->vertex_count);
 
     glUseProgram(renderer->shader_program); check_gl_error("draw - glUseProgram");
     glBindVertexArray(renderer->vao); check_gl_error("draw - glBindVertexArray");
 
     // --- Upload Buffered Vertex Data via glBufferSubData ---
-    LOG_INFO("  Uploading position data (%lu bytes)...\n", renderer->vertex_count * sizeof(RendererPosition));
+    LOG_TRACE("  Uploading position data (%lu bytes)...", renderer->vertex_count * sizeof(RendererPosition));
     glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer); check_gl_error("draw - glBindBuffer pos");
     glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererPosition), renderer->positions_data);
     check_gl_error("draw - glBufferSubData pos");
 
-    LOG_INFO("  Uploading color data (%lu bytes)...\n", renderer->vertex_count * sizeof(RendererColor));
+    LOG_TRACE("  Uploading color data (%lu bytes)...", renderer->vertex_count * sizeof(RendererColor));
     glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer); check_gl_error("draw - glBindBuffer col");
     glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererColor), renderer->colors_data);
     check_gl_error("draw - glBufferSubData col");
@@ -394,7 +394,7 @@ void renderer_draw(Renderer* renderer) {
     // ------------------------------------------------------
 
     // Draw the buffered primitives (interpreted as triangles)
-    LOG_INFO("  Issuing glDrawArrays...\n");
+    LOG_TRACE("  Issuing glDrawArrays...");
     glDrawArrays(GL_TRIANGLES,      // Mode: interpret vertices as triangles
                  0,                 // Starting index in the enabled arrays
                  renderer->vertex_count); // Number of vertices to render
