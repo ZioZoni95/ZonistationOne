@@ -1,298 +1,106 @@
 # ZoniStation One (PlayStation 1) Emulator
 
-A work-in-progress PlayStation 1 emulator fully written in C (-std99) , inspired by nocash and PSX-Spex documentation.
-
-**Reference Implementation:**
-- This project also uses [PCSX ReARMed](https://github.com/notaz/pcsx_rearmed) as a reference for understanding PlayStation hardware behavior and emulation techniques. No code is copied; PCSX ReARMed is used solely for learning, debugging, and cross-checking emulator logic.
-
-## 🏁 **Current Status: Interconnect Fully Tested & Compliant (01 July 2025)**
-
-- ✅ **CPU Exception Handling:** Complete
-- ✅ **Interconnect:** Fully tested, nocash/PSX-Spex compliant (all regions, edge cases, open bus behaviors verified)
-- ⏳ **Next Priority:** Timer0/VBlank IRQ re-implementation
-
-**Latest Achievement:** ✅ **CPU Exception System Fully Implemented and Tested (June 2025)**
-- Exception vector jumps (SYSCALL → 0x80000080) ✅
-- ERET instruction recognition and execution ✅
-- Register updates (EPC, Cause, Status) ✅
-- Exception flow control with `exception_pending` flag ✅
-- Strict compliance with PSX-Spex/nocash documentation ✅
-
-## Features
-
-- **MIPS R3000A CPU emulation** (with complete exception/interrupt support)
-- **GPU command parsing** and OpenGL-based renderer
-- **DMA controller** (partial)
-- **CDROM, RAM, VRAM, Timers, GTE** (partial)
-- **BIOS syscall and kernel support**
-- **Per-component logging** and debug system
-- **Modular codebase** (src/ for sources, include/ for headers)
-- **Comprehensive testing suite** for component validation
-
-## Building
-
-```sh
-make
-```
-
-Requires: gcc, SDL2, OpenGL, GLEW
-
-## Testing
-
-```sh
-make test
-```
-
-Runs CPU exception handling tests to verify implementation.
-
-## Running
-
-### Basic Usage
-
-```sh
-./myps1_emu [options] <BIOS_PATH>
-```
-
-**Default BIOS path:** `roms/SCPH1001.BIN`
-
-### Command Line Options
-
-| Option | Description |
-|--------|-------------|
-| `--debug` | Set log level to DEBUG (verbose output) |
-| `--trace` | Set log level to TRACE (ultra-verbose, per-instruction/cycle) (UNSTABLE! Cause Massive Logs use at own risk) |
-| `--quiet` | Set log level to WARN (minimal output) |
-| `--log-rate-limit=N` | Only log first N debug/trace messages per component, then every Nth |
-| `--log-single-file` | Log everything to `emulator_log.txt` (disables per-component logs) |
-| `--help` or `-h` | Show help message |
-
-### Examples
-
-```sh
-# Run with default settings
-./myps1_emu
-
-# Run with debug logging
-./myps1_emu --debug
-
-# Run with ultra-verbose tracing (useful for debugging)
-./myps1_emu --trace
-
-# Run with rate-limited debug output (prevents log spam)
-./myps1_emu --debug --log-rate-limit=1000
-
-# Run with single log file
-./myps1_emu --debug --log-single-file
-
-# Run with custom BIOS
-./myps1_emu --debug roms/SCPH5501.BIN
-```
-
-## Debugging
-
-### Log System
-
-The emulator features a comprehensive logging system with per-component logs:
-
-#### Log Levels
-- **FATAL** (0): Critical errors that cause program termination
-- **ERROR** (1): Errors that don't terminate but indicate problems
-- **WARN** (2): Warnings about potential issues
-- **INFO** (3): General information (default level)
-- **DEBUG** (4): Detailed debugging information
-- **TRACE** (5): Ultra-verbose per-instruction/cycle logging
-
-#### Log Output
-
-**Default Mode:** Per-component logs in `logs/` directory
-```
-logs/
-├── cpu.txt          # CPU execution logs
-├── gpu.txt          # GPU command logs
-├── bios.txt         # BIOS syscall logs
-├── interconnect.txt # Memory/register access logs
-├── cdrom.txt        # CD-ROM operation logs
-├── dma.txt          # DMA transfer logs
-├── timers.txt       # Timer operation logs
-└── ...
-```
-
-**Single File Mode:** All logs to `emulator_log.txt`
-- Automatically rotates when file exceeds 50MB
-- Old log becomes `emulator_log.old.txt`
-
-#### Rate Limiting
-
-To prevent log spam during debugging:
-```sh
-# Log first 1000 debug messages, then every 1000th
-./myps1_emu --debug --log-rate-limit=1000
-```
-
-### GDB Debugging
-
-#### Compile with Debug Symbols
-
-The Makefile already includes `-g` flag for debug symbols.
-
-#### Basic GDB Usage
-
-```sh
-# Start emulator under GDB
-gdb ./myps1_emu
-
-# Set breakpoints on key functions
-(gdb) break cpu_run_next_instruction
-(gdb) break cpu_exception
-(gdb) break interconnect_load32
-(gdb) break gpu_gp0
-
-# Run with arguments
-(gdb) run --debug
-
-# Continue execution
-(gdb) continue
-
-# Step through code
-(gdb) next
-(gdb) step
-
-# Examine variables
-(gdb) print cpu->pc
-(gdb) print cpu->regs[4]
-(gdb) print cpu->sr
-```
-
-#### Useful GDB Commands for PS1 Emulation
-
-```sh
-# Break on specific PC address
-(gdb) break *0x80000080  # Exception vector
-
-# Break on memory access
-(gdb) watch -l cpu->pc
-
-# Examine memory
-(gdb) x/4x 0x80000000    # Examine 4 words at address
-(gdb) x/16b cpu->pc      # Examine 16 bytes at PC
-
-# Examine CPU state
-(gdb) print *cpu
-(gdb) print cpu->regs[0]@32  # All 32 registers
-
-# Conditional breakpoints
-(gdb) break cpu_exception if cause == 0x08  # Break on SYSCALL
-(gdb) break interconnect_load32 if addr == 0x1f801810  # Break on GPU read
-```
-
-#### Debugging Common Issues
-
-**CPU Stuck in Loop:**
-```sh
-(gdb) break cpu_run_next_instruction
-(gdb) run --trace
-(gdb) continue
-# Check if PC is changing
-(gdb) print cpu->pc
-```
-
-**Exception Handling:**
-```sh
-(gdb) break cpu_exception
-(gdb) run --debug
-# Examine exception cause and PC
-(gdb) print cause
-(gdb) print cpu->epc
-```
-
-**Timer Issues:**
-```sh
-(gdb) break timer_update
-(gdb) run --debug
-# Check timer state
-(gdb) print *timer
-```
-
-## Project Status
-
-### ✅ **Completed Components**
-- **CPU Exception Handling**: Fully implemented and tested
-- **Memory Management**: RAM and VRAM systems
-- **Basic Interconnect**: Memory-mapped I/O routing
-- **CDROM Controller**: Basic command handling
-- **BIOS Interface**: Loading and syscall support
-
-### 🎯 **Next Priority**
-- **Timer 0 (VBlank)**: Implementation for proper interrupt timing
-- **GPU Integration**: Complete graphics pipeline
-- **DMA System**: Full DMA transfer implementation
-
-### 🔄 **Future Work**
-- **GTE Audit**: Geometry Transformation Engine verification
-- **Full System Integration**: End-to-end testing
-- **Game Compatibility**: Real game testing
-
-## Development Philosophy
-
-- **One component at a time** - Implement, test, and verify each component independently
-- **PSX-Spex compliance first** - Follow documentation exactly
-- **Minimal dependencies** - Each component should work with minimal assumptions
-- **Comprehensive testing** - Each step includes specific test criteria
-
-## Contributing
-
-This is a personal project for learning PS1 emulation. The codebase follows PSX-Spex and nocash documentation for accuracy.
-
-## License
-
-This project is for educational purposes only. PlayStation is a trademark of Sony Interactive Entertainment.
-
-## References
-
-- [PSX-Spex Documentation](https://psx-spx.consoledev.net/)
-- [nocash PSX Documentation](http://problemkaputt.de/psx.htm)
-- [MIPS R3000A Architecture](https://en.wikipedia.org/wiki/MIPS_architecture)
-
-## Roadmap
-
-- [x] CPU Exception System (complete)
-- [x] Interconnect (fully tested, compliant as of 01 July 2025)
-- [ ] Timer0/VBlank IRQ (next priority)
-- [ ] GPU & Renderer Audit
-- [ ] System Integration Testing 
-
-# PS1 Emulator Development Roadmap (Boot Logo Stuck)
-
-## 🖼️ **Current State: Boot Logo Stuck**
-- The emulator displays the PlayStation boot logo, but the animation is stuck and does not progress.
-- This means all core systems (CPU, GPU, VRAM, RAM, DMA, Renderer, CDROM, Interconnect, Timers) are working well enough to reach this point.
-- **The only major blocker is the event/IRQ system:** The BIOS is not receiving VBlank IRQs/timer events as expected, so the animation cannot continue.
-
-## 🚨 **Critical Issue**
-- **Missing/Incomplete Event/IRQ System:**
-  - No central event scheduling or proper IRQ delivery/acknowledgement.
-  - BIOS is stuck waiting for VBlank/timer IRQs to progress the animation.
-
-## ✅ **What Works**
-- CPU, GPU, VRAM, RAM, DMA, Renderer, CDROM, Interconnect, Timers: All working well enough to display the logo.
-- DMA and GPU: Can process and render the logo graphics.
-- Renderer: Displays the output correctly.
-
-## ❌ **What's Missing**
-- **Event/IRQ System:** The BIOS is not receiving VBlank IRQs/timer events in the way it expects, so the animation is stuck.
-- **Precise IRQ Acknowledgement:** The BIOS may be waiting for an IRQ flag to be set/cleared in a specific way.
-- **Event Loop Integration:** The main emulation loop may not be checking and dispatching events as needed.
-
-## 🟡 **What To Do Next**
-1. Implement a central event system (cycle-accurate scheduling of VBlank, timer, DMA events).
-2. Ensure IRQs are set, cleared, and acknowledged as the BIOS expects.
-3. Integrate event/IRQ delivery into the main emulation loop.
-
-## 🏁 **Conclusion**
-- You are extremely close! The logo appears, meaning 90%+ of the system is working.
-- The only thing blocking full boot is the event/interrupt system.
-- Once you implement this, the BIOS will progress past the logo and boot games.
+A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash and PSX-Spex documentation.
 
 ---
 
-*README updated to reflect the new information from the screenshot and PCSX ReARMed's event/IRQ handling.* 
+## 🏁 Current Status (July 2025)
+
+- The emulator displays the PlayStation boot logo, but the animation is stuck and does not progress.
+- All core systems (CPU, GPU, VRAM, RAM, DMA, Renderer, CDROM, Interconnect, Timers) are working well enough to reach this point.
+- **Blocker:** The event/IRQ system is incomplete—BIOS is not receiving VBlank/timer IRQs as expected, so the animation cannot continue.
+
+### Component Status
+
+| Component   | Status     | Boot Critical | Notes/Action Needed                |
+|-------------|------------|---------------|------------------------------------|
+| CPU         | EXCELLENT  | No            | Fully working                      |
+| RAM         | EXCELLENT  | No            | Fully working                      |
+| VRAM        | EXCELLENT  | No            | Fully working                      |
+| Renderer    | EXCELLENT  | No            | Fully working                      |
+| CDROM       | EXCELLENT  | No            | Fully working                      |
+| BIOS        | EXCELLENT  | No            | Fully working                      |
+| DMA         | PARTIAL    | **YES**       | Add handlers, event/IRQ, timing    |
+| Timers      | PARTIAL    | **YES**       | Add cycle/rate, event/IRQ, timing  |
+| Events      | PARTIAL    | **YES**       | Ensure all event types, integration|
+| GPU         | EXCELLENT* | Maybe         | Check status bits/timing           |
+| GTE         | STUBS      | No            | Needed for 3D games                |
+| MDEC        | MISSING    | No            | Needed for FMVs                    |
+| SIO         | MISSING    | No            | Needed for input/memcard           |
+| SPU         | MISSING    | No            | Needed for sound                   |
+
+---
+
+## 🚨 What's Blocking Boot?
+- **Event/IRQ System:** BIOS is not receiving VBlank/timer IRQs in the way it expects, so the animation is stuck.
+- **DMA/Timers:** Need channel handlers, event scheduling, and IRQ delivery for correct operation.
+- **Event Loop Integration:** The main emulation loop must check and dispatch events as needed.
+
+---
+
+## What's Next (Critical Path)
+1. Implement DMA channel handlers, event scheduling, and IRQs.
+2. Add cycle-accurate timer/event scheduling and IRQ delivery.
+3. Ensure the event system is robust and fully integrated.
+4. Double-check GPU status bits/timing for BIOS compatibility.
+
+**Once these are fixed, the BIOS will progress past the logo and boot games.**
+
+---
+
+## Features
+- MIPS R3000A CPU emulation (with complete exception/interrupt support)
+- GPU command parsing and OpenGL-based renderer
+- DMA controller (partial)
+- CDROM, RAM, VRAM, Timers, GTE (partial)
+- BIOS syscall and kernel support
+- Per-component logging and debug system
+- Modular codebase (src/ for sources, include/ for headers)
+
+## Building
+```sh
+make
+```
+Requires: gcc, SDL2, OpenGL, GLEW
+
+## Running
+```sh
+./myps1_emu [options] <BIOS_PATH>
+```
+Default BIOS path: `roms/SCPH1001.BIN`
+
+### Command Line Options
+| Option | Description |
+|--------|-------------|
+| `--debug` | Set log level to DEBUG (verbose output) |
+| `--trace` | Set log level to TRACE (ultra-verbose, per-instruction/cycle) |
+| `--quiet` | Set log level to WARN (minimal output) |
+| `--log-rate-limit=N` | Only log first N debug/trace messages per component, then every Nth |
+| `--log-single-file` | Log everything to `emulator_log.txt` |
+| `--help` or `-h` | Show help message |
+
+## Debugging
+- Per-component logs in `logs/` directory (cpu.txt, gpu.txt, bios.txt, etc.)
+- Log levels: FATAL, ERROR, WARN, INFO, DEBUG, TRACE
+- Rate limiting and single-file logging supported
+- GDB debugging supported (see code for breakpoints and variable inspection)
+
+## Development Philosophy
+- One component at a time: implement, test, and verify each independently
+- PSX-Spex compliance first
+- Minimal dependencies
+- Comprehensive testing
+
+## License
+This project is for educational purposes only. PlayStation is a trademark of Sony Interactive Entertainment.
+
+## References
+- [PSX-Spex Documentation](https://psx-spx.consoledev.net/)
+- [nocash PSX Documentation](http://problemkaputt.de/psx.htm)
+- [MIPS R3000A Architecture](https://en.wikipedia.org/wiki/MIPS_architecture)
+- [PCSX ReARMed](https://github.com/notaz/pcsx_rearmed) is used for learning and cross-checking only. No code is copied.
+
+
+---
+
+*PCSX ReARMed is used as a reference for hardware behavior only. No code is copied; all code is original.* 
