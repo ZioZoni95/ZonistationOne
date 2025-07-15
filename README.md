@@ -6,13 +6,13 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 
 ## 🏁 Current Status (July 2025)
 
-- **Boots to PlayStation logo (glitched/stuck animation):** The emulator now reliably displays the PS1 boot animation, but the animation is glitched or stuck and does not progress to the BIOS menu.
-- **Timer and IRQ system**: Fully refactored for hardware-accurate event scheduling and interrupt delivery. No more interrupt storms or CPU exception loops.
-- **Event Scheduler**: All hardware events (VBlank, timers, DMA, etc.) are now delivered via a robust event queue.
-- **Main Loop**: Clean integration with the event system; no direct hardware event hacks remain.
-- **DMA**: Only GPU DMA is minimally functional; other DMA channels are stubbed or not required for BIOS menu.
-- **CDROM**: Not yet fully implemented; BIOS menu should still appear with correct 'no disc' status, but the emulator is currently stuck at the boot logo.
-- **Renderer**: Sufficient for logo and menu graphics.
+- **Boots to PlayStation logo (glitched/stuck animation):** The emulator reliably displays the PS1 boot animation, but the animation is glitched or stuck and does not progress to the BIOS menu.
+- **Timer and IRQ system:** Fully refactored for hardware-accurate event scheduling and interrupt delivery, modeled after PCSX ReARMed. All timer IRQ and sticky flag logic is now handled in event handlers.
+- **Event Scheduler:** Patched to ensure all due events are fired, not just one per call. Robust event queue delivers all hardware events (VBlank, timers, DMA, etc.).
+- **DMA:** DICR write handler now immediately asserts IRQ3 if the condition is met, matching hardware. Detailed logging added for DMA, DICR, and event scheduling. Only GPU DMA is minimally functional; other DMA channels are stubbed or not required for BIOS menu.
+- **BIOS IRQs:** BIOS now receives correct timer and DMA IRQs, but emulator is still stuck at the boot logo.
+- **CDROM:** Not yet fully implemented; BIOS menu should still appear with correct 'no disc' status, but the emulator is currently stuck at the boot logo.
+- **Renderer:** Sufficient for logo and menu graphics.
 
 ### Component Status
 
@@ -32,6 +32,16 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 | MDEC        | MISSING    | No            | Needed for FMVs                    |
 | SIO         | MISSING    | No            | Needed for input/memcard           |
 | SPU         | MISSING    | No            | Needed for sound                   |
+
+---
+
+## 🚀 Recent Achievements
+- Refactored timer and event system for hardware accuracy, based on PCSX ReARMed.
+- Moved all timer IRQ and sticky flag logic to event handlers for correct scheduling and delivery.
+- Patched event queue logic to ensure all due events are fired, not just one per call.
+- Patched DMA DICR write handler to immediately assert IRQ3 if the condition is met, matching hardware behavior.
+- Added detailed logging to DMA, DICR, and event scheduling for easier debugging.
+- BIOS now receives correct timer and DMA IRQs, confirming event and interrupt system accuracy.
 
 ---
 
@@ -110,7 +120,11 @@ This project is for educational purposes only. PlayStation is a trademark of Son
 *PCSX ReARMed is used as a reference for hardware behavior only. No code is copied; all code is original.*
 
 ## Recent Fixes
-- Fixed timer IRQ acknowledge/clear logic to prevent interrupt storms.
+- Refactored timer IRQ acknowledge/clear logic to prevent interrupt storms.
+- All timer IRQ and sticky flag logic now handled in event handlers, matching hardware.
+- Patched event scheduler to fire all due events per call.
+- Patched DMA DICR write handler to immediately assert IRQ3 if the condition is met.
+- Added detailed logging to DMA, DICR, and event scheduling.
 - IRQ requests are now only made when appropriate, matching hardware behavior.
 - Event scheduler and timer event delivery are robust and accurate.
 - Cleaned up all compiler warnings and errors.

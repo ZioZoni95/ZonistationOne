@@ -65,9 +65,17 @@ typedef struct Cdrom {
     uint8_t index;
     /** @brief Cached Status register value (read via 1800h.0). Updated dynamically. */
     uint8_t status;
-    /** @brief Interrupt Enable register cache (written/read via 1803h.1, lower 5 bits: INT1-5 enable) */
+    /**
+     * @brief Interrupt Enable register cache (written/read via 1803h.1, lower 5 bits: INT1-5 enable)
+     *
+     * If a flag is set while the enable bit is not set, the flag is latched. If the enable bit is set later and the flag is still set, IRQ2 is requested (late enable logic).
+     */
     uint8_t interrupt_enable;
-    /** @brief Interrupt Flags cache (read via 1803h.1 upper 3 bits?, cleared by writing 1 to corresponding bit in 1803h.1) */
+    /**
+     * @brief Interrupt Flags cache (read via 1803h.1 upper 3 bits?, cleared by writing 1 to corresponding bit in 1803h.1)
+     *
+     * Flags are set by command completion or error, and are only cleared by explicit write. If any enabled flag is set, IRQ2 is requested.
+     */
     uint8_t interrupt_flags; // Bits 0-4 -> INT1-5 Pending? Check docs. Often mapped to upper bits on read.
 
     // --- FIFOs ---

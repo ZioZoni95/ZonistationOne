@@ -29,6 +29,7 @@ static void evq_handle_timer1(struct Interconnect* sys); // Timer1 event
 static void evq_handle_timer2(struct Interconnect* sys); // Timer2 event
 static void evq_handle_dma_gpu(struct Interconnect* sys);   // GPU DMA event
 static void evq_handle_dma_cdrom(struct Interconnect* sys); // CDROM DMA event
+static void evq_handle_cdrom(struct Interconnect* sys); // CDROM event
 // ... add more as needed for other event types
 
 // Table of event handlers, indexed by EventQueueType
@@ -43,7 +44,7 @@ static EventHandlerTable evq_handlers = {
     NULL,                // EVQ_DMA_SPU
     NULL,                // EVQ_DMA_OTC
     NULL,                // EVQ_SIO
-    NULL,                // EVQ_CDROM (non-DMA)
+    evq_handle_cdrom,    // EVQ_CDROM (non-DMA)
     NULL,                // EVQ_GPU (non-DMA)
     NULL,                // EVQ_MDEC
     NULL                 // EVQ_SPU
@@ -172,4 +173,13 @@ static void evq_handle_dma_gpu(struct Interconnect* sys) {
 static void evq_handle_dma_cdrom(struct Interconnect* sys) {
     LOG_EVENT_DEBUG("[DMA] CDROM DMA event handler called (stub)");
     // TODO: Complete the CDROM DMA transfer and set IRQ when ready
+}
+
+static void evq_handle_cdrom(struct Interconnect* sys) {
+    LOG_CDROM_INFO("[CDROM] Event handler fired\n");
+    if (sys->cdrom.pending_completion_handler) {
+        void (*handler)(struct Cdrom*) = sys->cdrom.pending_completion_handler;
+        sys->cdrom.pending_completion_handler = NULL;
+        handler(&sys->cdrom);
+    }
 } 
