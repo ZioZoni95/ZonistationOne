@@ -1,3 +1,8 @@
+/*
+ * Portions of this file are inspired by PCSX ReARMed (https://github.com/notaz/pcsx_rearmed)
+ * Copyright (c) PCSX ReARMed authors. Used under the GNU GPL v2.
+ * Logic and structure are adapted for clarity and uniqueness.
+ */
 // --- cdrom.c ---
 #include "cdrom.h"
 #include "interconnect.h" // For interrupt definitions/requests IRQ_CDROM
@@ -95,9 +100,31 @@ static uint8_t bcd_to_int(uint8_t bcd) { return ((bcd >> 4) * 10) + (bcd & 0x0F)
 
 // --- Internal Helper Functions ---
 
+// Improved: Set/latch interrupt flag and request IRQ2 if enabled (robust late enable logic)
+static void cdrom_set_irq_flag(Cdrom* cdrom, uint8_t irq_bit) {
+    uint8_t prev_flags = cdrom->interrupt_flags;
+    cdrom->interrupt_flags |= irq_bit;
+    LOG_CDROM_INFO("[CDROM] set_irq_flag: Set 0x%02x, flags now 0x%02x (was 0x%02x)\n", irq_bit, cdrom->interrupt_flags, prev_flags);
+    if (cdrom->interrupt_enable & irq_bit) {
+        LOG_CDROM_INFO("[CDROM] IRQ2 REQUESTED (set_irq_flag): enable=0x%02x, flags=0x%02x\n", cdrom->interrupt_enable, cdrom->interrupt_flags);
+        interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
+    } else {
+        LOG_CDROM_DEBUG("[CDROM] IRQ2 NOT requested (enable=0x%02x, flags=0x%02x)\n", cdrom->interrupt_enable, cdrom->interrupt_flags);
+    }
+}
+
+// Replace trigger_interrupt to use cdrom_set_irq_flag
+static void trigger_interrupt(Cdrom* cdrom, uint8_t int_code) {
+    if (int_code > 0 && int_code < 8) {
+        uint8_t flag_bit = 1 << (int_code - 1);
+        cdrom_set_irq_flag(cdrom, flag_bit);
+    }
+}
+
 static void cdrom_schedule_event(Cdrom* cdrom, uint32_t cycles, void (*handler)(Cdrom*)) {
-    cdrom->cycles_until_event = cycles;
+    LOG_CDROM_INFO("[CDROM] Scheduling event: cycles=%u, handler=%p\n", cycles, (void*)handler);
     cdrom->pending_completion_handler = handler;
+    eventq_schedule(cdrom->inter, EVQ_CDROM, cycles);
 }
 
 static void update_status_register(Cdrom* cdrom) {
@@ -108,21 +135,6 @@ static void update_status_register(Cdrom* cdrom) {
     if (!fifo_is_full(&cdrom->param_fifo)) cdrom->status |= STAT_PRMWRDY;
     if (!fifo_is_empty(&cdrom->response_fifo)) cdrom->status |= STAT_RSLRDY;
     if (cdrom->data_buffer_count > cdrom->data_buffer_read_ptr) cdrom->status |= STAT_DTEN;
-}
-
-static void trigger_interrupt(Cdrom* cdrom, uint8_t int_code) {
-    if (int_code > 0 && int_code < 8) {
-        uint8_t flag_bit = 1 << (int_code - 1);
-        uint8_t prev_flags = cdrom->interrupt_flags;
-        cdrom->interrupt_flags |= flag_bit;
-        LOG_CDROM_INFO("[CDROM] trigger_interrupt: Set flag 0x%02x, flags now 0x%02x (was 0x%02x)\n", flag_bit, cdrom->interrupt_flags, prev_flags);
-        if (cdrom->interrupt_enable & flag_bit) {
-            LOG_CDROM_INFO("[CDROM] Requesting IRQ2 (CDROM) via trigger_interrupt (int_code=%u, enable=0x%02x, flags=0x%02x)\n", int_code, cdrom->interrupt_enable, cdrom->interrupt_flags);
-            interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
-        } else {
-            LOG_CDROM_DEBUG("[CDROM] IRQ2 (CDROM) NOT requested: int_code=%u, enable=0x%02x, flags=0x%02x\n", int_code, cdrom->interrupt_enable, cdrom->interrupt_flags);
-        }
-    }
 }
 
 // --- Command Handlers (This is where the main logic is filled in) ---
@@ -414,9 +426,10 @@ void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
                     cdrom->interrupt_flags = 0;
                 }
                 LOG_CDROM_INFO("[CDROM] IRQ Enable/Flags Write: enable=0x%02x (was 0x%02x), flags=0x%02x (was 0x%02x)\n", cdrom->interrupt_enable, prev_enable, cdrom->interrupt_flags, prev_flags);
-                // After updating, if any enabled interrupt is pending, request IRQ2
-                if (cdrom->interrupt_enable & cdrom->interrupt_flags) {
-                    LOG_CDROM_INFO("[CDROM] IRQ2 (CDROM) requested after IRQ enable/flags write (enable=0x%02x, flags=0x%02x)\n", cdrom->interrupt_enable, cdrom->interrupt_flags);
+                // After updating, if any enabled interrupt is pending, request IRQ2 (late enable logic)
+                uint8_t pending = cdrom->interrupt_enable & cdrom->interrupt_flags;
+                if (pending) {
+                    LOG_CDROM_INFO("[CDROM] IRQ2 REQUESTED (enable/flags write): enable=0x%02x, flags=0x%02x\n", cdrom->interrupt_enable, cdrom->interrupt_flags);
                     interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
                 }
             } else {
