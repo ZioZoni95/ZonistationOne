@@ -54,7 +54,8 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
         (timer->irq_on_ffff && timer->counter == 0xFFFF && (timer->mode & 0x100))) {
         timer->interrupt_requested = true;
         timer->mode |= (1 << 10);
-        interconnect_request_irq(timers->inter, 0, "Timer0 (re-assert after mode write)");
+        LOG_TIMERS_DEBUG("[TIMER] Timer%d re-asserting IRQ%d after mode write (mode=0x%04x, counter=0x%04x, target=0x%04x)", timer_index, timer->irq, timer->mode, timer->counter, timer->target);
+        interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
     }
 }
 
@@ -258,6 +259,10 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
 
 // --- Event scheduling for timers ---
 void timers_schedule_next_event(Timers* timers, int timer_index) {
+    static int schedule_call_count[3] = {0, 0, 0};
+    if (schedule_call_count[timer_index] < 5) {
+        LOG_TIMERS_INFO("[TIMER] timers_schedule_next_event for Timer%d (count=%d)", timer_index, ++schedule_call_count[timer_index]);
+    }
     Timer* t = &timers->timers[timer_index];
     uint32_t cycles_until_event = 0;
     if (t->reset_on_target && t->target != 0) {
@@ -329,6 +334,13 @@ int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
+    static int handler_call_count[3] = {0, 0, 0};
+    if (handler_call_count[timer_index] < 5) {
+        LOG_TIMERS_INFO("[TIMER] timer_event_handler called for Timer%d (count=%d)", timer_index, ++handler_call_count[timer_index]);
+    }
+    if (log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_TIMERS_INFO("[TIMER] Timer%d event triggered (counter=0x%04x, mode=0x%04x, target=0x%04x)", timer_index, timers->timers[timer_index].counter, timers->timers[timer_index].mode, timers->timers[timer_index].target);
+    }
     Timer* t = &timers->timers[timer_index];
     // Set sticky flag for target or overflow
     if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
@@ -342,6 +354,7 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     if (irq_enabled && !t->interrupt_requested && (t->mode & 0x100)) {
         t->interrupt_requested = true;
         t->mode |= (1 << 10); // Set IRQ request bit
+        LOG_TIMERS_DEBUG("[TIMER] Timer%d requesting IRQ%d (mode=0x%04x, counter=0x%04x, target=0x%04x)", timer_index, t->irq, t->mode, t->counter, t->target);
         interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
     }
     // Reset counter if needed
@@ -361,17 +374,19 @@ void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->
 
 // VBlank event handler for event_scheduler.c
 void timers_on_vblank(Timers* timers) {
+    static int vblank_timer0_resched_count = 0;
+    if (vblank_timer0_resched_count < 5) {
+        LOG_TIMERS_INFO("[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=%d)", ++vblank_timer0_resched_count);
+    }
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
     t0->reached_target_flag = false;
     // Only clear interrupt_requested if the IRQ was acknowledged (handled in interconnect)
-    // Schedule next Timer0 event for the next VBlank interval
-    eventq_schedule(timers->inter, EVQ_TIMER0, VBLANK_CYCLES);
+    // (Removed: eventq_schedule for Timer0)
     // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
     if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
         interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
-        t0->mode |= (1 << 10); // Set IRQ request bit
     }
 }

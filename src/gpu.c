@@ -440,7 +440,9 @@ void gpu_soft_reset(Gpu* gpu) {
 
 /** Processes commands/data sent to GP0 port */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
-    LOG_GPU_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+    if (log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+    }
     // Handle IMAGE_LOAD state first
     if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD) {
         uint16_t pixel1 = (uint16_t)(command & 0xFFFF);
@@ -534,7 +536,9 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
 
 /** Processes commands sent to GP1 port */
 void gpu_gp1(Gpu* gpu, uint32_t command) {
-    LOG_GPU_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+    if (log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+    }
     uint32_t opcode = (command >> 24) & 0xFF;
     switch (opcode) {
         case 0x00: gp1_reset(gpu, command); break;

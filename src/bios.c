@@ -16,7 +16,7 @@ bool bios_load(Bios* bios, const char* path) {
     FILE *file = fopen(path, "rb");
     // Check if the file was opened successfully.
     if (!file) {
-        LOG_BIOS_ERROR("Error opening BIOS file: %s\n", path);
+        LOG_BIOS_ERROR("Error opening BIOS file: %s", path);
         return false; // Indicate failure.
     }
 
@@ -33,8 +33,7 @@ bool bios_load(Bios* bios, const char* path) {
 
     // Check if the number of bytes read matches the expected BIOS size.
     if (bytes_read != BIOS_SIZE) {
-        LOG_BIOS_ERROR("Error reading BIOS file: Read %zu bytes, expected %d\n",
-                bytes_read, BIOS_SIZE);
+        LOG_BIOS_ERROR("Error reading BIOS file: Read %zu bytes, expected %d", bytes_read, BIOS_SIZE);
         return false; // Indicate failure.
     }
 
@@ -42,7 +41,6 @@ bool bios_load(Bios* bios, const char* path) {
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
     // Print a success message including the path and size.
-    LOG_BIOS_INFO("BIOS initialized");
     LOG_BIOS_INFO("BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
     // Return true to indicate success.
     return true;

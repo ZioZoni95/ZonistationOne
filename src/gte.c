@@ -65,10 +65,11 @@ void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
 // --- GTE Instruction Execution ---
 
 uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
+    if (log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_GTE_INFO("[GTE] Executing instruction: 0x%08x", instruction);
+    }
     uint32_t opcode = (instruction >> 20) & 0x3F; // Bits 25-20
     uint32_t cycles = 1; // Default cycle count
-    
-    LOG_TRACE("GTE: Executing instruction 0x%08x (opcode 0x%02x)", instruction, opcode);
     
     switch (opcode) {
         case 0x01: // RTPS - Perspective Transformation (Single Point)

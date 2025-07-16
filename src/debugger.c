@@ -31,10 +31,10 @@ void debugger_init(Debugger* dbg) {
 bool debugger_add_breakpoint(Debugger* dbg, uint32_t addr) {
     for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) if (dbg->breakpoints[i] == addr) { if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint at 0x%08x already exists.\n", addr); return true; }
     if (dbg->breakpoint_count >= MAX_BREAKPOINTS) { if (log_get_level() >= LOG_LEVEL_WARN) fprintf(stderr, "Debugger Error: Cannot add breakpoint at 0x%08x. Maximum (%d) reached.\n", addr, MAX_BREAKPOINTS); return false; }
-    dbg->breakpoints[dbg->breakpoint_count++] = addr; if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint added at 0x%08x. (%u/%d)\n", addr, dbg->breakpoint_count, MAX_BREAKPOINTS); return true;
+    dbg->breakpoints[dbg->breakpoint_count++] = addr; if (log_get_level() >= LOG_LEVEL_INFO) LOG_DEBUGGER_INFO("[DEBUGGER] Breakpoint added at 0x%08x", addr); return true;
 }
 bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
-    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) { if (dbg->breakpoints[i] == addr) { dbg->breakpoints[i] = dbg->breakpoints[--dbg->breakpoint_count]; if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint removed at 0x%08x. (%u/%d)\n", addr, dbg->breakpoint_count, MAX_BREAKPOINTS); return true; }}
+    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) { if (dbg->breakpoints[i] == addr) { dbg->breakpoints[i] = dbg->breakpoints[--dbg->breakpoint_count]; if (log_get_level() >= LOG_LEVEL_INFO) LOG_DEBUGGER_INFO("[DEBUGGER] Breakpoint removed at 0x%08x", addr); return true; }}
     if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint at 0x%08x not found for removal.\n", addr); return false;
 }
 

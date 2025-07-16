@@ -66,18 +66,44 @@ static uint8_t hwregs[0x1000] = {0};
  * @param addr The 32-bit virtual address.
  * @return The 32-bit physical address.
  */
+static int mask_debug_count = 0;
 uint32_t mask_region(uint32_t addr) {
     size_t index = (addr >> 29) & 0x7;
     uint32_t paddr = addr & REGION_MASK[index];
-    static int mask_debug_count = 0;
-    if (mask_debug_count < 1000) {
-        LOG_INTERCONNECT_DEBUG("mask_region: vaddr=0x%08X -> paddr=0x%08X\n", addr, paddr);
+    if (log_get_level() >= LOG_LEVEL_TRACE && mask_debug_count < 10) {
+        LOG_TRACE("mask_region: vaddr=0x%08X -> paddr=0x%08X\n", addr, paddr);
         mask_debug_count++;
     }
     return paddr;
 }
 
+// Rate-limited logging for hot registers (must be at the very top, before any use)
+static uint32_t last_hot_addr = 0;
+static uint32_t hot_addr_count = 0;
+#define HOT_REG_RATE_LIMIT 1000
+static void log_hot_reg(const char* rw, uint32_t addr, uint32_t value, int is_write) {
+    if (addr == last_hot_addr) {
+        hot_addr_count++;
+    } else {
+        last_hot_addr = addr;
+        hot_addr_count = 1;
+    }
+    if (hot_addr_count == 1 || hot_addr_count % HOT_REG_RATE_LIMIT == 0) {
+        if (is_write)
+            LOG_INTERCONNECT_INFO("[INTERCONNECT] %s at 0x%08x = 0x%08x (count=%u)", rw, addr, value, hot_addr_count);
+        else
+            LOG_INTERCONNECT_INFO("[INTERCONNECT] %s at 0x%08x (count=%u)", rw, addr, hot_addr_count);
+    }
+}
+
 static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index);
+
+// Helper macro to check if address is a key hardware register
+#define IS_KEY_HW_REG(addr) \
+    ((addr) == 0x1f801070 /* IRQ_STATUS */ || \
+     (addr) == 0x1f801074 /* IRQ_MASK */ || \
+     ((addr) >= 0x1f801800 && (addr) <= 0x1f80180F) /* CDROM */ || \
+     ((addr) >= 0x1f801810 && (addr) <= 0x1f801817) /* GPU */)
 
 // --- Initialization ---
 /**
@@ -119,21 +145,20 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    (void)source;
-    uint16_t prev = inter->irq_status;
-    inter->irq_status |= (1 << irq_line);
-    if (irq_line == 0) {
-        LOG_INTERCONNECT_INFO("[IRQ] IRQ0 requested by %s (I_STAT: 0x%04x -> 0x%04x)", source, prev, inter->irq_status);
+    if (log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_INTERCONNECT_INFO("[IRQ] IRQ%u requested by %s (I_STAT before: 0x%04x)", irq_line, source, inter->irq_status);
     }
-    if (irq_line <= 6) {
-        LOG_INTERCONNECT_INFO("[IRQ] IRQ%u requested\n", irq_line);
+    inter->irq_status |= (1 << irq_line); // Always set, never clear here
+    if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_DEBUG("[IRQ] IRQ%u set: I_STAT now 0x%04x (source: %s)", irq_line, inter->irq_status, source);
     }
 }
 
 // Helper to clear an IRQ (for explicit logging, though BIOS usually does this via I_STAT write)
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
+    // Only clear if BIOS writes to I_STAT, never clear on read or after command/interrupt
     (void)source;
-    inter->irq_status &= ~(1 << irq_line);
+    // Do nothing here; clearing is handled only in I_STAT write handler below
 }
 
 
@@ -147,7 +172,11 @@ void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* 
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ32 at 0x%08x\n", physical_addr);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO READ32", physical_addr, 0, 0);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ32 at 0x%08x", physical_addr);
+    }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read32_count % 10000 == 0) {
@@ -227,11 +256,11 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     }
 
     // BIOS Region (0x1fc00000 - 0x1fc7ffff)
+    static int bios_load32_debug_count = 0;
     if (physical_addr >= BIOS_START && physical_addr <= BIOS_END) {
         uint32_t offset = physical_addr - BIOS_START;
-        static int bios_load32_debug_count = 0;
-        if (bios_load32_debug_count < 1000) {
-            LOG_INTERCONNECT_DEBUG("interconnect_load32: vaddr=0x%08X paddr=0x%08X BIOS offset=0x%X\n", address, physical_addr, offset);
+        if (log_get_level() >= LOG_LEVEL_TRACE && bios_load32_debug_count < 10) {
+            LOG_TRACE("interconnect_load32: vaddr=0x%08X paddr=0x%08X BIOS offset=0x%X\n", address, physical_addr, offset);
             bios_load32_debug_count++;
         }
         return bios_load32(inter->bios, offset); // Delegate to BIOS module
@@ -291,7 +320,11 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
  */
 uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ16 at 0x%08x\n", physical_addr);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO READ16", physical_addr, 0, 0);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ16 at 0x%08x", physical_addr);
+    }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read16_count % 10000 == 0) {
@@ -322,7 +355,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         LOG_INTERCONNECT_INFO("~ Read16 from IRQ_STATUS (0x1f801070): Returning 0x%04x\n", inter->irq_status);
-        return inter->irq_status;
+        return inter->irq_status; // Always return current value, no masking or filtering
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
         LOG_INTERCONNECT_TRACE("Read16 from IRQ_MASK (0x1f801074): Returning 0x%04x", inter->irq_mask);
@@ -403,7 +436,11 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
  */
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ8 at 0x%08x\n", physical_addr);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO READ8", physical_addr, 0, 0);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ8 at 0x%08x", physical_addr);
+    }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read8_count % 10000 == 0) {
@@ -488,6 +525,11 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO WRITE32", physical_addr, value, 1);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE32 at 0x%08x = 0x%08x", physical_addr, value);
+    }
     // Remove or comment out noisy IO write logs for general IO region
     // LOG_TRACE("[INTERCONNECT] IO WRITE32 at 0x%08x: value=0x%08x\n", physical_addr, value);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
@@ -524,8 +566,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         LOG_DEBUG("[IRQ] Write to I_STAT (IRQ_STATUS_ADDR): Value=0x%04x, Before=0x%04x", value, inter->irq_status);
-        // Clear bits in irq_status that are set in value
-        inter->irq_status &= ~(value & 0xFFFF);
+        inter->irq_status &= ~(value & 0xFFFF); // Only clear bits written by BIOS
         LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
         return;
     }
@@ -599,7 +640,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
                  else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
                 break;
             case RAM_SIZE_ADDR: // 0x1f801060
-                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x1f801060) = 0x%08x (Ignoring)\n", value);
+                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", value);
                 break;
             // IRQ regs handled above
             default:
@@ -692,6 +733,11 @@ static uint16_t last_write16_da8_value = 0;
  */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO WRITE16", physical_addr, value, 1);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x = 0x%04x", physical_addr, value);
+    }
     // Remove or comment out noisy IO write logs for general IO region
     // LOG_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
     if (physical_addr == 0x1f801da8) {
@@ -728,11 +774,22 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
      }
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        // Writing acknowledges (clears) specified interrupt flags
-        // According to PSX-Spex: Writing 1 to a bit clears that interrupt
+        static uint32_t irq_status_write_count = 0;
+        static uint16_t last_irq_status_value = 0xFFFF;
+        irq_status_write_count++;
+        if (irq_status_write_count == 1 || irq_status_write_count % 1000 == 0 || value != last_irq_status_value) {
+            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, Count=%u, Last=0x%04x", value, irq_status_write_count, last_irq_status_value);
+        }
+        last_irq_status_value = value;
         uint16_t ack_mask = value & 0x7FF;
         uint16_t prev_status = inter->irq_status;
+        if (log_get_level() >= LOG_LEVEL_DEBUG) {
+            LOG_DEBUG("[IRQ] I_STAT before clear: 0x%04x, AckMask: 0x%04x", inter->irq_status, ack_mask);
+        }
         inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
+        if (log_get_level() >= LOG_LEVEL_DEBUG) {
+            LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
+        }
         // Also clear timer interrupt_requested flags and mode[10] for Timer0, Timer1, Timer2
         if (ack_mask & (1 << TIMER0_IRQ)) {
             inter->timers_state.timers[0].interrupt_requested = false;
@@ -746,7 +803,10 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
             inter->timers_state.timers[2].interrupt_requested = false;
             inter->timers_state.timers[2].mode &= ~(1 << 10);
         }
-        LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)\n", value, ack_mask, prev_status, inter->irq_status, __func__);
+        // Keep the existing detailed log for the first write
+        if (irq_status_write_count == 1) {
+            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, ack_mask, prev_status, inter->irq_status, __func__);
+        }
         return;
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
@@ -862,6 +922,11 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
  */
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (IS_KEY_HW_REG(physical_addr)) {
+        log_hot_reg("IO WRITE8", physical_addr, value, 1);
+    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE8 at 0x%08x = 0x%02x", physical_addr, value);
+    }
     // Remove or comment out noisy IO write logs for general IO region
     // if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
     //     LOG_INFO("[INTERCONNECT] IO WRITE8 at 0x%08x: value=0x%02x\n", physical_addr, value);
