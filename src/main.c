@@ -250,8 +250,11 @@ int main(int argc, char *argv[]) {
         }
 
         // --- Run Emulation for One Frame ---
-        for (uint32_t i = 0; i < cycles_per_frame; ++i) {
-             cpu_run_next_instruction(&cpu_state);
+        uint32_t cycles_run = 0;
+        while (cycles_run < cycles_per_frame) {
+            cpu_run_next_instruction(&cpu_state);
+            eventq_dispatch_due(&interconnect_state);
+            cycles_run++;
         }
         // Step timers once per frame with the total cycles executed
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
@@ -259,13 +262,10 @@ int main(int argc, char *argv[]) {
         cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
         // Check if BIOS needs boot helper for interrupt configuration
         interconnect_check_bios_boot(&interconnect_state);
-        // --- Dispatch all due events (timers, VBlank, DMA, etc) ---
-        eventq_dispatch_due(&interconnect_state);
-        // Remove direct VBlank IRQ or timer event logic from here (handled by event system)
-        total_cycles += cycles_per_frame;
         // --- Render and Display Frame ---
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
+        total_cycles += cycles_per_frame;
     }
 
     // --- Cleanup ---

@@ -15,8 +15,11 @@ void ram_init(Ram* ram) {
 
 // Helper for bounds checking
 static inline int is_out_of_bounds(uint32_t offset, uint32_t access_size) {
-    // Check if offset + (access_size - 1) exceeds the last valid index (RAM_SIZE - 1)
-    return offset > RAM_SIZE - access_size;
+    int oob = (offset + access_size > RAM_SIZE);
+    if (oob && log_get_level() >= LOG_LEVEL_WARN) {
+        LOG_RAM_WARN("[RAM] Out-of-bounds access: offset=0x%08x, size=%u", offset, access_size);
+    }
+    return oob;
 }
 
 

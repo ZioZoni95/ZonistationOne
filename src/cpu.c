@@ -11,7 +11,7 @@
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
-    LOG_CPU_INFO("CPU initialized");
+    LOG_CPU_IMPORTANT("[BOOT] CPU initialization started");
     LOG_INFO("Initializing CPU...\n");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
@@ -57,7 +57,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     LOG_INFO("  Initializing GTE...\n");
     gte_init(&cpu->gte);
 
-    LOG_INFO("CPU Initialized: PC=0x%08x, NextPC=0x%08x, SR=0x%08x\n", cpu->pc, cpu->next_pc, cpu->sr);
+    LOG_CPU_IMPORTANT("[BOOT] CPU initialized, PC=0x%08x", cpu->pc);
 }
 
 
@@ -142,6 +142,10 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x\n", cause, cpu->pc);
     if (cause == EXCEPTION_INTERRUPT) {
         LOG_INFO("[CPU] Entered interrupt handler (IRQ)\n");
+        // --- ADDED: Small log for IRQ0 specifically (PCSX ReARMed style) ---
+        if ((cpu->inter->irq_status & 0x1) && (cpu->inter->irq_mask & 0x1)) {
+            LOG_DEBUG("[CPU][PCSX-IRQ0] Handling IRQ0 in exception handler (I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x)", cpu->inter->irq_status, cpu->inter->irq_mask, cpu->sr);
+        }
     }
     LOG_INFO("!!! CPU Exception: Cause=0x%02x, PC=0x%08x, InDelaySlot=%d !!!\n",
            cause, cpu->current_pc, cpu->in_delay_slot);
@@ -223,7 +227,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
     // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
     if (instruction_counter % 1000000 == 0) {
-        LOG_DEBUG("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
+        LOG_INFO("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
     }
 
     // --- 1. Check for Interrupts ---
@@ -237,11 +241,20 @@ void cpu_run_next_instruction(Cpu* cpu) {
         LOG_DEBUG("[CPU] Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x\n", 
                 status, mask, interrupts_globally_enabled, (status & mask));
     }
+    // --- ADDED: Small log for IRQ0 specifically (PCSX ReARMed style) ---
+    if ((status & 0x1) && (mask & 0x1) && interrupts_globally_enabled && log_get_level() >= LOG_LEVEL_DEBUG) {
+        LOG_DEBUG("[CPU][PCSX-IRQ0] IRQ0 is pending and enabled (I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x)", status, mask, cpu->sr);
+    }
 
     if ((status & mask) != 0 && interrupts_globally_enabled) {
         static int irq_log_count = 0;
         if (irq_log_count < 10 || irq_log_count % 1000 == 0) {
-            LOG_CPU_INFO("[CPU] Triggering Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x", status, mask);
+            LOG_DEBUG("[CPU][IRQ] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", status, mask, (status & mask));
+            for (int i = 0; i < 11; ++i) {
+                if ((status & mask) & (1 << i)) {
+                    LOG_DEBUG("[CPU][IRQ] IRQ%u is pending (bit %u)", i, i);
+                }
+            }
         }
         irq_log_count++;
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
@@ -312,6 +325,20 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // Restore original interrupt check at the end of cpu_run_next_instruction
     if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0) {
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
+    }
+
+    static int boot_log_stage = 0;
+    if (cpu->pc == 0xbfc00000 && boot_log_stage == 0) {
+        LOG_CPU_IMPORTANT("[BOOT] BIOS execution begins at 0xBFC00000");
+        boot_log_stage = 1;
+    }
+    if (boot_log_stage == 1 && cpu->pc != 0xbfc00000 && (cpu->pc & 0xFFF00000) != 0xbfc00000) {
+        LOG_CPU_IMPORTANT("[BOOT] Jumped out of BIOS region: PC=0x%08x", cpu->pc);
+        boot_log_stage = 2;
+    }
+
+    if (instruction_counter % 100000 == 0) {
+        LOG_INFO("[CPU][IRQ] Periodic: I_STAT=0x%04x, I_MASK=0x%04x", cpu->inter->irq_status, cpu->inter->irq_mask);
     }
 }
 
