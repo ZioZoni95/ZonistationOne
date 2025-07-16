@@ -57,13 +57,8 @@ static EventHandlerTable evq_handlers = {
 void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cycles_from_now) {
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
-    // --- Defensive, rate-limited logging for Timer0 event scheduling ---
-    static int timer0_sched_count = 0;
-    if (event == EVQ_TIMER0) {
-        if (timer0_sched_count < 10 || timer0_sched_count % 1000 == 0) {
-            LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X [count=%d]", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending, timer0_sched_count);
-        }
-        timer0_sched_count++;
+    if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
+        LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
     }
     // Update the next event cycle if this event is sooner
     if (sys->evq_next_cycle > sys->evq_target_cycle[event] || sys->evq_next_cycle <= sys->cpu_cycle_counter) {
@@ -83,15 +78,8 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         int any_fired = 0;
         for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
             if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
-                // Defensive, rate-limited logging for Timer0 event firing
-                if (event == EVQ_TIMER0) {
-                    static int timer0_fire_count = 0;
-                    if (timer0_fire_count < 10 || timer0_fire_count % 1000 == 0) {
-                        LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X [count=%d]", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending, timer0_fire_count);
-                    }
-                    timer0_fire_count++;
-                } else {
-                    LOG_EVENT_DEBUG("[EventQ] Firing event %d at cycle %u", event, now);
+                if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
+                    LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
                 }
                 sys->evq_pending &= ~(1u << event);
                 if (evq_handlers[event]) {
@@ -137,7 +125,13 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     timers_on_vblank(&sys->timers_state);
 }
 
-static void evq_handle_timer0(struct Interconnect* sys) { timer0_event_handler(sys); }
+static void evq_handle_timer0(struct Interconnect* sys) {
+    static int timer0_dispatch_count = 0;
+    if (timer0_dispatch_count < 5) {
+        LOG_EVENT_DEBUG("[EventQ] DISPATCH Timer0 event handler called (count=%d)", ++timer0_dispatch_count);
+    }
+    timer0_event_handler(sys);
+}
 static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(sys); }
 static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
 

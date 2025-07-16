@@ -166,17 +166,15 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 break;
             case 0x8: // CHCR
                 channel_set_control(ch, value);
-                // Check if this write activated the channel NOW
                 channel_became_active = dma_channel_is_active(ch);
-                if (channel_became_active) {
-                    // --- Event-driven GPU DMA (Channel 2) ---
-                    if (channel_index == 2) { // GPU DMA
-                        LOG_DMA_INFO("[DMA] Scheduling GPU DMA event for channel 2");
-                    }
+                if (channel_became_active && log_get_level() >= LOG_LEVEL_INFO) {
+                    LOG_DMA_INFO("DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
                 }
                 break;
             default:
-                LOG_WARN("Warning: Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)", offset, value, channel_index, register_offset);
+                if (log_get_level() >= LOG_LEVEL_WARN) {
+                    LOG_DMA_WARN("Warning: Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)", offset, value, channel_index, register_offset);
+                }
                 break;
         }
     } else { // Main DMA Register Access

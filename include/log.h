@@ -38,7 +38,7 @@ void log_component(const char* component, int level, const char* fmt, ...);
 #define LOG_CPU_WARN(fmt, ...)  log_component("cpu", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #define LOG_CPU_ERROR(fmt, ...) log_component("cpu", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #define LOG_CPU_TRACE(fmt, ...) log_component("cpu", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define LOG_CPU_IMPORTANT(fmt, ...) log_component("cpu", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
+#define LOG_CPU_IMPORTANT(...)   log_component("cpu", LOG_LEVEL_INFO, __VA_ARGS__)
 
 #define LOG_GPU_DEBUG(fmt, ...) log_component("gpu", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #define LOG_GPU_INFO(fmt, ...)  log_component("gpu", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
@@ -75,6 +75,7 @@ void log_component(const char* component, int level, const char* fmt, ...);
 #define LOG_CDROM_WARN(fmt, ...)  log_component("cdrom", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
 #define LOG_CDROM_ERROR(fmt, ...) log_component("cdrom", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
 #define LOG_CDROM_TRACE(fmt, ...) log_component("cdrom", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_CDROM_IMPORTANT(...) log_component("cdrom", LOG_LEVEL_INFO, __VA_ARGS__)
 
 #define LOG_DMA_DEBUG(fmt, ...) log_component("dma", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
 #define LOG_DMA_INFO(fmt, ...)  log_component("dma", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
