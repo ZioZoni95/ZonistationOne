@@ -40,7 +40,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->in_delay_slot = false;   // Not initially in a delay slot
 
     // Initialize Coprocessor 0 Registers
-    cpu->sr = 0x00000000;    // Status Register: Start with interrupts DISABLED (IEC=0)
+    cpu->sr = (1 << 22);    // Status Register: BEV=1 (bootstrap exception vector)
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
@@ -58,6 +58,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     gte_init(&cpu->gte);
 
     LOG_CPU_IMPORTANT("[BOOT] CPU initialized, PC=0x%08x", cpu->pc);
+    // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }
 
 
@@ -139,24 +140,17 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     cpu->exception_pending = true;
     // Log all exception entries in nocash/PSX-Spex style
     LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cause == EXCEPTION_LOAD_ADDRESS_ERROR || cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->current_pc : 0, cpu->in_delay_slot);
-    LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x\n", cause, cpu->pc);
+    LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x\n", cause, cpu->pc, cpu->sr, cpu->epc);
     if (cause == EXCEPTION_INTERRUPT) {
         LOG_INFO("[CPU] Entered interrupt handler (IRQ)\n");
-        // --- ADDED: Small log for IRQ0 specifically (PCSX ReARMed style) ---
-        if ((cpu->inter->irq_status & 0x1) && (cpu->inter->irq_mask & 0x1)) {
-            LOG_DEBUG("[CPU][PCSX-IRQ0] Handling IRQ0 in exception handler (I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x)", cpu->inter->irq_status, cpu->inter->irq_mask, cpu->sr);
-        }
     }
-    LOG_INFO("!!! CPU Exception: Cause=0x%02x, PC=0x%08x, InDelaySlot=%d !!!\n",
-           cause, cpu->current_pc, cpu->in_delay_slot);
+    // Save current mode bits (SR[4:0]) to stack (SR[7:2]), set EXL (bit 1), set kernel mode, disable interrupts
+    uint32_t old_sr = cpu->sr;
+    cpu->sr = (old_sr & ~0x3F) | ((old_sr & 0x1F) << 2) | 0x2; // EXL=1, push mode stack
 
     // Determine exception handler address based on SR bit 22 (BEV)
-    uint32_t handler_addr = (cpu->sr & (1 << 22)) ? 0xbfc00180  : 0x80000080;
-
-    // Update Status Register (SR): Push mode bits onto the stack
-    uint32_t mode_stack = cpu->sr & 0x3f;    // Get bits 5:0 (KU/IE stack)
-    cpu->sr &= ~0x3f;                       // Clear bits 5:0
-    cpu->sr |= (mode_stack << 2) & 0x3f;    // Shift stack left, pushing 0s into KUc/IEc
+    uint32_t handler_addr = (cpu->sr & (1 << 22)) ? 0xbfc00180 : 0x80000080;
+    LOG_INFO("[CPU] Jumping to exception handler at 0x%08x\n", handler_addr);
 
     // Update Cause Register: Set ExcCode (bits 6:2), preserve IP bits and BD
     uint32_t old_cause = cpu->cause;
@@ -166,16 +160,12 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     // Set BD bit if in delay slot
     if (cpu->in_delay_slot) {
         cpu->cause |= (1u << 31);
+        // For exceptions in delay slot, EPC = address of branch instruction (current_pc - 4)
+        cpu->epc = cpu->current_pc - 4;
     } else {
         cpu->cause &= ~(1u << 31);
+        cpu->epc = cpu->current_pc;
     }
-
-    // Update EPC: For exceptions in delay slot, EPC = address of instruction in delay slot
-    // For non-delay slot, EPC = current_pc
-    cpu->epc = cpu->current_pc;
-
-    // For address errors, set BadVaddr if needed (not implemented, but placeholder)
-    // (You may want to add a BadVaddr field to Cpu struct if needed)
 
     // For interrupts, acknowledge and clear pending IRQs
     if (cause == EXCEPTION_INTERRUPT) {
@@ -186,23 +176,22 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
             LOG_INFO("[CPU] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x\n", 
                     current_status, current_mask, pending_interrupts);
             if (pending_interrupts != 0) {
-                // Only clear the IRQs that are both pending and acknowledged
                 interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, pending_interrupts);
                 LOG_INFO("[CPU] Acknowledged interrupts: 0x%04x\n", pending_interrupts);
             }
-            // GTE/COP2 quirk: If instruction at EPC is GTE, increment EPC by 4
             uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
             if ((epc_instr & 0xFE000000) == 0x4A000000) {
                 LOG_CPU_IMPORTANT("@PSX-Spex GTE interrupt quirk: EPC advanced to 0x%08x", cpu->epc + 4);
                 cpu->epc += 4;
             }
         }
-        // Do NOT return directly to EPC; let BIOS handler do it. Just jump to handler_addr.
     }
 
     // For all exceptions, jump to the generic exception handler vector.
+    LOG_INFO("[CPU] Jumping to exception handler at 0x%08x\n", handler_addr);
     cpu->pc = handler_addr;
     cpu->next_pc = cpu->pc + 4;
+    LOG_INFO("[CPU] After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x\n", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
 }
 
 
@@ -320,6 +309,18 @@ void cpu_run_next_instruction(Cpu* cpu) {
         if (cpu->inter->cpu_cycle_counter >= cpu->inter->evq_next_cycle) {
             eventq_dispatch_due(cpu->inter);
         }
+    }
+
+    // --- ADDED: Detailed IRQ check log after every instruction ---
+    static uint64_t irq_check_log_counter = 0;
+    irq_check_log_counter++;
+    uint16_t post_status = cpu->inter->irq_status;
+    uint16_t post_mask = cpu->inter->irq_mask;
+    uint32_t post_sr = cpu->sr;
+    bool post_iec = (post_sr & 1) != 0;
+    bool post_irq_pending = ((post_status & post_mask) != 0) && post_iec;
+    if (irq_check_log_counter < 10 || irq_check_log_counter % 100000 == 0) {
+        LOG_DEBUG("[CPU][IRQ-TRACE] After instr: I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x, IEC=%d, IRQ_PENDING=%d", post_status, post_mask, post_sr, post_iec, post_irq_pending);
     }
 
     // Restore original interrupt check at the end of cpu_run_next_instruction
@@ -619,6 +620,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
              break;
         case 12: // SR (Status Register)
             // printf("~ MTC0 SR = 0x%08x\n", value); // Debug
+            LOG_INFO("[CPU] MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
             cpu->sr = value;
             break;
         case 13: // CAUSE
@@ -637,14 +639,12 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_rfe(Cpu* cpu, uint32_t instruction) {
-    (void)instruction;
+    // Restore mode bits from stack (SR[7:2] -> SR[4:0]), clear EXL
     uint32_t old_sr = cpu->sr;
-    uint32_t old_pc = cpu->pc;
-    uint32_t old_epc = cpu->epc;
-    uint32_t mode_stack = cpu->sr & 0x3f;
-    cpu->sr &= ~0x3f;
-    cpu->sr |= (mode_stack >> 2) & 0x3f; // Following guide's code
-    LOG_CPU_IMPORTANT("@PSX-Spex RFE: Executed, SR before=0x%08x after=0x%08x PC=0x%08x EPC=0x%08x", old_sr, cpu->sr, old_pc, old_epc);
+    cpu->sr = (old_sr & ~0x3F) | ((old_sr >> 2) & 0x1F);
+    LOG_INFO("[CPU] RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
+    LOG_CPU_IMPORTANT("@PSX-Spex RFE: Executed, SR before=0x%08x after=0x%08x PC=0x%08x EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
+    LOG_INFO("[CPU] RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x\n", old_sr, cpu->sr, cpu->pc, cpu->epc);
     // NOTE: Do NOT jump to EPC here! The BIOS handler must do the jump after RFE.
 }
 

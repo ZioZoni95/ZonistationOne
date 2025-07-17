@@ -594,7 +594,8 @@ uint32_t gpu_read_status(Gpu* gpu) {
     // --- DMA Direction Bits (STAT[30:29]) ---
     r |= ((uint32_t)gpu->dma_setting << 29);
     // Bit 31: Odd/Even line signal (needs timing) - Placeholder 0
-    LOG_GPU_INFO("[GPUSTAT] Read: 0x%08x", r);
+    bool vblank = (r & (1 << 23)) != 0;
+    LOG_GPU_INFO("[GPUSTAT] Read: 0x%08x (VBlank=%d)", r, vblank);
     return r;
 }
 
