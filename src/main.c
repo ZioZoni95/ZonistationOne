@@ -225,7 +225,8 @@ int main(int argc, char *argv[]) {
     #define VBLANK_CYCLES 564480
     // Only schedule VBlank event at startup. Timer0 events are scheduled by timer logic when needed.
     eventq_schedule(&interconnect_state, EVQ_VBLANK, VBLANK_CYCLES);
-    // eventq_schedule(&interconnect_state, EVQ_TIMER0, TIMER0_CYCLES); // REMOVED: Timer0 events are scheduled by timers_step()
+    // PCSX ReARMed-style: Schedule Timer0 event at boot so it is always in the event queue
+    eventq_schedule(&interconnect_state, EVQ_TIMER0, 1024); // Initial guess: 1024 cycles
 
     LOG_INFO("All Emulator Components Initialized.");
 
@@ -254,6 +255,8 @@ int main(int argc, char *argv[]) {
         while (cycles_run < cycles_per_frame) {
             cpu_run_next_instruction(&cpu_state);
             eventq_dispatch_due(&interconnect_state);
+            // --- PCSX ReARMed-style: Immediately run another CPU instruction after event dispatch to process IRQs ---
+            cpu_run_next_instruction(&cpu_state);
             cycles_run++;
         }
         // Step timers once per frame with the total cycles executed

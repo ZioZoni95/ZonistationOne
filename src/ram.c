@@ -7,10 +7,17 @@
 // Based on Guide Section 2.34 [cite: 460]
 void ram_init(Ram* ram) {
     LOG_RAM_INFO("RAM initialized");
-    // Fill RAM with a "garbage" value (0xCA) to simulate uninitialized state
-    // and potentially help catch reads from uninitialized memory.
-    memset(ram->data, 0xCA, RAM_SIZE);
-    LOG_DEBUG("RAM Initialized (%d bytes, filled with 0xCA).", RAM_SIZE);
+    // Fill RAM with zeros to match real PS1 power-on state
+    memset(ram->data, 0x00, RAM_SIZE);
+    LOG_DEBUG("RAM Initialized (%d bytes, filled with 0x00).", RAM_SIZE);
+
+    // Place a minimal RFE handler at 0x00000080 (maps to 0x80000080)
+    // RFE opcode: 0x42000010
+    uint32_t* ram32 = (uint32_t*)ram->data;
+    ram32[0x80 / 4] = 0x42000010; // RFE
+    ram32[0x84 / 4] = 0x00000000; // NOP
+    ram32[0x88 / 4] = 0x00000000; // NOP
+    ram32[0x8C / 4] = 0x00000000; // NOP
 }
 
 // Helper for bounds checking

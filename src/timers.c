@@ -375,6 +375,7 @@ void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->
 // VBlank event handler for event_scheduler.c
 void timers_on_vblank(Timers* timers) {
     static int vblank_timer0_resched_count = 0;
+    LOG_TIMERS_INFO("[VBlank] timers_on_vblank called. Timer0 counter reset. IRQ0 request logic follows.");
     if (vblank_timer0_resched_count < 5) {
         LOG_TIMERS_INFO("[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=%d)", ++vblank_timer0_resched_count);
     }
@@ -382,9 +383,13 @@ void timers_on_vblank(Timers* timers) {
     t0->counter = 0;
     t0->reached_target_flag = false;
     // Only clear interrupt_requested if the IRQ was acknowledged (handled in interconnect)
-    // (Removed: eventq_schedule for Timer0)
+    if (t0->interrupt_requested && /* IRQ0 was acknowledged */) {
+        LOG_TIMERS_INFO("[Timer0] IRQ0 acknowledged, clearing interrupt_requested flag.");
+        t0->interrupt_requested = false;
+    }
     // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
     if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
+        LOG_TIMERS_INFO("[VBlank] Requesting IRQ0 (Timer0 event, VBlank logic)");
         interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
