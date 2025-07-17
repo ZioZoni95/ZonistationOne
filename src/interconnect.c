@@ -126,7 +126,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 
     // Initialize Interrupt Controller state
     inter->irq_status = 0; // No pending interrupts
-    inter->irq_mask = 0x0000;   // Start with all interrupts masked, BIOS will enable as needed
+    inter->irq_mask = 0; // Mask all IRQs at startup
     
     // Initialize Timer state <<< ADD THIS CALL
     timers_init(&inter->timers_state, inter);
@@ -145,13 +145,9 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_INTERCONNECT_INFO("[IRQ] IRQ%u requested by %s (I_STAT before: 0x%04x)", irq_line, source, inter->irq_status);
-    }
-    inter->irq_status |= (1 << irq_line); // Always set, never clear here
-    if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_DEBUG("[IRQ] IRQ%u set: I_STAT now 0x%04x (source: %s)", irq_line, inter->irq_status, source);
-    }
+    LOG_INTERCONNECT_INFO("[IRQ] IRQ%u requested by %s. I_STAT before=0x%04x", irq_line, source, inter->irq_status);
+    inter->irq_status |= (1u << irq_line);
+    LOG_INTERCONNECT_INFO("[IRQ] IRQ%u set. I_STAT after=0x%04x", irq_line, inter->irq_status);
 }
 
 // Helper to clear an IRQ (for explicit logging, though BIOS usually does this via I_STAT write)
@@ -565,9 +561,9 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        LOG_DEBUG("[IRQ] Write to I_STAT (IRQ_STATUS_ADDR): Value=0x%04x, Before=0x%04x", value, inter->irq_status);
+        LOG_INTERCONNECT_INFO("[IRQ] Write to I_STAT (IRQ_STATUS_ADDR): Value=0x%04x, Before=0x%04x", value, inter->irq_status);
         inter->irq_status &= ~(value & 0xFFFF); // Only clear bits written by BIOS
-        LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
+        LOG_INTERCONNECT_INFO("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
