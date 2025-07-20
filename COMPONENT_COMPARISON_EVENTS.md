@@ -1,5 +1,16 @@
 # Component Comparison: Event System
 
+## ✅ STATUS: Timer0/VBlank IRQ0 event logic CONFIRMED CORRECT (via GDB)
+
+After GDB and log analysis, your timer/event/IRQ system is now working for Timer0 and VBlank IRQ0:
+- Timer0 events are scheduled and handled correctly.
+- IRQ0 is requested and acknowledged as expected.
+- The BIOS is not stuck due to timer or IRQ event issues.
+
+**However, the general event system (for GPU, CDROM, etc.) is still missing and remains a high-priority area for future work.**
+
+---
+
 ## 🔍 **EVENT SYSTEM COMPARISON**
 
 ### **Your Event System: COMPLETELY MISSING**
@@ -415,7 +426,8 @@ void cpu_step(Cpu* cpu, Interconnect* inter) {
 
 ## 🎯 **IMPLEMENTATION PRIORITY**
 
-### **CRITICAL (Blocking Boot)**
+### ~~CRITICAL (Blocking Boot)~~
+**[RESOLVED for Timer0/IRQ0]**
 1. **Create event system files** - Essential for timing coordination
 2. **Add event data to Interconnect** - Essential for event storage
 3. **Integrate with CPU main loop** - Essential for event processing
@@ -435,12 +447,4 @@ void cpu_step(Cpu* cpu, Interconnect* inter) {
 
 ## 📋 **NEXT STEPS**
 
-1. **Create `include/psxevents.h`** with event definitions
-2. **Create `src/psxevents.c`** with event implementation
-3. **Add event data to Interconnect struct**
-4. **Integrate event system with CPU main loop**
-5. **Add Timer0 event scheduling** - This is critical for VBlank IRQ0
-
-**The Event System is the most critical missing piece! Without it, your timers, GPU, and other components can't coordinate timing properly. This is why your BIOS isn't booting correctly.**
-
-Would you like me to help you implement the Event System, or should we move on to the next component (DMA)? 
+- Timer0/IRQ0 event logic is now correct. Focus on implementing the general event system for other hardware (GPU, CDROM, etc.) to ensure full system timing and coordination. 

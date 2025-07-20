@@ -1,5 +1,17 @@
 # Component Comparison: Timer System
 
+## ✅ STATUS: Timer0/VBlank IRQ0 logic CONFIRMED CORRECT (via GDB)
+
+After a thorough GDB session, your Timer0 and VBlank IRQ0 logic now matches PCSX ReARMed:
+- Timer0 is configured for VBlank IRQ0 (mode=0x0110, target=0xFFFF).
+- Timer0 counts up, requests IRQ0 at the right time, and the BIOS acknowledges it.
+- The IRQ0 request/acknowledge cycle is clean and matches the reference.
+- The BIOS is not stuck due to timer or IRQ issues.
+
+**Next areas to investigate:** GPU emulation, CPU exception/return logic, or other hardware subsystems.
+
+---
+
 ## 🔍 **TIMER SYSTEM COMPARISON**
 
 ### **Your Timer Structure vs PCSX ReARMed**
@@ -267,7 +279,7 @@ extern uint32_t frame_counter;
 
 ## 🎯 **IMPLEMENTATION PRIORITY**
 
-### **CRITICAL (Blocking Boot)**
+### **[RESOLVED for Timer0/IRQ0]**
 1. **Add `cycle` and `cycle_start` fields** - Essential for precise timing
 2. **Add `rate` field** - Essential for proper clock rates
 3. **Add `irq` field** - Essential for interrupt generation
@@ -286,11 +298,4 @@ extern uint32_t frame_counter;
 
 ## 📋 **NEXT STEPS**
 
-1. **Update your Timer struct** with the missing fields
-2. **Add the missing constants** to your header
-3. **Enhance your `timers_step()` function** with proper cycle counting
-4. **Test Timer0 VBlank generation** - This is critical for boot
-
-**The most critical missing pieces are the `cycle`, `cycle_start`, and `rate` fields. These are essential for proper timer timing and VBlank generation.**
-
-Would you like me to help you implement these missing pieces, or should we move on to the next component (GPU)? 
+- Timer0/IRQ0 logic is now correct. Move on to GPU, CPU exception/return, or other hardware for further debugging. 
