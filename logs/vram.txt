@@ -1,0 +1,6 @@
+VRAM initialized
+VRAM Initialized (1048576 bytes, filled with 0x00).
+VRAM initialized
+VRAM Initialized (1048576 bytes, filled with 0x00).
+VRAM initialized
+VRAM Initialized (1048576 bytes, filled with 0x00).

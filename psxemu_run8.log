@@ -1,0 +1,547 @@
+[INFO] Emulator core starting main loop
+[INFO] BIOS loaded from roms/SCPH1001.BIN (524288 bytes)
+[INFO] DMA initialized
+[INFO] Event queue initialized
+[INFO] GPU initialization started
+[INFO] GPU initialized (VRAM cleared)
+[INFO] Event scheduled: type=3 cycle=16667
+[INFO] Event scheduled: type=4 cycle=1000
+[INFO] [TRACE] Main loop iteration 0
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00000
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00000 value=0x3c080013
+[INFO] [CPU] PC=0xbfc00000, instruction=0x3c080013
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 1
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00004
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00004 value=0x3508243f
+[INFO] [CPU] PC=0xbfc00004, instruction=0x3508243f
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 2
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00008
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00008 value=0x3c011f80
+[INFO] [CPU] PC=0xbfc00008, instruction=0x3c011f80
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 3
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0000c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0000c value=0xac281010
+[INFO] [CPU] PC=0xbfc0000c, instruction=0xac281010
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00001010 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 4
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00010
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00010 value=0x00000000
+[INFO] [CPU] PC=0xbfc00010, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 5
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00014
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00014 value=0x24080b88
+[INFO] [CPU] PC=0xbfc00014, instruction=0x24080b88
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 6
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00018
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00018 value=0x3c011f80
+[INFO] [CPU] PC=0xbfc00018, instruction=0x3c011f80
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 7
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0001c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0001c value=0xac281060
+[INFO] [CPU] PC=0xbfc0001c, instruction=0xac281060
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00001060 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 8
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00020
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00020 value=0x00000000
+[INFO] [CPU] PC=0xbfc00020, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 9
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00024
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00024 value=0x00000000
+[INFO] [CPU] PC=0xbfc00024, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 10
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00028
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00028 value=0x00000000
+[INFO] [CPU] PC=0xbfc00028, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 11
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0002c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0002c value=0x00000000
+[INFO] [CPU] PC=0xbfc0002c, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 12
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00030
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00030 value=0x00000000
+[INFO] [CPU] PC=0xbfc00030, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 13
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00034
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00034 value=0x00000000
+[INFO] [CPU] PC=0xbfc00034, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 14
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00038
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00038 value=0x00000000
+[INFO] [CPU] PC=0xbfc00038, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 15
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0003c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0003c value=0x00000000
+[INFO] [CPU] PC=0xbfc0003c, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 16
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00040
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00040 value=0x00000000
+[INFO] [CPU] PC=0xbfc00040, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 17
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00044
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00044 value=0x00000000
+[INFO] [CPU] PC=0xbfc00044, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 18
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00048
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00048 value=0x00000000
+[INFO] [CPU] PC=0xbfc00048, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 19
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0004c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0004c value=0x00000000
+[INFO] [CPU] PC=0xbfc0004c, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 20
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00050
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00050 value=0x00000000
+[INFO] [CPU] PC=0xbfc00050, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 21
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00054
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00054 value=0x00000000
+[INFO] [CPU] PC=0xbfc00054, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 22
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00058
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00058 value=0x00000000
+[INFO] [CPU] PC=0xbfc00058, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 23
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0005c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0005c value=0x00000000
+[INFO] [CPU] PC=0xbfc0005c, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 24
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00060
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00060 value=0x00000000
+[INFO] [CPU] PC=0xbfc00060, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 25
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00064
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00064 value=0x00000000
+[INFO] [CPU] PC=0xbfc00064, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 26
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00068
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00068 value=0x00000000
+[INFO] [CPU] PC=0xbfc00068, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 27
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0006c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0006c value=0x00000000
+[INFO] [CPU] PC=0xbfc0006c, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 28
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00070
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00070 value=0x0bf00054
+[INFO] [CPU] PC=0xbfc00070, instruction=0x0bf00054
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 29
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00074
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00074 value=0x00000000
+[INFO] [CPU] PC=0xbfc00074, instruction=0x00000000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 30
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00150
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00150 value=0x3c091f80
+[INFO] [CPU] PC=0xbfc00150, instruction=0x3c091f80
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 31
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00154
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00154 value=0x35291000
+[INFO] [CPU] PC=0xbfc00154, instruction=0x35291000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 32
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00158
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00158 value=0x3c080003
+[INFO] [CPU] PC=0xbfc00158, instruction=0x3c080003
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 33
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0015c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0015c value=0x35081125
+[INFO] [CPU] PC=0xbfc0015c, instruction=0x35081125
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 34
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00160
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00160 value=0xad280020
+[INFO] [CPU] PC=0xbfc00160, instruction=0xad280020
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00000020 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 35
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00164
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00164 value=0x3c081f00
+[INFO] [CPU] PC=0xbfc00164, instruction=0x3c081f00
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 36
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00168
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00168 value=0xad280000
+[INFO] [CPU] PC=0xbfc00168, instruction=0xad280000
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00000000 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 37
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0016c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0016c value=0x3c081f80
+[INFO] [CPU] PC=0xbfc0016c, instruction=0x3c081f80
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 38
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00170
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00170 value=0x35082000
+[INFO] [CPU] PC=0xbfc00170, instruction=0x35082000
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 39
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00174
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00174 value=0xad280004
+[INFO] [CPU] PC=0xbfc00174, instruction=0xad280004
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00000004 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 40
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00178
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00178 value=0x3c080013
+[INFO] [CPU] PC=0xbfc00178, instruction=0x3c080013
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 41
+[INFO] [TRACE] Interconnect read32: addr=0xbfc0017c
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc0017c value=0x3508243f
+[INFO] [CPU] PC=0xbfc0017c, instruction=0x3508243f
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 42
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00180
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00180 value=0xad280008
+[INFO] [CPU] PC=0xbfc00180, instruction=0xad280008
+[WARN] [CPU] SWC0: Store $8 (0x00000000) to addr 0x00000008 (stub, hardware reg write)
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 43
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00184
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff
+[INFO] [TRACE] Checking region 1: 0x80000000-0x801fffff
+[INFO] [TRACE] Checking region 2: 0x1fc00000-0x1fc7ffff
+[INFO] [TRACE] Checking region 3: 0xbfc00000-0xbfc7ffff
+[INFO] [TRACE] Found matching region 3
+[INFO] BIOS read32: addr=0xbfc00184 value=0x3c082009
+[INFO] [CPU] PC=0xbfc00184, instruction=0x3c082009
+[INFO] DMA step (stub)
+[INFO] [TRACE] Main loop iteration 44
+[INFO] [TRACE] Interconnect read32: addr=0xbfc00188
+[INFO] [TRACE] Interconnect pointer: 0x7ffc5f37ee68
+[INFO] [TRACE] EmulatorContext pointer: 0x7ffc5f0fd330
+[INFO] [TRACE] Checking region 0: 0x00000000-0x001fffff

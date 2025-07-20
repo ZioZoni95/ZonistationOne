@@ -1,0 +1,36 @@
+Timers initialized
+[Timer0] Write16: offset=0x4 value=0x0000
+[Timer0] Write16: offset=0x8 value=0x0000
+[Timer0] Target set: 0x0000
+[Timer0] Write16: offset=0x0 value=0x0000
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=1)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=2)
+[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0
+[Timer0] Forced config: mode=0x0110, target=0xffff [PSX-Spex: VBlank IRQ0 enabled]
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=3)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=4)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=5)
+Timers initialized
+[Timer0] Write16: offset=0x4 value=0x0000
+[Timer0] Write16: offset=0x8 value=0x0000
+[Timer0] Target set: 0x0000
+[Timer0] Write16: offset=0x0 value=0x0000
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=1)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=2)
+[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0
+[Timer0] Forced config: mode=0x0110, target=0xffff [PSX-Spex: VBlank IRQ0 enabled]
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=3)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=4)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=5)
+Timers initialized
+[Timer0] Write16: offset=0x4 value=0x0000
+[Timer0] Write16: offset=0x8 value=0x0000
+[Timer0] Target set: 0x0000
+[Timer0] Write16: offset=0x0 value=0x0000
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=1)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=2)
+[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0
+[Timer0] Forced config: mode=0x0110, target=0xffff [PSX-Spex: VBlank IRQ0 enabled]
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=3)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=4)
+[VBlank] timers_on_vblank: (NO LONGER rescheduling Timer0 event here) (count=5)

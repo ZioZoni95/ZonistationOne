@@ -1,0 +1,3 @@
+[RENDERER] Initializing renderer
+[RENDERER] Initializing renderer
+[RENDERER] Initializing renderer

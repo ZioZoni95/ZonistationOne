@@ -2,43 +2,41 @@
 #define NEWCORE_EMULATOR_H
 
 #include "cpu.h"
-struct NcInterconnect;
-#include "event_scheduler.h"
-#include "renderer_plugin.h"
 #include "ram.h"
-#include "vram.h"
 #include "bios.h"
-#include "gpu.h"
-#include "timers.h"
-#include "cdrom.h"
-#include "gte.h"
-#include "debugger.h"
-#include "sio.h"
-#include "spu.h"
 #include "dma.h"
 #include "event_scheduler.h"
-// ... add other subsystem includes as needed
+#include "interconnect.h"
+#include "gpu.h" // Add this include for NcGpu
+
+// Scratchpad structure (1KB data cache RAM)
+typedef struct NcScratchpad {
+    uint8_t data[1024]; // 1KB scratchpad memory
+} NcScratchpad;
 
 // Emulator context holding all subsystem state
-typedef struct {
+typedef struct EmulatorContext {
     NcCpu cpu;
-    struct NcInterconnect* interconnect;
     NcRam ram;
-    NcVram vram;
     NcBios bios;
-    NcGpu gpu;
-    NcTimers timers;
-    NcCdrom cdrom;
-    NcGte gte;
-    NcDebugger debugger;
-    NcSio sio;
-    NcSpu spu;
     NcDma dma;
     NcEventQueue eventq;
-    // Add more as needed
+    struct NcInterconnect interconnect;
+    NcGpu gpu; // Add GPU subsystem for VRAM access
+    NcScratchpad scratchpad; // Add scratchpad for 0x1f800000-0x1f8003ff region
+    
+    // Interrupt controller state
+    uint16_t irq_status; // I_STAT register (pending interrupts)
+    uint16_t irq_mask;   // I_MASK register (interrupt enable mask)
+    
+    // CPU cycle counter for timing simulation
+    uint64_t cycle_count;
+    
+    // ... other subsystems ...
 } EmulatorContext;
 
-// Main entry point for the emulator core
+// Main emulator functions
+void nc_cpu_step(EmulatorContext* ctx);
 int emulator_run(EmulatorContext* ctx);
 
 #endif // NEWCORE_EMULATOR_H 

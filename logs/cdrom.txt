@@ -1,0 +1,29 @@
+CDROM initialized
+Initializing CD-ROM...
+
+CDROM: Attempting to load disc image 'games/Crassh Bandicoot.bin'
+
+CDROM Error: Failed to open disc image: games/Crassh Bandicoot.bin
+
+[CDROM] FIFO push: 0x20
+[BOOT] First CDROM command received: 0x19
+[CDROM] FIFO pop: 0x20
+[CDROM] FIFO push: 0x1c
+[CDROM] FIFO push: 0x94
+[CDROM] FIFO push: 0x00
+[CDROM] FIFO push: 0x00
+[CDROM] FIFO push: 0x00
+CDROM initialized
+Initializing CD-ROM...
+
+CDROM: Attempting to load disc image 'games/Crassh Bandicoot.bin'
+
+CDROM Error: Failed to open disc image: games/Crassh Bandicoot.bin
+
+CDROM initialized
+Initializing CD-ROM...
+
+CDROM: Attempting to load disc image 'games/Crassh Bandicoot.bin'
+
+CDROM Error: Failed to open disc image: games/Crassh Bandicoot.bin
+

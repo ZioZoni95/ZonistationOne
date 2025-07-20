@@ -31,4 +31,44 @@ void     bios_write32(void* ctx, uint32_t addr, uint32_t value);
 uint32_t dma_read32(void* ctx, uint32_t addr);
 void     dma_write32(void* ctx, uint32_t addr, uint32_t value);
 
+// Scratchpad region handlers
+uint32_t scratchpad_read32(void* ctx, uint32_t addr);
+void     scratchpad_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// Timer region handlers
+uint32_t timer_read32(void* ctx, uint32_t addr);
+void     timer_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// Interrupt controller handlers
+uint32_t irq_read32(void* ctx, uint32_t addr);
+void     irq_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// SIO (Serial I/O) handlers
+uint32_t sio_read32(void* ctx, uint32_t addr);
+void     sio_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// CDROM handlers
+uint32_t cdrom_read32(void* ctx, uint32_t addr);
+void     cdrom_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// SPU (Sound Processing Unit) handlers
+uint32_t spu_read32(void* ctx, uint32_t addr);
+void     spu_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// Memory control handlers
+uint32_t memctrl_read32(void* ctx, uint32_t addr);
+void     memctrl_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// Hardware register fallback handlers
+uint32_t hwreg_read32(void* ctx, uint32_t addr);
+void     hwreg_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// VRAM region handlers
+uint32_t vram_read32(void* ctx, uint32_t addr);
+void     vram_write32(void* ctx, uint32_t addr, uint32_t value);
+
+// GPU command region handlers
+uint32_t gpu_read32(void* ctx, uint32_t addr);
+void     gpu_write32(void* ctx, uint32_t addr, uint32_t value);
+
 #endif // NEWCORE_INTERCONNECT_H 

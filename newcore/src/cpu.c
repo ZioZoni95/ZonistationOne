@@ -1,5 +1,6 @@
 #include "../include/cpu.h"
 #include "../include/log.h"
+#include "../include/interconnect.h"
 #include <string.h>
 #include <stdint.h>
 
@@ -34,12 +35,135 @@ void nc_cpu_exception(NcCpu* cpu, NcExceptionCause cause) {
     NC_LOGE("[CPU] Exception: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x", cause, cpu->epc, cpu->current_pc, cpu->sr);
 }
 
-// --- Instruction handler stubs ---
-#define HANDLER(name) static void name(NcCpu* cpu, uint32_t instr) { NC_LOGW("[CPU] Stub: %s", #name); }
-// Only use HANDLER for unimplemented instructions:
-HANDLER(nc_op_sll) HANDLER(nc_op_srl) HANDLER(nc_op_sra) HANDLER(nc_op_sllv) HANDLER(nc_op_srlv) HANDLER(nc_op_srav)
-HANDLER(nc_op_mfhi) HANDLER(nc_op_mthi)
-HANDLER(nc_op_mflo) HANDLER(nc_op_mtlo) HANDLER(nc_op_mult) HANDLER(nc_op_multu) HANDLER(nc_op_div) HANDLER(nc_op_divu)
+// --- Missing handler stubs (must be defined before HANDLER macro/table usage) ---
+static void nc_op_cop1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_cop1"); }
+static void nc_op_cop3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_cop3"); }
+static void nc_op_lwl(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwl"); }
+static void nc_op_lwr(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwr"); }
+static void nc_op_swl(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swl"); }
+static void nc_op_swr(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swr"); }
+static void nc_op_lwc0(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc0"); }
+static void nc_op_lwc1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc1"); }
+static void nc_op_lwc2(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc2"); }
+static void nc_op_lwc3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc3"); }
+static void nc_op_swc0(NcCpu* cpu, uint32_t instr) {
+    // SWC0: Store Word to COP0 register (not a real MIPS I op, but used for memory-mapped I/O in PS1)
+    // In PS1, SWC0 is used for memory-mapped hardware, not actual COP0 registers.
+    // We'll log and treat as a stub for now, but this is where hardware register writes would go.
+    uint32_t base = (instr >> 21) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    int16_t imm = (int16_t)(instr & 0xFFFF);
+    uint32_t addr = cpu_reg(cpu, base) + imm;
+    uint32_t value = cpu_reg(cpu, rt);
+    NC_LOGW("[CPU] SWC0: Store $%u (0x%08x) to addr 0x%08x (stub, hardware reg write)", rt, value, addr);
+    // TODO: Route to hardware register write via interconnect if needed
+}
+static void nc_op_swc1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc1"); }
+static void nc_op_swc2(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc2"); }
+static void nc_op_swc3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc3"); }
+
+// --- Shift instruction handlers ---
+static void nc_op_sll(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t shamt = (instr >> 6) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu_reg(cpu, rt) << shamt);
+}
+static void nc_op_srl(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t shamt = (instr >> 6) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu_reg(cpu, rt) >> shamt);
+}
+static void nc_op_sra(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t shamt = (instr >> 6) & 0x1F;
+    cpu_set_reg(cpu, rd, (uint32_t)((int32_t)cpu_reg(cpu, rt) >> shamt));
+}
+static void nc_op_sllv(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t shamt = cpu_reg(cpu, rs) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu_reg(cpu, rt) << shamt);
+}
+static void nc_op_srlv(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t shamt = cpu_reg(cpu, rs) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu_reg(cpu, rt) >> shamt);
+}
+static void nc_op_srav(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t shamt = cpu_reg(cpu, rs) & 0x1F;
+    cpu_set_reg(cpu, rd, (uint32_t)((int32_t)cpu_reg(cpu, rt) >> shamt));
+}
+
+// --- Multiply/Divide instruction handlers ---
+static void nc_op_mfhi(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu->hi);
+}
+static void nc_op_mthi(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    cpu->hi = cpu_reg(cpu, rs);
+}
+static void nc_op_mflo(NcCpu* cpu, uint32_t instr) {
+    uint32_t rd = (instr >> 11) & 0x1F;
+    cpu_set_reg(cpu, rd, cpu->lo);
+}
+static void nc_op_mtlo(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    cpu->lo = cpu_reg(cpu, rs);
+}
+static void nc_op_mult(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    int64_t a = (int32_t)cpu_reg(cpu, rs);
+    int64_t b = (int32_t)cpu_reg(cpu, rt);
+    int64_t result = a * b;
+    cpu->hi = (uint32_t)(result >> 32);
+    cpu->lo = (uint32_t)(result & 0xFFFFFFFF);
+}
+static void nc_op_multu(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint64_t a = cpu_reg(cpu, rs);
+    uint64_t b = cpu_reg(cpu, rt);
+    uint64_t result = a * b;
+    cpu->hi = (uint32_t)(result >> 32);
+    cpu->lo = (uint32_t)(result & 0xFFFFFFFF);
+}
+static void nc_op_div(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    int32_t a = (int32_t)cpu_reg(cpu, rs);
+    int32_t b = (int32_t)cpu_reg(cpu, rt);
+    if (b == 0) {
+        cpu->lo = 0;
+        cpu->hi = (uint32_t)a;
+    } else {
+        cpu->lo = (uint32_t)(a / b);
+        cpu->hi = (uint32_t)(a % b);
+    }
+}
+static void nc_op_divu(NcCpu* cpu, uint32_t instr) {
+    uint32_t rs = (instr >> 21) & 0x1F;
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t a = cpu_reg(cpu, rs);
+    uint32_t b = cpu_reg(cpu, rt);
+    if (b == 0) {
+        cpu->lo = 0;
+        cpu->hi = a;
+    } else {
+        cpu->lo = a / b;
+        cpu->hi = a % b;
+    }
+}
 
 // --- Arithmetic and logic instruction handlers ---
 static void nc_op_add(NcCpu* cpu, uint32_t instr) {
@@ -92,7 +216,13 @@ static void nc_op_or(NcCpu* cpu, uint32_t instr) {
     uint32_t rd = (instr >> 11) & 0x1F;
     uint32_t rs = (instr >> 21) & 0x1F;
     uint32_t rt = (instr >> 16) & 0x1F;
+    NC_LOGI("[CPU] OR instruction executed: $%d = $%d | $%d", rd, rs, rt);
     cpu_set_reg(cpu, rd, cpu_reg(cpu, rs) | cpu_reg(cpu, rt));
+}
+
+// Test function to verify table indexing
+static void nc_op_test(NcCpu* cpu, uint32_t instr) {
+    NC_LOGI("[CPU] TEST instruction executed!");
 }
 static void nc_op_xor(NcCpu* cpu, uint32_t instr) {
     uint32_t rd = (instr >> 11) & 0x1F;
@@ -343,48 +473,37 @@ static void nc_op_break(NcCpu* cpu, uint32_t instr) {
     nc_cpu_exception(cpu, NC_EXC_BREAK);
 }
 
+// --- Safe catch-all handler for unimplemented/illegal instructions ---
+static void nc_op_unimplemented(NcCpu* cpu, uint32_t instr) {
+    NC_LOGE("[CPU] Unimplemented instruction: 0x%08x at PC=0x%08x", instr, cpu->current_pc);
+    nc_cpu_exception(cpu, NC_EXC_ILLEGAL);
+}
 // --- R-type subfunction dispatch table ---
 typedef void (*NcInstrHandler)(NcCpu*, uint32_t);
 static NcInstrHandler rtype_table[64] = {
-    nc_op_sll, 0, nc_op_srl, nc_op_sra, nc_op_sllv, 0, nc_op_srlv, nc_op_srav,
-    nc_op_jr, nc_op_jalr, 0, 0, nc_op_syscall, nc_op_break, 0, 0,
-    nc_op_mfhi, nc_op_mthi, nc_op_mflo, nc_op_mtlo, nc_op_mult, nc_op_multu, nc_op_div, nc_op_divu,
-    nc_op_add, nc_op_addu, nc_op_sub, nc_op_subu, nc_op_and, nc_op_or, nc_op_xor, nc_op_nor,
-    0, 0, nc_op_slt, nc_op_sltu, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0
+    /* 0x00 */ nc_op_sll, nc_op_unimplemented, nc_op_srl, nc_op_sra, nc_op_sllv, nc_op_unimplemented, nc_op_srlv, nc_op_srav,
+    /* 0x08 */ nc_op_jr, nc_op_jalr, nc_op_unimplemented, nc_op_unimplemented, nc_op_syscall, nc_op_break, nc_op_unimplemented, nc_op_unimplemented,
+    /* 0x10 */ nc_op_mfhi, nc_op_mthi, nc_op_mflo, nc_op_mtlo, nc_op_mult, nc_op_multu, nc_op_div, nc_op_divu,
+    /* 0x18 */ nc_op_add, nc_op_addu, nc_op_sub, nc_op_subu, nc_op_and, nc_op_unimplemented, nc_op_xor, nc_op_nor,
+    /* 0x20 */ nc_op_unimplemented, nc_op_unimplemented, nc_op_slt, nc_op_sltu, nc_op_unimplemented, nc_op_or, nc_op_unimplemented, nc_op_unimplemented,
+    /* 0x28 */ nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented,
+    /* 0x30 */ nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented,
+    /* 0x38 */ nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented
 };
 
-// --- Main opcode dispatch table (stubs for now) ---
+// --- Main opcode dispatch table ---
 #undef HANDLER
 #define HANDLER(name) name
 static NcInstrHandler opcode_table[64] = {
-    0, nc_op_j, nc_op_jal, nc_op_beq, nc_op_bne, nc_op_blez, nc_op_bgtz,
+    nc_op_unimplemented, nc_op_j, nc_op_jal, nc_op_beq, nc_op_bne, nc_op_blez, nc_op_bgtz,
     nc_op_addi, nc_op_addiu, nc_op_slti, nc_op_sltiu, nc_op_andi, nc_op_ori, nc_op_xori, nc_op_lui,
-    nc_op_cop0, nc_op_cop1, nc_op_cop2, nc_op_cop3, 0, 0, 0, 0,
-    nc_op_lb, nc_op_lh, nc_op_lwl, nc_op_lw, nc_op_lbu, nc_op_lhu, nc_op_lwr, 0,
-    nc_op_sb, nc_op_sh, nc_op_swl, nc_op_sw, 0, 0, nc_op_swr, 0,
+    nc_op_cop0, nc_op_cop1, nc_op_cop2, nc_op_cop3, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented,
+    nc_op_lb, nc_op_lh, nc_op_lwl, nc_op_lw, nc_op_lbu, nc_op_lhu, nc_op_lwr, nc_op_unimplemented,
+    nc_op_sb, nc_op_sh, nc_op_swl, nc_op_sw, nc_op_unimplemented, nc_op_unimplemented, nc_op_swr, nc_op_unimplemented,
     nc_op_lwc0, nc_op_lwc1, nc_op_lwc2, nc_op_lwc3, nc_op_swc0, nc_op_swc1, nc_op_swc2, nc_op_swc3,
-    0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0
+    nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented,
+    nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented
 };
-
-// Add stubs for all missing handlers referenced in the opcode table
-HANDLER(nc_op_cop1)
-HANDLER(nc_op_cop3)
-HANDLER(nc_op_lwl)
-HANDLER(nc_op_lwr)
-HANDLER(nc_op_swl)
-HANDLER(nc_op_swr)
-HANDLER(nc_op_lwc0)
-HANDLER(nc_op_lwc1)
-HANDLER(nc_op_lwc2)
-HANDLER(nc_op_lwc3)
-HANDLER(nc_op_swc0)
-HANDLER(nc_op_swc1)
-HANDLER(nc_op_swc2)
-HANDLER(nc_op_swc3)
 
 // --- Main decode/execute with delay slot and load delay logic ---
 void nc_decode_and_execute(NcCpu* cpu, uint32_t instruction) {
@@ -399,6 +518,9 @@ void nc_decode_and_execute(NcCpu* cpu, uint32_t instruction) {
     if (opcode == 0x00) {
         uint32_t subfunc = instruction & 0x3F;
         NcInstrHandler handler = rtype_table[subfunc];
+        if (subfunc == 0x25) {
+            NC_LOGI("[CPU] Dispatching subfunc 0x25: handler=%p", (void*)handler);
+        }
         if (handler) handler(cpu, instruction);
         else nc_cpu_exception(cpu, NC_EXC_ILLEGAL);
         return;
@@ -439,4 +561,7 @@ void nc_cpu_init(NcCpu* cpu, struct NcInterconnect* inter) {
         }
     }
     NC_LOGI("CPU initialized, PC=0x%08x", cpu->pc);
+    NC_LOGI("R-type table index 0x25 (OR): %p", (void*)rtype_table[0x25]);
+    NC_LOGI("nc_op_or function address: %p", (void*)nc_op_or);
+    NC_LOGI("nc_op_unimplemented function address: %p", (void*)nc_op_unimplemented);
 } 

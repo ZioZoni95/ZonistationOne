@@ -15,3 +15,15 @@ CPU debug message: value=42
 CPU debug message: value=42
 CPU debug message: value=42
 CPU debug message: value=42
+[BOOT] CPU initialization started
+[BOOT] CPU initialized, PC=0xbfc00000
+@PSX-Spex EXCEPTION: cause=0x00 EPC=0x00000000 PC=0x8005a3cc SR=0x00000000 BadVaddr=0x00000000 InDelaySlot=0
+@PSX-Spex RFE: Executed, SR before=0x00000000 after=0x00000000 PC=0x8005a3cc EPC=0x8005a3cc
+[BOOT] CPU initialization started
+[BOOT] CPU initialized, PC=0xbfc00000
+@PSX-Spex EXCEPTION: cause=0x00 EPC=0x00000000 PC=0x8005a3cc SR=0x00000000 BadVaddr=0x00000000 InDelaySlot=0
+@PSX-Spex RFE: Executed, SR before=0x00000000 after=0x00000000 PC=0x8005a3cc EPC=0x8005a3cc
+[BOOT] CPU initialization started
+[BOOT] CPU initialized, PC=0xbfc00000
+@PSX-Spex EXCEPTION: cause=0x00 EPC=0x00000000 PC=0x8005a3cc SR=0x00000000 BadVaddr=0x00000000 InDelaySlot=0
+@PSX-Spex RFE: Executed, SR before=0x00000000 after=0x00000000 PC=0x8005a3cc EPC=0x8005a3cc
