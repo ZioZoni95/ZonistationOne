@@ -30,7 +30,7 @@ uint32_t nc_bios_load32(NcBios* bios, uint32_t offset) {
     uint32_t b1 = bios->data[offset + 1];
     uint32_t b2 = bios->data[offset + 2];
     uint32_t b3 = bios->data[offset + 3];
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
 }
 
 // 16-bit read from BIOS

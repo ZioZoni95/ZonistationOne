@@ -21,9 +21,11 @@ static void vblank_handler(void* ctx) {
 static void dma_handler(void* ctx) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     NC_LOGD("DMA event triggered - process DMA transfers");
-    // TODO: Process pending DMA transfers
-    // For testing: don't reschedule indefinitely
-    // nc_eventq_schedule(&ectx->eventq, NC_EVENT_DMA, 1000, dma_handler, ctx);
+    // Simulate DMA completion: set DMA interrupt bit (bit 3) in I_STAT
+    ectx->irq_status |= (1 << 3); // DMA interrupt
+    NC_LOGI("[DMA] DMA interrupt set (I_STAT |= 0x8)");
+    // Optionally, reschedule DMA event for continuous operation
+    nc_eventq_schedule(&ectx->eventq, NC_EVENT_DMA, ectx->cycle_count + 1000, dma_handler, ctx);
 }
 
 // Real CPU step: fetch, decode, execute

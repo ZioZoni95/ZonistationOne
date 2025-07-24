@@ -9,6 +9,13 @@ void nc_dma_init(NcDma* dma) {
 }
 
 void nc_dma_step(NcDma* dma) {
-    // TODO: Implement DMA channel stepping and event scheduling
-    NC_LOGI("DMA step (stub)");
+    // Minimal simulation: for each channel, if enabled, simulate a transfer and clear enable
+    for (int ch = 0; ch < 7; ++ch) {
+        if (dma->channels[ch].control & 0x01000000) { // DMA enable bit
+            // Simulate transfer: clear enable, set 'DMA complete' (for BIOS polling)
+            dma->channels[ch].control &= ~0x01000000;
+            dma->channels[ch].control |= 0x80000000; // Set 'DMA complete' flag (not real, but plausible)
+            // Optionally, set interrupt flag (handled in event handler)
+        }
+    }
 } 

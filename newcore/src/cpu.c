@@ -9,11 +9,13 @@ static inline uint32_t cpu_reg(NcCpu* cpu, NcRegIndex idx) {
     return idx == NC_REG_ZERO ? 0 : cpu->regs[idx & 31];
 }
 static inline void cpu_set_reg(NcCpu* cpu, NcRegIndex idx, uint32_t value) {
-    if (idx != NC_REG_ZERO) cpu->out_regs[idx & 31] = value;
+    if (idx != NC_REG_ZERO) cpu->regs[idx & 31] = value;
 }
 
 // --- Exception handler (real logic) ---
 void nc_cpu_exception(NcCpu* cpu, NcExceptionCause cause) {
+    uint32_t instr = nc_interconnect_read32(cpu->inter, cpu->current_pc);
+    NC_LOGE("[CPU] Exception: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x, instr=0x%08x", cause, cpu->epc, cpu->current_pc, cpu->sr, instr);
     cpu->exception_pending = true;
     // Save EPC: if in delay slot, EPC = address of branch, else current_pc
     cpu->epc = cpu->current_pc;
@@ -32,7 +34,6 @@ void nc_cpu_exception(NcCpu* cpu, NcExceptionCause cause) {
     uint32_t handler_addr = (cpu->sr & (1 << 22)) ? 0xbfc00180 : 0x80000080;
     cpu->pc = handler_addr;
     cpu->next_pc = cpu->pc + 4;
-    NC_LOGE("[CPU] Exception: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x", cause, cpu->epc, cpu->current_pc, cpu->sr);
 }
 
 // --- Missing handler stubs (must be defined before HANDLER macro/table usage) ---
@@ -330,7 +331,9 @@ static void nc_op_sw(NcCpu* cpu, uint32_t instr) {
     uint32_t rs = (instr >> 21) & 0x1F;
     int16_t imm = (int16_t)(instr & 0xFFFF);
     uint32_t addr = cpu_reg(cpu, rs) + imm;
-    nc_interconnect_write32(cpu->inter, addr, cpu_reg(cpu, rt));
+    uint32_t value = cpu_reg(cpu, rt);
+    NC_LOGI("[SW] Writing 0x%08x to addr 0x%08x (rs=$%d, rt=$%d, imm=0x%04x)", value, addr, rs, rt, (uint16_t)imm);
+    nc_interconnect_write32(cpu->inter, addr, value);
 }
 static void nc_op_lb(NcCpu* cpu, uint32_t instr) {
     uint32_t rt = (instr >> 16) & 0x1F;
@@ -506,8 +509,8 @@ static void nc_op_sltiu(NcCpu* cpu, uint32_t instr) {
 static void nc_op_cop0(NcCpu* cpu, uint32_t instr) {
     // COP0: System control coprocessor (SR, CAUSE, EPC)
     uint32_t cop_op = (instr >> 21) & 0x1F;
-    uint32_t rt = (instr >> 16) & 0x1F;
-    uint32_t rd = (instr >> 11) & 0x1F;
+        uint32_t rt = (instr >> 16) & 0x1F;
+        uint32_t rd = (instr >> 11) & 0x1F;
     if (cop_op == 0x00) { // MFC0 rt, rd
         // Move From COP0: GPR[rt] = COP0[rd]
         uint32_t value = 0;
@@ -534,10 +537,12 @@ static void nc_op_cop0(NcCpu* cpu, uint32_t instr) {
 // --- COP2 (GTE integration) ---
 static void nc_op_cop2(NcCpu* cpu, uint32_t instr) {
     // COP2: GTE (Geometry Transformation Engine)
-    // Call GTE instruction dispatcher if available
-    // For now, log a stub
-    NC_LOGW("[CPU] Stub: nc_op_cop2 (GTE instruction)");
-    // Example for future: nc_gte_execute_instruction(&cpu->gte, instr);
+    // For now, treat all COP2 instructions as valid GTE ops and call the stub dispatcher
+    // In the future, you can decode funct/opcode for more accuracy
+    // Example: call nc_gte_execute_instruction(&cpu->gte, instr);
+    // For now, just return (stub)
+    // If you want to log, use: NC_LOGW("[CPU] GTE instruction stub: 0x%08x", instr);
+    return;
 }
 // --- COP3 (Not present on PS1, raise coprocessor unusable exception) ---
 static void nc_op_cop3(NcCpu* cpu, uint32_t instr) {
@@ -576,7 +581,7 @@ static NcInstrHandler rtype_table[64] = {
 static NcInstrHandler opcode_table[64] = {
     nc_op_unimplemented, nc_op_j, nc_op_jal, nc_op_beq, nc_op_bne, nc_op_blez, nc_op_bgtz,
     nc_op_addi, nc_op_addiu, nc_op_slti, nc_op_sltiu, nc_op_andi, nc_op_ori, nc_op_xori, nc_op_lui,
-    nc_op_cop0, nc_op_cop1, nc_op_cop2, nc_op_cop3, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented, nc_op_unimplemented,
+    nc_op_cop0, nc_op_cop1, nc_op_cop2, nc_op_cop3,
     nc_op_lb, nc_op_lh, nc_op_lwl, nc_op_lw, nc_op_lbu, nc_op_lhu, nc_op_lwr, nc_op_unimplemented,
     nc_op_sb, nc_op_sh, nc_op_swl, nc_op_sw, nc_op_unimplemented, nc_op_unimplemented, nc_op_swr, nc_op_unimplemented,
     nc_op_lwc0, nc_op_lwc1, nc_op_lwc2, nc_op_lwc3, nc_op_swc0, nc_op_swc1, nc_op_swc2, nc_op_swc3,
@@ -586,6 +591,8 @@ static NcInstrHandler opcode_table[64] = {
 
 // --- Main decode/execute with delay slot and load delay logic ---
 void nc_decode_and_execute(NcCpu* cpu, uint32_t instruction) {
+    uint32_t opcode = (instruction >> 26) & 0x3F;
+    NC_LOGI("[OPCODE] PC=0x%08x, instruction=0x%08x, opcode=0x%02x", cpu->current_pc, instruction, opcode);
     // Handle load delay slot: apply previous load to register
     if (cpu->load_reg_idx != NC_REG_ZERO) {
         cpu_set_reg(cpu, cpu->load_reg_idx, cpu->load_value);
@@ -593,7 +600,6 @@ void nc_decode_and_execute(NcCpu* cpu, uint32_t instruction) {
     }
     cpu->in_delay_slot = cpu->branch_taken;
     cpu->branch_taken = false;
-    uint32_t opcode = (instruction >> 26) & 0x3F;
     if (opcode == 0x00) {
         uint32_t subfunc = instruction & 0x3F;
         NcInstrHandler handler = rtype_table[subfunc];
@@ -617,19 +623,19 @@ void nc_cpu_init(NcCpu* cpu, struct NcInterconnect* inter) {
     cpu->current_pc = cpu->pc;
     cpu->inter = inter;
     for (int i = 0; i < 32; ++i) {
-        cpu->regs[i] = 0xdeadbeef;
-        cpu->out_regs[i] = 0xdeadbeef;
+        cpu->regs[i] = 0;
+        cpu->out_regs[i] = 0;
     }
     cpu->regs[NC_REG_ZERO] = 0;
     cpu->out_regs[NC_REG_ZERO] = 0;
     cpu->load_reg_idx = NC_REG_ZERO;
     cpu->load_value = 0;
-    cpu->hi = 0xdeadbeef;
-    cpu->lo = 0xdeadbeef;
+    cpu->hi = 0;
+    cpu->lo = 0;
     cpu->branch_taken = false;
     cpu->in_delay_slot = false;
     cpu->exception_pending = false;
-    cpu->sr = 0;
+    cpu->sr = 0x10600000;
     cpu->cause = 0;
     cpu->epc = 0;
     for (int i = 0; i < NC_ICACHE_LINES; ++i) {

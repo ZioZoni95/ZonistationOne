@@ -5,8 +5,8 @@
 // Initialize RAM with a known pattern (0xCA)
 void nc_ram_init(NcRam* ram) {
     NC_LOGI("Initializing RAM");
-    memset(ram->data, 0xCA, NC_RAM_SIZE);
-    NC_LOGD("RAM filled with 0xCA (%d bytes)", NC_RAM_SIZE);
+    memset(ram->data, 0x00, NC_RAM_SIZE);
+    NC_LOGD("RAM filled with 0x00 (%d bytes)", NC_RAM_SIZE);
 }
 
 // Helper for bounds checking

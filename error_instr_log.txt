@@ -1,0 +1,1 @@
+[ERROR] [CPU] Exception: cause=0x0b EPC=0x00000000 PC=0xbfc00004 SR=0x10600000, instr=0x3f240835

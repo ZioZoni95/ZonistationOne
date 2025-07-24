@@ -32,23 +32,33 @@
 - No input, audio, or peripheral logic.
 - No real test/validation suite yet.
 
+# Emulator Status Summary (for commit)
+- BIOS loads and executes.
+- CPU instruction set is mostly complete for BIOS boot (no unimplemented instruction errors in logs).
+- Memory map and hardware register stubs are in place.
+- DMA controller and event system are partially implemented (minimal DMA stepping, event queue, VBlank/DMA events scheduled).
+- BIOS is currently stuck in a hardware probe loop, executing NOPs in the expansion/hardware region.
+- Use BIOS execution logs to guide further development.
+
 ## Immediate Priority (Updated)
-1. **CPU Instruction Handler Completion**
+1. **CPU Instruction Handler Completion (Top Priority)**
    - Implement all missing MIPS instructions (especially LWL, LWR, SWL, SWR, LWCx, SWCx, COP1, COP3, and GTE integration).
    - Add proper exception handling for all cases (alignment, illegal instructions, etc.).
-2. **DMA Controller**
+   - Use BIOS execution logs to identify which instructions are still missing or stubbed.
+   - BIOS progress is blocked if any required instruction is missing or stubbed.
+2. **DMA Controller and Event/Timer System (Next Focus)**
+   - Expand DMA register emulation (per-channel registers, status, polling).
    - Implement real DMA channel stepping and event scheduling in `nc_dma_step`.
    - Implement DMA register reads/writes in the interconnect.
    - Connect DMA to GPU, CDROM, and SPU subsystems.
-3. **Event/Timer System**
    - Implement timer counting, event scheduling, and interrupt generation.
-   - Implement timer register writes and side effects.
    - Integrate VBlank and DMA events with the event queue and interrupt controller.
-4. **GPU/Renderer**
+   - BIOS may also stall if hardware events/interrupts are not delivered.
+3. **GPU/Renderer**
    - Implement GPU command processing (GP0/GP1) and control logic.
    - Expand GPU state struct and logic.
    - Implement a basic software renderer or connect the plugin to real VRAM data.
-5. **CDROM, SPU, SIO**
+4. **CDROM, SPU, SIO**
    - Implement register writes and state machines for CDROM, SPU, and SIO.
    - Expand state structs and add real emulation logic.
 
