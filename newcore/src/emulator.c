@@ -12,7 +12,7 @@
 // Event handlers
 static void vblank_handler(void* ctx) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
-    NC_LOGI("VBlank event triggered - GPU can update display");
+    NC_LOGD("VBlank event triggered - GPU can update display");
     // TODO: Trigger GPU VBlank interrupt, update display
     // For testing: don't reschedule indefinitely
     // nc_eventq_schedule(&ectx->eventq, NC_EVENT_VBLANK, 16667, vblank_handler, ctx);
@@ -20,7 +20,7 @@ static void vblank_handler(void* ctx) {
 
 static void dma_handler(void* ctx) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
-    NC_LOGI("DMA event triggered - process DMA transfers");
+    NC_LOGD("DMA event triggered - process DMA transfers");
     // TODO: Process pending DMA transfers
     // For testing: don't reschedule indefinitely
     // nc_eventq_schedule(&ectx->eventq, NC_EVENT_DMA, 1000, dma_handler, ctx);
@@ -41,7 +41,7 @@ void nc_cpu_step(EmulatorContext* ctx) {
 
     // Fetch instruction from memory (via interconnect)
     uint32_t instruction = nc_interconnect_read32(&ctx->interconnect, cpu->current_pc);
-    NC_LOGI("[CPU] PC=0x%08x, instruction=0x%08x", cpu->current_pc, instruction);
+    NC_LOGT("[CPU] PC=0x%08x, instruction=0x%08x", cpu->current_pc, instruction);
 
     // Advance PC for next cycle (sequential, will be updated by branches)
     cpu->pc = cpu->next_pc;
@@ -101,7 +101,7 @@ int emulator_run(EmulatorContext* ctx) {
     int running = 1;
     int step_count = 0;
     while (running) {
-        NC_LOGI("[TRACE] Main loop iteration %d", step_count);
+        NC_LOGT("[TRACE] Main loop iteration %d", step_count);
         // 1. Step CPU (fetch, decode, execute)
         nc_cpu_step(ctx);
         // 2. Step DMA

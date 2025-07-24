@@ -9,7 +9,6 @@
   - Added cycle counter for timing simulation
   - All hardware register accesses now return plausible values and are properly logged
   - Memory aliases for KSEG0/KSEG1 RAM and cached/uncached BIOS access implemented
-
 - BIOS is now loaded, mapped, and executed. Emulator fetches and executes real BIOS instructions, main loop runs as designed.
 - RAM alias regions for KSEG0 (0x80000000–0x801FFFFF) and KSEG1 (0xA0000000–0xA01FFFFF) added to memory map.
 - Shift instructions (SLL, SRL, SRA, SLLV, SRLV, SRAV) implemented and working correctly.
@@ -18,59 +17,56 @@
 - GPU command registers (GP0/GP1) mapped and basic command handlers implemented.
 - Detailed logging and hardware register stubs are in place to trace execution and support further debugging.
 
-## Next Steps (Implementation Plan)
+## Missing/To-Do Features (from codebase scan)
+- Many MIPS instructions are still stubs or unimplemented (COP1, COP3, LWL, LWR, SWL, SWR, LWCx, SWCx, etc.).
+- GTE and other coprocessor integration is marked as TODO in the CPU struct.
+- Exception handling for some cases (e.g., PC alignment) is marked as TODO.
+- DMA stepping and event scheduling is stubbed; no real DMA transfer logic.
+- DMA register reads/writes are stubbed in the interconnect.
+- Timer register writes and counting are stubbed; no real timer events or interrupts.
+- VBlank and DMA event handlers are stubbed.
+- GPU command processing and control (GP0/GP1) are stubbed; renderer plugin is a stub.
+- GPU, CDROM, SPU, SIO state structs have TODOs for more fields and logic.
+- CDROM, SPU, SIO register writes are stubbed.
+- Debugger is scaffolded but not integrated.
+- No input, audio, or peripheral logic.
+- No real test/validation suite yet.
 
-### Immediate Priority (Next 1-2 Steps):
-1. **Continue CPU Instruction Handler Implementation**
-   - Port remaining MIPS instruction handlers used by BIOS
-   - Focus on multiply/divide instructions (MULT, MULTU, DIV, DIVU)
-   - Implement arithmetic operations (ADD, ADDU, SUB, SUBU, SLT, SLTU)
-   - Add load/store instructions (LB, LH, LW, SB, SH, SW)
-   - Implement branch instructions (BEQ, BNE, BLEZ, BGTZ, BLTZ, BGEZ)
+## Immediate Priority (Updated)
+1. **CPU Instruction Handler Completion**
+   - Implement all missing MIPS instructions (especially LWL, LWR, SWL, SWR, LWCx, SWCx, COP1, COP3, and GTE integration).
+   - Add proper exception handling for all cases (alignment, illegal instructions, etc.).
+2. **DMA Controller**
+   - Implement real DMA channel stepping and event scheduling in `nc_dma_step`.
+   - Implement DMA register reads/writes in the interconnect.
+   - Connect DMA to GPU, CDROM, and SPU subsystems.
+3. **Event/Timer System**
+   - Implement timer counting, event scheduling, and interrupt generation.
+   - Implement timer register writes and side effects.
+   - Integrate VBlank and DMA events with the event queue and interrupt controller.
+4. **GPU/Renderer**
+   - Implement GPU command processing (GP0/GP1) and control logic.
+   - Expand GPU state struct and logic.
+   - Implement a basic software renderer or connect the plugin to real VRAM data.
+5. **CDROM, SPU, SIO**
+   - Implement register writes and state machines for CDROM, SPU, and SIO.
+   - Expand state structs and add real emulation logic.
 
-2. **Enhance Hardware Register Behavior**
-   - Implement actual timer functionality with proper timing
-   - Add interrupt generation for VBlank, DMA, and other events
-   - Implement DMA register read/write logic beyond stubs
-   - Add CDROM command processing and response generation
-
-### Medium Priority (Next 3-5 Steps):
-3. **Event/Timer System Integration**
-   - Connect timer hardware registers to event scheduler
-   - Implement VBlank interrupt generation
-   - Add DMA event scheduling and processing
-   - Integrate interrupt controller with CPU exception handling
-
-4. **DMA Controller Enhancement**
-   - Implement actual DMA transfer logic
-   - Add DMA channel state management
-   - Connect DMA to GPU, CDROM, and SPU subsystems
-   - Handle DMA interrupts and completion events
-
-5. **BIOS Boot Sequence Analysis**
-   - Analyze BIOS execution to identify missing instruction handlers
-   - Implement hardware register behaviors required by BIOS
-   - Add proper interrupt handling for BIOS initialization
-   - Ensure BIOS can complete boot sequence
-
-### Long-term Goals:
-6. **Renderer Plugin Development**
-   - Implement software renderer backend
-   - Add OpenGL renderer for hardware acceleration
-   - Implement proper GPU command processing
-   - Add display output and frame rendering
-
-7. **Peripheral Integration**
-   - Complete SPU (Sound Processing Unit) implementation
-   - Add SIO (Serial I/O) for controller and memory card support
-   - Implement CDROM drive emulation
-   - Add input handling and controller emulation
-
+## Medium Priority (Next 3-5 Steps)
+6. **Peripheral and Hardware Register Completion**
+   - Implement all hardware register handlers (memory control, fallback, etc.).
+   - Add missing fields and logic to all subsystem state structs.
+7. **Debugger Integration**
+   - Integrate the debugger with CPU and memory access.
+   - Add breakpoint and watchpoint support.
 8. **Testing and Validation**
-   - Add comprehensive test suites for each subsystem
-   - Implement automated testing for BIOS boot sequence
-   - Add performance benchmarking and optimization
-   - Validate against known PS1 hardware behavior
+   - Add a test suite for instruction handlers, memory, and hardware registers.
+   - Implement automated BIOS boot sequence testing.
+
+## Long-term Goals
+- Renderer Plugin Development: Implement a real software renderer and/or OpenGL backend. Add display output and frame rendering.
+- Peripheral Integration: Complete SPU (audio), SIO (controller/memory card), and CDROM drive emulation. Add input handling and controller emulation.
+- Performance and Optimization: Add performance benchmarking and optimize hot paths. Validate against known PS1 hardware behavior.
 
 ## Completed Steps
 - Modular project structure and build system.

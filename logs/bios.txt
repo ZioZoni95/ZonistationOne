@@ -1,3 +1,0 @@
-BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
-BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
-BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)

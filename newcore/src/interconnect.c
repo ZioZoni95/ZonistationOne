@@ -13,7 +13,7 @@ uint32_t ram_read32(void* ctx, uint32_t addr) {
     uint32_t b2 = data[offset + 2];
     uint32_t b3 = data[offset + 3];
     uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    NC_LOGI("RAM read32: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("RAM read32: addr=0x%08x value=0x%08x", addr, value);
     return value;
 }
 void ram_write32(void* ctx, uint32_t addr, uint32_t value) {
@@ -24,7 +24,7 @@ void ram_write32(void* ctx, uint32_t addr, uint32_t value) {
     data[offset + 1] = (uint8_t)((value >> 8) & 0xFF);
     data[offset + 2] = (uint8_t)((value >> 16) & 0xFF);
     data[offset + 3] = (uint8_t)((value >> 24) & 0xFF);
-    NC_LOGI("RAM write32: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("RAM write32: addr=0x%08x value=0x%08x", addr, value);
 }
 
 // BIOS region handlers
@@ -37,23 +37,27 @@ uint32_t bios_read32(void* ctx, uint32_t addr) {
     uint32_t b2 = data[offset + 2];
     uint32_t b3 = data[offset + 3];
     uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    NC_LOGI("BIOS read32: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("BIOS read32: addr=0x%08x value=0x%08x", addr, value);
     return value;
 }
 void bios_write32(void* ctx, uint32_t addr, uint32_t value) {
     // BIOS is read-only
-    NC_LOGI("BIOS write32 IGNORED: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("BIOS write32 IGNORED: addr=0x%08x value=0x%08x", addr, value);
 }
 
 // DMA region handlers
 uint32_t dma_read32(void* ctx, uint32_t addr) {
-    NC_LOGI("DMA read32: addr=0x%08x", addr);
+    NC_LOGT("DMA read32: addr=0x%08x", addr);
     // TODO: Implement real DMA register reads
+    if (offset == 0x70) return ((EmulatorContext*)ctx)->dma.control;
+    if (offset == 0x74) return ((EmulatorContext*)ctx)->dma.interrupt;
     return 0;
 }
 void dma_write32(void* ctx, uint32_t addr, uint32_t value) {
-    NC_LOGI("DMA write32: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("DMA write32: addr=0x%08x value=0x%08x", addr, value);
     // TODO: Implement real DMA register writes
+    if (offset == 0x70) { ((EmulatorContext*)ctx)->dma.control = value; return; }
+    if (offset == 0x74) { ((EmulatorContext*)ctx)->dma.interrupt = value; return; }
 }
 
 // Scratchpad region handlers (1KB data cache RAM)
@@ -66,7 +70,7 @@ uint32_t scratchpad_read32(void* ctx, uint32_t addr) {
     uint32_t b2 = data[offset + 2];
     uint32_t b3 = data[offset + 3];
     uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    NC_LOGI("SCRATCHPAD read32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
+    NC_LOGT("SCRATCHPAD read32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
     return value;
 }
 void scratchpad_write32(void* ctx, uint32_t addr, uint32_t value) {
@@ -77,7 +81,7 @@ void scratchpad_write32(void* ctx, uint32_t addr, uint32_t value) {
     data[offset + 1] = (uint8_t)((value >> 8) & 0xFF);
     data[offset + 2] = (uint8_t)((value >> 16) & 0xFF);
     data[offset + 3] = (uint8_t)((value >> 24) & 0xFF);
-    NC_LOGI("SCRATCHPAD write32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
+    NC_LOGT("SCRATCHPAD write32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
 }
 
 // Timer region handlers
@@ -108,13 +112,13 @@ uint32_t timer_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("TIMER read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("TIMER read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 void timer_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & 0x2F;
-    NC_LOGI("TIMER write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("TIMER write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     // TODO: Implement actual timer register writes
 }
 
@@ -136,7 +140,7 @@ uint32_t irq_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("IRQ read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("IRQ read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 void irq_write32(void* ctx, uint32_t addr, uint32_t value) {
@@ -146,11 +150,11 @@ void irq_write32(void* ctx, uint32_t addr, uint32_t value) {
     switch (offset) {
         case 0x00: // I_STAT - Writing clears bits (acknowledge interrupts)
             ectx->irq_status &= ~(value & 0x7FF); // Only bits 0-10 matter
-            NC_LOGI("IRQ write32: I_STAT clear=0x%04x, new status=0x%04x", value, ectx->irq_status);
+            NC_LOGT("IRQ write32: I_STAT clear=0x%04x, new status=0x%04x", value, ectx->irq_status);
             break;
         case 0x04: // I_MASK - Writing sets the interrupt mask
             ectx->irq_mask = value & 0x7FF;
-            NC_LOGI("IRQ write32: I_MASK=0x%04x", ectx->irq_mask);
+            NC_LOGT("IRQ write32: I_MASK=0x%04x", ectx->irq_mask);
             break;
         default:
             NC_LOGW("IRQ write32: unknown offset 0x%02x = 0x%08x", offset, value);
@@ -185,13 +189,13 @@ uint32_t sio_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("SIO read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("SIO read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 void sio_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & 0x1F;
-    NC_LOGI("SIO write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("SIO write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     // TODO: Implement actual SIO register writes
 }
 
@@ -219,13 +223,13 @@ uint32_t cdrom_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("CDROM read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("CDROM read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 void cdrom_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & 0x3;
-    NC_LOGI("CDROM write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("CDROM write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     // TODO: Implement actual CDROM register writes
 }
 
@@ -248,13 +252,13 @@ uint32_t spu_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("SPU read32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
+    NC_LOGT("SPU read32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
     return value;
 }
 void spu_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & 0x1FF;
-    NC_LOGI("SPU write32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
+    NC_LOGT("SPU write32: addr=0x%08x offset=0x%03x value=0x%08x", addr, offset, value);
     // TODO: Implement actual SPU register writes
 }
 
@@ -279,13 +283,13 @@ uint32_t memctrl_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("MEMCTRL read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("MEMCTRL read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 void memctrl_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & 0x7F;
-    NC_LOGI("MEMCTRL write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("MEMCTRL write32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     // TODO: Implement actual memory control register writes
 }
 
@@ -311,14 +315,14 @@ uint32_t vram_read32(void* ctx, uint32_t addr) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & (NC_VRAM_SIZE - 1);
     uint32_t value = nc_vram_load32(&ectx->gpu.vram, offset);
-    NC_LOGI("VRAM read32: addr=0x%08x offset=0x%06x value=0x%08x", addr, offset, value);
+    NC_LOGT("VRAM read32: addr=0x%08x offset=0x%06x value=0x%08x", addr, offset, value);
     return value;
 }
 void vram_write32(void* ctx, uint32_t addr, uint32_t value) {
     EmulatorContext* ectx = (EmulatorContext*)ctx;
     uint32_t offset = addr & (NC_VRAM_SIZE - 1);
     nc_vram_store32(&ectx->gpu.vram, offset, value);
-    NC_LOGI("VRAM write32: addr=0x%08x offset=0x%06x value=0x%08x", addr, offset, value);
+    NC_LOGT("VRAM write32: addr=0x%08x offset=0x%06x value=0x%08x", addr, offset, value);
 }
 
 // GPU command region handlers
@@ -339,7 +343,7 @@ uint32_t gpu_read32(void* ctx, uint32_t addr) {
             break;
     }
     
-    NC_LOGI("GPU read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
+    NC_LOGT("GPU read32: addr=0x%08x offset=0x%02x value=0x%08x", addr, offset, value);
     return value;
 }
 
@@ -350,11 +354,11 @@ void gpu_write32(void* ctx, uint32_t addr, uint32_t value) {
     switch (offset) {
         case 0x00: // GP0 - GPU command/data
             // TODO: Implement GPU command processing
-            NC_LOGI("GPU GP0 command: 0x%08x", value);
+            NC_LOGT("GPU GP0 command: 0x%08x", value);
             break;
         case 0x04: // GP1 - GPU control
             // TODO: Implement GPU control commands
-            NC_LOGI("GPU GP1 control: 0x%08x", value);
+            NC_LOGT("GPU GP1 control: 0x%08x", value);
             break;
         default:
             NC_LOGW("GPU write32: unknown offset 0x%02x = 0x%08x", offset, value);
@@ -400,18 +404,18 @@ static NcMemRegion memory_map[NUM_REGIONS] = {
 };
 
 uint32_t nc_interconnect_read32(struct NcInterconnect* inter, uint32_t addr) {
-    NC_LOGI("[TRACE] Interconnect read32: addr=0x%08x", addr);
-    NC_LOGI("[TRACE] Interconnect pointer: %p", (void*)inter);
+    NC_LOGT("[TRACE] Interconnect read32: addr=0x%08x", addr);
+    NC_LOGT("[TRACE] Interconnect pointer: %p", (void*)inter);
     EmulatorContext* ctx = (EmulatorContext*)((char*)inter - offsetof(EmulatorContext, interconnect));
-    NC_LOGI("[TRACE] EmulatorContext pointer: %p", (void*)ctx);
+    NC_LOGT("[TRACE] EmulatorContext pointer: %p", (void*)ctx);
     for (int i = 0; i < NUM_REGIONS; ++i) {
-        NC_LOGI("[TRACE] Checking region %d: 0x%08x-0x%08x", i, memory_map[i].start, memory_map[i].end);
+        NC_LOGT("[TRACE] Checking region %d: 0x%08x-0x%08x", i, memory_map[i].start, memory_map[i].end);
         if (addr >= memory_map[i].start && addr <= memory_map[i].end) {
-            NC_LOGI("[TRACE] Found matching region %d", i);
+            NC_LOGT("[TRACE] Found matching region %d", i);
             return memory_map[i].read32(ctx, addr);
         }
     }
-    NC_LOGI("Unmapped read32: addr=0x%08x", addr);
+    NC_LOGT("Unmapped read32: addr=0x%08x", addr);
     return 0xFFFFFFFF;
 }
 
@@ -423,5 +427,5 @@ void nc_interconnect_write32(struct NcInterconnect* inter, uint32_t addr, uint32
             return;
         }
     }
-    NC_LOGI("Unmapped write32: addr=0x%08x value=0x%08x", addr, value);
+    NC_LOGT("Unmapped write32: addr=0x%08x value=0x%08x", addr, value);
 } 

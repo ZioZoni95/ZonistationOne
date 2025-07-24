@@ -36,31 +36,99 @@ void nc_cpu_exception(NcCpu* cpu, NcExceptionCause cause) {
 }
 
 // --- Missing handler stubs (must be defined before HANDLER macro/table usage) ---
-static void nc_op_cop1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_cop1"); }
-static void nc_op_cop3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_cop3"); }
-static void nc_op_lwl(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwl"); }
-static void nc_op_lwr(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwr"); }
-static void nc_op_swl(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swl"); }
-static void nc_op_swr(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swr"); }
-static void nc_op_lwc0(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc0"); }
-static void nc_op_lwc1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc1"); }
-static void nc_op_lwc2(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc2"); }
-static void nc_op_lwc3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_lwc3"); }
-static void nc_op_swc0(NcCpu* cpu, uint32_t instr) {
-    // SWC0: Store Word to COP0 register (not a real MIPS I op, but used for memory-mapped I/O in PS1)
-    // In PS1, SWC0 is used for memory-mapped hardware, not actual COP0 registers.
-    // We'll log and treat as a stub for now, but this is where hardware register writes would go.
-    uint32_t base = (instr >> 21) & 0x1F;
+static void nc_op_cop1(NcCpu* cpu, uint32_t instr) {
+    // COP1: Not present on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+
+static void nc_op_lwl(NcCpu* cpu, uint32_t instr) {
+    // LWL rt, offset(base)
     uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t base = (instr >> 21) & 0x1F;
     int16_t imm = (int16_t)(instr & 0xFFFF);
     uint32_t addr = cpu_reg(cpu, base) + imm;
-    uint32_t value = cpu_reg(cpu, rt);
-    NC_LOGW("[CPU] SWC0: Store $%u (0x%08x) to addr 0x%08x (stub, hardware reg write)", rt, value, addr);
-    // TODO: Route to hardware register write via interconnect if needed
+    uint32_t aligned_addr = addr & ~3;
+    uint32_t mem = nc_interconnect_read32(cpu->inter, aligned_addr);
+    uint32_t shift = (3 - (addr & 3)) * 8;
+    uint32_t mask = 0xFFFFFFFF >> (8 * (addr & 3));
+    uint32_t regval = cpu_reg(cpu, rt);
+    uint32_t value = (regval & ~mask) | (mem >> shift & mask);
+    cpu_set_reg(cpu, rt, value);
 }
-static void nc_op_swc1(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc1"); }
-static void nc_op_swc2(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc2"); }
-static void nc_op_swc3(NcCpu* cpu, uint32_t instr) { (void)cpu; (void)instr; NC_LOGW("[CPU] Stub: nc_op_swc3"); }
+static void nc_op_lwr(NcCpu* cpu, uint32_t instr) {
+    // LWR rt, offset(base)
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t base = (instr >> 21) & 0x1F;
+    int16_t imm = (int16_t)(instr & 0xFFFF);
+    uint32_t addr = cpu_reg(cpu, base) + imm;
+    uint32_t aligned_addr = addr & ~3;
+    uint32_t mem = nc_interconnect_read32(cpu->inter, aligned_addr);
+    uint32_t shift = (addr & 3) * 8;
+    uint32_t mask = 0xFFFFFFFF << shift;
+    uint32_t regval = cpu_reg(cpu, rt);
+    uint32_t value = (regval & ~mask) | (mem << shift & mask);
+    cpu_set_reg(cpu, rt, value);
+}
+static void nc_op_swl(NcCpu* cpu, uint32_t instr) {
+    // SWL rt, offset(base)
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t base = (instr >> 21) & 0x1F;
+    int16_t imm = (int16_t)(instr & 0xFFFF);
+    uint32_t addr = cpu_reg(cpu, base) + imm;
+    uint32_t aligned_addr = addr & ~3;
+    uint32_t mem = nc_interconnect_read32(cpu->inter, aligned_addr);
+    uint32_t shift = (3 - (addr & 3)) * 8;
+    uint32_t mask = 0xFFFFFFFF << shift;
+    uint32_t regval = cpu_reg(cpu, rt);
+    uint32_t value = (mem & ~mask) | ((regval >> shift) & mask);
+    nc_interconnect_write32(cpu->inter, aligned_addr, value);
+}
+static void nc_op_swr(NcCpu* cpu, uint32_t instr) {
+    // SWR rt, offset(base)
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t base = (instr >> 21) & 0x1F;
+    int16_t imm = (int16_t)(instr & 0xFFFF);
+    uint32_t addr = cpu_reg(cpu, base) + imm;
+    uint32_t aligned_addr = addr & ~3;
+    uint32_t mem = nc_interconnect_read32(cpu->inter, aligned_addr);
+    uint32_t shift = (addr & 3) * 8;
+    uint32_t mask = 0xFFFFFFFF >> shift;
+    uint32_t regval = cpu_reg(cpu, rt);
+    uint32_t value = (mem & ~mask) | ((regval << shift) & mask);
+    nc_interconnect_write32(cpu->inter, aligned_addr, value);
+}
+static void nc_op_lwc0(NcCpu* cpu, uint32_t instr) {
+    // LWC0 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+static void nc_op_lwc1(NcCpu* cpu, uint32_t instr) {
+    // LWC1 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+static void nc_op_lwc2(NcCpu* cpu, uint32_t instr) {
+    // LWC2 (GTE) - stub for now
+    NC_LOGW("[CPU] Stub: nc_op_lwc2 (GTE coprocessor)");
+}
+static void nc_op_lwc3(NcCpu* cpu, uint32_t instr) {
+    // LWC3 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+static void nc_op_swc0(NcCpu* cpu, uint32_t instr) {
+    // SWC0 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+static void nc_op_swc1(NcCpu* cpu, uint32_t instr) {
+    // SWC1 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
+static void nc_op_swc2(NcCpu* cpu, uint32_t instr) {
+    // SWC2 (GTE) - stub for now
+    NC_LOGW("[CPU] Stub: nc_op_swc2 (GTE coprocessor)");
+}
+static void nc_op_swc3(NcCpu* cpu, uint32_t instr) {
+    // SWC3 is not used on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
+}
 
 // --- Shift instruction handlers ---
 static void nc_op_sll(NcCpu* cpu, uint32_t instr) {
@@ -436,34 +504,45 @@ static void nc_op_sltiu(NcCpu* cpu, uint32_t instr) {
 }
 // --- COP0 (System Control) ---
 static void nc_op_cop0(NcCpu* cpu, uint32_t instr) {
+    // COP0: System control coprocessor (SR, CAUSE, EPC)
     uint32_t cop_op = (instr >> 21) & 0x1F;
-    if (cop_op == 0x00) { // MFC0
-        uint32_t rt = (instr >> 16) & 0x1F;
-        uint32_t rd = (instr >> 11) & 0x1F;
-        // Only SR (12) and CAUSE (13) are implemented for now
+    uint32_t rt = (instr >> 16) & 0x1F;
+    uint32_t rd = (instr >> 11) & 0x1F;
+    if (cop_op == 0x00) { // MFC0 rt, rd
+        // Move From COP0: GPR[rt] = COP0[rd]
         uint32_t value = 0;
         if (rd == 12) value = cpu->sr;
         else if (rd == 13) value = cpu->cause;
+        else if (rd == 14) value = cpu->epc;
         cpu_set_reg(cpu, rt, value);
-    } else if (cop_op == 0x04) { // MTC0
-        uint32_t rt = (instr >> 16) & 0x1F;
-        uint32_t rd = (instr >> 11) & 0x1F;
+    } else if (cop_op == 0x04) { // MTC0 rt, rd
+        // Move To COP0: COP0[rd] = GPR[rt]
         uint32_t value = cpu_reg(cpu, rt);
         if (rd == 12) cpu->sr = value;
         else if (rd == 13) cpu->cause = value;
+        else if (rd == 14) cpu->epc = value;
     } else if (cop_op == 0x10 && (instr & 0x3F) == 0x10) { // RFE
-        // Restore previous mode bits in SR
+        // Restore From Exception: restore previous mode bits in SR
         uint32_t mode_stack = cpu->sr & 0x3F;
         cpu->sr &= ~0x3F;
         cpu->sr |= (mode_stack >> 2) & 0x3F;
     } else {
+        // Unhandled COP0 operation
         nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
     }
 }
 // --- COP2 (GTE integration) ---
 static void nc_op_cop2(NcCpu* cpu, uint32_t instr) {
-    // TODO: Wire up GTE pointer properly (e.g., via EmulatorContext or CPU struct)
-    NC_LOGW("[CPU] GTE instruction: GTE pointer not wired");
+    // COP2: GTE (Geometry Transformation Engine)
+    // Call GTE instruction dispatcher if available
+    // For now, log a stub
+    NC_LOGW("[CPU] Stub: nc_op_cop2 (GTE instruction)");
+    // Example for future: nc_gte_execute_instruction(&cpu->gte, instr);
+}
+// --- COP3 (Not present on PS1, raise coprocessor unusable exception) ---
+static void nc_op_cop3(NcCpu* cpu, uint32_t instr) {
+    // COP3: Not present on PS1, raise coprocessor unusable exception
+    nc_cpu_exception(cpu, NC_EXC_COPROCESSOR);
 }
 // --- SYSCALL and BREAK ---
 static void nc_op_syscall(NcCpu* cpu, uint32_t instr) {
