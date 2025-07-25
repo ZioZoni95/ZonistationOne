@@ -5,6 +5,8 @@ SRC = $(wildcard src/*.c)
 OBJ = $(SRC:.c=.o)
 TARGET = psxemu
 
+.PHONY: all clean
+
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
