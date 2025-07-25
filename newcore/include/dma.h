@@ -4,10 +4,10 @@
 #define NC_DMA_CHANNELS 7
 
 typedef struct {
-    uint32_t base;
-    uint32_t block_control;
-    uint32_t control;
-    uint32_t active;
+    uint32_t madr;    // Base Address Register (MADR)
+    uint32_t bcr;     // Block Control Register (BCR)
+    uint32_t control; // Channel Control Register (CHCR)
+    // Removed 'active' field (not used in register emulation)
 } NcDmaChannel;
 
 typedef struct {

@@ -1,62 +1,41 @@
-# Emulator Implementation Roadmap
+# PS1 Emulator Roadmap
 
-## Milestones & Subsystem Progress
+## Milestones
+- **[Initial]** Project started, goal: fully functional PS1 emulator with reference to oldcode and PCSX ReARMed.
+- **[CPU Core]** Implemented MIPS R3000A CPU core, basic instruction set, opcode and R-type tables.
+- **[Memory Map]** Mapped RAM, BIOS, hardware registers, expansion regions, and mirrors to match PS1 and PCSX ReARMed.
+- **[Hardware Stubs]** Added stubs for GPU, CDROM, SIO, timers, DMA, IRQ, SPU, and scratchpad.
+- **[BIOS Boot]** BIOS loads and begins execution from reset vector.
+- **[Expansion Probe Handling]** BIOS expansion region probes (e.g., 0xb000a2b4) return 0xFFFFFFFF as expected.
+- **[Log Flood Suppression]** Suppressed log flooding from unmapped/expansion region accesses.
+- **[Exception Loop]** Emulator currently stuck in exception loop after BIOS probe (likely exception/RFE logic).
 
-### 1. Core Loop & CPU Execution
-- [x] Main emulation loop (fetch-decode-execute)
-- [x] Table-driven instruction decode/dispatch
-- [x] Exception and interrupt handling
-- [x] BIOS instruction stream execution
-- [ ] Complete all MIPS instructions (COP1, COP3, LWL, LWR, SWL, SWR, LWCx, SWCx, GTE integration)
-- [ ] GTE coprocessor integration and instruction support
+## Current Status
+- BIOS loads and executes.
+- Memory map and hardware stubs are correct and match PCSX ReARMed.
+- Expansion region probe handling is correct.
+- Log flooding from unmapped regions is suppressed.
+- Emulator is stuck in an exception loop after BIOS probe, likely due to exception/return-from-exception (RFE) logic.
 
-### 2. Memory Map & Interconnect
-- [x] RAM, BIOS, and hardware register mapping
-- [x] Memory aliases (KSEG0/KSEG1, cached/uncached)
-- [x] Scratchpad (1KB data cache RAM)
-- [x] Comprehensive hardware register regions (IRQ, DMA, timers, SIO, CDROM, SPU, GPU, MemCtrl)
-- [ ] Expansion region edge cases and hardware probe handling
+## Next Steps
+1. **Audit and fix exception and RFE logic in CPU core**
+   - Ensure EPC and SR are handled exactly as in PCSX ReARMed.
+   - Add logging for EPC, SR, and PC transitions during exception and RFE handling.
+2. **Verify BIOS proceeds past hardware probe**
+   - Confirm BIOS moves on after a few expansion region probes.
+3. **Continue toward BIOS logo/menu**
+   - Ensure VBlank, IRQ0, and GPU display are working.
+   - Test with no disc and with a valid disc image. 
 
-### 3. Hardware Register Emulation
-- [x] IRQ: I_STAT/I_MASK register logic
-- [x] DMA: Control/interrupt register stubs
-- [x] Timers: Counter reads, basic stubs
-- [x] SIO, CDROM, SPU, GPU, MemCtrl: Register stubs
-- [ ] DMA: Per-channel register emulation, transfer logic, interrupts, polling
-- [ ] Timers: Register writes, event scheduling, interrupts
-- [ ] GPU: Command processing, VRAM access, renderer integration
-- [ ] CDROM/SIO: Command/state machine, status polling
-- [ ] SPU: Status/control, audio stub
-
-### 4. Event System
-- [x] Event queue and scheduling
-- [x] VBlank and DMA event handlers (stub)
-- [ ] Timer events, accurate cycle timing
-- [ ] Integration of hardware events with interrupt controller
-
-### 5. Debugging & Validation
-- [x] Logging for memory, hardware, and opcode execution
-- [ ] BIOS boot sequence validation
-- [ ] Test ROMs for instruction and hardware coverage
-- [ ] Logging improvements and error reporting
-- [ ] Debugger integration (breakpoints, watchpoints)
-
-### 6. Long-Term & Stretch Goals
-- [ ] Software renderer and/or OpenGL backend
-- [ ] Audio (SPU) and input (SIO/controller) emulation
-- [ ] Save states, debugging UI, performance optimization
-- [ ] Peripheral integration (memory card, multitap, etc.)
-
-## Current Bottlenecks & Known Issues
-- [ ] BIOS stuck in hardware probe loop (expansion region)
-- [ ] DMA and timer event system incomplete
-- [ ] Hardware register stubs need expansion for full BIOS compatibility
-- [ ] No real test/validation suite yet
-
-## Next Steps (Actionable)
-- [ ] Expand DMA register emulation (per-channel registers, status, polling)
-- [ ] Implement real DMA channel stepping and event scheduling
-- [ ] Implement timer register writes, event scheduling, and interrupts
-- [ ] Continue stubbing/implementing other hardware (CDROM, SIO, GPU, SPU, etc.)
-- [ ] Use BIOS execution logs to guide further development
-- [ ] Add test ROMs and BIOS boot validation 
+## Missing / Incomplete Components
+- **MIPS Instruction Set:** Some instructions (COP1, COP3, LWL, LWR, SWL, SWR, LWCx, SWCx, GTE) are not fully implemented or are stubs. GTE coprocessor integration is incomplete.
+- **Exception Handling:** Some edge cases (e.g., PC alignment, RFE logic) may not match hardware/PCSX ReARMed.
+- **DMA Controller:** Per-channel register emulation, transfer logic, interrupts, and polling are incomplete. Only minimal DMA stepping is present.
+- **Timer System:** Timer register writes, event scheduling, and interrupt generation are stubbed or incomplete.
+- **GPU:** Command processing, VRAM access, and renderer integration are minimal or stubbed. No display output yet.
+- **CDROM/SIO:** Command/state machines, status polling, and register logic are stubs. No real disc or controller emulation.
+- **SPU (Audio):** Status/control and audio output are stubbed.
+- **Debugger:** No integrated debugger (breakpoints, watchpoints, etc.).
+- **Test Suite:** No automated test/validation suite for instruction or hardware coverage.
+- **Peripheral Integration:** No memory card, multitap, or other peripheral support.
+- **Performance/Optimization:** No benchmarking or optimization work yet. 

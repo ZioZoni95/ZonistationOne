@@ -1,121 +1,42 @@
-# Full Implementation Plan: newcore PS1 Emulator
+# PS1 Emulator Implementation Plan
 
-## Progress Summary
-- **COMPLETED: Hardware Register Emulation and Memory Map Expansion**
-  - Expanded memory map from 10 to 20 regions covering all major PS1 address spaces
-  - Implemented sophisticated hardware register handlers for all major subsystems
-  - Added scratchpad (1KB data cache RAM) with proper read/write handlers
-  - Added interrupt controller state (I_STAT, I_MASK) to EmulatorContext
-  - Added cycle counter for timing simulation
-  - All hardware register accesses now return plausible values and are properly logged
-  - Memory aliases for KSEG0/KSEG1 RAM and cached/uncached BIOS access implemented
-- BIOS is now loaded, mapped, and executed. Emulator fetches and executes real BIOS instructions, main loop runs as designed.
-- RAM alias regions for KSEG0 (0x80000000–0x801FFFFF) and KSEG1 (0xA0000000–0xA01FFFFF) added to memory map.
-- Shift instructions (SLL, SRL, SRA, SLLV, SRLV, SRAV) implemented and working correctly.
-- Memory map expanded with comprehensive hardware register regions for complete PS1 hardware support.
-- VRAM region (0x1F000000–0x1F1FFFFF) fully integrated with GPU subsystem and accessible via interconnect.
-- GPU command registers (GP0/GP1) mapped and basic command handlers implemented.
-- Detailed logging and hardware register stubs are in place to trace execution and support further debugging.
+## Milestones
+- **[Initial]** Project setup, reference to oldcode and PCSX ReARMed.
+- **[CPU Core]** MIPS R3000A CPU core implemented, instruction decode and execution.
+- **[Memory Map]** RAM, BIOS, hardware registers, expansion regions mapped.
+- **[Hardware Stubs]** GPU, CDROM, SIO, timers, DMA, IRQ, SPU, scratchpad stubs added.
+- **[BIOS Boot]** BIOS loads and executes from reset vector.
+- **[Expansion Probe Handling]** Expansion region probe returns 0xFFFFFFFF, matching hardware/PCSX ReARMed.
+- **[Log Flood Suppression]** Log flooding from unmapped/expansion regions suppressed.
+- **[Exception Loop]** Emulator currently stuck in exception loop after BIOS probe (likely exception/RFE logic).
 
-## Missing/To-Do Features (from codebase scan)
-- Many MIPS instructions are still stubs or unimplemented (COP1, COP3, LWL, LWR, SWL, SWR, LWCx, SWCx, etc.).
-- GTE and other coprocessor integration is marked as TODO in the CPU struct.
-- Exception handling for some cases (e.g., PC alignment) is marked as TODO.
-- DMA stepping and event scheduling is stubbed; no real DMA transfer logic.
-- DMA register reads/writes are stubbed in the interconnect.
-- Timer register writes and counting are stubbed; no real timer events or interrupts.
-- VBlank and DMA event handlers are stubbed.
-- GPU command processing and control (GP0/GP1) are stubbed; renderer plugin is a stub.
-- GPU, CDROM, SPU, SIO state structs have TODOs for more fields and logic.
-- CDROM, SPU, SIO register writes are stubbed.
-- Debugger is scaffolded but not integrated.
-- No input, audio, or peripheral logic.
-- No real test/validation suite yet.
-
-# Emulator Status Summary (for commit)
+## Current Progress
 - BIOS loads and executes.
-- CPU instruction set is mostly complete for BIOS boot (no unimplemented instruction errors in logs).
-- Memory map and hardware register stubs are in place.
-- DMA controller and event system are partially implemented (minimal DMA stepping, event queue, VBlank/DMA events scheduled).
-- BIOS is currently stuck in a hardware probe loop, executing NOPs in the expansion/hardware region.
-- Use BIOS execution logs to guide further development.
+- Hardware stubs and memory map are correct and match PCSX ReARMed.
+- Expansion region probe handling is done.
+- Log flooding from unmapped regions is suppressed.
+- Emulator is currently stuck in an exception loop after the BIOS probes the expansion region.
 
-## Immediate Priority (Updated)
-1. **CPU Instruction Handler Completion (Top Priority)**
-   - Implement all missing MIPS instructions (especially LWL, LWR, SWL, SWR, LWCx, SWCx, COP1, COP3, and GTE integration).
-   - Add proper exception handling for all cases (alignment, illegal instructions, etc.).
-   - Use BIOS execution logs to identify which instructions are still missing or stubbed.
-   - BIOS progress is blocked if any required instruction is missing or stubbed.
-2. **DMA Controller and Event/Timer System (Next Focus)**
-   - Expand DMA register emulation (per-channel registers, status, polling).
-   - Implement real DMA channel stepping and event scheduling in `nc_dma_step`.
-   - Implement DMA register reads/writes in the interconnect.
-   - Connect DMA to GPU, CDROM, and SPU subsystems.
-   - Implement timer counting, event scheduling, and interrupt generation.
-   - Integrate VBlank and DMA events with the event queue and interrupt controller.
-   - BIOS may also stall if hardware events/interrupts are not delivered.
-3. **GPU/Renderer**
-   - Implement GPU command processing (GP0/GP1) and control logic.
-   - Expand GPU state struct and logic.
-   - Implement a basic software renderer or connect the plugin to real VRAM data.
-4. **CDROM, SPU, SIO**
-   - Implement register writes and state machines for CDROM, SPU, and SIO.
-   - Expand state structs and add real emulation logic.
+## Immediate Next Steps
+1. **Audit and fix exception and RFE (Return From Exception) logic in the CPU core**
+   - Ensure EPC and SR are set/restored exactly as in PCSX ReARMed.
+   - Add detailed logging for EPC, SR, and PC transitions during exception and RFE handling.
+   - Confirm that after an exception, the BIOS can return and continue execution.
+2. **Verify BIOS moves past hardware probe**
+   - BIOS should only probe expansion region a few times, then continue boot sequence.
+3. **Continue toward BIOS logo/menu**
+   - Ensure VBlank, IRQ0, and GPU display are working.
+   - Test with no disc and with a valid disc image. 
 
-## Medium Priority (Next 3-5 Steps)
-6. **Peripheral and Hardware Register Completion**
-   - Implement all hardware register handlers (memory control, fallback, etc.).
-   - Add missing fields and logic to all subsystem state structs.
-7. **Debugger Integration**
-   - Integrate the debugger with CPU and memory access.
-   - Add breakpoint and watchpoint support.
-8. **Testing and Validation**
-   - Add a test suite for instruction handlers, memory, and hardware registers.
-   - Implement automated BIOS boot sequence testing.
-
-## Long-term Goals
-- Renderer Plugin Development: Implement a real software renderer and/or OpenGL backend. Add display output and frame rendering.
-- Peripheral Integration: Complete SPU (audio), SIO (controller/memory card), and CDROM drive emulation. Add input handling and controller emulation.
-- Performance and Optimization: Add performance benchmarking and optimize hot paths. Validate against known PS1 hardware behavior.
-
-## Completed Steps
-- Modular project structure and build system.
-- Modular CPU core with table-driven decode/dispatch, exceptions, and delay slots.
-- Table-driven interconnect with comprehensive memory mapping (20 regions total).
-- DMA subsystem scaffolded and region handlers integrated.
-- Event/timer system scaffolded and modular event queue implemented.
-- All handler stubs and opcode tables cleaned up for a clean build.
-- Emulator core, CPU, DMA, and event system now run together and log execution.
-- BIOS is now loaded, mapped, and executed. Emulator fetches and executes real BIOS instructions, main loop runs as designed.
-- RAM alias regions for KSEG0 (0x80000000–0x801FFFFF) and KSEG1 (0xA0000000–0xA01FFFFF) added to memory map.
-- Shift instructions (SLL, SRL, SRA, SLLV, SRLV, SRAV) implemented and working correctly.
-- Memory map expanded with comprehensive hardware register regions for complete PS1 hardware support.
-- VRAM region fully integrated with GPU subsystem and accessible via interconnect.
-- GPU command registers (GP0/GP1) mapped and basic command handlers implemented.
-- **COMPLETED: Sophisticated hardware register emulation for all major subsystems:**
-  - Scratchpad (1KB data cache RAM)
-  - Timer registers with incrementing counter simulation
-  - Interrupt controller (I_STAT, I_MASK)
-  - SIO (Serial I/O) controller
-  - CDROM controller
-  - SPU (Sound Processing Unit)
-  - Memory control registers
-  - Hardware register fallback regions
-
-## In Progress
-- Incremental porting of instruction handlers used by BIOS.
-- Analysis of BIOS execution to identify missing instruction handlers.
-- Enhancement of hardware register behavior beyond basic stubs.
-
-## To Do
-- Integrate and test GPU, SPU, CDROM, and other peripherals.
-- Add more instruction handlers as required by BIOS/games.
-- Add more tests and validation for each subsystem.
-- Implement proper interrupt handling and event scheduling.
-- Develop renderer plugins for display output.
-
-## Implementation Notes
-- **Reference Implementation:** Using pcsx_rearmed_reference for hardware register behavior and memory mapping patterns
-- **Incremental Approach:** Each subsystem is implemented and tested before moving to the next
-- **Logging Strategy:** Comprehensive logging for debugging, with rate limiting for performance
-- **Memory Safety:** All memory accesses go through interconnect for proper validation and routing 
+## Missing / Incomplete Components
+- **MIPS Instruction Set:** Some instructions (COP1, COP3, LWL, LWR, SWL, SWR, LWCx, SWCx, GTE) are not fully implemented or are stubs. GTE coprocessor integration is incomplete.
+- **Exception Handling:** Some edge cases (e.g., PC alignment, RFE logic) may not match hardware/PCSX ReARMed.
+- **DMA Controller:** Per-channel register emulation, transfer logic, interrupts, and polling are incomplete. Only minimal DMA stepping is present.
+- **Timer System:** Timer register writes, event scheduling, and interrupt generation are stubbed or incomplete.
+- **GPU:** Command processing, VRAM access, and renderer integration are minimal or stubbed. No display output yet.
+- **CDROM/SIO:** Command/state machines, status polling, and register logic are stubs. No real disc or controller emulation.
+- **SPU (Audio):** Status/control and audio output are stubbed.
+- **Debugger:** No integrated debugger (breakpoints, watchpoints, etc.).
+- **Test Suite:** No automated test/validation suite for instruction or hardware coverage.
+- **Peripheral Integration:** No memory card, multitap, or other peripheral support.
+- **Performance/Optimization:** No benchmarking or optimization work yet. 

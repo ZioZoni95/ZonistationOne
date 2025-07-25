@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "../include/gte.h"
 struct NcInterconnect;
 
 // Register index type and constants
@@ -45,7 +46,7 @@ typedef struct NcCpu {
     uint32_t sr, cause, epc;
     struct NcInterconnect* inter;
     NcICacheLine icache[NC_ICACHE_LINES];
-    // TODO: Add GTE and other coprocessors
+    NcGte gte; // Add GTE coprocessor state
 } NcCpu;
 
 // CPU API

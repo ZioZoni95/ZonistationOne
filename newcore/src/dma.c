@@ -1,5 +1,6 @@
 #include "../include/dma.h"
 #include "../include/log.h"
+#include "../include/emulator.h"
 #include <string.h>
 
 void nc_dma_init(NcDma* dma) {
@@ -10,12 +11,13 @@ void nc_dma_init(NcDma* dma) {
 
 void nc_dma_step(NcDma* dma) {
     // Minimal simulation: for each channel, if enabled, simulate a transfer and clear enable
-    for (int ch = 0; ch < 7; ++ch) {
-        if (dma->channels[ch].control & 0x01000000) { // DMA enable bit
-            // Simulate transfer: clear enable, set 'DMA complete' (for BIOS polling)
+    for (int ch = 0; ch < NC_DMA_CHANNELS; ++ch) {
+        if (dma->channels[ch].control & 0x01000000) { // CHCR start bit
+            // Simulate transfer complete: clear start bit
             dma->channels[ch].control &= ~0x01000000;
-            dma->channels[ch].control |= 0x80000000; // Set 'DMA complete' flag (not real, but plausible)
-            // Optionally, set interrupt flag (handled in event handler)
+            // Set DMA interrupt flag (bit 3 in DMA interrupt reg)
+            dma->interrupt |= (1 << 3);
+            // Optionally, set global IRQ (I_STAT) if unmasked (done in event handler)
         }
     }
 } 
