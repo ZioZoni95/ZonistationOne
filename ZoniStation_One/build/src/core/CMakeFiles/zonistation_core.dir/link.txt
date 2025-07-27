@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_core.a CMakeFiles/zonistation_core.dir/core.c.o CMakeFiles/zonistation_core.dir/core_config.c.o CMakeFiles/zonistation_core.dir/core_timing.c.o CMakeFiles/zonistation_core.dir/core_debug.c.o
+/usr/bin/ranlib libzonistation_core.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_cpu.a CMakeFiles/zonistation_cpu.dir/cpu.c.o CMakeFiles/zonistation_cpu.dir/cpu_interpreter.c.o CMakeFiles/zonistation_cpu.dir/cpu_instructions.c.o CMakeFiles/zonistation_cpu.dir/cpu_exceptions.c.o CMakeFiles/zonistation_cpu.dir/cpu_cache.c.o
+/usr/bin/ranlib libzonistation_cpu.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_hardware.a CMakeFiles/zonistation_hardware.dir/hardware.c.o
+/usr/bin/ranlib libzonistation_hardware.a

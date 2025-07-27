@@ -1,0 +1,25 @@
+src/core/CMakeFiles/zonistation_core.dir/core_timing.c.o: \
+ /home/antoninoc/gemini_PS1emulator/ZoniStation_One/src/core/core_timing.c \
+ /usr/include/stdc-predef.h \
+ /home/antoninoc/gemini_PS1emulator/ZoniStation_One/include/zonistation_common.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h /usr/include/stdint.h \
+ /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
+ /usr/include/features.h /usr/include/features-time64.h \
+ /usr/include/x86_64-linux-gnu/bits/wordsize.h \
+ /usr/include/x86_64-linux-gnu/bits/timesize.h \
+ /usr/include/x86_64-linux-gnu/sys/cdefs.h \
+ /usr/include/x86_64-linux-gnu/bits/long-double.h \
+ /usr/include/x86_64-linux-gnu/gnu/stubs.h \
+ /usr/include/x86_64-linux-gnu/gnu/stubs-64.h \
+ /usr/include/x86_64-linux-gnu/bits/types.h \
+ /usr/include/x86_64-linux-gnu/bits/typesizes.h \
+ /usr/include/x86_64-linux-gnu/bits/time64.h \
+ /usr/include/x86_64-linux-gnu/bits/wchar.h \
+ /usr/include/x86_64-linux-gnu/bits/stdint-intn.h \
+ /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h \
+ /usr/include/x86_64-linux-gnu/bits/stdint-least.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/stdbool.h \
+ /usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h \
+ /home/antoninoc/gemini_PS1emulator/ZoniStation_One/include/zonistation_core.h \
+ /home/antoninoc/gemini_PS1emulator/ZoniStation_One/include/zonistation_common.h \
+ /home/antoninoc/gemini_PS1emulator/ZoniStation_One/include/zonistation_config.h

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_bios.a CMakeFiles/zonistation_bios.dir/bios.c.o
+/usr/bin/ranlib libzonistation_bios.a

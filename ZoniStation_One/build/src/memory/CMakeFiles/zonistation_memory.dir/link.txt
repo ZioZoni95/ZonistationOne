@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_memory.a CMakeFiles/zonistation_memory.dir/memory.c.o CMakeFiles/zonistation_memory.dir/memory_mapping.c.o
+/usr/bin/ranlib libzonistation_memory.a

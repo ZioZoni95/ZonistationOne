@@ -1,0 +1,2 @@
+/usr/bin/ar qc libzonistation_plugins.a CMakeFiles/zonistation_plugins.dir/plugins.c.o
+/usr/bin/ranlib libzonistation_plugins.a
