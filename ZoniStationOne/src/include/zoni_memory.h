@@ -10,6 +10,7 @@
 #define ZONI_MEMORY_H
 
 #include "zoni_common.h"
+#include "zoni_hwregs.h"
 
 // PlayStation memory map
 #define PSX_MEMORY_REGIONS 8
@@ -41,7 +42,8 @@ typedef struct {
     u8* ram;                    // Main RAM (8MB)
     u8* bios;                   // BIOS (512KB)
     u8* scratchpad;             // Scratchpad (1KB)
-    
+    zoni_hwregs_t hwregs;
+
     // Memory access callbacks
     zoni_error_t (*read8_callback)(u32 address, u8* value);
     zoni_error_t (*read16_callback)(u32 address, u16* value);

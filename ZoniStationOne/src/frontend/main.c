@@ -10,6 +10,8 @@
 #include <unistd.h>   // Per getcwd
 #include <limits.h>   // Per PATH_MAX
 
+#define BIOS_STEP_COUNT 10000
+
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
     ZONI_UNUSED(argv);
@@ -95,18 +97,25 @@ int main(int argc, char* argv[]) {
     zoni_log(ZONI_LOG_INFO, "Imposto PC all'entry point BIOS (0xBFC00000)");
     cpu.pc = 0xBFC00000;
 
-    // Fetch e decode della prima istruzione BIOS
-    zoni_instruction_t bios_instr;
-    result = zoni_cpu_fetch_instruction(&cpu, &bios_instr);
-    if (result == ZONI_SUCCESS) {
-        char disasm[128];
-        if (zoni_cpu_decode_instruction(&bios_instr, disasm, sizeof(disasm)) == ZONI_SUCCESS) {
-            zoni_log(ZONI_LOG_INFO, "Prima istruzione BIOS a 0x%08X: %s", cpu.pc, disasm);
-        } else {
-            zoni_log(ZONI_LOG_INFO, "Istruzione BIOS fetchata a 0x%08X (decode fallita)", cpu.pc);
+    // Esegui e logga le prime 1000 istruzioni del BIOS
+    for (int i = 0; i < BIOS_STEP_COUNT; i++) {
+        zoni_instruction_t instr;
+        u32 pc = cpu.pc;
+        zoni_error_t fetch_res = zoni_cpu_fetch_instruction(&cpu, &instr);
+        if (fetch_res != ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_ERROR, "Failed to fetch BIOS instruction at 0x%08X", pc);
+            break;
         }
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "Fetch istruzione BIOS fallito a 0x%08X", cpu.pc);
+        char disasm[128];
+        if (zoni_cpu_decode_instruction(&instr, disasm, sizeof(disasm)) == ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_INFO, "[BIOS] PC=0x%08X: %s", pc, disasm);
+        } else {
+            zoni_log(ZONI_LOG_INFO, "[BIOS] PC=0x%08X: (decode failed)", pc);
+        }
+        if (zoni_cpu_step(&cpu) != ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_ERROR, "CPU step failed at 0x%08X (continua)", cpu.pc);
+            // NON fare break; così il ciclo continua
+        }
     }
     
     // Test CPU register access

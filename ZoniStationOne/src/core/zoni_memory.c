@@ -4,6 +4,7 @@
  */
 
 #include "zoni_memory.h"
+#include "zoni_hwregs.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -56,6 +57,8 @@ zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
                           NULL, true, false, "Expansion");
     zoni_memory_map_region(memory, PSX_MEM_CACHE_CTRL, PSX_CACHE_CTRL_BASE, PSX_CACHE_CTRL_END - PSX_CACHE_CTRL_BASE + 1, 
                           NULL, true, false, "Cache Control");
+    
+    zoni_hwregs_init(&memory->hwregs);
     
     zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
     return ZONI_SUCCESS;
@@ -153,9 +156,9 @@ zoni_error_t zoni_memory_read8(zoni_memory_t* memory, u32 address, u8* value) {
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->readable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid read8 at address 0x%08X", address);
+        zoni_log(ZONI_LOG_WARNING, "Unmapped read8 at address 0x%08X (probabile accesso hardware o regione non implementata)", address);
         *value = 0;
-        return ZONI_ERROR_INVALID_PARAMETER;
+        return ZONI_SUCCESS; // Restituisci comunque SUCCESS per non bloccare il BIOS
     }
     
     if (reg->data) {
@@ -184,9 +187,9 @@ zoni_error_t zoni_memory_read16(zoni_memory_t* memory, u32 address, u16* value) 
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->readable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid read16 at address 0x%08X", address);
+        zoni_log(ZONI_LOG_WARNING, "Unmapped read16 at address 0x%08X (probabile accesso hardware o regione non implementata)", address);
         *value = 0;
-        return ZONI_ERROR_INVALID_PARAMETER;
+        return ZONI_SUCCESS;
     }
     
     if (reg->data) {
@@ -205,21 +208,58 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
     if (!memory || !value) {
         return ZONI_ERROR_INVALID_PARAMETER;
     }
-    
+
+    // Gestisci subito l'alias BIOS
+    if ((address >= 0x1FC00000 && address <= 0x1FC7FFFF) ||
+        (address >= 0xBFC00000 && address <= 0xBFC7FFFF)) {
+        u32 bios_offset = (address & 0x7FFFF); // 512KB mask
+        *value = (memory->bios[bios_offset]) |
+                 (memory->bios[bios_offset + 1] << 8) |
+                 (memory->bios[bios_offset + 2] << 16) |
+                 (memory->bios[bios_offset + 3] << 24);
+        return ZONI_SUCCESS;
+    }
+
+    if (address == 0x1F801040) { *value = memory->hwregs.io_port; return ZONI_SUCCESS; }
+    if (address == 0x1F801060) { *value = memory->hwregs.ram_size; return ZONI_SUCCESS; }
+    if (address == 0x1F801070) { *value = memory->hwregs.interrupt_stat; return ZONI_SUCCESS; }
+    if (address == 0x1F801074) { *value = memory->hwregs.interrupt_mask; return ZONI_SUCCESS; }
+
+    // Lettura
+    for (int i = 0; i < 7; i++) {
+        if (address == 0x1F801080 + i * 0x10) { *value = memory->hwregs.dma_base[i]; return ZONI_SUCCESS; }
+        if (address == 0x1F801084 + i * 0x10) { *value = memory->hwregs.dma_block[i]; return ZONI_SUCCESS; }
+        if (address == 0x1F801088 + i * 0x10) { *value = memory->hwregs.dma_control[i]; return ZONI_SUCCESS; }
+    }
+    if (address == 0x1F8010F0) { *value = memory->hwregs.dma_pcr; return ZONI_SUCCESS; }
+    if (address == 0x1F8010F4) { *value = memory->hwregs.dma_icr; return ZONI_SUCCESS; }
+
+    // --- Lettura GPU ---
+    if (address == 0x1F801810) { 
+        *value = 0; 
+        zoni_log(ZONI_LOG_INFO, "GPU GP0 read (stub)"); 
+        return ZONI_SUCCESS; 
+    }
+    if (address == 0x1F801814) { 
+        *value = 0; 
+        zoni_log(ZONI_LOG_INFO, "GPU GP1 read (stub)"); 
+        return ZONI_SUCCESS; 
+    }
+
     // Check alignment
     if (address & 3) {
         zoni_log(ZONI_LOG_WARNING, "Unaligned read32 at address 0x%08X", address);
         *value = 0;
         return ZONI_ERROR_INVALID_PARAMETER;
     }
-    
+
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->readable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid read32 at address 0x%08X", address);
+        zoni_log(ZONI_LOG_WARNING, "Unmapped read32 at address 0x%08X (probabile accesso hardware o regione non implementata)", address);
         *value = 0;
-        return ZONI_ERROR_INVALID_PARAMETER;
+        return ZONI_SUCCESS;
     }
-    
+
     if (reg->data) {
         u32 offset = address - reg->base_address;
         // PlayStation uses little-endian byte order
@@ -229,7 +269,7 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
         // Hardware register read - return 0 for now
         *value = 0;
     }
-    
+
     memory->read_count++;
     return ZONI_SUCCESS;
 }
@@ -241,8 +281,8 @@ zoni_error_t zoni_memory_write8(zoni_memory_t* memory, u32 address, u8 value) {
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid write8 at address 0x%08X", address);
-        return ZONI_ERROR_INVALID_PARAMETER;
+        zoni_log(ZONI_LOG_WARNING, "Unmapped write8 at address 0x%08X (value=0x%02X) (probabile accesso hardware o regione non implementata)", address, value);
+        return ZONI_SUCCESS;
     }
     
     if (reg->data) {
@@ -270,8 +310,8 @@ zoni_error_t zoni_memory_write16(zoni_memory_t* memory, u32 address, u16 value) 
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid write16 at address 0x%08X", address);
-        return ZONI_ERROR_INVALID_PARAMETER;
+        zoni_log(ZONI_LOG_WARNING, "Unmapped write16 at address 0x%08X (value=0x%04X) (probabile accesso hardware o regione non implementata)", address, value);
+        return ZONI_SUCCESS;
     }
     
     if (reg->data) {
@@ -292,6 +332,41 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     
+    if (address == 0x1F801040) { memory->hwregs.io_port = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801060) { memory->hwregs.ram_size = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801070) { memory->hwregs.interrupt_stat = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801074) { memory->hwregs.interrupt_mask = value; return ZONI_SUCCESS; }
+
+    // Scrittura
+    if (address == 0x1F801100) { memory->hwregs.timer0_counter = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801104) { memory->hwregs.timer0_mode = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801108) { memory->hwregs.timer0_target = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801110) { memory->hwregs.timer1_counter = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801114) { memory->hwregs.timer1_mode = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801118) { memory->hwregs.timer1_target = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801120) { memory->hwregs.timer2_counter = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801124) { memory->hwregs.timer2_mode = value; return ZONI_SUCCESS; }
+    if (address == 0x1F801128) { memory->hwregs.timer2_target = value; return ZONI_SUCCESS; }
+
+    // Lettura DMA
+    for (int i = 0; i < 7; i++) {
+        if (address == 0x1F801080 + i * 0x10) { memory->hwregs.dma_base[i] = value; zoni_log(ZONI_LOG_INFO, "DMA%u base set to 0x%08X", i, value); return ZONI_SUCCESS; }
+        if (address == 0x1F801084 + i * 0x10) { memory->hwregs.dma_block[i] = value; zoni_log(ZONI_LOG_INFO, "DMA%u block set to 0x%08X", i, value); return ZONI_SUCCESS; }
+        if (address == 0x1F801088 + i * 0x10) { memory->hwregs.dma_control[i] = value; zoni_log(ZONI_LOG_INFO, "DMA%u control set to 0x%08X", i, value); return ZONI_SUCCESS; }
+    }
+    if (address == 0x1F8010F0) { memory->hwregs.dma_pcr = value; zoni_log(ZONI_LOG_INFO, "DMA PCR set to 0x%08X", value); return ZONI_SUCCESS; }
+    if (address == 0x1F8010F4) { memory->hwregs.dma_icr = value; zoni_log(ZONI_LOG_INFO, "DMA ICR set to 0x%08X", value); return ZONI_SUCCESS; }
+
+    // --- Scrittura GPU ---
+    if (address == 0x1F801810) { 
+        zoni_log(ZONI_LOG_INFO, "GPU GP0 write: 0x%08X", value); 
+        return ZONI_SUCCESS; 
+    }
+    if (address == 0x1F801814) { 
+        zoni_log(ZONI_LOG_INFO, "GPU GP1 write: 0x%08X", value); 
+        return ZONI_SUCCESS; 
+    }
+
     // Check alignment
     if (address & 3) {
         zoni_log(ZONI_LOG_WARNING, "Unaligned write32 at address 0x%08X", address);
@@ -300,8 +375,8 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
-        zoni_log(ZONI_LOG_WARNING, "Invalid write32 at address 0x%08X", address);
-        return ZONI_ERROR_INVALID_PARAMETER;
+        zoni_log(ZONI_LOG_WARNING, "Unmapped write32 at address 0x%08X (value=0x%08X) (probabile accesso hardware o regione non implementata)", address, value);
+        return ZONI_SUCCESS;
     }
     
     if (reg->data) {

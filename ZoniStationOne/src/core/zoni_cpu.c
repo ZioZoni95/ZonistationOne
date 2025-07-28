@@ -1083,22 +1083,22 @@ zoni_error_t zoni_cpu_execute_sb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
 // J address: PC = (PC & 0xF0000000) | (address << 2)
 zoni_error_t zoni_cpu_execute_j(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
     u32 current_pc = cpu->pc;
-    u32 address = instruction->j.address;
-    u32 new_pc = (current_pc & 0xF0000000) | (address << 2);
-    
+    // Estrai i 26 bit dal raw (non usare instruction->j.address se non sei sicura)
+    u32 target = instruction->raw & 0x03FFFFFF;
+    u32 new_pc = (current_pc & 0xF0000000) | (target << 2);
+
     cpu->pc = new_pc;
-    zoni_log(ZONI_LOG_DEBUG, "J PC = (0x%08X & 0xF0000000) | (0x%06X << 2) = 0x%08X", 
-             current_pc, address, new_pc);
+    zoni_log(ZONI_LOG_DEBUG, "J PC = (0x%08X & 0xF0000000) | (0x%07X << 2) = 0x%08X", 
+             current_pc, target, new_pc);
     return ZONI_SUCCESS;
 }
 
 // JAL address: $31 = PC + 4, PC = (PC & 0xF0000000) | (address << 2)
 zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
     u32 current_pc = cpu->pc;
-    u32 address = instruction->j.address;
-    u32 new_pc = (current_pc & 0xF0000000) | (address << 2);
-    
-    // Save return address in $31 (ra)
+    u32 target = instruction->raw & 0x03FFFFFF;
+    u32 new_pc = (current_pc & 0xF0000000) | (target << 2);
+
     cpu->gpr.r[31] = current_pc + 4;
     cpu->pc = new_pc;
     zoni_log(ZONI_LOG_DEBUG, "JAL $31 = PC + 4 = 0x%08X + 4 = 0x%08X, PC = 0x%08X", 
