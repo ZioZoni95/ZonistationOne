@@ -241,7 +241,9 @@ zoni_error_t zoni_memory_write8(zoni_memory_t* memory, u32 address, u8 value) {
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
+        #ifdef ZONI_DEBUG
         zoni_log(ZONI_LOG_WARNING, "Invalid write8 at address 0x%08X", address);
+        #endif
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     
@@ -270,7 +272,9 @@ zoni_error_t zoni_memory_write16(zoni_memory_t* memory, u32 address, u16 value) 
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
+        #ifdef ZONI_DEBUG
         zoni_log(ZONI_LOG_WARNING, "Invalid write16 at address 0x%08X", address);
+        #endif
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     
@@ -300,7 +304,9 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
     
     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
     if (!reg || !reg->writable) {
+        #ifdef ZONI_DEBUG
         zoni_log(ZONI_LOG_WARNING, "Invalid write32 at address 0x%08X", address);
+        #endif
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     

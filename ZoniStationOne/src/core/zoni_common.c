@@ -8,7 +8,7 @@
 #include <time.h>
 
 // Global log level
-static zoni_log_level_t g_log_level = ZONI_LOG_DEBUG;
+static zoni_log_level_t g_log_level = ZONI_LOG_INFO;
 
 // Log level strings
 static const char* log_level_strings[] = {

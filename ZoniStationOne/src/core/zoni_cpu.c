@@ -212,13 +212,17 @@ zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* i
 
 // ADDI rt, rs, immediate: rt = rs + immediate (signed)
 zoni_error_t zoni_cpu_execute_addi(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    if (instruction->i.rt != 0) {  // $0 is always 0
-        u32 rs_val = cpu->gpr.r[instruction->i.rs];
-        s16 immediate = (s16)instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    s16 immediate = (s16)(instruction->raw & 0xFFFF);
+    
+    if (rt != 0) {  // $0 is always 0
+        u32 rs_val = cpu->gpr.r[rs];
         s32 result = (s32)rs_val + immediate;
-        cpu->gpr.r[instruction->i.rt] = (u32)result;
+        cpu->gpr.r[rt] = (u32)result;
         zoni_log(ZONI_LOG_DEBUG, "ADDI $%d = $%d + %d = 0x%08X", 
-                 instruction->i.rt, instruction->i.rs, immediate, result);
+                 rt, rs, immediate, result);
     }
     return ZONI_SUCCESS;
 }
@@ -253,7 +257,7 @@ void zoni_cpu_dload_rt(zoni_cpu_regs_t* cpu, u32 r, u32 val) {
 }
 
 void zoni_cpu_dload_step(zoni_cpu_regs_t* cpu) {
-    int sel = cpu->dload_sel;
+    int sel = cpu->dload_sel ^ 1;  // Process the slot that was filled by the previous instruction
     if (cpu->dload_reg[sel] != 0) {
         cpu->gpr.r[cpu->dload_reg[sel]] = cpu->dload_val[sel];
     }
@@ -883,106 +887,137 @@ zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     
-    // Process load delay slots before executing new instruction
-    zoni_cpu_dload_step(cpu);
-    
     // Extract opcode directly from raw instruction (little-endian)
     // The bit fields in instruction structure are already in little-endian order
     u8 opcode = (instruction->raw >> 26) & 0x3F;
     u8 funct = instruction->raw & 0x3F;
     
-    // Debug: Log the instruction being executed (cleaner format)
-    zoni_log(ZONI_LOG_DEBUG, "Executing: raw=0x%08X, opcode=0x%02X", instruction->raw, opcode);
+    // Debug: Log the instruction being executed (only in debug mode)
+    // zoni_log(ZONI_LOG_DEBUG, "Executing: raw=0x%08X, opcode=0x%02X", instruction->raw, opcode);
     
     // Execute instruction based on opcode
+    zoni_error_t result;
     switch (opcode) {
         case MIPS_OP_SPECIAL:
             // R-type instruction, check function code
-            return zoni_cpu_execute_r_type(cpu, instruction, instruction->raw, funct);
+            result = zoni_cpu_execute_r_type(cpu, instruction, instruction->raw, funct);
+            break;
             
         case MIPS_OP_ADDI:
-            return zoni_cpu_execute_addi(cpu, instruction);
+            result = zoni_cpu_execute_addi(cpu, instruction);
+            break;
             
         case MIPS_OP_ADDIU:
-            return zoni_cpu_execute_addiu(cpu, instruction);
+            result = zoni_cpu_execute_addiu(cpu, instruction);
+            break;
             
         case MIPS_OP_ANDI:
-            return zoni_cpu_execute_andi(cpu, instruction);
+            result = zoni_cpu_execute_andi(cpu, instruction);
+            break;
             
         case MIPS_OP_ORI:
-            return zoni_cpu_execute_ori(cpu, instruction);
+            result = zoni_cpu_execute_ori(cpu, instruction);
+            break;
             
         case MIPS_OP_XORI:
-            return zoni_cpu_execute_xori(cpu, instruction);
+            result = zoni_cpu_execute_xori(cpu, instruction);
+            break;
             
         case MIPS_OP_LUI:
-            return zoni_cpu_execute_lui(cpu, instruction);
+            result = zoni_cpu_execute_lui(cpu, instruction);
+            break;
             
         case MIPS_OP_BEQ:
-            return zoni_cpu_execute_beq(cpu, instruction);
+            result = zoni_cpu_execute_beq(cpu, instruction);
+            break;
             
         case MIPS_OP_BNE:
-            return zoni_cpu_execute_bne(cpu, instruction);
+            result = zoni_cpu_execute_bne(cpu, instruction);
+            break;
             
         case MIPS_OP_LW:
-            return zoni_cpu_execute_lw(cpu, instruction);
+            result = zoni_cpu_execute_lw(cpu, instruction);
+            break;
             
         case MIPS_OP_SW:
-            return zoni_cpu_execute_sw(cpu, instruction);
+            result = zoni_cpu_execute_sw(cpu, instruction);
+            break;
             
         case MIPS_OP_LB:
-            return zoni_cpu_execute_lb(cpu, instruction);
+            result = zoni_cpu_execute_lb(cpu, instruction);
+            break;
             
         case MIPS_OP_SB:
-            return zoni_cpu_execute_sb(cpu, instruction);
+            result = zoni_cpu_execute_sb(cpu, instruction);
+            break;
             
         case MIPS_OP_J:
-            return zoni_cpu_execute_j(cpu, instruction);
+            result = zoni_cpu_execute_j(cpu, instruction);
+            break;
             
         case MIPS_OP_JAL:
-            return zoni_cpu_execute_jal(cpu, instruction);
+            result = zoni_cpu_execute_jal(cpu, instruction);
+            break;
             
         default:
             zoni_log(ZONI_LOG_WARNING, "Unknown instruction opcode: 0x%02X", opcode);
-            return ZONI_ERROR_NOT_IMPLEMENTED;
+            result = ZONI_ERROR_NOT_IMPLEMENTED;
+            break;
     }
+    
+    // Process load delay slots after executing instruction
+    zoni_cpu_dload_step(cpu);
+    
+    return result;
 }
 
 // ANDI rt, rs, immediate: rt = rs & immediate
 zoni_error_t zoni_cpu_execute_andi(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    if (instruction->i.rt != 0) {
-        u32 rs_val = cpu->gpr.r[instruction->i.rs];
-        u16 immediate = instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u16 immediate = instruction->raw & 0xFFFF;
+    
+    if (rt != 0) {
+        u32 rs_val = cpu->gpr.r[rs];
         u32 result = rs_val & immediate;
-        cpu->gpr.r[instruction->i.rt] = result;
+        cpu->gpr.r[rt] = result;
         zoni_log(ZONI_LOG_DEBUG, "ANDI $%d = $%d & 0x%04X = 0x%08X", 
-                 instruction->i.rt, instruction->i.rs, immediate, result);
+                 rt, rs, immediate, result);
     }
     return ZONI_SUCCESS;
 }
 
 // ORI rt, rs, immediate: rt = rs | immediate
 zoni_error_t zoni_cpu_execute_ori(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    if (instruction->i.rt != 0) {
-        u32 rs_val = cpu->gpr.r[instruction->i.rs];
-        u16 immediate = instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u16 immediate = instruction->raw & 0xFFFF;
+    
+    if (rt != 0) {
+        u32 rs_val = cpu->gpr.r[rs];
         u32 result = rs_val | immediate;
-        cpu->gpr.r[instruction->i.rt] = result;
+        cpu->gpr.r[rt] = result;
         zoni_log(ZONI_LOG_DEBUG, "ORI $%d = $%d | 0x%04X = 0x%08X", 
-                 instruction->i.rt, instruction->i.rs, immediate, result);
+                 rt, rs, immediate, result);
     }
     return ZONI_SUCCESS;
 }
 
 // XORI rt, rs, immediate: rt = rs ^ immediate
 zoni_error_t zoni_cpu_execute_xori(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    if (instruction->i.rt != 0) {
-        u32 rs_val = cpu->gpr.r[instruction->i.rs];
-        u16 immediate = instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u16 immediate = instruction->raw & 0xFFFF;
+    
+    if (rt != 0) {
+        u32 rs_val = cpu->gpr.r[rs];
         u32 result = rs_val ^ immediate;
-        cpu->gpr.r[instruction->i.rt] = result;
+        cpu->gpr.r[rt] = result;
         zoni_log(ZONI_LOG_DEBUG, "XORI $%d = $%d ^ 0x%04X = 0x%08X", 
-                 instruction->i.rt, instruction->i.rs, immediate, result);
+                 rt, rs, immediate, result);
     }
     return ZONI_SUCCESS;
 }
@@ -1004,37 +1039,45 @@ zoni_error_t zoni_cpu_execute_lui(zoni_cpu_regs_t* cpu, zoni_instruction_t* inst
 
 // BEQ rs, rt, offset: if (rs == rt) PC += offset
 zoni_error_t zoni_cpu_execute_beq(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    u32 rs_val = cpu->gpr.r[instruction->i.rs];
-    u32 rt_val = cpu->gpr.r[instruction->i.rt];
-    s16 offset = (s16)instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    s16 offset = (s16)(instruction->raw & 0xFFFF);
+    
+    u32 rs_val = cpu->gpr.r[rs];
+    u32 rt_val = cpu->gpr.r[rt];
     
     if (rs_val == rt_val) {
         u32 new_pc = cpu->pc + 4 + (offset << 2);
         cpu->pc = new_pc;
         zoni_log(ZONI_LOG_DEBUG, "BEQ $%d == $%d, PC = 0x%08X + 4 + (%d << 2) = 0x%08X", 
-                 instruction->i.rs, instruction->i.rt, cpu->pc - 4 - (offset << 2), offset, new_pc);
+                 rs, rt, cpu->pc - 4 - (offset << 2), offset, new_pc);
     } else {
         zoni_log(ZONI_LOG_DEBUG, "BEQ $%d (0x%08X) != $%d (0x%08X), no branch", 
-                 instruction->i.rs, rs_val, instruction->i.rt, rt_val);
+                 rs, rs_val, rt, rt_val);
     }
     return ZONI_SUCCESS;
 }
 
 // BNE rs, rt, offset: if (rs != rt) PC += offset
 zoni_error_t zoni_cpu_execute_bne(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    u32 rs_val = cpu->gpr.r[instruction->i.rs];
-    u32 rt_val = cpu->gpr.r[instruction->i.rt];
-    s16 offset = (s16)instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    s16 offset = (s16)(instruction->raw & 0xFFFF);
+    
+    u32 rs_val = cpu->gpr.r[rs];
+    u32 rt_val = cpu->gpr.r[rt];
     u32 old_pc = cpu->pc;
     
     if (rs_val != rt_val) {
         u32 new_pc = cpu->pc + 4 + (offset << 2);
         cpu->pc = new_pc;
         zoni_log(ZONI_LOG_DEBUG, "BNE $%d != $%d, PC = 0x%08X + 4 + (%d << 2) = 0x%08X", 
-                 instruction->i.rs, instruction->i.rt, old_pc, offset, new_pc);
+                 rs, rt, old_pc, offset, new_pc);
     } else {
         zoni_log(ZONI_LOG_DEBUG, "BNE $%d (0x%08X) == $%d (0x%08X), no branch", 
-                 instruction->i.rs, rs_val, instruction->i.rt, rt_val);
+                 rs, rs_val, rt, rt_val);
     }
     return ZONI_SUCCESS;
 }
@@ -1089,9 +1132,13 @@ zoni_error_t zoni_cpu_execute_sw(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
 
 // LB rt, offset(rs): rt = Memory[rs + offset] (signed byte)
 zoni_error_t zoni_cpu_execute_lb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    if (instruction->i.rt != 0) {
-        u32 rs_val = cpu->gpr.r[instruction->i.rs];
-        s16 offset = (s16)instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    s16 offset = (s16)(instruction->raw & 0xFFFF);
+    
+    if (rt != 0) {
+        u32 rs_val = cpu->gpr.r[rs];
         u32 address = rs_val + offset;
         u8 value;
         
@@ -1099,9 +1146,9 @@ zoni_error_t zoni_cpu_execute_lb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
         if (result == ZONI_SUCCESS) {
             // Sign extend byte to 32 bits
             s32 sign_extended = (s8)value;
-            zoni_cpu_do_load(cpu, instruction->i.rt, (u32)sign_extended);
+            zoni_cpu_do_load(cpu, rt, (u32)sign_extended);
             zoni_log(ZONI_LOG_DEBUG, "LB $%d = Memory[0x%08X + %d] = Memory[0x%08X] = 0x%02X (sign-extended to 0x%08X)", 
-                     instruction->i.rt, rs_val, offset, address, value, sign_extended);
+                     rt, rs_val, offset, address, value, sign_extended);
         } else {
             zoni_log(ZONI_LOG_ERROR, "LB failed to read from address 0x%08X", address);
             return result;
@@ -1112,15 +1159,19 @@ zoni_error_t zoni_cpu_execute_lb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
 
 // SB rt, offset(rs): Memory[rs + offset] = rt (lowest byte)
 zoni_error_t zoni_cpu_execute_sb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
-    u32 rs_val = cpu->gpr.r[instruction->i.rs];
-    s16 offset = (s16)instruction->i.immediate;
+    // Extract fields manually from raw instruction (little-endian)
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    s16 offset = (s16)(instruction->raw & 0xFFFF);
+    
+    u32 rs_val = cpu->gpr.r[rs];
     u32 address = rs_val + offset;
-    u8 value = (u8)cpu->gpr.r[instruction->i.rt];
+    u8 value = (u8)cpu->gpr.r[rt];
     
     zoni_error_t result = zoni_cpu_write8(cpu, address, value);
     if (result == ZONI_SUCCESS) {
         zoni_log(ZONI_LOG_DEBUG, "SB Memory[0x%08X + %d] = Memory[0x%08X] = $%d (0x%08X) = 0x%02X", 
-                 rs_val, offset, address, instruction->i.rt, cpu->gpr.r[instruction->i.rt], value);
+                 rs_val, offset, address, rt, cpu->gpr.r[rt], value);
     } else {
         zoni_log(ZONI_LOG_ERROR, "SB failed to write to address 0x%08X", address);
         return result;
@@ -1131,19 +1182,23 @@ zoni_error_t zoni_cpu_execute_sb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
 // J address: PC = (PC & 0xF0000000) | (address << 2)
 zoni_error_t zoni_cpu_execute_j(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
     u32 current_pc = cpu->pc;
-    u32 address = instruction->j.address;
+    // Extract address field manually from raw instruction (little-endian)
+    u32 address = instruction->raw & 0x3FFFFFF;
     u32 new_pc = (current_pc & 0xF0000000) | (address << 2);
     
     cpu->pc = new_pc;
     zoni_log(ZONI_LOG_DEBUG, "J PC = (0x%08X & 0xF0000000) | (0x%06X << 2) = 0x%08X", 
              current_pc, address, new_pc);
+    zoni_log(ZONI_LOG_DEBUG, "J Debug: raw=0x%08X, address=0x%06X, shifted=0x%08X", 
+             instruction->raw, address, address << 2);
     return ZONI_SUCCESS;
 }
 
 // JAL address: $31 = PC + 4, PC = (PC & 0xF0000000) | (address << 2)
 zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
     u32 current_pc = cpu->pc;
-    u32 address = instruction->j.address;
+    // Extract address field manually from raw instruction (little-endian)
+    u32 address = instruction->raw & 0x3FFFFFF;
     u32 new_pc = (current_pc & 0xF0000000) | (address << 2);
     
     // Save return address in $31 (ra)
@@ -1160,6 +1215,7 @@ zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* inst
 // Format: SYSCALL (no operands)
 // Opcode: 0x00 (SPECIAL), Function: 0x0C (SYSCALL)
 zoni_error_t zoni_cpu_execute_syscall(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    ZONI_UNUSED(instruction);
     // SYSCALL triggers a system call exception
     // This is the primary way the PlayStation BIOS communicates with the emulator
     // The BIOS uses SYSCALL extensively for file I/O, memory management, etc.

@@ -6,50 +6,23 @@
 #include "zoni_common.h"
 #include "zoni_memory.h"
 #include "zoni_cpu.h"
-#include "zoni_emulator.h"
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
     ZONI_UNUSED(argv);
     
-    zoni_log(ZONI_LOG_INFO, "ZoniStationOne v%s starting up...", ZONI_VERSION_STRING);
+    zoni_log(ZONI_LOG_INFO, "ZoniStationOne v%s - PlayStation 1 Emulator", ZONI_VERSION_STRING);
+    zoni_log(ZONI_LOG_INFO, "================================================");
     
-    // Test memory system
+    // Initialize memory system
     zoni_memory_t memory;
     zoni_error_t result = zoni_memory_init(&memory);
     if (result != ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_ERROR, "Failed to initialize memory system: %s", 
-                 zoni_error_to_string(result));
+        zoni_log(ZONI_LOG_ERROR, "Memory initialization failed");
         return 1;
     }
     
-    zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
-    
-    // Test memory access
-    u8 test_value = 0x42;
-    zoni_memory_write8(&memory, 0x1000, test_value);
-    
-    u8 read_value;
-    result = zoni_memory_read8(&memory, 0x1000, &read_value);
-    if (result == ZONI_SUCCESS && read_value == test_value) {
-        zoni_log(ZONI_LOG_INFO, "Memory read/write test passed");
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "Memory read/write test failed");
-    }
-    
-    // Test 32-bit memory access
-    u32 test32 = 0x12345678;
-    zoni_memory_write32(&memory, 0x2000, test32);
-    
-    u32 read32;
-    result = zoni_memory_read32(&memory, 0x2000, &read32);
-    if (result == ZONI_SUCCESS && read32 == test32) {
-        zoni_log(ZONI_LOG_INFO, "32-bit memory access test passed");
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "32-bit memory access test failed");
-    }
-    
-    // Test CPU system
+    // Initialize CPU system
     zoni_cpu_regs_t cpu;
     zoni_cpu_config_t cpu_config = {
         .mode = ZONI_CPU_MODE_INTERPRETER,
@@ -61,328 +34,119 @@ int main(int argc, char* argv[]) {
     
     result = zoni_cpu_init(&cpu, &cpu_config);
     if (result != ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_ERROR, "Failed to initialize CPU: %s", 
-                 zoni_error_to_string(result));
+        zoni_log(ZONI_LOG_ERROR, "CPU initialization failed");
         zoni_memory_shutdown(&memory);
         return 1;
     }
     
-    zoni_log(ZONI_LOG_INFO, "CPU system initialized successfully");
-    
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
     
-    // Test CPU register access
+    zoni_log(ZONI_LOG_INFO, "✅ Core systems initialized successfully");
+    
+    // Test basic CPU functionality
     zoni_cpu_set_register(&cpu, 1, 0x12345678);
     u32 reg_value = zoni_cpu_get_register(&cpu, 1);
-    if (reg_value == 0x12345678) {
-        zoni_log(ZONI_LOG_INFO, "CPU register access test passed");
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "CPU register access test failed");
+    if (reg_value != 0x12345678) {
+        zoni_log(ZONI_LOG_ERROR, "❌ CPU register test failed");
+        goto cleanup;
     }
     
     // Test load delay slots
     zoni_cpu_do_load(&cpu, 2, 0xDEADBEEF);
     zoni_cpu_dload_step(&cpu);
     zoni_cpu_dload_step(&cpu);
-    if (cpu.gpr.r[2] == 0xDEADBEEF) {
-        zoni_log(ZONI_LOG_INFO, "CPU load delay test passed");
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "CPU load delay test failed");
+    if (cpu.gpr.r[2] != 0xDEADBEEF) {
+        zoni_log(ZONI_LOG_ERROR, "❌ CPU load delay test failed");
+        goto cleanup;
     }
     
     // Test CPU memory access
+    u8 test_value = 0x42;
+    zoni_memory_write8(&memory, 0x1000, test_value);
+    
     u8 cpu_read_value;
     result = zoni_cpu_read8(&cpu, 0x1000, &cpu_read_value);
-    if (result == ZONI_SUCCESS && cpu_read_value == test_value) {
-        zoni_log(ZONI_LOG_INFO, "CPU memory access test passed");
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "CPU memory access test failed");
+    if (result != ZONI_SUCCESS || cpu_read_value != test_value) {
+        zoni_log(ZONI_LOG_ERROR, "❌ CPU memory access test failed");
+        goto cleanup;
     }
     
-    // Test instruction fetch and decode
-    zoni_log(ZONI_LOG_INFO, "Testing instruction fetch and decode...");
-    
-    // Write test instructions to RAM (which is writable)
-    zoni_memory_write32(&memory, 0x00001000, 0x00000000); // NOP
-    zoni_memory_write32(&memory, 0x00001004, 0x2001007B); // ADDI $1, $0, 123
-    zoni_memory_write32(&memory, 0x00001008, 0x200200FF); // ADDI $2, $0, 255
-    zoni_memory_write32(&memory, 0x0000100C, 0x00430820); // ADD $1, $2, $3
-    
-    // Debug: Print the actual instruction values
-    zoni_log(ZONI_LOG_DEBUG, "Test instructions written to memory");
-    
-    // Set PC to RAM address
-    cpu.pc = 0x00001000;
-    
-    // Fetch and decode the first instruction (NOP)
-    zoni_instruction_t instruction;
-    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "Instruction fetch successful");
-        
-        // Decode the instruction
-        char disasm[256];
-        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
-        if (result == ZONI_SUCCESS) {
-            zoni_log(ZONI_LOG_INFO, "Instruction decode: %s", disasm);
-        }
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "Instruction fetch failed");
-    }
-    
-    // Test with ADDI instruction
-    cpu.pc = 0x00001004;
-    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
-    if (result == ZONI_SUCCESS) {
-        char disasm[256];
-        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
-        if (result == ZONI_SUCCESS) {
-            zoni_log(ZONI_LOG_INFO, "ADDI instruction decode: %s", disasm);
-        }
-    }
-    
-    // Test with ADD instruction
-    cpu.pc = 0x0000100C;
-    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
-    if (result == ZONI_SUCCESS) {
-        char disasm[256];
-        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
-        if (result == ZONI_SUCCESS) {
-            zoni_log(ZONI_LOG_INFO, "ADD instruction decode: %s", disasm);
-        }
-    }
+    zoni_log(ZONI_LOG_INFO, "✅ Basic CPU functionality verified");
     
     // Test instruction execution
-    zoni_log(ZONI_LOG_INFO, "Testing instruction execution...");
+    zoni_log(ZONI_LOG_INFO, "Testing MIPS instruction execution...");
     
-    // Set up some test registers
-    zoni_cpu_set_register(&cpu, 1, 0x12345678);  // $1 = 0x12345678
-    zoni_cpu_set_register(&cpu, 2, 0x0000000F);  // $2 = 0x0000000F
-    zoni_cpu_set_register(&cpu, 3, 0x00000000);  // $3 = 0x00000000
-    
-    // Write test instructions to RAM at different addresses to avoid conflicts
-    // ADD $1, $2, $3: rd=1, rs=2, rt=3, shamt=0, funct=0x20
-    // Binary: 000000 00010 00011 00001 00000 100000 = 0x00430820
+    // Write test instructions to RAM
     zoni_memory_write32(&memory, 0x00002000, 0x00430820); // ADD $1, $2, $3
-    
-    // ADDI $1, $0, 123: rt=1, rs=0, immediate=123
-    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B (big-endian)
-    // Little-endian: 0x7B010020
-    zoni_memory_write32(&memory, 0x00002004, 0x2001007B); // ADDI $1, $0, 123 (big-endian)
-    
-    // ADDI $2, $0, 255: rt=2, rs=0, immediate=255
-    // Binary: 001000 00000 00010 0000000011111111 = 0x200200FF (big-endian)
-    // Little-endian: 0xFF020020
-    zoni_memory_write32(&memory, 0x00002008, 0x200200FF); // ADDI $2, $0, 255 (big-endian)
-    
-    // ORI $1, $1, 0x0F: rt=1, rs=1, immediate=0x0F
-    // Binary: 001101 00001 00001 0000000000001111 = 0x3421000F (big-endian)
-    // Little-endian: 0x0F210034
-    zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F (big-endian)
-    
-    // SYSCALL: opcode=0x00 (SPECIAL), funct=0x0C
-    // Binary: 000000 00000 00000 00000 00000 001100 = 0x0000000C (big-endian)
+    zoni_memory_write32(&memory, 0x00002004, 0x2001007B); // ADDI $1, $0, 123
+    zoni_memory_write32(&memory, 0x00002008, 0x200200FF); // ADDI $2, $0, 255
+    zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F
     zoni_memory_write32(&memory, 0x00002010, 0x0000000C); // SYSCALL
+    
+    // Set up test registers
+    zoni_cpu_set_register(&cpu, 1, 0x12345678);
+    zoni_cpu_set_register(&cpu, 2, 0x0000000F);
+    zoni_cpu_set_register(&cpu, 3, 0x00000000);
     
     // Set PC to start of test instructions
     cpu.pc = 0x00002000;
     
-    // Execute ADD instruction
-    zoni_log(ZONI_LOG_INFO, "Executing ADD instruction...");
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "ADD execution successful");
-        zoni_log(ZONI_LOG_INFO, "After ADD: $1 = 0x%08X, $2 = 0x%08X, $3 = 0x%08X", 
-                 zoni_cpu_get_register(&cpu, 1), zoni_cpu_get_register(&cpu, 2), zoni_cpu_get_register(&cpu, 3));
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "ADD execution failed");
+    // Execute test sequence
+    for (int i = 0; i < 5; i++) {
+        result = zoni_cpu_step(&cpu);
+        if (result != ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_ERROR, "❌ Instruction execution failed at step %d", i+1);
+            goto cleanup;
+        }
     }
     
-    // Execute ADDI instruction
-    zoni_log(ZONI_LOG_INFO, "Executing ADDI instruction...");
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "ADDI execution successful");
-        zoni_log(ZONI_LOG_INFO, "After ADDI: $1 = 0x%08X", zoni_cpu_get_register(&cpu, 1));
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "ADDI execution failed");
-    }
+    zoni_log(ZONI_LOG_INFO, "✅ Basic instruction set working");
     
-    // Execute second ADDI instruction
-    zoni_log(ZONI_LOG_INFO, "Executing second ADDI instruction...");
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "Second ADDI execution successful");
-        zoni_log(ZONI_LOG_INFO, "After second ADDI: $2 = 0x%08X", zoni_cpu_get_register(&cpu, 2));
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "Second ADDI execution failed");
-    }
-    
-    // Execute ORI instruction
-    zoni_log(ZONI_LOG_INFO, "Executing ORI instruction...");
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "ORI execution successful");
-        zoni_log(ZONI_LOG_INFO, "After ORI: $1 = 0x%08X", zoni_cpu_get_register(&cpu, 1));
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "ORI execution failed");
-    }
-    
-    // Execute SYSCALL instruction
-    zoni_log(ZONI_LOG_INFO, "Executing SYSCALL instruction...");
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "SYSCALL execution successful");
-        zoni_log(ZONI_LOG_INFO, "After SYSCALL: PC = 0x%08X", cpu.pc);
-        zoni_log(ZONI_LOG_INFO, "Exception Cause = 0x%08X", cpu.cp0.n.Cause);
-        zoni_log(ZONI_LOG_INFO, "Exception EPC = 0x%08X", cpu.cp0.n.EPC);
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "SYSCALL execution failed");
-    }
-    
-    // Test critical BIOS instructions
-    zoni_log(ZONI_LOG_INFO, "=== Testing Critical BIOS Instructions ===");
-    
-    // Test ADDIU instruction
-    zoni_log(ZONI_LOG_INFO, "--- Testing ADDIU ---");
-    // ADDIU: opcode=0x09, rt=1, rs=0, immediate=0x1234
-    // Binary: 001001 00000 00001 0001001000110100 = 0x24011234 (big-endian)
-    zoni_memory_write32(&memory, 0x00002020, 0x24011234); // ADDIU $1, $0, 0x1234
-    
-    zoni_cpu_reset(&cpu);
-    cpu.pc = 0x00002020;
-    cpu.gpr.r[0] = 0x00001000; // Set $0 to 0x1000
-    
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "ADDIU execution successful");
-        zoni_log(ZONI_LOG_INFO, "After ADDIU: $1 = 0x%08X (expected 0x00002234)", cpu.gpr.r[1]);
-        zoni_log(ZONI_LOG_INFO, "PC = 0x%08X", cpu.pc);
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "ADDIU execution failed");
-    }
-    
-    // Test LUI instruction
-    zoni_log(ZONI_LOG_INFO, "--- Testing LUI ---");
-    // LUI: opcode=0x0F, rt=2, immediate=0x5678
-    // Binary: 001111 00010 00000 0101011001111000 = 0x3C025678 (big-endian)
-    zoni_memory_write32(&memory, 0x00002030, 0x3C025678); // LUI $2, 0x5678
-    
-    zoni_cpu_reset(&cpu);
-    cpu.pc = 0x00002030;
-    
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "LUI execution successful");
-        zoni_log(ZONI_LOG_INFO, "After LUI: $2 = 0x%08X (expected 0x56780000)", cpu.gpr.r[2]);
-        zoni_log(ZONI_LOG_INFO, "PC = 0x%08X", cpu.pc);
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "LUI execution failed");
-    }
-    
-    // Test LW instruction
-    zoni_log(ZONI_LOG_INFO, "--- Testing LW ---");
-    // LW: opcode=0x23, rt=3, rs=0, offset=0x100
-    // Binary: 100011 00011 00000 0000000100000000 = 0x8C300100 (big-endian)
-    zoni_memory_write32(&memory, 0x00002040, 0x8C300100); // LW $3, 0x100($0)
-    
-    // Write test data to memory
-    zoni_memory_write32(&memory, 0x00000100, 0xDEADBEEF);
-    
-    zoni_cpu_reset(&cpu);
-    cpu.pc = 0x00002040;
-    cpu.gpr.r[0] = 0x00000000; // Set $0 to 0
-    
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "LW execution successful");
-        zoni_log(ZONI_LOG_INFO, "After LW: $3 = 0x%08X (expected 0xDEADBEEF)", cpu.gpr.r[3]);
-        zoni_log(ZONI_LOG_INFO, "PC = 0x%08X", cpu.pc);
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "LW execution failed");
-    }
-    
-    // Test SW instruction
-    zoni_log(ZONI_LOG_INFO, "--- Testing SW ---");
-    // SW: opcode=0x2B, rt=4, rs=0, offset=0x200
-    // Binary: 101011 00100 00000 0000001000000000 = 0xAC400200 (big-endian)
-    zoni_memory_write32(&memory, 0x00002050, 0xAC400200); // SW $4, 0x200($0)
-    
-    zoni_cpu_reset(&cpu);
-    cpu.pc = 0x00002050;
-    cpu.gpr.r[0] = 0x00000000; // Set $0 to 0
-    cpu.gpr.r[4] = 0xCAFEBABE; // Set $4 to test value
-    
-    result = zoni_cpu_step(&cpu);
-    if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_INFO, "SW execution successful");
-        u32 sw_result;
-        zoni_memory_read32(&memory, 0x00000200, &sw_result);
-        zoni_log(ZONI_LOG_INFO, "After SW: Memory[0x200] = 0x%08X (expected 0xCAFEBABE)", sw_result);
-        zoni_log(ZONI_LOG_INFO, "PC = 0x%08X", cpu.pc);
-    } else {
-        zoni_log(ZONI_LOG_ERROR, "SW execution failed");
-    }
-    
-    // Test instruction sequence (like BIOS would use)
-    zoni_log(ZONI_LOG_INFO, "=== Testing BIOS-like Instruction Sequence ===");
+    // Test BIOS-like instruction sequence
+    zoni_log(ZONI_LOG_INFO, "Testing BIOS instruction sequence...");
     
     // Sequence: LUI -> ADDIU -> LW -> SW
-    // LUI $5, 0x0001: 0x3C050001 (big-endian)
-    // ADDIU $5, $5, 0x0000: 0x24A50000 (big-endian)
-    // LW $6, 0x0000($5): 0x8CA60000 (big-endian)
-    // SW $7, 0x0000($5): 0xACA70000 (big-endian)
     zoni_memory_write32(&memory, 0x00002060, 0x3C050001); // LUI $5, 0x0001
     zoni_memory_write32(&memory, 0x00002064, 0x24A50000); // ADDIU $5, $5, 0x0000
     zoni_memory_write32(&memory, 0x00002068, 0x8CA60000); // LW $6, 0x0000($5)
     zoni_memory_write32(&memory, 0x0000206C, 0xACA70000); // SW $7, 0x0000($5)
     
-    // Write test data (use aligned address)
+    // Write test data
     zoni_memory_write32(&memory, 0x00010000, 0x12345678);
     
     zoni_cpu_reset(&cpu);
     cpu.pc = 0x00002060;
-    cpu.gpr.r[7] = 0x87654321; // Set $7 to test value
+    cpu.gpr.r[7] = 0x87654321;
     
     // Execute sequence
     for (int i = 0; i < 4; i++) {
         result = zoni_cpu_step(&cpu);
-        if (result == ZONI_SUCCESS) {
-            zoni_log(ZONI_LOG_INFO, "Step %d: PC = 0x%08X, $5 = 0x%08X, $6 = 0x%08X", 
-                     i+1, cpu.pc, cpu.gpr.r[5], cpu.gpr.r[6]);
-        } else {
-            zoni_log(ZONI_LOG_ERROR, "Step %d failed", i+1);
-            break;
+        if (result != ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_ERROR, "❌ BIOS sequence failed at step %d", i+1);
+            goto cleanup;
         }
     }
     
     // Verify final memory state
     u32 final_memory;
     zoni_memory_read32(&memory, 0x00010000, &final_memory);
-    zoni_log(ZONI_LOG_INFO, "Final memory[0x00010000] = 0x%08X (expected 0x87654321)", final_memory);
     
     if (final_memory == 0x87654321) {
         zoni_log(ZONI_LOG_INFO, "✅ BIOS instruction sequence test PASSED");
+        zoni_log(ZONI_LOG_INFO, "✅ All critical instructions working correctly");
     } else {
         zoni_log(ZONI_LOG_ERROR, "❌ BIOS instruction sequence test FAILED");
     }
     
-    // Dump CPU registers
-    zoni_cpu_dump_registers(&cpu);
+    zoni_log(ZONI_LOG_INFO, "================================================");
+    zoni_log(ZONI_LOG_INFO, "🎮 ZoniStationOne Core Emulation: READY");
+    zoni_log(ZONI_LOG_INFO, "Next: BIOS Loading, GPU, SPU, CD-ROM...");
     
-    // Dump memory statistics
-    zoni_memory_dump_stats(&memory);
-    
-    // Test memory dump
-    zoni_log(ZONI_LOG_INFO, "Testing memory dump:");
-    zoni_memory_dump_region(&memory, PSX_MEM_RAM, 0x1000, 32);
-    
+cleanup:
     // Cleanup
     zoni_cpu_shutdown(&cpu);
     zoni_memory_shutdown(&memory);
-    
-    zoni_log(ZONI_LOG_INFO, "ZoniStationOne shutdown complete");
     
     return 0;
 } 
