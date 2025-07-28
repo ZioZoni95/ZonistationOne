@@ -22,6 +22,7 @@
 - **Clean Runtime Output**: Professional, readable debug output
 - **SYSCALL Instruction**: Complete implementation with exception handling
 - **Exception Handling**: Improved system with proper vectors and state management
+- **BIOS Analysis**: Complete analysis of SCPH1001.BIN using Linux tools
 
 ### ⚠️ **Partially Complete**
 - **CPU Instruction Set**: Basic instructions + SYSCALL working, other advanced instructions missing
