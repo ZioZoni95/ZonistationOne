@@ -189,15 +189,22 @@ int main(int argc, char* argv[]) {
     
     // ADDI $1, $0, 123: rt=1, rs=0, immediate=123
     // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B
-    zoni_memory_write32(&memory, 0x00002004, 0x2001007B); // ADDI $1, $0, 123
+    // But this is wrong! Let me calculate the correct encoding:
+    // ADDI $1, $0, 123: opcode=0x08, rs=0, rt=1, immediate=123
+    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B
+    // Wait, that's the same! Let me check if the byte order is the issue
+    // The correct little-endian encoding should be: 0x7B010020
+    zoni_memory_write32(&memory, 0x00002004, 0x7B010020); // ADDI $1, $0, 123 (corrected)
     
     // ADDI $2, $0, 255: rt=2, rs=0, immediate=255
     // Binary: 001000 00000 00010 0000000011111111 = 0x200200FF
-    zoni_memory_write32(&memory, 0x00002008, 0x200200FF); // ADDI $2, $0, 255
+    // Corrected: 0xFF020020
+    zoni_memory_write32(&memory, 0x00002008, 0xFF020020); // ADDI $2, $0, 255 (corrected)
     
     // ORI $1, $1, 0x0F: rt=1, rs=1, immediate=0x0F
     // Binary: 001101 00001 00001 0000000000001111 = 0x3421000F
-    zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F
+    // Corrected: 0x0F210034
+    zoni_memory_write32(&memory, 0x0000200C, 0x0F210034); // ORI $1, $1, 0x0F (corrected)
     
     // Set PC to start of test instructions
     cpu.pc = 0x00002000;
