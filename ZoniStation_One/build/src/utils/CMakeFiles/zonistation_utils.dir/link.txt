@@ -1,2 +1,0 @@
-/usr/bin/ar qc libzonistation_utils.a CMakeFiles/zonistation_utils.dir/utils.c.o CMakeFiles/zonistation_utils.dir/logging.c.o CMakeFiles/zonistation_utils.dir/config.c.o
-/usr/bin/ranlib libzonistation_utils.a
