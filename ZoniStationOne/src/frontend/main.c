@@ -100,6 +100,80 @@ int main(int argc, char* argv[]) {
         zoni_log(ZONI_LOG_ERROR, "CPU memory access test failed");
     }
     
+    // Test instruction fetch and decode
+    zoni_log(ZONI_LOG_INFO, "Testing instruction fetch and decode...");
+    
+    // Write test instructions to RAM (which is writable)
+    zoni_memory_write32(&memory, 0x00001000, 0x00000000); // NOP
+    zoni_memory_write32(&memory, 0x00001004, 0x2001007B); // ADDI $1, $0, 123
+    zoni_memory_write32(&memory, 0x00001008, 0x200200FF); // ADDI $2, $0, 255
+    zoni_memory_write32(&memory, 0x0000100C, 0x00430820); // ADD $1, $2, $3
+    
+    // Debug: Print the actual instruction values
+    zoni_log(ZONI_LOG_DEBUG, "Written instructions:");
+    zoni_log(ZONI_LOG_DEBUG, "  0x00001000: 0x%08X", 0x00000000);
+    zoni_log(ZONI_LOG_DEBUG, "  0x00001004: 0x%08X", 0x2001007B);
+    zoni_log(ZONI_LOG_DEBUG, "  0x00001008: 0x%08X", 0x200200FF);
+    zoni_log(ZONI_LOG_DEBUG, "  0x0000100C: 0x%08X", 0x00430820);
+    
+    // Set PC to RAM address
+    cpu.pc = 0x00001000;
+    
+    // Fetch and decode the first instruction (NOP)
+    zoni_instruction_t instruction;
+    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "Instruction fetch successful");
+        zoni_log(ZONI_LOG_DEBUG, "Fetched instruction: 0x%08X", instruction.raw);
+        
+        // Decode the instruction
+        char disasm[256];
+        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
+        if (result == ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_INFO, "Instruction decode: %s", disasm);
+            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
+                     instruction.raw, instruction.r.opcode);
+            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
+            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
+            zoni_log(ZONI_LOG_DEBUG, "Expected ADDI: 0x2001007B -> 0x7B010020");
+            zoni_log(ZONI_LOG_DEBUG, "Expected ADD: 0x00430820 -> 0x20084300");
+        } else {
+            zoni_log(ZONI_LOG_ERROR, "Instruction decode failed");
+        }
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "Instruction fetch failed");
+    }
+    
+    // Test with ADDI instruction
+    cpu.pc = 0x00001004;
+    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
+    if (result == ZONI_SUCCESS) {
+        char disasm[256];
+        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
+        if (result == ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_INFO, "ADDI instruction decode: %s", disasm);
+            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
+            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
+                     instruction.raw, instruction.r.opcode);
+            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
+        }
+    }
+    
+    // Test with ADD instruction
+    cpu.pc = 0x0000100C;
+    result = zoni_cpu_fetch_instruction(&cpu, &instruction);
+    if (result == ZONI_SUCCESS) {
+        char disasm[256];
+        result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
+        if (result == ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_INFO, "ADD instruction decode: %s", disasm);
+            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
+            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
+                     instruction.raw, instruction.r.opcode);
+            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
+        }
+    }
+    
     // Dump CPU registers
     zoni_cpu_dump_registers(&cpu);
     

@@ -264,4 +264,186 @@ void zoni_cpu_disassemble_instruction(zoni_cpu_regs_t* cpu, u32 address, char* b
 // Set memory reference (called from emulator)
 void zoni_cpu_set_memory(zoni_memory_t* memory) {
     g_memory = memory;
+}
+
+// Instruction fetching and execution
+zoni_error_t zoni_cpu_fetch_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    if (!cpu || !instruction || !g_memory) {
+        return ZONI_ERROR_INVALID_PARAMETER;
+    }
+    
+    // Fetch 32-bit instruction from memory at current PC
+    u32 instruction_word;
+    zoni_error_t result = zoni_memory_read32(g_memory, cpu->pc, &instruction_word);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to fetch instruction at PC=0x%08X", cpu->pc);
+        return result;
+    }
+    
+    // Store the raw instruction in the union for easy access
+    instruction->raw = instruction_word;
+    
+    // Update CPU state
+    cpu->code = instruction_word;  // Store current instruction
+    cpu->instruction_count++;      // Increment instruction counter
+    
+    zoni_log(ZONI_LOG_DEBUG, "Fetched instruction 0x%08X at PC=0x%08X", instruction_word, cpu->pc);
+    
+    return ZONI_SUCCESS;
+}
+
+zoni_error_t zoni_cpu_decode_instruction(zoni_instruction_t* instruction, char* disasm, size_t disasm_size) {
+    if (!instruction || !disasm) {
+        return ZONI_ERROR_INVALID_PARAMETER;
+    }
+    
+    // Convert little-endian instruction to big-endian for proper decoding
+    u32 big_endian_instruction = zoni_instruction_to_big_endian(instruction->raw);
+    zoni_instruction_t temp_instruction;
+    temp_instruction.raw = big_endian_instruction;
+    
+    // Basic instruction disassembly based on opcode
+    switch (temp_instruction.r.opcode) {
+        case MIPS_OP_SPECIAL:
+            // R-type instruction, check function code
+            switch (temp_instruction.r.funct) {
+                case MIPS_FUNC_ADD:
+                    snprintf(disasm, disasm_size, "ADD $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_ADDU:
+                    snprintf(disasm, disasm_size, "ADDU $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_SUB:
+                    snprintf(disasm, disasm_size, "SUB $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_SUBU:
+                    snprintf(disasm, disasm_size, "SUBU $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_AND:
+                    snprintf(disasm, disasm_size, "AND $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_OR:
+                    snprintf(disasm, disasm_size, "OR $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_XOR:
+                    snprintf(disasm, disasm_size, "XOR $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_NOR:
+                    snprintf(disasm, disasm_size, "NOR $%d, $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_SLL:
+                    snprintf(disasm, disasm_size, "SLL $%d, $%d, %d", 
+                            temp_instruction.r.rd, temp_instruction.r.rt, temp_instruction.r.shamt);
+                    break;
+                case MIPS_FUNC_SRL:
+                    snprintf(disasm, disasm_size, "SRL $%d, $%d, %d", 
+                            temp_instruction.r.rd, temp_instruction.r.rt, temp_instruction.r.shamt);
+                    break;
+                case MIPS_FUNC_SRA:
+                    snprintf(disasm, disasm_size, "SRA $%d, $%d, %d", 
+                            temp_instruction.r.rd, temp_instruction.r.rt, temp_instruction.r.shamt);
+                    break;
+                case MIPS_FUNC_JR:
+                    snprintf(disasm, disasm_size, "JR $%d", temp_instruction.r.rs);
+                    break;
+                case MIPS_FUNC_JALR:
+                    snprintf(disasm, disasm_size, "JALR $%d, $%d", 
+                            temp_instruction.r.rd, temp_instruction.r.rs);
+                    break;
+                case MIPS_FUNC_SYSCALL:
+                    snprintf(disasm, disasm_size, "SYSCALL");
+                    break;
+                case MIPS_FUNC_BREAK:
+                    snprintf(disasm, disasm_size, "BREAK");
+                    break;
+                case MIPS_FUNC_MFHI:
+                    snprintf(disasm, disasm_size, "MFHI $%d", temp_instruction.r.rd);
+                    break;
+                case MIPS_FUNC_MFLO:
+                    snprintf(disasm, disasm_size, "MFLO $%d", temp_instruction.r.rd);
+                    break;
+                case MIPS_FUNC_MULT:
+                    snprintf(disasm, disasm_size, "MULT $%d, $%d", 
+                            temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                case MIPS_FUNC_DIV:
+                    snprintf(disasm, disasm_size, "DIV $%d, $%d", 
+                            temp_instruction.r.rs, temp_instruction.r.rt);
+                    break;
+                default:
+                    snprintf(disasm, disasm_size, "UNKNOWN_R(0x%02X)", temp_instruction.r.funct);
+                    break;
+            }
+            break;
+            
+        case MIPS_OP_ADDI:
+            snprintf(disasm, disasm_size, "ADDI $%d, $%d, %d", 
+                    temp_instruction.i.rt, temp_instruction.i.rs, (s16)temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_ADDIU:
+            snprintf(disasm, disasm_size, "ADDIU $%d, $%d, %d", 
+                    temp_instruction.i.rt, temp_instruction.i.rs, (s16)temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_ANDI:
+            snprintf(disasm, disasm_size, "ANDI $%d, $%d, 0x%04X", 
+                    temp_instruction.i.rt, temp_instruction.i.rs, temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_ORI:
+            snprintf(disasm, disasm_size, "ORI $%d, $%d, 0x%04X", 
+                    temp_instruction.i.rt, temp_instruction.i.rs, temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_XORI:
+            snprintf(disasm, disasm_size, "XORI $%d, $%d, 0x%04X", 
+                    temp_instruction.i.rt, temp_instruction.i.rs, temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_LUI:
+            snprintf(disasm, disasm_size, "LUI $%d, 0x%04X", 
+                    temp_instruction.i.rt, temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_BEQ:
+            snprintf(disasm, disasm_size, "BEQ $%d, $%d, %d", 
+                    temp_instruction.i.rs, temp_instruction.i.rt, (s16)temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_BNE:
+            snprintf(disasm, disasm_size, "BNE $%d, $%d, %d", 
+                    temp_instruction.i.rs, temp_instruction.i.rt, (s16)temp_instruction.i.immediate);
+            break;
+        case MIPS_OP_LW:
+            snprintf(disasm, disasm_size, "LW $%d, %d($%d)", 
+                    temp_instruction.i.rt, (s16)temp_instruction.i.immediate, temp_instruction.i.rs);
+            break;
+        case MIPS_OP_SW:
+            snprintf(disasm, disasm_size, "SW $%d, %d($%d)", 
+                    temp_instruction.i.rt, (s16)temp_instruction.i.immediate, temp_instruction.i.rs);
+            break;
+        case MIPS_OP_LB:
+            snprintf(disasm, disasm_size, "LB $%d, %d($%d)", 
+                    temp_instruction.i.rt, (s16)temp_instruction.i.immediate, temp_instruction.i.rs);
+            break;
+        case MIPS_OP_SB:
+            snprintf(disasm, disasm_size, "SB $%d, %d($%d)", 
+                    temp_instruction.i.rt, (s16)temp_instruction.i.immediate, temp_instruction.i.rs);
+            break;
+        case MIPS_OP_J:
+            snprintf(disasm, disasm_size, "J 0x%08X", 
+                    (temp_instruction.j.address << 2) & 0x0FFFFFFF);
+            break;
+        case MIPS_OP_JAL:
+            snprintf(disasm, disasm_size, "JAL 0x%08X", 
+                    (temp_instruction.j.address << 2) & 0x0FFFFFFF);
+            break;
+        default:
+            snprintf(disasm, disasm_size, "UNKNOWN(0x%02X)", temp_instruction.r.opcode);
+            break;
+    }
+    
+    return ZONI_SUCCESS;
 } 

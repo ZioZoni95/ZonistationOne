@@ -6,21 +6,22 @@ A PlayStation One emulator written in C, inspired by PCSX-ReARMed but designed a
 
 ZoniStationOne is a PlayStation One emulator that aims to provide accurate emulation of the original PlayStation hardware. The project is built from the ground up with modern C practices while learning from the excellent work done in PCSX-ReARMed.
 
-## Current Status: CPU Foundation Complete ✅
+## Current Status: Instruction Fetch & Decode Complete ✅
 
-The project has successfully implemented its foundational components and is ready for the next phase of development.
+The project has successfully implemented the instruction fetch and decode system and is ready for instruction execution implementation.
 
 ### ✅ Completed Features
 
 - **Memory System**: Full PlayStation memory map with proper region management
 - **CPU Foundation**: MIPS R3000A register structure and load delay system
+- **Instruction System**: Fetch and decode MIPS instructions from memory
 - **Build System**: Automated build process with dependency detection
 - **Testing**: All basic functionality tests passing
 - **Documentation**: Comprehensive development guides and status tracking
 
 ### 🔄 In Progress
 
-- **CPU Instruction Interpreter**: Implementing MIPS R3000A instruction set
+- **CPU Instruction Execution**: Implementing MIPS R3000A instruction execution
 - **BIOS Emulation**: PlayStation BIOS loading and HLE implementation
 
 ## Features (Planned)
@@ -95,6 +96,9 @@ This project has completed its foundation phase and is now implementing the CPU 
 - **Exception Handling**: Framework ready for instruction-level exceptions
 - **Memory Integration**: CPU properly connected to memory system
 - **Debug Support**: Register dump and instruction disassembly ready
+- **Instruction Fetch**: Reading 32-bit instructions from memory at program counter
+- **Instruction Decode**: MIPS instruction format parsing (R-type, I-type, J-type)
+- **Disassembly**: Basic instruction disassembly with proper byte order handling
 
 #### Memory System
 - **Complete Memory Map**: 8MB RAM, 512KB BIOS, hardware registers, etc.
@@ -115,6 +119,7 @@ All tests are currently passing:
 - ✅ Memory system initialization and operations
 - ✅ CPU register access and load delay slots
 - ✅ CPU-memory integration
+- ✅ Instruction fetch and decode
 - ✅ Error handling and validation
 
 ## Documentation
@@ -138,9 +143,10 @@ Contributions are welcome! Please read the [Development Guide](DEVELOPMENT.md) b
 
 ## Roadmap
 
-### Phase 1: CPU Interpreter (Current)
+### Phase 1: CPU Instruction Execution (Current)
 - [x] CPU foundation with register system
-- [ ] MIPS instruction decoding
+- [x] MIPS instruction fetch and decode
+- [ ] MIPS instruction execution
 - [ ] Basic arithmetic and logical instructions
 - [ ] Load/store and branch instructions
 

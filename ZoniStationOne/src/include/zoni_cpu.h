@@ -165,30 +165,48 @@ void zoni_cpu_dload_step(zoni_cpu_regs_t* cpu);
 void zoni_cpu_dload_flush(zoni_cpu_regs_t* cpu);
 void zoni_cpu_dload_clear(zoni_cpu_regs_t* cpu);
 
-// Memory reference (called from emulator)
-void zoni_cpu_set_memory(zoni_memory_t* memory);
-
-// MIPS instruction formats
+// MIPS instruction formats (R-type, I-type, J-type)
 typedef struct {
-    u32 opcode : 6;
-    u32 rs : 5;
-    u32 rt : 5;
-    u32 rd : 5;
-    u32 shamt : 5;
-    u32 funct : 6;
+    u32 opcode : 6;    // Opcode (bits 26-31)
+    u32 rs : 5;        // Source register (bits 21-25)
+    u32 rt : 5;        // Target register (bits 16-20)
+    u32 rd : 5;        // Destination register (bits 11-15)
+    u32 shamt : 5;     // Shift amount (bits 6-10)
+    u32 funct : 6;     // Function code (bits 0-5)
 } zoni_mips_r_type_t;
 
 typedef struct {
-    u32 opcode : 6;
-    u32 rs : 5;
-    u32 rt : 5;
-    u32 immediate : 16;
+    u32 opcode : 6;    // Opcode (bits 26-31)
+    u32 rs : 5;        // Source register (bits 21-25)
+    u32 rt : 5;        // Target register (bits 16-20)
+    u32 immediate : 16; // Immediate value (bits 0-15)
 } zoni_mips_i_type_t;
 
 typedef struct {
-    u32 opcode : 6;
-    u32 address : 26;
+    u32 opcode : 6;    // Opcode (bits 26-31)
+    u32 address : 26;  // Jump address (bits 0-25)
 } zoni_mips_j_type_t;
+
+// Union for easy instruction access
+typedef union {
+    u32 raw;                    // Raw 32-bit instruction
+    zoni_mips_r_type_t r;       // R-type format
+    zoni_mips_i_type_t i;       // I-type format
+    zoni_mips_j_type_t j;       // J-type format
+} zoni_instruction_t;
+
+// Helper function to convert little-endian instruction to big-endian for decoding
+static inline u32 zoni_instruction_to_big_endian(u32 instruction) {
+    return ((instruction & 0xFF) << 24) | ((instruction & 0xFF00) << 8) |
+           ((instruction & 0xFF0000) >> 8) | ((instruction & 0xFF000000) >> 24);
+}
+
+// Memory reference (called from emulator)
+void zoni_cpu_set_memory(zoni_memory_t* memory);
+
+// Instruction fetching and execution
+zoni_error_t zoni_cpu_fetch_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_decode_instruction(zoni_instruction_t* instruction, char* disasm, size_t disasm_size);
 
 // MIPS instruction opcodes
 #define MIPS_OP_SPECIAL 0x00

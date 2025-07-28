@@ -213,9 +213,9 @@ zoni_cpu_disassemble_instruction(&cpu, address, buffer, buffer_size);
 
 ## Current Implementation Status
 
-### CPU Foundation (Complete ✅)
+### CPU Foundation & Instruction System (Complete ✅)
 
-The CPU foundation is now complete and follows the PCSX-ReARMed structure:
+The CPU foundation and instruction fetch/decode system are now complete and follow the PCSX-ReARMed structure:
 
 #### ✅ Implemented Components
 - **Register Structure**: Complete MIPS R3000A register layout with proper byte ordering
@@ -223,11 +223,16 @@ The CPU foundation is now complete and follows the PCSX-ReARMed structure:
 - **Exception Handling**: Framework for CPU exceptions and interrupts
 - **Memory Integration**: CPU properly connected to memory system
 - **Debug Support**: Register dump and instruction disassembly ready
+- **Instruction Fetch**: Reading 32-bit instructions from memory at program counter
+- **Instruction Decode**: MIPS instruction format parsing (R-type, I-type, J-type)
+- **Disassembly**: Basic instruction disassembly with proper byte order handling
+- **Memory Byte Order**: Little-endian memory access for PlayStation compatibility
 
 #### 🔄 Next Steps
-- **Instruction Decoding**: Parse MIPS instruction formats
-- **Basic Instructions**: Implement arithmetic, logical, load/store, branch instructions
-- **Advanced Instructions**: Multiply/divide, coprocessor, special instructions
+- **Instruction Execution**: Execute decoded MIPS instructions
+- **Register Updates**: Update register file based on instruction results
+- **Memory Operations**: Implement load/store instruction execution
+- **Branch/Jump Handling**: Implement control flow instructions
 
 ### Memory System (Complete ✅)
 - Full PlayStation memory map implementation
@@ -252,7 +257,8 @@ The CPU foundation is now complete and follows the PCSX-ReARMed structure:
 ### Planned Features
 
 - [x] CPU foundation (registers, load delay slots, memory integration)
-- [ ] CPU instruction interpreter implementation
+- [x] CPU instruction fetch and decode system
+- [ ] CPU instruction execution engine
 - [ ] Dynamic recompiler
 - [ ] GPU plugin system
 - [ ] SPU plugin system

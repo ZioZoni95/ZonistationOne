@@ -1,8 +1,8 @@
 # ZoniStationOne Project Status
 
-## Current Status: ✅ CPU Foundation Complete
+## Current Status: ✅ Instruction Fetch & Decode Complete
 
-The ZoniStationOne PlayStation One emulator project has successfully implemented the CPU foundation following the PCSX-ReARMed structure. The CPU register system, load delay slots, and memory integration are working correctly.
+The ZoniStationOne PlayStation One emulator project has successfully implemented the instruction fetch and decode system. The CPU can now fetch instructions from memory, decode them into proper MIPS formats, and provide basic disassembly output.
 
 ## ✅ Completed Components
 
@@ -33,6 +33,10 @@ The ZoniStationOne PlayStation One emulator project has successfully implemented
   - Exception handling framework
   - Memory integration and access functions
   - Register access and debug functions
+  - **Instruction fetch and decode system**
+  - **MIPS instruction format parsing (R-type, I-type, J-type)**
+  - **Basic instruction disassembly**
+  - **Byte order handling for PlayStation memory**
 
 - [x] Emulator interface (`zoni_emulator.h`)
   - Main emulator structure
@@ -50,15 +54,18 @@ The ZoniStationOne PlayStation One emulator project has successfully implemented
 - [x] Memory system tests (initialization, read/write, statistics)
 - [x] CPU system tests (initialization, register access, load delay slots)
 - [x] CPU-memory integration tests
+- [x] **Instruction fetch and decode tests**
+- [x] **Memory byte order handling tests**
 - [x] All tests passing with clean compilation
 
 ## 🚧 Next Development Priorities
 
-### Phase 1: CPU Interpreter Implementation (High Priority)
-1. **Instruction Decoding** (`zoni_cpu.c`)
-   - MIPS R3000A instruction format parsing
-   - Opcode and function code handling
-   - Immediate value extraction
+### Phase 1: CPU Instruction Execution (High Priority)
+1. **Instruction Execution Engine** (`zoni_cpu.c`)
+   - Execute decoded MIPS instructions
+   - Register file updates
+   - Memory access operations
+   - Branch and jump handling
 
 2. **Basic Instructions**
    - Arithmetic: ADD, ADDI, SUB, SUBI
@@ -113,6 +120,9 @@ The ZoniStationOne PlayStation One emulator project has successfully implemented
 - CPU foundation with MIPS R3000A register structure
 - Load delay slot system working correctly
 - Memory-CPU integration functional
+- **Instruction fetch and decode system**
+- **MIPS instruction format parsing and disassembly**
+- **Memory byte order handling for PlayStation compatibility**
 - 8/16/32-bit memory access with validation
 - Memory region management and protection
 - Comprehensive logging system
@@ -120,7 +130,7 @@ The ZoniStationOne PlayStation One emulator project has successfully implemented
 - Complete testing framework with all tests passing
 
 ### 🔄 In Progress
-- CPU instruction interpreter implementation
+- CPU instruction execution engine
 - BIOS loading and emulation
 
 ### 📋 Planned Features
@@ -158,10 +168,12 @@ make debug
 - Memory allocation: ~8MB RAM + 512KB BIOS
 - CPU register access: Immediate
 - Load delay slot processing: Working correctly
+- **Instruction fetch: Working correctly**
+- **Instruction decode: Working correctly**
 - Memory access: ~2-4 cycles per access
 - Build time: <5 seconds
 - Binary size: ~50KB
-- All tests passing: ✅ Memory, ✅ CPU register access, ✅ CPU load delay, ✅ CPU memory access
+- All tests passing: ✅ Memory, ✅ CPU register access, ✅ CPU load delay, ✅ CPU memory access, ✅ Instruction fetch, ✅ Instruction decode
 
 ### Target Performance
 - CPU emulation: 33.8688 MHz (NTSC)
@@ -173,7 +185,8 @@ make debug
 
 ### Short Term (1-2 months)
 - [x] CPU foundation with register system and load delay slots
-- [ ] CPU instruction interpreter runs basic MIPS code
+- [x] CPU instruction fetch and decode system
+- [ ] CPU instruction execution engine
 - [ ] BIOS boots and shows PlayStation logo
 - [ ] Basic graphics output
 - [ ] Simple audio output
@@ -201,4 +214,4 @@ make debug
 
 The project is well-structured and follows modern C development practices while maintaining compatibility with the PCSX-ReARMed reference structure. The modular architecture will make it easy to add new features and plugins. The comprehensive logging system will be invaluable for debugging as the emulator becomes more complex.
 
-The CPU foundation is now complete with proper MIPS R3000A register structure, load delay slot system, and memory integration. All tests are passing and the system is ready for instruction interpreter implementation. The next phase should focus on implementing the MIPS instruction set to make the emulator functional. 
+The CPU foundation and instruction fetch/decode system are now complete with proper MIPS R3000A register structure, load delay slot system, memory integration, and instruction parsing. All tests are passing and the system is ready for instruction execution implementation. The next phase should focus on implementing the MIPS instruction execution engine to make the emulator functional. 

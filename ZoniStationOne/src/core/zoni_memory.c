@@ -221,8 +221,9 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        *value = (reg->data[offset] << 24) | (reg->data[offset + 1] << 16) |
-                 (reg->data[offset + 2] << 8) | reg->data[offset + 3];
+        // PlayStation uses little-endian byte order
+        *value = reg->data[offset] | (reg->data[offset + 1] << 8) |
+                 (reg->data[offset + 2] << 16) | (reg->data[offset + 3] << 24);
     } else {
         // Hardware register read - return 0 for now
         *value = 0;
@@ -304,10 +305,11 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        reg->data[offset] = (value >> 24) & 0xFF;
-        reg->data[offset + 1] = (value >> 16) & 0xFF;
-        reg->data[offset + 2] = (value >> 8) & 0xFF;
-        reg->data[offset + 3] = value & 0xFF;
+        // PlayStation uses little-endian byte order
+        reg->data[offset] = value & 0xFF;
+        reg->data[offset + 1] = (value >> 8) & 0xFF;
+        reg->data[offset + 2] = (value >> 16) & 0xFF;
+        reg->data[offset + 3] = (value >> 24) & 0xFF;
     } else {
         // Hardware register write - ignore for now
         zoni_log(ZONI_LOG_DEBUG, "Hardware write32: 0x%08X = 0x%08X", address, value);
