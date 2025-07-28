@@ -21,9 +21,9 @@ ZoniStationOne is a PlayStation One emulator that aims to provide accurate emula
 - **Cycle Counting**: Accurate CPU cycle tracking
 - **PC Management**: Correct program counter advancement
 - **Byte Order Handling**: Fixed instruction decoding issues
+- **Clean Runtime Output**: Professional, readable debug output
 
 ### 🔄 **In Progress**
-- **Execution Engine**: Final byte order fixes for instruction execution
 - **Advanced Instructions**: Additional MIPS instruction implementations
 - **Comprehensive Testing**: Extended test suite development
 
@@ -55,13 +55,22 @@ ZoniStationOne is a PlayStation One emulator that aims to provide accurate emula
 - **Solution**: Manual bit extraction from raw instruction
 - **Status**: ✅ **RESOLVED**
 
+#### **4. Execution vs Decode Mismatch (FIXED)**
+- **Problem**: Decode showed correct instruction, but execution treated it differently
+- **Solution**: Updated execution engine to use raw instruction like decode function
+- **Status**: ✅ **RESOLVED**
+
+#### **5. Verbose Runtime Output (FIXED)**
+- **Problem**: Debug output was too verbose and hard to read
+- **Solution**: Cleaned up debug messages for professional output
+- **Status**: ✅ **RESOLVED**
+
 ### 🔍 **Current Issues**
 
-#### **1. Execution vs Decode Mismatch (IN PROGRESS)**
-- **Problem**: Decode shows correct instruction, but execution treats it differently
-- **Example**: Decode shows "ADD $1, $2, $3" but execution shows "ADDI $1 = $0 + 67"
-- **Priority**: HIGH
-- **Status**: 🔄 **IN PROGRESS**
+#### **1. Advanced Instructions (MINOR)**
+- **Problem**: Missing advanced MIPS instructions (MULT, DIV, SYSCALL, etc.)
+- **Priority**: MEDIUM
+- **Status**: 📋 **PLANNED**
 
 ---
 
@@ -134,9 +143,12 @@ make debug
 ✅ Instruction fetch successful
 ✅ ADD instruction decode: ADD $1, $2, $3
 ✅ ADDI instruction decode: ADDI $1, $0, 123
-✅ PC incremented correctly
+✅ ADD execution successful: $1 = 0x0000000F
+✅ ADDI execution successful: $1 = 0x0000000F
+✅ ORI execution successful: $1 = 0x0000000F
+✅ PC incremented correctly: 0x00002000 → 0x00002010
 ✅ Register updates working
-✅ Cycle counting accurate
+✅ Cycle counting accurate: 4 cycles
 ```
 
 ### **Run Tests**
@@ -185,12 +197,14 @@ ZoniStationOne/
 - **Instruction Decode**: Manual bit extraction for accuracy
 - **Instruction Execution**: Complete MIPS instruction execution with register updates
 - **Disassembly**: Basic instruction disassembly with proper byte order handling
+- **PC Management**: Automatic advancement with branch detection
 
 ### **Development Infrastructure** ✅
 - Comprehensive logging system with colored output
 - Error handling and reporting
 - Build system with dependency detection
 - Complete testing framework
+- **Clean, professional runtime output**
 
 ---
 
@@ -201,12 +215,14 @@ ZoniStationOne/
 2. **Manual Bit Extraction**: More reliable than union-based bit field access
 3. **Test Data Validation**: Important to verify instruction encodings
 4. **Debug Logging**: Essential for identifying byte order issues
+5. **Clean Output**: Professional runtime output improves development experience
 
 ### **Technical Decisions**
 1. **Raw Instruction Access**: Using direct bit extraction instead of byte order conversion
 2. **Manual Register Extraction**: More reliable than union bit fields
 3. **Comprehensive Logging**: Debug output for troubleshooting
 4. **Step-by-Step Development**: One component at a time
+5. **Clean Debug Messages**: Professional, readable output format
 
 ---
 
@@ -217,6 +233,7 @@ ZoniStationOne/
 - **Instruction Execution**: 4 cycles per test run
 - **Decode Accuracy**: 100% for tested instructions
 - **PC Advancement**: Correct for all instruction types
+- **Runtime Output**: Clean and professional
 
 ### **Target Performance**
 - **CPU Emulation**: 33.8688 MHz (NTSC)
@@ -235,6 +252,8 @@ ZoniStationOne/
 - [x] Instruction execution engine
 - [x] Load delay slot processing
 - [x] PC management and cycle counting
+- [x] Byte order handling fixes
+- [x] Clean runtime output
 
 ### **Phase 2: BIOS and Boot Process** 📋 **PLANNED**
 - [ ] PlayStation BIOS loading

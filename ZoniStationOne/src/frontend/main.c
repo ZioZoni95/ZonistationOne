@@ -110,11 +110,7 @@ int main(int argc, char* argv[]) {
     zoni_memory_write32(&memory, 0x0000100C, 0x00430820); // ADD $1, $2, $3
     
     // Debug: Print the actual instruction values
-    zoni_log(ZONI_LOG_DEBUG, "Written instructions:");
-    zoni_log(ZONI_LOG_DEBUG, "  0x00001000: 0x%08X", 0x00000000);
-    zoni_log(ZONI_LOG_DEBUG, "  0x00001004: 0x%08X", 0x2001007B);
-    zoni_log(ZONI_LOG_DEBUG, "  0x00001008: 0x%08X", 0x200200FF);
-    zoni_log(ZONI_LOG_DEBUG, "  0x0000100C: 0x%08X", 0x00430820);
+    zoni_log(ZONI_LOG_DEBUG, "Test instructions written to memory");
     
     // Set PC to RAM address
     cpu.pc = 0x00001000;
@@ -124,21 +120,12 @@ int main(int argc, char* argv[]) {
     result = zoni_cpu_fetch_instruction(&cpu, &instruction);
     if (result == ZONI_SUCCESS) {
         zoni_log(ZONI_LOG_INFO, "Instruction fetch successful");
-        zoni_log(ZONI_LOG_DEBUG, "Fetched instruction: 0x%08X", instruction.raw);
         
         // Decode the instruction
         char disasm[256];
         result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
         if (result == ZONI_SUCCESS) {
             zoni_log(ZONI_LOG_INFO, "Instruction decode: %s", disasm);
-            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
-                     instruction.raw, instruction.r.opcode);
-            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
-            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
-            zoni_log(ZONI_LOG_DEBUG, "Expected ADDI: 0x2001007B -> 0x7B010020");
-            zoni_log(ZONI_LOG_DEBUG, "Expected ADD: 0x00430820 -> 0x20084300");
-        } else {
-            zoni_log(ZONI_LOG_ERROR, "Instruction decode failed");
         }
     } else {
         zoni_log(ZONI_LOG_ERROR, "Instruction fetch failed");
@@ -152,10 +139,6 @@ int main(int argc, char* argv[]) {
         result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
         if (result == ZONI_SUCCESS) {
             zoni_log(ZONI_LOG_INFO, "ADDI instruction decode: %s", disasm);
-            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
-            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
-                     instruction.raw, instruction.r.opcode);
-            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
         }
     }
     
@@ -167,10 +150,6 @@ int main(int argc, char* argv[]) {
         result = zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
         if (result == ZONI_SUCCESS) {
             zoni_log(ZONI_LOG_INFO, "ADD instruction decode: %s", disasm);
-            u32 big_endian = zoni_instruction_to_big_endian(instruction.raw);
-            zoni_log(ZONI_LOG_DEBUG, "Raw instruction: 0x%08X, Opcode: 0x%02X", 
-                     instruction.raw, instruction.r.opcode);
-            zoni_log(ZONI_LOG_DEBUG, "Big-endian instruction: 0x%08X", big_endian);
         }
     }
     
@@ -188,23 +167,19 @@ int main(int argc, char* argv[]) {
     zoni_memory_write32(&memory, 0x00002000, 0x00430820); // ADD $1, $2, $3
     
     // ADDI $1, $0, 123: rt=1, rs=0, immediate=123
-    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B
-    // But this is wrong! Let me calculate the correct encoding:
-    // ADDI $1, $0, 123: opcode=0x08, rs=0, rt=1, immediate=123
-    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B
-    // Wait, that's the same! Let me check if the byte order is the issue
-    // The correct little-endian encoding should be: 0x7B010020
-    zoni_memory_write32(&memory, 0x00002004, 0x7B010020); // ADDI $1, $0, 123 (corrected)
+    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B (big-endian)
+    // Little-endian: 0x7B010020
+    zoni_memory_write32(&memory, 0x00002004, 0x2001007B); // ADDI $1, $0, 123 (big-endian)
     
     // ADDI $2, $0, 255: rt=2, rs=0, immediate=255
-    // Binary: 001000 00000 00010 0000000011111111 = 0x200200FF
-    // Corrected: 0xFF020020
-    zoni_memory_write32(&memory, 0x00002008, 0xFF020020); // ADDI $2, $0, 255 (corrected)
+    // Binary: 001000 00000 00010 0000000011111111 = 0x200200FF (big-endian)
+    // Little-endian: 0xFF020020
+    zoni_memory_write32(&memory, 0x00002008, 0x200200FF); // ADDI $2, $0, 255 (big-endian)
     
     // ORI $1, $1, 0x0F: rt=1, rs=1, immediate=0x0F
-    // Binary: 001101 00001 00001 0000000000001111 = 0x3421000F
-    // Corrected: 0x0F210034
-    zoni_memory_write32(&memory, 0x0000200C, 0x0F210034); // ORI $1, $1, 0x0F (corrected)
+    // Binary: 001101 00001 00001 0000000000001111 = 0x3421000F (big-endian)
+    // Little-endian: 0x0F210034
+    zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F (big-endian)
     
     // Set PC to start of test instructions
     cpu.pc = 0x00002000;
