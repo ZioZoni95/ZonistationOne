@@ -6,6 +6,7 @@
 #include "zoni_common.h"
 #include "zoni_memory.h"
 #include "zoni_cpu.h"
+#include "zoni_bios.h"
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
@@ -39,10 +40,33 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Initialize BIOS system
+    zoni_bios_t bios;
+    result = zoni_bios_init(&bios);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "BIOS initialization failed");
+        zoni_cpu_shutdown(&cpu);
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }
+    
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
     
     zoni_log(ZONI_LOG_INFO, "✅ Core systems initialized successfully");
+    
+    // Load BIOS
+    zoni_log(ZONI_LOG_INFO, "Loading BIOS...");
+    result = zoni_bios_load_default(&bios, &memory);
+    if (result != ZONI_SUCCESS && !zoni_bios_is_hle(&bios)) {
+        zoni_log(ZONI_LOG_ERROR, "BIOS loading failed");
+        goto cleanup;
+    }
+    
+    zoni_log(ZONI_LOG_INFO, "✅ BIOS loaded: %s (%s, %s)", 
+             zoni_bios_get_version(&bios), 
+             zoni_bios_get_region(&bios),
+             zoni_bios_is_hle(&bios) ? "HLE" : "Real BIOS");
     
     // Test basic CPU functionality
     zoni_cpu_set_register(&cpu, 1, 0x12345678);
@@ -139,12 +163,40 @@ int main(int argc, char* argv[]) {
         zoni_log(ZONI_LOG_ERROR, "❌ BIOS instruction sequence test FAILED");
     }
     
+    // BIOS Boot Test
+    zoni_log(ZONI_LOG_INFO, "================================================");
+    zoni_log(ZONI_LOG_INFO, "🎮 Testing BIOS Boot Process");
+    zoni_log(ZONI_LOG_INFO, "================================================");
+    
+    // Set up BIOS boot state
+    result = zoni_bios_setup_boot_state(&bios, &cpu);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "❌ BIOS boot state setup failed");
+        goto cleanup;
+    }
+    
+    // Execute BIOS (limited cycles for testing)
+    result = zoni_bios_execute(&bios, &cpu, &memory);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "❌ BIOS execution failed");
+        goto cleanup;
+    }
+    
+    // Check if BIOS execution completed
+    if (zoni_bios_execution_ended(&cpu)) {
+        zoni_log(ZONI_LOG_INFO, "✅ BIOS boot process completed successfully");
+        zoni_log(ZONI_LOG_INFO, "✅ Final PC: 0x%08X", cpu.pc);
+    } else {
+        zoni_log(ZONI_LOG_WARNING, "⚠️ BIOS execution timeout (this is normal for testing)");
+    }
+    
     zoni_log(ZONI_LOG_INFO, "================================================");
     zoni_log(ZONI_LOG_INFO, "🎮 ZoniStationOne Core Emulation: READY");
-    zoni_log(ZONI_LOG_INFO, "Next: BIOS Loading, GPU, SPU, CD-ROM...");
+    zoni_log(ZONI_LOG_INFO, "Next: GPU, SPU, CD-ROM...");
     
 cleanup:
     // Cleanup
+    zoni_bios_shutdown(&bios);
     zoni_cpu_shutdown(&cpu);
     zoni_memory_shutdown(&memory);
     

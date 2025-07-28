@@ -57,12 +57,23 @@ zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
     zoni_memory_map_region(memory, PSX_MEM_CACHE_CTRL, PSX_CACHE_CTRL_BASE, PSX_CACHE_CTRL_END - PSX_CACHE_CTRL_BASE + 1, 
                           NULL, true, false, "Cache Control");
     
+    // Initialize hardware
+    zoni_error_t hw_result = zoni_hardware_init(&memory->hardware);
+    if (hw_result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to initialize hardware");
+        zoni_memory_shutdown(memory);
+        return hw_result;
+    }
+    
     zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
     return ZONI_SUCCESS;
 }
 
 void zoni_memory_shutdown(zoni_memory_t* memory) {
     if (!memory) return;
+    
+    // Shutdown hardware
+    zoni_hardware_shutdown(&memory->hardware);
     
     // Free allocated memory
     zoni_free(memory->ram);
@@ -162,8 +173,8 @@ zoni_error_t zoni_memory_read8(zoni_memory_t* memory, u32 address, u8* value) {
         u32 offset = address - reg->base_address;
         *value = reg->data[offset];
     } else {
-        // Hardware register read - return 0 for now
-        *value = 0;
+        // Hardware register read - use hardware module
+        *value = zoni_hw_read8(&memory->hardware, address);
     }
     
     memory->read_count++;
@@ -194,8 +205,8 @@ zoni_error_t zoni_memory_read16(zoni_memory_t* memory, u32 address, u16* value) 
         // MIPS R3000A uses little-endian byte order
         *value = zoni_read_le16(&reg->data[offset]);
     } else {
-        // Hardware register read - return 0 for now
-        *value = 0;
+        // Hardware register read - use hardware module
+        *value = zoni_hw_read16(&memory->hardware, address);
     }
     
     memory->read_count++;
@@ -226,8 +237,8 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
         // MIPS R3000A uses little-endian byte order
         *value = zoni_read_le32(&reg->data[offset]);
     } else {
-        // Hardware register read - return 0 for now
-        *value = 0;
+        // Hardware register read - use hardware module
+        *value = zoni_hw_read32(&memory->hardware, address);
     }
     
     memory->read_count++;
@@ -251,8 +262,14 @@ zoni_error_t zoni_memory_write8(zoni_memory_t* memory, u32 address, u8 value) {
         u32 offset = address - reg->base_address;
         reg->data[offset] = value;
     } else {
-        // Hardware register write - ignore for now
-        zoni_log(ZONI_LOG_DEBUG, "Hardware write8: 0x%08X = 0x%02X", address, value);
+        // Hardware register write - use hardware module
+        zoni_error_t hw_result = zoni_hw_write8(&memory->hardware, address, value);
+        if (hw_result != ZONI_SUCCESS) {
+            #ifdef ZONI_DEBUG
+            zoni_log(ZONI_LOG_WARNING, "Hardware write8 failed: 0x%08X = 0x%02X", address, value);
+            #endif
+            return hw_result;
+        }
     }
     
     memory->write_count++;
@@ -283,8 +300,14 @@ zoni_error_t zoni_memory_write16(zoni_memory_t* memory, u32 address, u16 value) 
         // MIPS R3000A uses little-endian byte order
         zoni_write_le16(&reg->data[offset], value);
     } else {
-        // Hardware register write - ignore for now
-        zoni_log(ZONI_LOG_DEBUG, "Hardware write16: 0x%08X = 0x%04X", address, value);
+        // Hardware register write - use hardware module
+        zoni_error_t hw_result = zoni_hw_write16(&memory->hardware, address, value);
+        if (hw_result != ZONI_SUCCESS) {
+            #ifdef ZONI_DEBUG
+            zoni_log(ZONI_LOG_WARNING, "Hardware write16 failed: 0x%08X = 0x%04X", address, value);
+            #endif
+            return hw_result;
+        }
     }
     
     memory->write_count++;
@@ -315,8 +338,14 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
         // MIPS R3000A uses little-endian byte order
         zoni_write_le32(&reg->data[offset], value);
     } else {
-        // Hardware register write - ignore for now
-        zoni_log(ZONI_LOG_DEBUG, "Hardware write32: 0x%08X = 0x%08X", address, value);
+        // Hardware register write - use hardware module
+        zoni_error_t hw_result = zoni_hw_write32(&memory->hardware, address, value);
+        if (hw_result != ZONI_SUCCESS) {
+            #ifdef ZONI_DEBUG
+            zoni_log(ZONI_LOG_WARNING, "Hardware write32 failed: 0x%08X = 0x%08X", address, value);
+            #endif
+            return hw_result;
+        }
     }
     
     memory->write_count++;

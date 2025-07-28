@@ -10,19 +10,21 @@
 #define ZONI_MEMORY_H
 
 #include "zoni_common.h"
+#include "zoni_hardware.h"
 
 // PlayStation memory map
-#define PSX_MEMORY_REGIONS 8
+#define PSX_MEMORY_REGIONS 9
 
 typedef enum {
     PSX_MEM_RAM = 0,           // 0x00000000 - 0x01FFFFFF (32MB, mirrored)
     PSX_MEM_BIOS = 1,          // 0x1FC00000 - 0x1FFFFFFF (512KB)
-    PSX_MEM_SCRATCHPAD = 2,    // 0x1F800000 - 0x1F8003FF (1KB)
-    PSX_MEM_HW_REG = 3,        // 0x1F801000 - 0x1F802FFF (Hardware registers)
-    PSX_MEM_CACHE_CTRL = 4,    // 0xFFFE0000 - 0xFFFEFFFF (Cache control)
-    PSX_MEM_CDROM = 5,         // 0x1F801800 - 0x1F801803 (CDROM controller)
-    PSX_MEM_SPU = 6,           // 0x1F801C00 - 0x1F801FFF (SPU registers)
-    PSX_MEM_EXPANSION = 7      // 0x1F000000 - 0x1F7FFFFF (Expansion)
+    PSX_MEM_BIOS_KSEG1 = 2,    // 0xBFC00000 - 0xBFFFFFFF (512KB, KSEG1)
+    PSX_MEM_SCRATCHPAD = 3,    // 0x1F800000 - 0x1F8003FF (1KB)
+    PSX_MEM_HW_REG = 4,        // 0x1F801000 - 0x1F802FFF (Hardware registers)
+    PSX_MEM_CACHE_CTRL = 5,    // 0xFFFE0000 - 0xFFFEFFFF (Cache control)
+    PSX_MEM_CDROM = 6,         // 0x1F801800 - 0x1F801803 (CDROM controller)
+    PSX_MEM_SPU = 7,           // 0x1F801C00 - 0x1F801FFF (SPU registers)
+    PSX_MEM_EXPANSION = 8      // 0x1F000000 - 0x1F7FFFFF (Expansion)
 } psx_memory_region_t;
 
 // Memory region structure
@@ -41,6 +43,7 @@ typedef struct {
     u8* ram;                    // Main RAM (8MB)
     u8* bios;                   // BIOS (512KB)
     u8* scratchpad;             // Scratchpad (1KB)
+    zoni_hardware_t hardware;   // Hardware registers
     
     // Memory access callbacks
     zoni_error_t (*read8_callback)(u32 address, u8* value);
