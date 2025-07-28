@@ -174,6 +174,75 @@ int main(int argc, char* argv[]) {
         }
     }
     
+    // Test instruction execution
+    zoni_log(ZONI_LOG_INFO, "Testing instruction execution...");
+    
+    // Set up some test registers
+    zoni_cpu_set_register(&cpu, 1, 0x12345678);  // $1 = 0x12345678
+    zoni_cpu_set_register(&cpu, 2, 0x0000000F);  // $2 = 0x0000000F
+    zoni_cpu_set_register(&cpu, 3, 0x00000000);  // $3 = 0x00000000
+    
+    // Write test instructions to RAM at different addresses to avoid conflicts
+    // ADD $1, $2, $3: rd=1, rs=2, rt=3, shamt=0, funct=0x20
+    // Binary: 000000 00010 00011 00001 00000 100000 = 0x00430820
+    zoni_memory_write32(&memory, 0x00002000, 0x00430820); // ADD $1, $2, $3
+    
+    // ADDI $1, $0, 123: rt=1, rs=0, immediate=123
+    // Binary: 001000 00000 00001 0000000001111011 = 0x2001007B
+    zoni_memory_write32(&memory, 0x00002004, 0x2001007B); // ADDI $1, $0, 123
+    
+    // ADDI $2, $0, 255: rt=2, rs=0, immediate=255
+    // Binary: 001000 00000 00010 0000000011111111 = 0x200200FF
+    zoni_memory_write32(&memory, 0x00002008, 0x200200FF); // ADDI $2, $0, 255
+    
+    // ORI $1, $1, 0x0F: rt=1, rs=1, immediate=0x0F
+    // Binary: 001101 00001 00001 0000000000001111 = 0x3421000F
+    zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F
+    
+    // Set PC to start of test instructions
+    cpu.pc = 0x00002000;
+    
+    // Execute ADD instruction
+    zoni_log(ZONI_LOG_INFO, "Executing ADD instruction...");
+    result = zoni_cpu_step(&cpu);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "ADD execution successful");
+        zoni_log(ZONI_LOG_INFO, "After ADD: $1 = 0x%08X, $2 = 0x%08X, $3 = 0x%08X", 
+                 zoni_cpu_get_register(&cpu, 1), zoni_cpu_get_register(&cpu, 2), zoni_cpu_get_register(&cpu, 3));
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "ADD execution failed");
+    }
+    
+    // Execute ADDI instruction
+    zoni_log(ZONI_LOG_INFO, "Executing ADDI instruction...");
+    result = zoni_cpu_step(&cpu);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "ADDI execution successful");
+        zoni_log(ZONI_LOG_INFO, "After ADDI: $1 = 0x%08X", zoni_cpu_get_register(&cpu, 1));
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "ADDI execution failed");
+    }
+    
+    // Execute second ADDI instruction
+    zoni_log(ZONI_LOG_INFO, "Executing second ADDI instruction...");
+    result = zoni_cpu_step(&cpu);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "Second ADDI execution successful");
+        zoni_log(ZONI_LOG_INFO, "After second ADDI: $2 = 0x%08X", zoni_cpu_get_register(&cpu, 2));
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "Second ADDI execution failed");
+    }
+    
+    // Execute ORI instruction
+    zoni_log(ZONI_LOG_INFO, "Executing ORI instruction...");
+    result = zoni_cpu_step(&cpu);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "ORI execution successful");
+        zoni_log(ZONI_LOG_INFO, "After ORI: $1 = 0x%08X", zoni_cpu_get_register(&cpu, 1));
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "ORI execution failed");
+    }
+    
     // Dump CPU registers
     zoni_cpu_dump_registers(&cpu);
     

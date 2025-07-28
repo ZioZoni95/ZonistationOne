@@ -207,6 +207,24 @@ void zoni_cpu_set_memory(zoni_memory_t* memory);
 // Instruction fetching and execution
 zoni_error_t zoni_cpu_fetch_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
 zoni_error_t zoni_cpu_decode_instruction(zoni_instruction_t* instruction, char* disasm, size_t disasm_size);
+zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+
+// Individual instruction execution functions
+zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction, u32 big_endian_instruction, u8 funct);
+zoni_error_t zoni_cpu_execute_addi(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_addiu(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_andi(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_ori(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_xori(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_lui(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_beq(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_bne(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_lw(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_sw(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_lb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_sb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_j(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
 
 // MIPS instruction opcodes
 #define MIPS_OP_SPECIAL 0x00
