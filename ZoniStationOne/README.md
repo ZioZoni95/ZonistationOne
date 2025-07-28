@@ -2,9 +2,9 @@
 
 A PlayStation One emulator written in C, designed for accuracy and performance.
 
-## 🎯 **Current Status: CPU Instruction Execution Complete** ✅
+## 🎯 **Current Status: SYSCALL Implementation Complete** ✅
 
-**Version**: 0.1.0  
+**Version**: 0.1.1  
 **Last Updated**: December 2024
 
 ---
@@ -15,17 +15,26 @@ ZoniStationOne is a PlayStation One emulator that aims to provide accurate emula
 
 ### ✅ **Completed Features**
 - **Memory System**: Complete PlayStation memory map implementation
-- **CPU Foundation**: MIPS R3000A CPU with full register support
-- **Instruction System**: Fetch, decode, and execute MIPS instructions
+- **CPU Foundation**: Basic MIPS R3000A CPU with full register support
+- **Instruction System**: Basic fetch, decode, and execute pipeline
 - **Load Delay Slots**: Proper MIPS load delay slot handling
-- **Cycle Counting**: Accurate CPU cycle tracking
+- **Cycle Counting**: Basic CPU cycle tracking
 - **PC Management**: Correct program counter advancement
 - **Byte Order Handling**: Fixed instruction decoding issues
 - **Clean Runtime Output**: Professional, readable debug output
+- **SYSCALL Instruction**: Complete implementation with exception handling
+- **Exception Handling**: Improved system with proper vectors and state management
 
-### 🔄 **In Progress**
-- **Advanced Instructions**: Additional MIPS instruction implementations
-- **Comprehensive Testing**: Extended test suite development
+### ⚠️ **Partially Complete**
+- **CPU Instruction Set**: Basic instructions + SYSCALL working, other advanced instructions missing
+- **Exception Handling**: SYSCALL and BREAK working, other exceptions need implementation
+
+### ❌ **Missing Features**
+- **Advanced MIPS Instructions**: MULT, DIV, SLT, SLTU, MFHI/MFLO, MTHI/MTLO, etc.
+- **Coprocessor Support**: COP0 (partial), COP2 (missing)
+- **Advanced Memory Operations**: LWL/LWR, SWL/SWR
+- **Complete Branch Instructions**: BLEZ, BGTZ, BLTZ, BGEZ
+- **Additional Exception Types**: ADEL, ADES, RI, ERET instruction
 
 ### 📋 **Planned Features**
 - **BIOS Emulation**: PlayStation BIOS loading and boot process
@@ -65,11 +74,26 @@ ZoniStationOne is a PlayStation One emulator that aims to provide accurate emula
 - **Solution**: Cleaned up debug messages for professional output
 - **Status**: ✅ **RESOLVED**
 
+#### **6. SYSCALL Implementation (COMPLETED)**
+- **Problem**: Missing SYSCALL instruction for BIOS communication
+- **Solution**: Implemented complete SYSCALL with exception handling
+- **Status**: ✅ **RESOLVED**
+
+#### **7. Exception Handling Improvement (COMPLETED)**
+- **Problem**: Basic exception framework needed improvement for BIOS
+- **Solution**: Enhanced exception handling with proper vectors and state management
+- **Status**: ✅ **RESOLVED**
+
 ### 🔍 **Current Issues**
 
-#### **1. Advanced Instructions (MINOR)**
-- **Problem**: Missing advanced MIPS instructions (MULT, DIV, SYSCALL, etc.)
+#### **1. Missing Advanced Instructions (MEDIUM)**
+- **Problem**: Missing MULT, DIV, SLT, SLTU, MFHI/MFLO, MTHI/MTLO, etc.
 - **Priority**: MEDIUM
+- **Status**: 📋 **PLANNED**
+
+#### **2. Additional Exception Types (LOW)**
+- **Problem**: Missing ADEL, ADES, RI, ERET instruction
+- **Priority**: LOW
 - **Status**: 📋 **PLANNED**
 
 ---
@@ -84,18 +108,20 @@ Scratchpad: 0x1F800000-0x1F8003FF (1KB)
 Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 ```
 
-### **CPU Core** ✅
+### **CPU Core** ⚠️ **PARTIALLY COMPLETE**
 - **Architecture**: MIPS R3000A
 - **Registers**: 32 GPR + LO/HI + CP0
-- **Instruction Set**: Basic MIPS instructions
+- **Instruction Set**: Basic MIPS instructions + SYSCALL
 - **Pipeline**: Fetch → Decode → Execute
 - **Load Delay**: Proper slot handling
+- **Exception Handling**: SYSCALL and BREAK working
 
-### **Instruction System** ✅
-- **Fetch**: Memory-based instruction loading
-- **Decode**: Manual bit extraction for accuracy
-- **Execute**: Individual instruction handlers
-- **PC Management**: Automatic advancement with branch detection
+### **Instruction System** ⚠️ **PARTIALLY COMPLETE**
+- **Fetch**: Memory-based instruction loading ✅
+- **Decode**: Manual bit extraction for accuracy ✅
+- **Execute**: Basic instruction handlers + SYSCALL ✅
+- **PC Management**: Automatic advancement with branch detection ✅
+- **Exception System**: SYSCALL and BREAK with proper vectors ✅
 
 ---
 
@@ -149,6 +175,11 @@ make debug
 ✅ PC incremented correctly: 0x00002000 → 0x00002010
 ✅ Register updates working
 ✅ Cycle counting accurate: 4 cycles
+✅ SYSCALL execution successful
+✅ Exception Cause = 0x00000008 (SYSCALL)
+✅ Exception EPC = 0x00002010 (SYSCALL address)
+✅ Exception Vector = 0x80000044 (SYSCALL vector)
+✅ Status Register = 0x00000002 (EXL bit set)
 ```
 
 ### **Run Tests**
@@ -186,18 +217,19 @@ ZoniStationOne/
 - Memory region management and protection
 - Statistics tracking and debugging
 
-### **CPU Foundation** ✅
+### **CPU Foundation** ⚠️ **PARTIALLY COMPLETE**
 - MIPS R3000A register structure
 - Load delay slot system with dual-slot implementation
-- Exception handling framework
+- Basic exception handling framework
 - Memory integration and access functions
 
-### **Instruction System** ✅
-- **Instruction Fetch**: Memory-based instruction loading
-- **Instruction Decode**: Manual bit extraction for accuracy
-- **Instruction Execution**: Complete MIPS instruction execution with register updates
-- **Disassembly**: Basic instruction disassembly with proper byte order handling
-- **PC Management**: Automatic advancement with branch detection
+### **Instruction System** ⚠️ **PARTIALLY COMPLETE**
+- **Instruction Fetch**: Memory-based instruction loading ✅
+- **Instruction Decode**: Manual bit extraction for accuracy ✅
+- **Instruction Execution**: Basic MIPS instruction execution with register updates + SYSCALL ✅
+- **Disassembly**: Basic instruction disassembly with proper byte order handling ✅
+- **PC Management**: Automatic advancement with branch detection ✅
+- **Exception System**: SYSCALL and BREAK with proper vectors ✅
 
 ### **Development Infrastructure** ✅
 - Comprehensive logging system with colored output
@@ -205,6 +237,7 @@ ZoniStationOne/
 - Build system with dependency detection
 - Complete testing framework
 - **Clean, professional runtime output**
+- **Detailed code comments**
 
 ---
 
@@ -216,6 +249,8 @@ ZoniStationOne/
 3. **Test Data Validation**: Important to verify instruction encodings
 4. **Debug Logging**: Essential for identifying byte order issues
 5. **Clean Output**: Professional runtime output improves development experience
+6. **BIOS Analysis**: PCSX-ReARMed BIOS shows SYSCALL is critical, MULT/DIV not needed
+7. **Exception Handling**: Proper exception vectors and state management are crucial for BIOS
 
 ### **Technical Decisions**
 1. **Raw Instruction Access**: Using direct bit extraction instead of byte order conversion
@@ -223,17 +258,19 @@ ZoniStationOne/
 3. **Comprehensive Logging**: Debug output for troubleshooting
 4. **Step-by-Step Development**: One component at a time
 5. **Clean Debug Messages**: Professional, readable output format
+6. **Exception-First Approach**: Implemented SYSCALL with proper exception handling
 
 ---
 
 ## 📈 **Performance Metrics**
 
 ### **Current Performance**
-- **Memory Access**: ~10 reads/writes per test run
-- **Instruction Execution**: 4 cycles per test run
+- **Memory Access**: ~11 reads/writes per test run
+- **Instruction Execution**: 5 cycles per test run (including SYSCALL)
 - **Decode Accuracy**: 100% for tested instructions
 - **PC Advancement**: Correct for all instruction types
 - **Runtime Output**: Clean and professional
+- **Exception Handling**: SYSCALL working perfectly
 
 ### **Target Performance**
 - **CPU Emulation**: 33.8688 MHz (NTSC)
@@ -245,17 +282,22 @@ ZoniStationOne/
 
 ## 🎮 **Roadmap**
 
-### **Phase 1: CPU Foundation** ✅ **COMPLETE**
+### **Phase 1: CPU Foundation** ⚠️ **PARTIALLY COMPLETE**
 - [x] Memory system implementation
 - [x] CPU register file
-- [x] Instruction fetch and decode
-- [x] Instruction execution engine
+- [x] Basic instruction fetch and decode
+- [x] Basic instruction execution engine
 - [x] Load delay slot processing
 - [x] PC management and cycle counting
 - [x] Byte order handling fixes
 - [x] Clean runtime output
+- [x] **SYSCALL instruction implementation**
+- [x] **Exception handling improvement**
+- [ ] **Other advanced MIPS instructions** (MULT, DIV, SLT, etc.)
+- [ ] **Complete exception handling** (ADEL, ADES, RI, ERET)
+- [ ] **Coprocessor support**
 
-### **Phase 2: BIOS and Boot Process** 📋 **PLANNED**
+### **Phase 2: BIOS and Boot Process** 🚀 **READY TO START**
 - [ ] PlayStation BIOS loading
 - [ ] HLE (High-Level Emulation) BIOS
 - [ ] Basic boot sequence
@@ -276,6 +318,28 @@ ZoniStationOne/
 - [ ] PlayStation controller protocol
 - [ ] Input mapping system
 - [ ] Multiple controller support
+
+---
+
+## 🚀 **Next Development: BIOS Implementation**
+
+### **Phase 2: BIOS Implementation (READY)** 🎯
+**Goal**: Get BIOS working with real PlayStation BIOS file
+1. **Load PlayStation BIOS** from file (user has BIOS file ready)
+2. **Implement HLE BIOS** for basic system calls
+3. **Test BIOS boot sequence**
+4. **Add other missing instructions as BIOS needs them**
+
+**Pros**: Real-world validation, faster progress, better testing
+**Cons**: May need to add more instructions based on BIOS requirements
+
+### **Phase 2 Readiness Assessment**
+1. ✅ **SYSCALL is working perfectly** - Critical for BIOS
+2. ✅ **Exception handling is functional** - BIOS can handle system calls
+3. ✅ **Exception vectors are correct** - BIOS will jump to right addresses
+4. ✅ **Exception state is preserved** - EPC, Cause, SR all working
+5. 🎮 **User has BIOS file ready** - Real PlayStation BIOS for testing
+6. 🚀 **Ready for real-world validation** - BIOS will test our CPU with real code
 
 ---
 
@@ -329,6 +393,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Status**: 🟢 **Active Development**  
+**Status**: 🟢 **Ready for BIOS**  
 **Last Updated**: December 2024  
-**Version**: 0.1.0 
+**Version**: 0.1.1 

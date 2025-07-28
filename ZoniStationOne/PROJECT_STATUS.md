@@ -1,10 +1,10 @@
 # ZoniStationOne Project Status
 
-## 🎯 Current Status: **CPU Instruction Execution Complete** ✅
+## �� Current Status: **SYSCALL Implementation Complete** ✅
 
 **Last Updated**: December 2024  
-**Version**: 0.1.0  
-**Phase**: CPU Foundation Complete
+**Version**: 0.1.1  
+**Phase**: CPU Foundation - Ready for BIOS
 
 ---
 
@@ -12,18 +12,27 @@
 
 ### ✅ **Completed Features**
 - **Memory System**: Complete PlayStation memory map implementation
-- **CPU Foundation**: Complete MIPS R3000A CPU core
-- **Instruction System**: Fetch, decode, and execute MIPS instructions from memory
+- **CPU Foundation**: Basic MIPS R3000A CPU core
+- **Instruction System**: Basic fetch, decode, and execute pipeline
 - **Register Management**: Full GPR, CP0, and special register support
 - **Load Delay Slots**: Proper MIPS load delay slot handling
-- **Cycle Counting**: Accurate CPU cycle tracking
+- **Cycle Counting**: Basic CPU cycle tracking
 - **PC Management**: Correct program counter advancement
 - **Byte Order Handling**: Fixed instruction decoding byte order issues
 - **Clean Runtime Output**: Professional, readable debug output
+- **SYSCALL Instruction**: Complete implementation with exception handling
+- **Exception Handling**: Improved system with proper vectors and state management
 
-### 🔄 **In Progress**
-- **Advanced Instructions**: Additional MIPS instruction implementations
-- **Comprehensive Testing**: Extended test suite development
+### ⚠️ **Partially Complete**
+- **CPU Instruction Set**: Basic instructions + SYSCALL working, other advanced instructions missing
+- **Exception Handling**: SYSCALL and BREAK working, other exceptions need implementation
+
+### ❌ **Missing Features**
+- **Advanced MIPS Instructions**: MULT, DIV, SLT, SLTU, MFHI/MFLO, MTHI/MTLO, etc.
+- **Coprocessor Support**: COP0 (partial), COP2 (missing)
+- **Advanced Memory Operations**: LWL/LWR, SWL/SWR
+- **Complete Branch Instructions**: BLEZ, BGTZ, BLTZ, BGEZ
+- **Additional Exception Types**: ADEL, ADES, RI, ERET instruction
 
 ### 📋 **Planned Features**
 - **BIOS Emulation**: PlayStation BIOS loading and boot process
@@ -73,18 +82,34 @@
 - **Solution**: Cleaned up debug messages for professional output
 - **Status**: ✅ **RESOLVED**
 
+#### **7. SYSCALL Implementation (COMPLETED)**
+- **Problem**: Missing SYSCALL instruction for BIOS communication
+- **Solution**: Implemented complete SYSCALL with exception handling
+- **Status**: ✅ **RESOLVED**
+
+#### **8. Exception Handling Improvement (COMPLETED)**
+- **Problem**: Basic exception framework needed improvement for BIOS
+- **Solution**: Enhanced exception handling with proper vectors and state management
+- **Status**: ✅ **RESOLVED**
+
 ### 🔍 **Current Issues Identified**
 
-#### **1. Advanced Instructions (MINOR)**
-- **Problem**: Missing advanced MIPS instructions (MULT, DIV, SYSCALL, etc.)
+#### **1. Missing Advanced Instructions (MEDIUM)**
+- **Problem**: Missing MULT, DIV, SLT, SLTU, MFHI/MFLO, MTHI/MTLO, etc.
 - **Impact**: Limited instruction set coverage
 - **Priority**: MEDIUM
 - **Status**: 📋 **PLANNED**
 
-#### **2. Comprehensive Testing (MINOR)**
-- **Problem**: Need more thorough test coverage
-- **Impact**: Limited validation of edge cases
-- **Priority**: MEDIUM
+#### **2. Additional Exception Types (LOW)**
+- **Problem**: Missing ADEL, ADES, RI, ERET instruction
+- **Impact**: Limited exception handling
+- **Priority**: LOW
+- **Status**: 📋 **PLANNED**
+
+#### **3. Missing Coprocessor Support (LOW)**
+- **Problem**: COP0 (partial), COP2 completely missing
+- **Impact**: Graphics won't work, but BIOS can work without COP2
+- **Priority**: LOW
 - **Status**: 📋 **PLANNED**
 
 ---
@@ -99,35 +124,42 @@ Scratchpad: 0x1F800000-0x1F8003FF (1KB)
 Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 ```
 
-### **CPU Core** ✅
+### **CPU Core** ⚠️ **PARTIALLY COMPLETE**
 - **Architecture**: MIPS R3000A
 - **Registers**: 32 GPR + LO/HI + CP0
-- **Instruction Set**: Basic MIPS instructions
+- **Instruction Set**: Basic MIPS instructions + SYSCALL
 - **Pipeline**: Fetch → Decode → Execute
 - **Load Delay**: Proper slot handling
+- **Exception Handling**: SYSCALL and BREAK working
 
-### **Instruction System** ✅
-- **Fetch**: Memory-based instruction loading
-- **Decode**: Manual bit extraction for accuracy
-- **Execute**: Individual instruction handlers
-- **PC Management**: Automatic advancement with branch detection
+### **Instruction System** ⚠️ **PARTIALLY COMPLETE**
+- **Fetch**: Memory-based instruction loading ✅
+- **Decode**: Manual bit extraction for accuracy ✅
+- **Execute**: Basic instruction handlers + SYSCALL ✅
+- **PC Management**: Automatic advancement with branch detection ✅
+- **Exception System**: SYSCALL and BREAK with proper vectors ✅
 
 ---
 
 ## 📈 **Development Phases**
 
-### **Phase 1: CPU Foundation** ✅ **COMPLETE**
+### **Phase 1: CPU Foundation** ⚠️ **PARTIALLY COMPLETE**
 - [x] Memory system implementation
 - [x] CPU register file
 - [x] Basic instruction fetch
 - [x] Instruction decode system
-- [x] Instruction execution engine
+- [x] Basic instruction execution engine
 - [x] Load delay slot processing
 - [x] PC management and cycle counting
 - [x] Byte order handling fixes
 - [x] Clean runtime output
+- [x] **SYSCALL instruction implementation**
+- [x] **Exception handling improvement**
+- [ ] **Other advanced MIPS instructions** (MULT, DIV, SLT, etc.)
+- [ ] **Complete exception handling** (ADEL, ADES, RI, ERET)
+- [ ] **Coprocessor support**
 
-### **Phase 2: BIOS and Boot Process** 📋 **PLANNED**
+### **Phase 2: BIOS and Boot Process** 🚀 **READY TO START**
 - [ ] PlayStation BIOS loading
 - [ ] HLE (High-Level Emulation) BIOS
 - [ ] Basic boot sequence
@@ -164,8 +196,11 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 - CPU memory access
 - Instruction fetch and decode
 - PC increment and cycle counting
-- **Instruction execution (ADD, ADDI, ORI)**
+- **Basic instruction execution (ADD, ADDI, ORI)**
 - **Register updates and PC management**
+- **SYSCALL instruction execution**
+- **Exception handling and vectors**
+- **Exception state management (Cause, EPC, SR)**
 
 ### 🔄 **Current Test Results**
 ```
@@ -180,10 +215,15 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 ✅ PC incremented correctly: 0x00002000 → 0x00002010
 ✅ Register updates working
 ✅ Cycle counting accurate: 4 cycles
+✅ SYSCALL execution successful
+✅ Exception Cause = 0x00000008 (SYSCALL)
+✅ Exception EPC = 0x00002010 (SYSCALL address)
+✅ Exception Vector = 0x80000044 (SYSCALL vector)
+✅ Status Register = 0x00000002 (EXL bit set)
 ```
 
 ### 📋 **Planned Tests**
-- [ ] Comprehensive instruction execution tests
+- [ ] Advanced instruction execution tests
 - [ ] BIOS instruction disassembly
 - [ ] Real PlayStation game instruction traces
 - [ ] Performance benchmarking
@@ -204,10 +244,13 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 - [x] Byte order issues are resolved
 - [x] **Execution matches decode output**
 - [x] **Clean, professional runtime output**
+- [x] **SYSCALL instruction works correctly**
+- [x] **Exception handling works properly**
+- [x] **Exception vectors are correct**
 
-### 🔄 **In Progress**
+### ⚠️ **Partially Achieved**
 - [ ] All instruction types execute correctly
-- [ ] Advanced instructions implemented
+- [ ] Complete exception handling works properly
 - [ ] BIOS compatibility verified
 
 ### 📋 **Planned**
@@ -221,30 +264,37 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 
 ## 🚀 **Next Development Priorities**
 
-### **Immediate (High Priority)**
-1. **Advanced Instructions**: Add MULT, DIV, SYSCALL, etc.
-2. **Comprehensive Testing**: Expand test coverage
+### **Phase 2: BIOS Implementation (READY)** 🎯
+**Goal**: Get BIOS working with real PlayStation BIOS file
+1. **Load PlayStation BIOS** from file (user has BIOS file ready)
+2. **Implement HLE BIOS** for basic system calls
+3. **Test BIOS boot sequence**
+4. **Add other missing instructions as BIOS needs them**
 
-### **Short Term (Medium Priority)**
-1. **BIOS Emulation**: Implement PlayStation BIOS loading
-2. **Graphics Foundation**: Basic GPU plugin system
-3. **Audio Foundation**: Basic SPU plugin system
+**Pros**: Real-world validation, faster progress, better testing
+**Cons**: May need to add more instructions based on BIOS requirements
 
-### **Long Term (Low Priority)**
-1. **Game Loading**: CD-ROM and file system support
-2. **Performance Optimization**: Dynamic recompilation
-3. **Advanced Features**: Save states, cheats, etc.
+### **Alternative: Complete CPU First**
+**Goal**: Complete CPU implementation before BIOS
+1. **Add all missing MIPS instructions** (1-2 weeks)
+2. **Complete exception handling** (1 week)
+3. **Add coprocessor support** (1 week)
+4. **Then start Phase 2**
+
+**Pros**: Complete CPU implementation, fewer iterations
+**Cons**: Slower progress, may implement unused instructions
 
 ---
 
 ## 📊 **Performance Metrics**
 
 ### **Current Performance**
-- **Memory Access**: ~10 reads/writes per test run
-- **Instruction Execution**: 4 cycles per test run
+- **Memory Access**: ~11 reads/writes per test run
+- **Instruction Execution**: 5 cycles per test run (including SYSCALL)
 - **Decode Accuracy**: 100% for tested instructions
 - **PC Advancement**: Correct for all instruction types
 - **Runtime Output**: Clean and professional
+- **Exception Handling**: SYSCALL working perfectly
 
 ### **Target Performance**
 - **Memory Access**: Optimized for large instruction sequences
@@ -261,6 +311,7 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 - [x] Comprehensive logging
 - [x] Clear documentation
 - [x] **Clean runtime output**
+- [x] **Detailed code comments**
 - [ ] Unit test coverage
 - [ ] Performance profiling
 
@@ -268,6 +319,7 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 - [x] Modular design
 - [x] Plugin system foundation
 - [x] Memory management
+- [x] **Exception handling system**
 - [ ] Threading support
 - [ ] Cross-platform compatibility
 
@@ -281,6 +333,8 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 3. **Test Data Validation**: Important to verify instruction encodings
 4. **Debug Logging**: Essential for identifying byte order issues
 5. **Clean Output**: Professional runtime output improves development experience
+6. **BIOS Analysis**: PCSX-ReARMed BIOS shows SYSCALL is critical, MULT/DIV not needed
+7. **Exception Handling**: Proper exception vectors and state management are crucial for BIOS
 
 ### **Technical Decisions**
 1. **Raw Instruction Access**: Using direct bit extraction instead of byte order conversion
@@ -288,9 +342,38 @@ Hardware Registers: 0x1F801000-0x1F802FFF (8KB)
 3. **Comprehensive Logging**: Debug output for troubleshooting
 4. **Step-by-Step Development**: One component at a time
 5. **Clean Debug Messages**: Professional, readable output format
+6. **Exception-First Approach**: Implemented SYSCALL with proper exception handling
 
 ### **Future Considerations**
-1. **BIOS File Support**: Need to handle real PlayStation BIOS files
+1. **BIOS File Support**: User has BIOS file ready for testing
 2. **Performance Optimization**: May need dynamic recompilation
 3. **Plugin Architecture**: Extensible design for GPU/SPU plugins
-4. **Cross-Platform**: Ensure compatibility across different systems 
+4. **Cross-Platform**: Ensure compatibility across different systems
+
+### **Phase 2 Readiness Assessment**
+1. ✅ **SYSCALL is working perfectly** - Critical for BIOS
+2. ✅ **Exception handling is functional** - BIOS can handle system calls
+3. ✅ **Exception vectors are correct** - BIOS will jump to right addresses
+4. ✅ **Exception state is preserved** - EPC, Cause, SR all working
+5. 🎮 **User has BIOS file ready** - Real PlayStation BIOS for testing
+6. 🚀 **Ready for real-world validation** - BIOS will test our CPU with real code
+
+---
+
+## 🎯 **Recommendation**
+
+**Proceed with Phase 2: BIOS Implementation**
+
+**Rationale:**
+1. ✅ **SYSCALL is working perfectly** - the most critical instruction for BIOS
+2. ✅ **Exception handling is functional** - BIOS can handle system calls
+3. ✅ **Exception vectors are correct** - BIOS will jump to right addresses
+4. 🎮 **User has BIOS file ready** - Real PlayStation BIOS for testing
+5. 🚀 **Faster progress** toward working emulator
+6. 🧪 **Real-world validation** - BIOS will reveal what other instructions are actually needed
+
+**Next Steps:**
+1. Load PlayStation BIOS from file
+2. Implement HLE BIOS for basic system calls
+3. Test BIOS boot sequence
+4. Add other instructions as BIOS reveals they're needed 

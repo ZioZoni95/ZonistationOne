@@ -228,6 +228,18 @@ zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* i
             }
             break;
             
+        case MIPS_FUNC_SYSCALL:
+            // SYSCALL: System call instruction
+            // This triggers a system call exception for BIOS communication
+            return zoni_cpu_execute_syscall(cpu, instruction);
+            
+        case MIPS_FUNC_BREAK:
+            // BREAK: Breakpoint instruction
+            // This triggers a breakpoint exception for debugging
+            zoni_log(ZONI_LOG_DEBUG, "BREAK: Triggering breakpoint exception");
+            zoni_cpu_trigger_exception(cpu, ZONI_EXCEPTION_BP, cpu->pc);
+            return ZONI_SUCCESS;
+            
         default:
             zoni_log(ZONI_LOG_WARNING, "Unknown R-type function: 0x%02X", funct);
             return ZONI_ERROR_NOT_IMPLEMENTED;
@@ -295,33 +307,67 @@ void zoni_cpu_dload_clear(zoni_cpu_regs_t* cpu) {
 }
 
 // Exception handling
+// This function handles CPU exceptions by setting up the exception state
+// and jumping to the appropriate exception vector
+// Exceptions are the primary way the PlayStation BIOS communicates with the emulator
 static void zoni_cpu_exception(zoni_cpu_regs_t* cpu, zoni_exception_t cause, u32 epc) {
     zoni_log(ZONI_LOG_DEBUG, "CPU Exception: %d at PC=0x%08X", cause, epc);
     
+    // Store the exception cause and EPC (Exception Program Counter)
+    // EPC contains the address of the instruction that caused the exception
     cpu->cp0.n.Cause = cause;
     cpu->cp0.n.EPC = epc;
     
     // Set exception vector based on cause
+    // PlayStation BIOS uses specific exception vectors for different types of exceptions
     switch (cause) {
         case ZONI_EXCEPTION_INT:
+            // Interrupt exception - hardware interrupts
             cpu->pc = 0x80000080; // Interrupt vector
             break;
         case ZONI_EXCEPTION_SYSCALL:
+            // System call exception - BIOS system calls
+            // This is the most important exception for BIOS communication
             cpu->pc = 0x80000040; // Syscall vector
             break;
         case ZONI_EXCEPTION_BP:
+            // Breakpoint exception - debugging
             cpu->pc = 0x80000048; // Breakpoint vector
             break;
+        case ZONI_EXCEPTION_ADEL:
+            // Address error on load - memory access violation
+            cpu->pc = 0x80000080; // General exception vector
+            break;
+        case ZONI_EXCEPTION_ADES:
+            // Address error on store - memory access violation
+            cpu->pc = 0x80000080; // General exception vector
+            break;
+        case ZONI_EXCEPTION_RI:
+            // Reserved instruction - unknown instruction
+            cpu->pc = 0x80000080; // General exception vector
+            break;
         default:
+            // General exception - catch-all for other exceptions
             cpu->pc = 0x80000080; // General exception vector
             break;
     }
     
     // Set exception mode in Status Register
+    // EXL (Exception Level) bit indicates we're in exception mode
+    // This prevents nested exceptions and changes CPU behavior
     cpu->cp0.n.SR |= 0x00000002; // EXL bit
 }
 
+// Trigger a CPU exception
+// This function is called by instructions that need to generate exceptions
+// Examples: SYSCALL, BREAK, memory access violations, etc.
+// The BIOS will handle these exceptions and perform the appropriate actions
 void zoni_cpu_trigger_exception(zoni_cpu_regs_t* cpu, zoni_exception_t cause, u32 epc) {
+    // Log the exception for debugging
+    zoni_log(ZONI_LOG_DEBUG, "Triggering exception: %d at PC=0x%08X", cause, epc);
+    
+    // Call the exception handler to set up the exception state
+    // This will set the EPC, Cause register, and jump to the exception vector
     zoni_cpu_exception(cpu, cause, epc);
 }
 
@@ -1103,5 +1149,28 @@ zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* inst
     cpu->pc = new_pc;
     zoni_log(ZONI_LOG_DEBUG, "JAL $31 = PC + 4 = 0x%08X + 4 = 0x%08X, PC = 0x%08X", 
              current_pc, current_pc + 4, new_pc);
+    return ZONI_SUCCESS;
+}
+
+// SYSCALL instruction handler
+// SYSCALL is a system call instruction that triggers an exception
+// It's used extensively by the PlayStation BIOS for system calls
+// Format: SYSCALL (no operands)
+// Opcode: 0x00 (SPECIAL), Function: 0x0C (SYSCALL)
+zoni_error_t zoni_cpu_execute_syscall(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    // SYSCALL triggers a system call exception
+    // This is the primary way the PlayStation BIOS communicates with the emulator
+    // The BIOS uses SYSCALL extensively for file I/O, memory management, etc.
+    
+    zoni_log(ZONI_LOG_DEBUG, "SYSCALL: Triggering system call exception");
+    
+    // Trigger a SYSCALL exception
+    // This will cause the CPU to jump to the exception handler
+    // The exception handler will then handle the system call based on register values
+    zoni_cpu_trigger_exception(cpu, ZONI_EXCEPTION_SYSCALL, cpu->pc);
+    
+    // Note: We don't increment PC here because the exception handler will handle it
+    // The exception handler will set the EPC (Exception Program Counter) and jump to the exception vector
+    
     return ZONI_SUCCESS;
 }

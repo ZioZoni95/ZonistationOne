@@ -181,6 +181,10 @@ int main(int argc, char* argv[]) {
     // Little-endian: 0x0F210034
     zoni_memory_write32(&memory, 0x0000200C, 0x3421000F); // ORI $1, $1, 0x0F (big-endian)
     
+    // SYSCALL: opcode=0x00 (SPECIAL), funct=0x0C
+    // Binary: 000000 00000 00000 00000 00000 001100 = 0x0000000C (big-endian)
+    zoni_memory_write32(&memory, 0x00002010, 0x0000000C); // SYSCALL
+    
     // Set PC to start of test instructions
     cpu.pc = 0x00002000;
     
@@ -223,6 +227,18 @@ int main(int argc, char* argv[]) {
         zoni_log(ZONI_LOG_INFO, "After ORI: $1 = 0x%08X", zoni_cpu_get_register(&cpu, 1));
     } else {
         zoni_log(ZONI_LOG_ERROR, "ORI execution failed");
+    }
+    
+    // Execute SYSCALL instruction
+    zoni_log(ZONI_LOG_INFO, "Executing SYSCALL instruction...");
+    result = zoni_cpu_step(&cpu);
+    if (result == ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_INFO, "SYSCALL execution successful");
+        zoni_log(ZONI_LOG_INFO, "After SYSCALL: PC = 0x%08X", cpu.pc);
+        zoni_log(ZONI_LOG_INFO, "Exception Cause = 0x%08X", cpu.cp0.n.Cause);
+        zoni_log(ZONI_LOG_INFO, "Exception EPC = 0x%08X", cpu.cp0.n.EPC);
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "SYSCALL execution failed");
     }
     
     // Dump CPU registers
