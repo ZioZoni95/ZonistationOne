@@ -7,6 +7,8 @@
 #include "zoni_memory.h"
 #include "zoni_cpu.h"
 #include "zoni_emulator.h"
+#include <unistd.h>   // Per getcwd
+#include <limits.h>   // Per PATH_MAX
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
@@ -24,6 +26,24 @@ int main(int argc, char* argv[]) {
     }
     
     zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
+
+    // Stampa la directory corrente
+    char cwd[PATH_MAX];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        zoni_log(ZONI_LOG_DEBUG, "Current working directory: %s", cwd);
+    } else {
+        zoni_log(ZONI_LOG_DEBUG, "Could not get current working directory");
+    }
+
+    // Load BIOS
+    const char* bios_path = "../bios_files/SCPH1001.BIN";
+    result = zoni_memory_load_bios(&memory, bios_path);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to load BIOS: %s", zoni_error_to_string(result));
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }
+    zoni_log(ZONI_LOG_INFO, "BIOS loaded successfully");
     
     // Test memory access
     u8 test_value = 0x42;
@@ -71,6 +91,23 @@ int main(int argc, char* argv[]) {
     
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
+    
+    zoni_log(ZONI_LOG_INFO, "Imposto PC all'entry point BIOS (0xBFC00000)");
+    cpu.pc = 0xBFC00000;
+
+    // Fetch e decode della prima istruzione BIOS
+    zoni_instruction_t bios_instr;
+    result = zoni_cpu_fetch_instruction(&cpu, &bios_instr);
+    if (result == ZONI_SUCCESS) {
+        char disasm[128];
+        if (zoni_cpu_decode_instruction(&bios_instr, disasm, sizeof(disasm)) == ZONI_SUCCESS) {
+            zoni_log(ZONI_LOG_INFO, "Prima istruzione BIOS a 0x%08X: %s", cpu.pc, disasm);
+        } else {
+            zoni_log(ZONI_LOG_INFO, "Istruzione BIOS fetchata a 0x%08X (decode fallita)", cpu.pc);
+        }
+    } else {
+        zoni_log(ZONI_LOG_ERROR, "Fetch istruzione BIOS fallito a 0x%08X", cpu.pc);
+    }
     
     // Test CPU register access
     zoni_cpu_set_register(&cpu, 1, 0x12345678);
@@ -242,4 +279,4 @@ int main(int argc, char* argv[]) {
     zoni_log(ZONI_LOG_INFO, "ZoniStationOne shutdown complete");
     
     return 0;
-} 
+}

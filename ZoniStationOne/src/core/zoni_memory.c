@@ -5,6 +5,7 @@
 
 #include "zoni_memory.h"
 #include <string.h>
+#include <stdio.h>
 
 zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
     if (!memory) {
@@ -449,4 +450,39 @@ void zoni_memory_validate_address(zoni_memory_t* memory, u32 address, zoni_mem_a
     } else if (access == ZONI_MEM_ACCESS_WRITE && !reg->writable) {
         zoni_log(ZONI_LOG_ERROR, "Write access to non-writable region at address 0x%08X", address);
     }
-} 
+}
+
+zoni_error_t zoni_memory_load_bios(zoni_memory_t* memory, const char* bios_path) {
+    if (!memory || !bios_path) {
+        return ZONI_ERROR_INVALID_PARAMETER;
+    }
+
+    FILE* f = fopen(bios_path, "rb");
+    if (!f) {
+        zoni_log(ZONI_LOG_ERROR, "BIOS file not found: %s", bios_path);
+        return ZONI_ERROR_FILE_NOT_FOUND;
+    }
+
+    // Check file size
+    fseek(f, 0, SEEK_END);
+    size_t size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size != PSX_BIOS_SIZE) {
+        zoni_log(ZONI_LOG_ERROR, "BIOS file size invalid: %zu bytes (expected %d)", size, PSX_BIOS_SIZE);
+        fclose(f);
+        return ZONI_ERROR_INVALID_FORMAT;
+    }
+
+    // Read BIOS into memory->bios
+    size_t read = fread(memory->bios, 1, PSX_BIOS_SIZE, f);
+    fclose(f);
+
+    if (read != PSX_BIOS_SIZE) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to read BIOS file: %s", bios_path);
+        return ZONI_ERROR_INVALID_FORMAT;
+    }
+
+    zoni_log(ZONI_LOG_INFO, "Loaded BIOS: %s (%zu bytes)", bios_path, size);
+    return ZONI_SUCCESS;
+}

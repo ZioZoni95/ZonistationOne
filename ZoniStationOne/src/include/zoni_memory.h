@@ -160,4 +160,6 @@ zoni_error_t zoni_memory_set_callbacks(zoni_memory_t* memory,
 #define ZONI_MEM_WRITE16(mem, addr, val) zoni_memory_write16(mem, addr, val)
 #define ZONI_MEM_WRITE32(mem, addr, val) zoni_memory_write32(mem, addr, val)
 
-#endif // ZONI_MEMORY_H 
+zoni_error_t zoni_memory_load_bios(zoni_memory_t* memory, const char* bios_path);
+
+#endif // ZONI_MEMORY_H
