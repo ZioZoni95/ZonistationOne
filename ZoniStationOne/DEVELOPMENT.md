@@ -1,287 +1,249 @@
-# ZoniStationOne Development Guide
+# ZoniStationOne Development Guidelines
 
 ## Project Overview
 
-ZoniStationOne is a PlayStation One emulator written in C, designed to be clean, well-documented, and educational. The project is inspired by PCSX-ReARMed but built from the ground up with modern practices.
+ZoniStationOne is a PlayStation 1 emulator focusing on accuracy and clean code architecture. The project prioritizes MIPS R3000A hardware accuracy over legacy compatibility.
 
-## Project Structure
+## Architecture Principles
 
-```
-ZoniStationOne/
-├── src/
-│   ├── core/           # Core emulation engine
-│   │   ├── zoni_common.c    # Common utilities and logging
-│   │   ├── zoni_memory.c    # Memory management
-│   │   ├── zoni_cpu.c       # CPU emulation (Foundation Complete)
-│   │   └── zoni_emulator.c  # Main emulator logic (TODO)
-│   ├── plugins/        # GPU, SPU, and input plugins
-│   │   ├── gpu/        # Graphics plugins
-│   │   ├── spu/        # Sound plugins
-│   │   └── input/      # Input plugins
-│   ├── frontend/       # User interface
-│   │   └── main.c      # Main entry point
-│   └── include/        # Header files
-│       ├── zoni_common.h     # Common definitions
-│       ├── zoni_cpu.h        # CPU interface (Foundation Complete)
-│       ├── zoni_memory.h     # Memory interface
-│       └── zoni_emulator.h   # Main emulator interface
-├── docs/              # Documentation
-├── tests/             # Unit tests
-├── tools/             # Development tools
-├── Makefile          # Build system
-├── configure         # Configuration script
-└── README.md         # Project overview
-```
+### **1. Hardware Accuracy First**
+- **MIPS R3000A**: Implement according to actual hardware specifications
+- **Little-Endian**: Use native little-endian mode for all operations
+- **Memory Map**: Follow exact PlayStation memory layout
+- **Timing**: Respect original hardware timing constraints
 
-## Building the Project
+### **2. Clean Code Architecture**
+- **Modular Design**: Separate components with clear interfaces
+- **Error Handling**: Comprehensive error checking and reporting
+- **Documentation**: Detailed comments and documentation
+- **Testing**: Thorough testing of each component
 
-### Prerequisites
+### **3. Endianness Guidelines**
 
-- GCC or Clang compiler
-- Make
-- SDL2 (optional, for frontend)
-- OpenGL (optional, for GPU plugins)
-
-### Build Instructions
-
-```bash
-# Configure the project
-./configure
-
-# Build the emulator
-make
-
-# Run the emulator
-./bin/zonistationone
-```
-
-### Build Targets
-
-- `make` - Build the emulator
-- `make debug` - Build with debug symbols
-- `make release` - Build optimized release version
-- `make clean` - Remove build artifacts
-- `make help` - Show available targets
-
-## Development Guidelines
-
-### Code Style
-
-- Use C99 standard
-- Follow consistent naming conventions:
-  - Functions: `zoni_module_function_name`
-  - Types: `zoni_type_name_t`
-  - Constants: `ZONI_CONSTANT_NAME`
-  - Macros: `ZONI_MACRO_NAME`
-- Use meaningful variable and function names
-- Add comments for complex logic
-- Use header guards: `#ifndef ZONI_MODULE_H`
-
-### Error Handling
-
-- Use the `zoni_error_t` enum for return values
-- Check return values from functions
-- Use `zoni_log()` for error reporting
-- Provide meaningful error messages
-
-### Memory Management
-
-- Use `zoni_malloc()`, `zoni_calloc()`, `zoni_realloc()`, `zoni_free()`
-- Always check for NULL returns
-- Clean up resources in shutdown functions
-
-### Logging
-
-Use the logging system for debugging and information:
-
+#### **✅ Correct Approach (ZoniStationOne)**
 ```c
-zoni_log(ZONI_LOG_INFO, "Initializing module");
-zoni_log(ZONI_LOG_DEBUG, "Debug information: %d", value);
-zoni_log(ZONI_LOG_WARNING, "Warning message");
-zoni_log(ZONI_LOG_ERROR, "Error occurred: %s", error_string);
+// Always use little-endian for MIPS R3000A
+u32 value = zoni_read_le32(&memory[address]);
+zoni_write_le32(&memory[address], value);
+
+// Use raw instruction data for decoding
+u8 opcode = (instruction->raw >> 26) & 0x3F;
 ```
 
-## Architecture Overview
-
-### Core Components
-
-1. **Memory System** (`zoni_memory.h/c`)
-   - Manages PlayStation memory map
-   - Handles memory access and protection
-   - Provides debugging utilities
-
-2. **CPU System** (`zoni_cpu.h/c`)
-   - MIPS R3000A emulation
-   - Interpreter and dynamic recompiler modes
-   - Exception handling
-
-3. **Emulator Core** (`zoni_emulator.h/c`)
-   - Coordinates all components
-   - Manages timing and synchronization
-   - Handles plugin loading
-
-### Plugin System
-
-The emulator uses a plugin architecture for:
-- **GPU Plugins**: Graphics rendering
-- **SPU Plugins**: Sound processing
-- **Input Plugins**: Controller input
-- **CDROM Plugins**: CD-ROM emulation
-
-### Memory Map
-
-```
-0x00000000 - 0x01FFFFFF: RAM (32MB, mirrored)
-0x1F800000 - 0x1F8003FF: Scratchpad (1KB)
-0x1F801000 - 0x1F802FFF: Hardware registers
-0x1F801800 - 0x1F801803: CDROM controller
-0x1F801C00 - 0x1F801FFF: SPU registers
-0x1F000000 - 0x1F7FFFFF: Expansion
-0x1FC00000 - 0x1FFFFFFF: BIOS (512KB)
-0xFFFE0000 - 0xFFFEFFFF: Cache control
-```
-
-## Testing
-
-### Unit Tests
-
-Tests are located in the `tests/` directory. Run tests with:
-
-```bash
-make test
-```
-
-### Manual Testing
-
-The main program includes comprehensive tests for:
-- Memory system initialization and operations
-- CPU register access and load delay slots
-- CPU-memory integration
-- Error handling and validation
-- All tests passing with clean compilation
-
-## Contributing
-
-### Adding New Features
-
-1. Create header file in `src/include/`
-2. Implement in `src/core/` or appropriate plugin directory
-3. Add to Makefile if needed
-4. Update documentation
-5. Add tests
-
-### Code Review Checklist
-
-- [ ] Code compiles without warnings
-- [ ] All functions have proper error handling
-- [ ] Memory is properly managed
-- [ ] Logging is appropriate
-- [ ] Documentation is updated
-- [ ] Tests pass
-
-## Debugging
-
-### Debug Build
-
-```bash
-make debug
-```
-
-### Logging Levels
-
-Set log level with environment variable:
-```bash
-export ZONI_LOG_LEVEL=DEBUG
-./bin/zonistationone
-```
-
-### Memory Debugging
-
-Use memory dump functions:
+#### **❌ Avoid (PCSX-ReARMed Legacy)**
 ```c
-zoni_memory_dump_region(memory, PSX_MEM_RAM, 0x1000, 64);
-zoni_memory_dump_stats(memory);
+// Don't use big-endian conversion for MIPS R3000A
+u32 value = SWAPu32(*(u32*)memory);  // Wrong for MIPS
 ```
 
-### CPU Debugging
+## Coding Standards
 
-Use CPU debug functions:
+### **1. Memory Access**
 ```c
-zoni_cpu_dump_registers(&cpu);
-zoni_cpu_disassemble_instruction(&cpu, address, buffer, buffer_size);
+// ✅ Correct: Use endianness helper functions
+zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) {
+    // Validate address first
+    if (!zoni_memory_validate_address(memory, address)) {
+        return ZONI_ERROR_INVALID_ADDRESS;
+    }
+    
+    // Use little-endian helper
+    *value = zoni_read_le32(&reg->data[offset]);
+    return ZONI_SUCCESS;
+}
 ```
 
-## Current Implementation Status
+### **2. Instruction Decoding**
+```c
+// ✅ Correct: Use raw instruction data
+zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    // Extract opcode directly from raw instruction
+    u8 opcode = (instruction->raw >> 26) & 0x3F;
+    u8 funct = instruction->raw & 0x3F;
+    
+    // No endianness conversion needed
+    switch (opcode) {
+        case MIPS_OP_SW:
+            return zoni_cpu_execute_sw(cpu, instruction);
+    }
+}
+```
 
-### CPU Foundation & Instruction System (Complete ✅)
+### **3. Field Extraction**
+```c
+// ✅ Correct: Manual bit extraction
+zoni_error_t zoni_cpu_execute_sw(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    // Extract fields manually from raw instruction
+    u8 rt = (instruction->raw >> 16) & 0x1F;        // bits 16-20
+    u8 rs = (instruction->raw >> 21) & 0x1F;        // bits 21-25
+    s16 offset = (s16)(instruction->raw & 0xFFFF);  // bits 0-15
+    
+    // Calculate address and execute
+    u32 address = cpu->gpr.r[rs] + offset;
+    return zoni_cpu_write32(cpu, address, cpu->gpr.r[rt]);
+}
+```
 
-The CPU foundation and instruction fetch/decode system are now complete and follow the PCSX-ReARMed structure:
+### **4. Error Handling**
+```c
+// ✅ Correct: Comprehensive error handling
+zoni_error_t zoni_cpu_write32(zoni_cpu_regs_t* cpu, u32 address, u32 value) {
+    if (!cpu || !g_memory) {
+        return ZONI_ERROR_INVALID_PARAMETER;
+    }
+    
+    zoni_error_t result = zoni_memory_write32(g_memory, address, value);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to write32 at address 0x%08X", address);
+        return result;
+    }
+    
+    return ZONI_SUCCESS;
+}
+```
 
-#### ✅ Implemented Components
-- **Register Structure**: Complete MIPS R3000A register layout with proper byte ordering
-- **Load Delay System**: Accurate MIPS load delay slot emulation with dual-slot system
-- **Exception Handling**: Framework for CPU exceptions and interrupts
-- **Memory Integration**: CPU properly connected to memory system
-- **Debug Support**: Register dump and instruction disassembly ready
-- **Instruction Fetch**: Reading 32-bit instructions from memory at program counter
-- **Instruction Decode**: MIPS instruction format parsing (R-type, I-type, J-type)
-- **Disassembly**: Basic instruction disassembly with proper byte order handling
-- **Memory Byte Order**: Little-endian memory access for PlayStation compatibility
+### **5. Logging**
+```c
+// ✅ Correct: Clear, informative logging
+zoni_log(ZONI_LOG_DEBUG, "SW Memory[0x%08X + %d] = Memory[0x%08X] = $%d = 0x%08X", 
+         rs_val, offset, address, rt, value);
+```
 
-#### 🔄 Next Steps
-- **Instruction Execution**: Execute decoded MIPS instructions
-- **Register Updates**: Update register file based on instruction results
-- **Memory Operations**: Implement load/store instruction execution
-- **Branch/Jump Handling**: Implement control flow instructions
+## Development Workflow
 
-### Memory System (Complete ✅)
-- Full PlayStation memory map implementation
-- Memory region management and access control
-- Statistics and debugging utilities
+### **1. Component Development**
+1. **Research**: Understand hardware specifications
+2. **Design**: Plan clean interface and implementation
+3. **Implement**: Write code with proper error handling
+4. **Test**: Thorough testing with edge cases
+5. **Document**: Update documentation and comments
 
-### Common Utilities (Complete ✅)
-- Comprehensive logging system
-- Error handling and memory management
-- File, time, and math utilities
+### **2. Testing Strategy**
+```c
+// Test each component thoroughly
+void test_memory_system() {
+    // Test valid addresses
+    assert(zoni_memory_read32(memory, 0x1000, &value) == ZONI_SUCCESS);
+    
+    // Test invalid addresses
+    assert(zoni_memory_read32(memory, 0x56780200, &value) == ZONI_ERROR_INVALID_ADDRESS);
+    
+    // Test endianness
+    zoni_memory_write32(memory, 0x1000, 0x12345678);
+    zoni_memory_read32(memory, 0x1000, &value);
+    assert(value == 0x12345678);  // Should be little-endian
+}
+```
 
-## Performance Considerations
+### **3. Documentation Updates**
+- Update `PROJECT_STATUS.md` with current status
+- Document any endianness decisions in `docs/ENDIANNESS_ANALYSIS.md`
+- Keep `DEVELOPMENT.md` current with best practices
+- Update code comments for complex logic
 
-- Use appropriate data structures
-- Minimize memory allocations
-- Profile critical paths
-- Consider cache-friendly layouts
-- Use SIMD instructions where possible
+## Current Status
 
-## Future Development
+### **✅ Completed**
+- **Memory System**: Little-endian implementation with proper validation
+- **CPU Core**: Basic MIPS R3000A instruction set
+- **Endianness**: Correct little-endian implementation
+- **Error Handling**: Comprehensive validation and reporting
 
-### Planned Features
+### **📋 Next Stages**
+1. **BIOS Loading**: Load and execute PlayStation BIOS
+2. **GPU Emulation**: Basic graphics processing
+3. **SPU Emulation**: Audio processing
+4. **CD-ROM**: Disc emulation
+5. **Input/Output**: Controller and memory card support
 
-- [x] CPU foundation (registers, load delay slots, memory integration)
-- [x] CPU instruction fetch and decode system
-- [ ] CPU instruction execution engine
-- [ ] Dynamic recompiler
-- [ ] GPU plugin system
-- [ ] SPU plugin system
-- [ ] Input plugin system
-- [ ] CD-ROM emulation
-- [ ] BIOS emulation (HLE)
-- [ ] Save state support
-- [ ] Debugger interface
+## Best Practices
 
-### Architecture Improvements
+### **1. Endianness**
+- **Always use little-endian** for MIPS R3000A operations
+- **Use helper functions** from `zoni_endian.h`
+- **Avoid endianness conversion** unless absolutely necessary
+- **Document endianness decisions** clearly
 
-- [ ] Plugin hot-swapping
-- [ ] Multi-threading support
-- [ ] JIT compilation
-- [ ] Hardware acceleration
-- [ ] Network multiplayer
+### **2. Memory Management**
+- **Validate addresses** before access
+- **Use proper error codes** for different failure types
+- **Log errors clearly** for debugging
+- **Follow PlayStation memory map** exactly
 
-## Resources
+### **3. Instruction Implementation**
+- **Use raw instruction data** for decoding
+- **Manual bit extraction** for field decoding
+- **Test with real instruction encodings**
+- **Verify against MIPS specification**
 
-- [PlayStation Technical Reference](https://problemkaputt.de/psx-spx.htm)
-- [MIPS R3000A Documentation](https://en.wikibooks.org/wiki/MIPS_Assembly/MIPS_Details)
-- [PCSX-ReARMed Reference](https://github.com/notaz/pcsx_rearmed)
+### **4. Code Quality**
+- **Comprehensive error handling**
+- **Clear, informative logging**
+- **Detailed code comments**
+- **Consistent naming conventions**
 
-## License
+## Common Pitfalls
 
-This project is licensed under the GNU General Public License v2 or later. 
+### **❌ Avoid These Mistakes**
+
+1. **Endianness Confusion**
+   ```c
+   // ❌ Wrong: Using big-endian for MIPS R3000A
+   u32 value = (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0];
+   ```
+
+2. **Unsafe Memory Access**
+   ```c
+   // ❌ Wrong: No address validation
+   u32 value = *(u32*)&memory[address];
+   ```
+
+3. **Poor Error Handling**
+   ```c
+   // ❌ Wrong: Silent failures
+   memory_write(address, value);  // No error checking
+   ```
+
+4. **Inconsistent Logging**
+   ```c
+   // ❌ Wrong: Unclear debug messages
+   printf("x=%x y=%x", x, y);  // What do x and y represent?
+   ```
+
+### **✅ Do This Instead**
+
+1. **Correct Endianness**
+   ```c
+   // ✅ Right: Use little-endian helper
+   u32 value = zoni_read_le32(&memory[address]);
+   ```
+
+2. **Safe Memory Access**
+   ```c
+   // ✅ Right: Validate address first
+   if (!zoni_memory_validate_address(memory, address)) {
+       return ZONI_ERROR_INVALID_ADDRESS;
+   }
+   u32 value = zoni_read_le32(&memory[address]);
+   ```
+
+3. **Comprehensive Error Handling**
+   ```c
+   // ✅ Right: Check all error conditions
+   zoni_error_t result = zoni_memory_write32(memory, address, value);
+   if (result != ZONI_SUCCESS) {
+       zoni_log(ZONI_LOG_ERROR, "Memory write failed: %s", zoni_error_string(result));
+       return result;
+   }
+   ```
+
+4. **Clear Logging**
+   ```c
+   // ✅ Right: Descriptive debug messages
+   zoni_log(ZONI_LOG_DEBUG, "SW $%d = Memory[0x%08X + %d] = 0x%08X", 
+            rt, rs_val, offset, value);
+   ```
+
+## Conclusion
+
+Follow these guidelines to maintain code quality and hardware accuracy. The endianness corrections have established a solid foundation for accurate PlayStation 1 emulation. Continue to prioritize MIPS R3000A accuracy and clean code architecture in all future development. 

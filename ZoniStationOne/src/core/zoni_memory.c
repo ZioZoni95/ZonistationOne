@@ -4,6 +4,7 @@
  */
 
 #include "zoni_memory.h"
+#include "zoni_endian.h"
 #include <string.h>
 
 zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
@@ -190,8 +191,8 @@ zoni_error_t zoni_memory_read16(zoni_memory_t* memory, u32 address, u16* value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        // PlayStation uses big-endian byte order (like PCSX-ReARMed)
-        *value = (reg->data[offset] << 8) | reg->data[offset + 1];
+        // MIPS R3000A uses little-endian byte order
+        *value = zoni_read_le16(&reg->data[offset]);
     } else {
         // Hardware register read - return 0 for now
         *value = 0;
@@ -222,10 +223,8 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        // PlayStation uses big-endian byte order (like PCSX-ReARMed)
-        u32 big_endian_value = (reg->data[offset] << 24) | (reg->data[offset + 1] << 16) |
-                               (reg->data[offset + 2] << 8) | reg->data[offset + 3];
-        *value = big_endian_value;
+        // MIPS R3000A uses little-endian byte order
+        *value = zoni_read_le32(&reg->data[offset]);
     } else {
         // Hardware register read - return 0 for now
         *value = 0;
@@ -277,9 +276,8 @@ zoni_error_t zoni_memory_write16(zoni_memory_t* memory, u32 address, u16 value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        // PlayStation uses big-endian byte order (like PCSX-ReARMed)
-        reg->data[offset] = (value >> 8) & 0xFF;
-        reg->data[offset + 1] = value & 0xFF;
+        // MIPS R3000A uses little-endian byte order
+        zoni_write_le16(&reg->data[offset], value);
     } else {
         // Hardware register write - ignore for now
         zoni_log(ZONI_LOG_DEBUG, "Hardware write16: 0x%08X = 0x%04X", address, value);
@@ -308,12 +306,8 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
     
     if (reg->data) {
         u32 offset = address - reg->base_address;
-        // PlayStation uses big-endian byte order (like PCSX-ReARMed)
-        // Convert from host byte order to big-endian for storage
-        reg->data[offset] = (value >> 24) & 0xFF;
-        reg->data[offset + 1] = (value >> 16) & 0xFF;
-        reg->data[offset + 2] = (value >> 8) & 0xFF;
-        reg->data[offset + 3] = value & 0xFF;
+        // MIPS R3000A uses little-endian byte order
+        zoni_write_le32(&reg->data[offset], value);
     } else {
         // Hardware register write - ignore for now
         zoni_log(ZONI_LOG_DEBUG, "Hardware write32: 0x%08X = 0x%08X", address, value);
