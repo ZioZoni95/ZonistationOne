@@ -8,6 +8,8 @@
 #include "zoni_cpu.h"
 #include "zoni_bios.h"
 #include "zoni_gpu.h"
+#include "zoni_spu.h"
+#include "zoni_cdrom.h"
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
@@ -74,11 +76,54 @@ int main(int argc, char* argv[]) {
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
     
-    // Connect GPU to memory system
+    // Initialize SPU system
+    zoni_spu_t spu;
+    zoni_spu_config_t spu_config = {
+        .sample_rate = 44100,
+        .buffer_size = 1024,
+        .enable_audio = true,
+        .enable_reverb = false
+    };
+    
+    result = zoni_spu_init(&spu, &spu_config);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "SPU initialization failed");
+        zoni_gpu_shutdown(&gpu);
+        zoni_bios_shutdown(&bios);
+        zoni_cpu_shutdown(&cpu);
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }
+    
+    // Initialize CD-ROM system
+    zoni_cdrom_t cdrom;
+    zoni_cdrom_config_t cdrom_config = {
+        .enable_cdrom = true,
+        .enable_audio = true,
+        .enable_video = false,
+        .iso_path = NULL
+    };
+    
+    result = zoni_cdrom_init(&cdrom, &cdrom_config);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "CD-ROM initialization failed");
+        zoni_spu_shutdown(&spu);
+        zoni_gpu_shutdown(&gpu);
+        zoni_bios_shutdown(&bios);
+        zoni_cpu_shutdown(&cpu);
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }
+    
+    // Connect GPU, SPU, and CD-ROM to memory system
     memory.gpu = &gpu;
+    memory.spu = &spu;
+    memory.cdrom = &cdrom;
     
     zoni_log(ZONI_LOG_INFO, "✅ Core systems initialized successfully");
     zoni_log(ZONI_LOG_INFO, "🎮 GPU initialized - SDL2 window ready");
+    zoni_log(ZONI_LOG_INFO, "🔊 SPU initialized - audio system ready");
+    zoni_log(ZONI_LOG_INFO, "💿 CD-ROM initialized - disc system ready");
     
     // Load BIOS
     zoni_log(ZONI_LOG_INFO, "Loading BIOS...");
@@ -228,6 +273,8 @@ int main(int argc, char* argv[]) {
 cleanup:
     // Cleanup
     zoni_gpu_shutdown(&gpu);
+    zoni_spu_shutdown(&spu);
+    zoni_cdrom_shutdown(&cdrom);
     zoni_bios_shutdown(&bios);
     zoni_cpu_shutdown(&cpu);
     zoni_memory_shutdown(&memory);

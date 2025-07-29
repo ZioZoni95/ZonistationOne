@@ -49,7 +49,7 @@ zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* i
                     u32 rt_val = cpu->gpr.r[rt];
                     u32 result = rs_val + rt_val;
                     cpu->gpr.r[rd] = result;
-                    zoni_log(ZONI_LOG_DEBUG, "ADD $%d = $%d + $%d = 0x%08X", rd, rs, rt, result);
+                    // zoni_log(ZONI_LOG_DEBUG, "ADD $%d = $%d + $%d = 0x%08X", rd, rs, rt, result);
                 }
             }
             break;
@@ -62,7 +62,7 @@ zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* i
                     u32 rt_val = cpu->gpr.r[rt];
                     u32 result = rs_val + rt_val;
                     cpu->gpr.r[rd] = result;
-                    zoni_log(ZONI_LOG_DEBUG, "ADDU $%d = $%d + $%d = 0x%08X", rd, rs, rt, result);
+                    // zoni_log(ZONI_LOG_DEBUG, "ADDU $%d = $%d + $%d = 0x%08X", rd, rs, rt, result);
                 }
             }
             break;
@@ -342,8 +342,8 @@ zoni_error_t zoni_cpu_execute_addiu(zoni_cpu_regs_t* cpu, zoni_instruction_t* in
         u32 rs_val = cpu->gpr.r[rs];
         u32 result = rs_val + immediate;
         cpu->gpr.r[rt] = result;
-        zoni_log(ZONI_LOG_DEBUG, "ADDIU $%d = $%d (0x%08X) + %u = 0x%08X", 
-                 rt, rs, rs_val, immediate, result);
+                        // zoni_log(ZONI_LOG_DEBUG, "ADDIU $%d = $%d (0x%08X) + %u = 0x%08X", 
+                //          rt, rs, rs_val, immediate, result);
     }
     return ZONI_SUCCESS;
 }
@@ -592,10 +592,7 @@ zoni_error_t zoni_cpu_step(zoni_cpu_regs_t* cpu) {
         return result;
     }
     
-    // Increment PC (unless instruction was a branch/jump)
-    // Note: Branch and jump instructions update PC themselves
     // Extract opcode and function code directly from raw instruction
-    // This matches the execution engine approach for consistency
     u8 opcode = (instruction.raw >> 26) & 0x3F;
     u8 funct = instruction.raw & 0x3F;
     
@@ -609,12 +606,77 @@ zoni_error_t zoni_cpu_step(zoni_cpu_regs_t* cpu) {
         is_branch_or_jump = true;
     }
     
-    // Only increment PC if it's not a branch/jump instruction
-    if (!is_branch_or_jump) {
-        cpu->pc += 4;
-        zoni_log(ZONI_LOG_DEBUG, "PC incremented to 0x%08X", cpu->pc);
+    // Handle branch delay slots
+    if (is_branch_or_jump) {
+        // For branch/jump instructions, we need to execute the delay slot
+        // before taking the branch. Store the branch target for later use.
+        u32 branch_target = 0;
+        bool should_branch = false;
+        
+        // Calculate branch target based on instruction type
+        if (opcode == MIPS_OP_BEQ || opcode == MIPS_OP_BNE) {
+            // Extract branch condition and target
+            u8 rs = (instruction.raw >> 21) & 0x1F;
+            u8 rt = (instruction.raw >> 16) & 0x1F;
+            s16 offset = (s16)(instruction.raw & 0xFFFF);
+            
+            u32 rs_val = cpu->gpr.r[rs];
+            u32 rt_val = cpu->gpr.r[rt];
+            
+            if (opcode == MIPS_OP_BEQ) {
+                should_branch = (rs_val == rt_val);
+            } else { // MIPS_OP_BNE
+                should_branch = (rs_val != rt_val);
+            }
+            
+            if (should_branch) {
+                branch_target = cpu->pc + 4 + (offset << 2);
+            }
+        } else if (opcode == MIPS_OP_J || opcode == MIPS_OP_JAL) {
+            // Jump instructions always branch
+            should_branch = true;
+            u32 target = instruction.raw & 0x3FFFFFF;
+            branch_target = (cpu->pc & 0xF0000000) | (target << 2);
+        } else if (opcode == MIPS_OP_SPECIAL && funct == MIPS_FUNC_JR) {
+            // JR instruction always branches
+            should_branch = true;
+            u8 rs = (instruction.raw >> 21) & 0x1F;
+            branch_target = cpu->gpr.r[rs];
+        }
+        
+        // Now execute the delay slot instruction
+        if (should_branch) {
+            // Fetch and execute the instruction at PC+4 (delay slot)
+            u32 delay_slot_pc = cpu->pc + 4;
+            zoni_instruction_t delay_instruction;
+            
+            // Temporarily set PC to delay slot address for fetching
+            u32 original_pc = cpu->pc;
+            cpu->pc = delay_slot_pc;
+            
+            // Fetch delay slot instruction
+            result = zoni_cpu_fetch_instruction(cpu, &delay_instruction);
+            if (result == ZONI_SUCCESS) {
+                // Execute delay slot instruction
+                result = zoni_cpu_execute_instruction(cpu, &delay_instruction);
+                if (result == ZONI_SUCCESS) {
+                    zoni_log(ZONI_LOG_INFO, "Executed delay slot instruction at 0x%08X", delay_slot_pc);
+                }
+            }
+            
+            // Restore original PC and then take the branch
+            cpu->pc = original_pc;
+            cpu->pc = branch_target;
+            zoni_log(ZONI_LOG_INFO, "Branch taken to 0x%08X", branch_target);
+        } else {
+            // No branch, just increment PC normally
+            cpu->pc += 4;
+            // zoni_log(ZONI_LOG_DEBUG, "PC incremented to 0x%08X (no branch)", cpu->pc);
+        }
     } else {
-        zoni_log(ZONI_LOG_DEBUG, "PC not incremented (branch/jump instruction)");
+        // Non-branch instruction, just increment PC
+        cpu->pc += 4;
+        // zoni_log(ZONI_LOG_DEBUG, "PC incremented to 0x%08X", cpu->pc);
     }
     
     // Increment cycle count
@@ -701,7 +763,7 @@ zoni_error_t zoni_cpu_fetch_instruction(zoni_cpu_regs_t* cpu, zoni_instruction_t
     cpu->code = instruction_word;  // Store current instruction
     cpu->instruction_count++;      // Increment instruction counter
     
-    zoni_log(ZONI_LOG_DEBUG, "Fetched instruction 0x%08X at PC=0x%08X", instruction_word, cpu->pc);
+            // zoni_log(ZONI_LOG_DEBUG, "Fetched instruction 0x%08X at PC=0x%08X", instruction_word, cpu->pc);
     
     return ZONI_SUCCESS;
 }
@@ -1231,8 +1293,8 @@ zoni_error_t zoni_cpu_execute_sw(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
     
     zoni_error_t result = zoni_cpu_write32(cpu, address, value);
     if (result == ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_DEBUG, "SW Memory[0x%08X + %d] = Memory[0x%08X] = $%d = 0x%08X", 
-                 rs_val, offset, address, rt, value);
+        // zoni_log(ZONI_LOG_DEBUG, "SW Memory[0x%08X + %d] = Memory[0x%08X] = $%d = 0x%08X", 
+        //          rs_val, offset, address, rt, value);
     } else {
         zoni_log(ZONI_LOG_ERROR, "SW failed to write to address 0x%08X", address);
         return result;
@@ -1352,6 +1414,8 @@ zoni_error_t zoni_cpu_execute_cop0(zoni_cpu_regs_t* cpu, zoni_instruction_t* ins
                     switch (rd) {
                         case 12: // Status Register
                             cp0_value = cpu->cp0.n.SR;
+                            // The BIOS expects specific cache status bits after cache initialization
+                            // Add cache ready bit if cache has been configured
                             break;
                         case 13: // Cause Register
                             cp0_value = cpu->cp0.n.Cause;

@@ -1,6 +1,8 @@
 #include "zoni_hardware.h"
 #include "zoni_endian.h"
 #include "zoni_gpu.h"
+#include "zoni_spu.h"
+#include "zoni_cdrom.h"
 #include "zoni_memory.h"
 
 zoni_error_t zoni_hardware_init(zoni_hardware_t* hw) {
@@ -84,6 +86,9 @@ u8 zoni_hw_read8(zoni_hardware_t* hw, u32 address) {
             return 0x00; // Default CDROM data
             
         case 0x1801: // CDROM Status
+            if (hw->memory && hw->memory->cdrom) {
+                return zoni_cdrom_read_register(hw->memory->cdrom, address);
+            }
             return 0x18; // Default CDROM status
             
         default:
@@ -164,7 +169,12 @@ u32 zoni_hw_read32(zoni_hardware_t* hw, u32 address) {
             return zoni_read_le32(&hw->hw_regs[offset]);
             
         case 0x0130: // Cache Control Register (0xFFFE0130)
-            return 0x00000000; // Default cache control value
+            // Return the stored cache control value
+            // The BIOS writes 0x00000804 and expects to read it back
+            if (offset < PSX_HW_SIZE - 3) {
+                return zoni_read_le32(&hw->hw_regs[offset]);
+            }
+            return 0x00000000; // Default value if not written yet
             
         case 0x1810: // GPU Data Port (0x1F801810)
             // GPU GP0 read - route to actual GPU if available
@@ -213,6 +223,31 @@ u32 zoni_hw_read32(zoni_hardware_t* hw, u32 address) {
         case 0x1128: // Timer 2 Target
             return 0x00000000; // Default timer target
             
+        // SPU registers (0x1F801C00-0x1F801DFF)
+        case 0x1C00: // SPU Status
+            if (hw->memory && hw->memory->spu) {
+                return zoni_spu_read_register(hw->memory->spu, address);
+            }
+            return 0x00000001; // Default SPU status (ready)
+            
+        case 0x1C02: // SPU Control
+            if (hw->memory && hw->memory->spu) {
+                return zoni_spu_read_register(hw->memory->spu, address);
+            }
+            return 0x00000000; // Default SPU control
+            
+        case 0x1C04: // SPU Volume Left
+            if (hw->memory && hw->memory->spu) {
+                return zoni_spu_read_register(hw->memory->spu, address);
+            }
+            return 0x00003FFF; // Default volume
+            
+        case 0x1C06: // SPU Volume Right
+            if (hw->memory && hw->memory->spu) {
+                return zoni_spu_read_register(hw->memory->spu, address);
+            }
+            return 0x00003FFF; // Default volume
+            
         default:
             if (offset < PSX_HW_SIZE - 3) {
                 return zoni_read_le32(&hw->hw_regs[offset]);
@@ -240,7 +275,10 @@ zoni_error_t zoni_hw_write8(zoni_hardware_t* hw, u32 address, u8 value) {
         case 0x1801: // CDROM Status
         case 0x1802: // CDROM Mode
         case 0x1803: // CDROM Control
-            // Accept CDROM writes
+            // Route CDROM writes to actual CDROM if available
+            if (hw->memory && hw->memory->cdrom) {
+                return zoni_cdrom_write_register(hw->memory->cdrom, address, value);
+            }
             return ZONI_SUCCESS;
             
         default:
@@ -296,6 +334,24 @@ zoni_error_t zoni_hw_write16(zoni_hardware_t* hw, u32 address, u16 value) {
             // Accept timer writes
             return ZONI_SUCCESS;
             
+        // SPU registers (0x1F801C00-0x1F801DFF)
+        case 0x1C00: // SPU Status
+        case 0x1C02: // SPU Control
+        case 0x1C04: // SPU Volume Left
+        case 0x1C06: // SPU Volume Right
+        case 0x1C08: // SPU Reverb Volume Left
+        case 0x1C0A: // SPU Reverb Volume Right
+        case 0x1C8C: // SPU Key On
+        case 0x1C8E: // SPU Key Off
+        case 0x1C90: // SPU DMA Address
+        case 0x1C92: // SPU DMA Size
+        case 0x1C94: // SPU DMA Control
+            // Route SPU writes to actual SPU if available
+            if (hw->memory && hw->memory->spu) {
+                return zoni_spu_write_register(hw->memory->spu, address, value);
+            }
+            return ZONI_SUCCESS;
+            
         default:
             if (offset < PSX_HW_SIZE - 1) {
                 zoni_write_le16(&hw->hw_regs[offset], value);
@@ -314,7 +370,7 @@ zoni_error_t zoni_hw_write32(zoni_hardware_t* hw, u32 address, u32 value) {
     }
     
     u32 offset = get_hw_offset(address);
-    zoni_log(ZONI_LOG_DEBUG, "Hardware write32: 0x%08X = 0x%08X (offset: 0x%04X)", address, value, offset);
+            zoni_log(ZONI_LOG_INFO, "Hardware write32: 0x%08X = 0x%08X (offset: 0x%04X)", address, value, offset);
     
     // Handle specific registers
     switch (address & 0xFFFF) {
@@ -344,7 +400,11 @@ zoni_error_t zoni_hw_write32(zoni_hardware_t* hw, u32 address, u32 value) {
             break;
             
         case 0x0130: // Cache Control Register (0xFFFE0130)
-            // Accept cache control writes
+            // Accept cache control writes and store the value
+            // The BIOS writes 0x00000804 to configure cache
+            if (offset < PSX_HW_SIZE - 3) {
+                zoni_write_le32(&hw->hw_regs[offset], value);
+            }
             return ZONI_SUCCESS;
             
         case 0x1810: // GPU Data Port (0x1F801810)

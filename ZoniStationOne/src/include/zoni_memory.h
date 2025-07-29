@@ -14,6 +14,8 @@
 // Forward declarations
 typedef struct zoni_hardware_s zoni_hardware_t;
 typedef struct zoni_gpu_s zoni_gpu_t;
+typedef struct zoni_spu_s zoni_spu_t;
+typedef struct zoni_cdrom_s zoni_cdrom_t;
 
 // PlayStation memory map
 #define PSX_MEMORY_REGIONS 9
@@ -48,6 +50,8 @@ typedef struct zoni_memory_s {
     u8* scratchpad;             // Scratchpad (1KB)
     struct zoni_hardware_s* hardware;   // Hardware registers
     zoni_gpu_t* gpu;            // GPU system (optional)
+    struct zoni_spu_s* spu;     // SPU system (optional)
+    struct zoni_cdrom_s* cdrom; // CD-ROM system (optional)
     
     // Memory access callbacks
     zoni_error_t (*read8_callback)(u32 address, u8* value);

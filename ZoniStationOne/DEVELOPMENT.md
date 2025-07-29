@@ -10,15 +10,46 @@
 - **Hardware Access**: Basic hardware register support
 - **Development Tools**: Comprehensive logging and debugging
 
-### 🔄 **Phase 2 Ready: Hardware Emulation**
-- **GPU Implementation**: Graphics Processing Unit for display
-- **SPU Implementation**: Sound Processing Unit for audio
-- **CD-ROM Emulation**: CD-ROM drive emulation
+### 🔄 **Phase 2 In Progress: Hardware Emulation**
+- **GPU Implementation**: ✅ Graphics Processing Unit for display
+- **SPU Implementation**: ✅ Sound Processing Unit for audio (Basic skeleton)
+- **CD-ROM Emulation**: ✅ CD-ROM drive emulation (Basic skeleton)
 - **Controller Input**: Input device emulation
 
 ## 🚀 **Next Development Priorities**
 
-### **1. GPU Implementation** 🎯 **HIGH PRIORITY**
+### **1. BIOS Loop Analysis** 🔍 **HIGH PRIORITY**
+
+#### **Current Issue**
+The BIOS is stuck in a loop at addresses `0xBFC00250-0xBFC00270`:
+- Writing zeros to memory addresses `0x00000000` through `0x00000070`
+- Branch instruction `BNE` keeps jumping back to `0xBFC00250`
+- No interaction with GPU, SPU, or CD-ROM yet
+
+#### **Goal**
+Understand what the BIOS is waiting for and get it to progress beyond this initialization loop.
+
+#### **Implementation Plan**
+1. **Analyze BIOS Loop**
+   - Examine the condition in the BNE instruction
+   - Understand what the BIOS is checking for
+   - Identify missing hardware components
+
+2. **Implement Missing Components**
+   - Interrupt handling system
+   - Timer functionality
+   - Controller support
+   - Additional hardware registers
+
+3. **Debug BIOS Progress**
+   - Monitor when BIOS accesses different hardware
+   - Track BIOS progression through different phases
+   - Identify blocking conditions
+
+#### **Expected Result**
+BIOS progresses beyond the initialization loop and starts using GPU, SPU, and CD-ROM.
+
+### **2. GPU Implementation** 🎯 **HIGH PRIORITY**
 
 #### **Goal**
 Display the classic PlayStation boot screen and provide visual feedback.
@@ -48,7 +79,13 @@ Display the classic PlayStation boot screen and provide visual feedback.
 #### **Expected Result**
 Classic PlayStation boot screen with Sony logo and "Please insert a PlayStation or PlayStation 2 format disc" message.
 
-### **2. SPU Implementation** 🎵 **MEDIUM PRIORITY**
+### **3. SPU Implementation** 🎵 **MEDIUM PRIORITY**
+
+#### **Current Status** ✅ **BASIC SKELETON IMPLEMENTED**
+- **SPU Structure**: Basic SPU emulation structure created
+- **Memory Integration**: SPU integrated into memory system
+- **Hardware Routing**: SPU registers routed through hardware system
+- **Initialization**: SPU initialization and shutdown in main.c
 
 #### **Goal**
 Provide audio output for PlayStation sounds and music.
@@ -78,7 +115,13 @@ Provide audio output for PlayStation sounds and music.
 #### **Expected Result**
 PlayStation BIOS audio including startup sounds and disc-related audio cues.
 
-### **3. CD-ROM Emulation** 💿 **MEDIUM PRIORITY**
+### **4. CD-ROM Emulation** 💿 **MEDIUM PRIORITY**
+
+#### **Current Status** ✅ **BASIC SKELETON IMPLEMENTED**
+- **CD-ROM Structure**: Basic CD-ROM emulation structure created
+- **Memory Integration**: CD-ROM integrated into memory system
+- **Hardware Routing**: CD-ROM registers routed through hardware system
+- **Initialization**: CD-ROM initialization and shutdown in main.c
 
 #### **Goal**
 Properly handle CD-ROM drive emulation and disc detection.
@@ -108,7 +151,7 @@ Properly handle CD-ROM drive emulation and disc detection.
 #### **Expected Result**
 BIOS properly detects "no disc" state and shows appropriate messages.
 
-### **4. Controller Input** 🎮 **LOW PRIORITY**
+### **5. Controller Input** 🎮 **LOW PRIORITY**
 
 #### **Goal**
 Handle user input through PlayStation controller emulation.
@@ -184,20 +227,28 @@ Cache Control: 0xFFFE0000-0xFFFEFFFF (64KB)
 - **Validation**: BIOS file validation and identification
 - **Logging**: Comprehensive development logging
 
+### **Hardware System** ✅
+- **GPU**: Basic GPU structure and hardware routing
+- **SPU**: Basic SPU structure and hardware routing
+- **CD-ROM**: Basic CD-ROM structure and hardware routing
+- **Hardware Registers**: Complete hardware register access
+
 ## 🎮 **Testing Strategy**
 
 ### **Current Testing**
 - **BIOS Loading**: Validates BIOS files correctly
-- **BIOS Execution**: Runs without errors for 50K cycles
+- **BIOS Execution**: Runs without errors for 10K cycles (testing mode)
 - **Memory Access**: Proper memory protection and access
 - **CPU Instructions**: All implemented instructions work
 - **Hardware Access**: Basic hardware register support
+- **SPU/CD-ROM**: Basic structures initialized and integrated
 
 ### **Next Testing Priorities**
-1. **GPU Testing**: Verify display output and timing
-2. **SPU Testing**: Verify audio output and quality
-3. **CD-ROM Testing**: Verify disc detection and handling
-4. **Controller Testing**: Verify input handling and mapping
+1. **BIOS Loop Analysis**: Understand and fix BIOS loop
+2. **GPU Testing**: Verify display output and timing
+3. **SPU Testing**: Verify audio output and quality
+4. **CD-ROM Testing**: Verify disc detection and handling
+5. **Controller Testing**: Verify input handling and mapping
 
 ## 📈 **Success Metrics**
 
@@ -209,19 +260,21 @@ Cache Control: 0xFFFE0000-0xFFFEFFFF (64KB)
 - [x] **Hardware access works**: Basic hardware support
 - [x] **Development tools work**: Good logging and debugging
 
-### **Phase 2 Metrics** 📋 **TARGET**
+### **Phase 2 Metrics** 📋 **IN PROGRESS**
+- [x] **SPU skeleton implemented**: Basic SPU structure and integration
+- [x] **CD-ROM skeleton implemented**: Basic CD-ROM structure and integration
+- [ ] **BIOS progresses beyond loop**: BIOS moves past initialization
 - [ ] **GPU displays boot screen**: Visual PlayStation boot screen
 - [ ] **SPU provides audio**: BIOS audio output
 - [ ] **CD-ROM handles disc state**: Proper disc detection
 - [ ] **Controller accepts input**: User interaction with BIOS
 
-## 🚀 **Getting Started with Phase 2**
+## 🚀 **Getting Started with Current Development**
 
-### **Recommended Order**
-1. **GPU Implementation** - Provides immediate visual feedback
-2. **SPU Implementation** - Adds audio experience
-3. **CD-ROM Emulation** - Improves BIOS accuracy
-4. **Controller Input** - Enables user interaction
+### **Current Focus**
+1. **BIOS Loop Analysis** - Understand why BIOS is stuck
+2. **GPU Implementation** - Provides immediate visual feedback
+3. **SPU/CD-ROM Enhancement** - Complete the basic implementations
 
 ### **Development Setup**
 ```bash
@@ -230,17 +283,18 @@ cd ZoniStationOne
 make clean
 make
 
-# Run with current BIOS execution
+# Run with current BIOS execution (10K cycles for testing)
 ./bin/zonistationone
 
-# Expected output: BIOS loads and executes for 50K cycles
+# Expected output: BIOS loads and executes for 10K cycles
+# Current behavior: BIOS stuck in loop at 0xBFC00250-0xBFC00270
 ```
 
 ### **Next Steps**
-1. **Choose GPU implementation** for immediate visual feedback
-2. **Follow SDL2 documentation** for graphics setup
-3. **Implement basic framebuffer** management
-4. **Test with BIOS execution** to see boot screen
+1. **Analyze BIOS loop** to understand what it's waiting for
+2. **Implement missing hardware** components (interrupts, timers)
+3. **Enhance GPU implementation** for visual feedback
+4. **Complete SPU/CD-ROM** implementations
 
 ## 📚 **Resources**
 
@@ -258,4 +312,4 @@ make
 
 ---
 
-**Status**: 🟡 **Development Phase** - Core systems complete, ready for hardware emulation 
+**Status**: 🟡 **Development Phase** - Core systems complete, SPU/CD-ROM skeletons added, BIOS loop analysis needed 

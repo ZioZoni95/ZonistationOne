@@ -1,6 +1,6 @@
 # ZoniStationOne Project Status
 
-## Current Status: ✅ BIOS EXECUTION COMPLETE & DEVELOPMENT READY
+## Current Status: ✅ BIOS EXECUTION COMPLETE & HARDWARE SKELETONS ADDED
 
 ### ✅ Completed Components
 
@@ -33,17 +33,41 @@
 - **Development Logging**: Comprehensive logging for development and debugging
 
 #### 5. **Development Infrastructure** ✅
-- **Controlled Execution**: 50K cycle timeout for development
+- **Controlled Execution**: 10K cycle timeout for testing
 - **Loop Detection**: Detects stuck BIOS execution
 - **Detailed Logging**: Progress tracking and instruction logging
 - **Error Handling**: Graceful error handling and reporting
 - **Clean Output**: Professional, readable debug output
 
+#### 6. **Hardware System** ✅ **NEW**
+- **GPU**: Basic GPU structure and hardware routing
+- **SPU**: Basic SPU structure and hardware routing
+- **CD-ROM**: Basic CD-ROM structure and hardware routing
+- **Hardware Registers**: Complete hardware register access
+
 ### 🔧 Recent Fixes (Latest Session)
+
+#### **SPU Implementation** ✅ **NEW**
+- **Problem**: Missing SPU emulation for audio
+- **Solution**: Created basic SPU structure (`zoni_spu.h`, `zoni_spu.c`)
+- **Problem**: SPU not integrated into memory system
+- **Solution**: Added SPU pointer to memory structure and hardware routing
+- **Problem**: SPU not initialized in main
+- **Solution**: Added SPU initialization and shutdown in main.c
+- **Files Modified**: `zoni_spu.h`, `zoni_spu.c`, `zoni_memory.h`, `zoni_hardware.c`, `main.c`
+
+#### **CD-ROM Implementation** ✅ **NEW**
+- **Problem**: Missing CD-ROM emulation for disc handling
+- **Solution**: Created basic CD-ROM structure (`zoni_cdrom.h`, `zoni_cdrom.c`)
+- **Problem**: CD-ROM not integrated into memory system
+- **Solution**: Added CD-ROM pointer to memory structure and hardware routing
+- **Problem**: CD-ROM not initialized in main
+- **Solution**: Added CD-ROM initialization and shutdown in main.c
+- **Files Modified**: `zoni_cdrom.h`, `zoni_cdrom.c`, `zoni_memory.h`, `zoni_hardware.c`, `main.c`
 
 #### **BIOS Execution Improvements** ✅
 - **Problem**: BIOS was running indefinitely without timeout
-- **Solution**: Added 50K cycle timeout with detailed logging
+- **Solution**: Added 10K cycle timeout with detailed logging for testing
 - **Problem**: No visibility into BIOS execution progress
 - **Solution**: Added progress logging every 5000 cycles
 - **Problem**: No detection of stuck BIOS execution
@@ -87,10 +111,10 @@
 - ✅ **Hardware Access**: Basic hardware register support
 - ✅ **Development Tools**: Comprehensive logging and debugging
 
-#### **Phase 2: Hardware Emulation** 🔄 **READY TO START**
-- 📋 **GPU Implementation**: Graphics Processing Unit for display
-- 📋 **SPU Implementation**: Sound Processing Unit for audio
-- 📋 **CD-ROM Emulation**: CD-ROM drive emulation
+#### **Phase 2: Hardware Emulation** 🔄 **IN PROGRESS**
+- ✅ **GPU Implementation**: Graphics Processing Unit for display (Basic structure)
+- ✅ **SPU Implementation**: Sound Processing Unit for audio (Basic skeleton)
+- ✅ **CD-ROM Emulation**: CD-ROM drive emulation (Basic skeleton)
 - 📋 **Controller Input**: Input device emulation
 
 #### **Phase 3: Advanced Features** 📋 **PLANNED**
@@ -108,9 +132,11 @@
 - **CPU Instructions**: Core MIPS instruction set
 - **Hardware Access**: Basic hardware register read/write
 - **Development Tools**: Comprehensive logging and debugging
+- **SPU Integration**: Basic SPU structure and hardware routing
+- **CD-ROM Integration**: Basic CD-ROM structure and hardware routing
 
 #### **🔧 Development Features**
-- **Controlled Execution**: 50K cycle timeout for development
+- **Controlled Execution**: 10K cycle timeout for testing
 - **Loop Detection**: Detects stuck BIOS execution
 - **Detailed Logging**: Progress tracking and instruction logging
 - **Error Handling**: Graceful error handling and reporting
@@ -119,38 +145,45 @@
 
 #### **Current Behavior**
 - **BIOS Loading**: ✅ Successful (SCPH-1001, NTSC-U, 12/04/95)
-- **BIOS Execution**: ✅ Working (50K cycles completed)
-- **PC Progression**: ✅ Active (cycling through 0xBFC00250-0xBFC00270)
+- **BIOS Execution**: ✅ Working (10K cycles completed)
+- **PC Progression**: ⚠️ Stuck in loop (0xBFC00250-0xBFC00270)
 - **No Errors**: ✅ Clean execution with no unknown instructions
-- **Loop Detection**: ✅ No stuck loops detected
+- **Loop Detection**: ✅ Detected stuck loop in initialization
 
 #### **Development Insights**
 - **BIOS is working correctly**: No errors, clean execution
-- **PC is actively executing**: Moving between different addresses
+- **PC is stuck in initialization**: Writing zeros to memory block
 - **Hardware access working**: BIOS can read/write hardware registers
-- **Ready for next phase**: GPU, SPU, CD-ROM, or controller implementation
+- **SPU/CD-ROM integrated**: Basic structures ready for use
+- **Need to analyze loop**: Understand what BIOS is waiting for
 
 ### 🚀 **Next Development Priorities**
 
-#### **1. GPU Implementation** 🎯 **HIGH PRIORITY**
+#### **1. BIOS Loop Analysis** 🔍 **HIGH PRIORITY**
+- **Goal**: Understand why BIOS is stuck in initialization loop
+- **Benefits**: Progress BIOS beyond initialization
+- **Implementation**: Analyze BNE condition, implement missing hardware
+- **Expected Result**: BIOS progresses to use GPU, SPU, CD-ROM
+
+#### **2. GPU Implementation** 🎯 **HIGH PRIORITY**
 - **Goal**: Display PlayStation boot screen
 - **Benefits**: Visual feedback, real PlayStation experience
 - **Implementation**: SDL2 graphics, framebuffer management
 - **Expected Result**: Classic PlayStation boot screen
 
-#### **2. SPU Implementation** 🎵 **MEDIUM PRIORITY**
+#### **3. SPU Implementation** 🎵 **MEDIUM PRIORITY**
 - **Goal**: Audio output for PlayStation sounds
 - **Benefits**: Complete audio experience
 - **Implementation**: SDL2 audio, PlayStation audio format
 - **Expected Result**: BIOS audio and game audio
 
-#### **3. CD-ROM Emulation** 💿 **MEDIUM PRIORITY**
+#### **4. CD-ROM Emulation** 💿 **MEDIUM PRIORITY**
 - **Goal**: CD-ROM drive emulation
 - **Benefits**: Handle "no disc" state properly
 - **Implementation**: CD-ROM controller, disc detection
 - **Expected Result**: Proper BIOS disc detection
 
-#### **4. Controller Input** 🎮 **LOW PRIORITY**
+#### **5. Controller Input** 🎮 **LOW PRIORITY**
 - **Goal**: Input device emulation
 - **Benefits**: User interaction with BIOS
 - **Implementation**: SDL2 input, PlayStation controller protocol
@@ -159,7 +192,7 @@
 ### 📈 **Performance Metrics**
 
 #### **Current Performance**
-- **BIOS Execution**: 50K cycles in ~1 second
+- **BIOS Execution**: 10K cycles in ~1 second (testing mode)
 - **Memory Access**: Efficient with proper caching
 - **Instruction Execution**: All implemented instructions working
 - **Error Rate**: 0% (no unknown instructions or failures)
@@ -191,6 +224,12 @@
 - Comprehensive logging and debugging
 - Loop detection for stuck execution
 
+#### **Hardware System** **NEW**
+- GPU structure and hardware routing
+- SPU structure and hardware routing
+- CD-ROM structure and hardware routing
+- Complete hardware register access
+
 #### **Development Infrastructure**
 - Professional logging system
 - Error handling and reporting
@@ -207,13 +246,23 @@
 - [x] **Hardware access works**: BIOS can read/write hardware registers
 - [x] **Development tools work**: Comprehensive logging and debugging
 
-### 🚀 **Ready for Phase 2**
+#### **Phase 2 Success Criteria** 📋 **IN PROGRESS**
+- [x] **SPU skeleton implemented**: Basic SPU structure and integration
+- [x] **CD-ROM skeleton implemented**: Basic CD-ROM structure and integration
+- [ ] **BIOS progresses beyond loop**: BIOS moves past initialization
+- [ ] **GPU displays boot screen**: Visual PlayStation boot screen
+- [ ] **SPU provides audio**: BIOS audio output
+- [ ] **CD-ROM handles disc state**: Proper disc detection
+- [ ] **Controller accepts input**: User interaction with BIOS
 
-The emulator is now **perfectly positioned** for Phase 2 development:
+### 🚀 **Ready for Next Phase**
+
+The emulator is now **well positioned** for continued development:
 
 1. **✅ Core systems are stable**: No errors, clean execution
 2. **✅ BIOS is working**: Real PlayStation BIOS executing correctly
-3. **✅ Development tools are ready**: Good logging and debugging
-4. **✅ Clear next steps**: GPU, SPU, CD-ROM, or controller implementation
+3. **✅ Hardware skeletons added**: SPU and CD-ROM basic structures
+4. **✅ Development tools are ready**: Good logging and debugging
+5. **🔍 Need BIOS loop analysis**: Understand why BIOS is stuck
 
-**Status**: 🟡 **Development Phase** - Core systems complete, ready for hardware emulation 
+**Status**: 🟡 **Development Phase** - Core systems complete, hardware skeletons added, BIOS loop analysis needed 

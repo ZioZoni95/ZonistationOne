@@ -170,7 +170,7 @@ zoni_error_t zoni_gpu_write_gp0(zoni_gpu_t* gpu, u32 value) {
     // Extract command
     u8 command = (value >> 24) & 0xFF;
     
-    zoni_log(ZONI_LOG_DEBUG, "GPU GP0 write: 0x%08X (command: 0x%02X)", value, command);
+            zoni_log(ZONI_LOG_INFO, "GPU GP0 write: 0x%08X (command: 0x%02X)", value, command);
     
     // Handle different commands
     switch (command) {
@@ -214,7 +214,7 @@ zoni_error_t zoni_gpu_write_gp1(zoni_gpu_t* gpu, u32 value) {
     // Extract command
     u8 command = (value >> 24) & 0xFF;
     
-    zoni_log(ZONI_LOG_DEBUG, "GPU GP1 write: 0x%08X (command: 0x%02X)", value, command);
+            zoni_log(ZONI_LOG_INFO, "GPU GP1 write: 0x%08X (command: 0x%02X)", value, command);
     
     switch (command) {
         case 0x00: // Reset GPU
