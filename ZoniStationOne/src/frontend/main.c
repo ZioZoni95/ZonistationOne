@@ -7,6 +7,7 @@
 #include "zoni_memory.h"
 #include "zoni_cpu.h"
 #include "zoni_bios.h"
+#include "zoni_gpu.h"
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
@@ -50,10 +51,34 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Initialize GPU system
+    zoni_gpu_t gpu;
+    zoni_gpu_config_t gpu_config = {
+        .mode = ZONI_GPU_MODE_NTSC,
+        .enable_display = true,
+        .enable_vblank = true,
+        .frame_rate = 60,
+        .display_width = 640,
+        .display_height = 480
+    };
+    
+    result = zoni_gpu_init(&gpu, &gpu_config);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "GPU initialization failed");
+        zoni_bios_shutdown(&bios);
+        zoni_cpu_shutdown(&cpu);
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }
+    
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
     
+    // Connect GPU to memory system
+    memory.gpu = &gpu;
+    
     zoni_log(ZONI_LOG_INFO, "✅ Core systems initialized successfully");
+    zoni_log(ZONI_LOG_INFO, "🎮 GPU initialized - SDL2 window ready");
     
     // Load BIOS
     zoni_log(ZONI_LOG_INFO, "Loading BIOS...");
@@ -190,12 +215,19 @@ int main(int argc, char* argv[]) {
         zoni_log(ZONI_LOG_WARNING, "⚠️ BIOS execution timeout (this is normal for testing)");
     }
     
+    // Render a test frame to show GPU is working
+    zoni_log(ZONI_LOG_INFO, "🎨 Rendering test frame...");
+    zoni_gpu_clear_screen(&gpu, 0x000080FF); // Blue background
+    zoni_gpu_render_frame(&gpu);
+    
     zoni_log(ZONI_LOG_INFO, "================================================");
     zoni_log(ZONI_LOG_INFO, "🎮 ZoniStationOne Core Emulation: READY");
-    zoni_log(ZONI_LOG_INFO, "Next: GPU, SPU, CD-ROM...");
+    zoni_log(ZONI_LOG_INFO, "🎨 GPU: SDL2 window with test frame");
+    zoni_log(ZONI_LOG_INFO, "Next: BIOS graphics, SPU, CD-ROM...");
     
 cleanup:
     // Cleanup
+    zoni_gpu_shutdown(&gpu);
     zoni_bios_shutdown(&bios);
     zoni_cpu_shutdown(&cpu);
     zoni_memory_shutdown(&memory);

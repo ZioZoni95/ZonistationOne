@@ -1,5 +1,7 @@
 #include "zoni_hardware.h"
 #include "zoni_endian.h"
+#include "zoni_gpu.h"
+#include "zoni_memory.h"
 
 zoni_error_t zoni_hardware_init(zoni_hardware_t* hw) {
     if (!hw) {
@@ -25,6 +27,9 @@ zoni_error_t zoni_hardware_init(zoni_hardware_t* hw) {
     // Interrupt status - default value (offset 0x1070 - 0x1000 = 0x70)
     zoni_write_le16(&hw->hw_regs[0x70], 0x0001);
     
+    // Initialize memory pointer
+    hw->memory = NULL; // Will be set by memory system
+    
     return ZONI_SUCCESS;
 }
 
@@ -42,7 +47,8 @@ void zoni_hardware_reset(zoni_hardware_t* hw) {
 // Helper function to check if address is in hardware range
 static bool is_hw_address(u32 address) {
     return (address >= PSX_HW_BASE && address < PSX_HW_BASE + PSX_HW_SIZE) ||
-           (address >= PSX_HW_SCRATCHPAD && address < PSX_HW_SCRATCHPAD + PSX_HW_SCRATCH_SIZE);
+           (address >= PSX_HW_SCRATCHPAD && address < PSX_HW_SCRATCHPAD + PSX_HW_SCRATCH_SIZE) ||
+           (address >= 0xFFFE0000 && address < 0xFFFF0000); // Cache control region
 }
 
 // Helper function to get register offset
@@ -50,9 +56,13 @@ static u32 get_hw_offset(u32 address) {
     if (address >= PSX_HW_SCRATCHPAD && address < PSX_HW_SCRATCHPAD + PSX_HW_SCRATCH_SIZE) {
         return address - PSX_HW_SCRATCHPAD;
     }
+    if (address >= 0xFFFE0000 && address < 0xFFFF0000) {
+        // Cache control region - use a separate offset space
+        return address - 0xFFFE0000 + 0x8000; // Map to upper part of hw_regs
+    }
     // For hardware registers, calculate offset from base
-    // 0x1F801000 -> 0x0000, 0x1F801001 -> 0x0001, etc.
-    return address & 0xFFFF;  // Take only the lower 16 bits as offset
+    // 0x1F801000 -> 0x0000, 0x1F801010 -> 0x0010, etc.
+    return address - PSX_HW_BASE;  // Calculate offset from hardware base
 }
 
 u8 zoni_hw_read8(zoni_hardware_t* hw, u32 address) {
@@ -150,6 +160,26 @@ u32 zoni_hw_read32(zoni_hardware_t* hw, u32 address) {
         case 0x1074: // Interrupt Mask
             return zoni_read_le32(&hw->hw_regs[offset]);
             
+        case 0x1010: // DMA PCR (Priority Control Register)
+            return zoni_read_le32(&hw->hw_regs[offset]);
+            
+        case 0x0130: // Cache Control Register (0xFFFE0130)
+            return 0x00000000; // Default cache control value
+            
+        case 0x1810: // GPU Data Port (0x1F801810)
+            // GPU GP0 read - route to actual GPU if available
+            if (hw->memory && hw->memory->gpu) {
+                return zoni_gpu_read_gp0(hw->memory->gpu);
+            }
+            return 0x00000000; // Default GPU GP0 read
+            
+        case 0x1814: // GPU Status Port (0x1F801814)
+            // GPU GP1 read - route to actual GPU if available
+            if (hw->memory && hw->memory->gpu) {
+                return zoni_gpu_read_gp1(hw->memory->gpu);
+            }
+            return 0x04000000; // Default GPU status (ready + DMA ready)
+            
         case 0x10F0: // DMA PCR
             return zoni_read_le32(&hw->hw_regs[offset]);
             
@@ -182,12 +212,6 @@ u32 zoni_hw_read32(zoni_hardware_t* hw, u32 address) {
             
         case 0x1128: // Timer 2 Target
             return 0x00000000; // Default timer target
-            
-        case 0x1810: // GPU Data
-            return 0x00000000; // Default GPU data
-            
-        case 0x1814: // GPU Status
-            return 0x14802000; // Default GPU status (based on PCSX-ReARMed)
             
         default:
             if (offset < PSX_HW_SIZE - 3) {
@@ -285,10 +309,12 @@ zoni_error_t zoni_hw_write16(zoni_hardware_t* hw, u32 address, u16 value) {
 
 zoni_error_t zoni_hw_write32(zoni_hardware_t* hw, u32 address, u32 value) {
     if (!hw || !is_hw_address(address)) {
+        zoni_log(ZONI_LOG_DEBUG, "Hardware write32 failed: invalid address 0x%08X", address);
         return ZONI_ERROR_INVALID_PARAMETER;
     }
     
     u32 offset = get_hw_offset(address);
+    zoni_log(ZONI_LOG_DEBUG, "Hardware write32: 0x%08X = 0x%08X (offset: 0x%04X)", address, value, offset);
     
     // Handle specific registers
     switch (address & 0xFFFF) {
@@ -309,6 +335,31 @@ zoni_error_t zoni_hw_write32(zoni_hardware_t* hw, u32 address, u32 value) {
                 return ZONI_SUCCESS;
             }
             break;
+            
+        case 0x1010: // DMA PCR (Priority Control Register)
+            if (offset < PSX_HW_SIZE - 3) {
+                zoni_write_le32(&hw->hw_regs[offset], value);
+                return ZONI_SUCCESS;
+            }
+            break;
+            
+        case 0x0130: // Cache Control Register (0xFFFE0130)
+            // Accept cache control writes
+            return ZONI_SUCCESS;
+            
+        case 0x1810: // GPU Data Port (0x1F801810)
+            // GPU GP0 register write - route to actual GPU if available
+            if (hw->memory && hw->memory->gpu) {
+                return zoni_gpu_write_gp0(hw->memory->gpu, value);
+            }
+            return ZONI_SUCCESS;
+            
+        case 0x1814: // GPU Status Port (0x1F801814)
+            // GPU GP1 register write - route to actual GPU if available
+            if (hw->memory && hw->memory->gpu) {
+                return zoni_gpu_write_gp1(hw->memory->gpu, value);
+            }
+            return ZONI_SUCCESS;
             
         case 0x10F0: // DMA PCR
             if (offset < PSX_HW_SIZE - 3) {
@@ -336,14 +387,7 @@ zoni_error_t zoni_hw_write32(zoni_hardware_t* hw, u32 address, u32 value) {
             // Accept timer writes
             return ZONI_SUCCESS;
             
-        case 0x1810: // GPU Data
-            // Accept GPU data writes
-            return ZONI_SUCCESS;
-            
-        case 0x1814: // GPU Status
-            // Accept GPU status writes
-            return ZONI_SUCCESS;
-            
+
         default:
             if (offset < PSX_HW_SIZE - 3) {
                 zoni_write_le32(&hw->hw_regs[offset], value);

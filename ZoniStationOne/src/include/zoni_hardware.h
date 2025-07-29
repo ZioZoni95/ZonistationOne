@@ -3,6 +3,9 @@
 
 #include "zoni_common.h"
 
+// Forward declaration
+typedef struct zoni_memory_s zoni_memory_t;
+
 // Hardware register ranges
 #define PSX_HW_BASE        0x1F801000
 #define PSX_HW_SIZE        0x8000
@@ -72,9 +75,10 @@
 #define HW_SIO_BAUD        0x1F80104E  // SIO Baud Rate
 
 // Hardware structure
-typedef struct {
+typedef struct zoni_hardware_s {
     u8 scratchpad[PSX_HW_SCRATCH_SIZE];  // Scratchpad memory
     u8 hw_regs[PSX_HW_SIZE];            // Hardware registers
+    zoni_memory_t* memory;               // Pointer to memory system for GPU access
 } zoni_hardware_t;
 
 // Hardware functions

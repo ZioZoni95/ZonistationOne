@@ -311,12 +311,13 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
         return ZONI_SUCCESS;
     }
     
-    // Execute BIOS for a limited number of cycles
-    // This simulates the BIOS boot process
-    const int max_cycles = 1000;  // Limited cycles for testing
+    // Execute BIOS with development timeout and detailed logging
+    const int max_cycles = 50000;  // 50K cycles for development
     int cycles = 0;
+    u32 last_pc = 0;
+    int same_pc_count = 0;
     
-    zoni_log(ZONI_LOG_INFO, "Executing BIOS...");
+    zoni_log(ZONI_LOG_INFO, "Executing BIOS (development mode, max %d cycles)...", max_cycles);
     
     while (cycles < max_cycles) {
         zoni_error_t result = zoni_cpu_step(cpu);
@@ -328,7 +329,7 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
                 cycles++;
                 continue;
             } else {
-                zoni_log(ZONI_LOG_ERROR, "BIOS execution failed at cycle %d", cycles);
+                zoni_log(ZONI_LOG_ERROR, "BIOS execution failed at cycle %d, PC=0x%08X", cycles, cpu->pc);
                 return result;
             }
         }
@@ -337,12 +338,32 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
         
         // Check if BIOS execution has ended
         if (zoni_bios_execution_ended(cpu)) {
-            zoni_log(ZONI_LOG_INFO, "BIOS execution completed after %d cycles", cycles);
+            zoni_log(ZONI_LOG_INFO, "✅ BIOS execution completed after %d cycles", cycles);
             return ZONI_SUCCESS;
+        }
+        
+        // Detect if we're stuck in a loop
+        if (cpu->pc == last_pc) {
+            same_pc_count++;
+            if (same_pc_count > 1000) {
+                zoni_log(ZONI_LOG_WARNING, "⚠️ BIOS appears stuck at PC=0x%08X for %d cycles", cpu->pc, same_pc_count);
+                zoni_log(ZONI_LOG_INFO, "🔍 This suggests missing hardware implementation");
+                break;
+            }
+        } else {
+            same_pc_count = 0;
+            last_pc = cpu->pc;
+        }
+        
+        // Log progress every 5000 cycles with more detail
+        if (cycles % 5000 == 0) {
+            zoni_log(ZONI_LOG_INFO, "BIOS: %d cycles, PC=0x%08X, same_pc=%d", cycles, cpu->pc, same_pc_count);
         }
     }
     
-    zoni_log(ZONI_LOG_WARNING, "BIOS execution timeout after %d cycles", cycles);
+    zoni_log(ZONI_LOG_WARNING, "⏰ BIOS execution timeout after %d cycles", cycles);
+    zoni_log(ZONI_LOG_INFO, "📊 Final state: PC=0x%08X, cycles=%d", cpu->pc, cycles);
+    zoni_log(ZONI_LOG_INFO, "🔍 Next steps: Implement GPU, SPU, CD-ROM, or controller input");
     return ZONI_SUCCESS;
 }
 

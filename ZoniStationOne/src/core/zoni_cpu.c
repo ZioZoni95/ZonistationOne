@@ -195,6 +195,106 @@ zoni_error_t zoni_cpu_execute_r_type(zoni_cpu_regs_t* cpu, zoni_instruction_t* i
             // This triggers a system call exception for BIOS communication
             return zoni_cpu_execute_syscall(cpu, instruction);
             
+        case MIPS_FUNC_MULT:
+            // MULT rs, rt: hi,lo = rs * rt (signed)
+            {
+                s32 rs_val = (s32)cpu->gpr.r[rs];
+                s32 rt_val = (s32)cpu->gpr.r[rt];
+                s64 result = (s64)rs_val * (s64)rt_val;
+                
+                // Store high 32 bits in HI, low 32 bits in LO
+                cpu->gpr.r[32] = (u32)(result >> 32);  // HI register
+                cpu->gpr.r[33] = (u32)(result & 0xFFFFFFFF);  // LO register
+                
+                zoni_log(ZONI_LOG_DEBUG, "MULT $%d * $%d = %d * %d = %lld (HI=0x%08X, LO=0x%08X)", 
+                         rs, rt, rs_val, rt_val, result, cpu->gpr.r[32], cpu->gpr.r[33]);
+            }
+            break;
+            
+        case MIPS_FUNC_MULTU:
+            // MULTU rs, rt: hi,lo = rs * rt (unsigned)
+            {
+                u32 rs_val = cpu->gpr.r[rs];
+                u32 rt_val = cpu->gpr.r[rt];
+                u64 result = (u64)rs_val * (u64)rt_val;
+                
+                // Store high 32 bits in HI, low 32 bits in LO
+                cpu->gpr.r[32] = (u32)(result >> 32);  // HI register
+                cpu->gpr.r[33] = (u32)(result & 0xFFFFFFFF);  // LO register
+                
+                zoni_log(ZONI_LOG_DEBUG, "MULTU $%d * $%d = %u * %u = %llu (HI=0x%08X, LO=0x%08X)", 
+                         rs, rt, rs_val, rt_val, result, cpu->gpr.r[32], cpu->gpr.r[33]);
+            }
+            break;
+            
+        case MIPS_FUNC_MFHI:
+            // MFHI rd: rd = hi
+            {
+                if (rd != 0) {
+                    u32 hi_val = cpu->gpr.r[32];  // HI register
+                    cpu->gpr.r[rd] = hi_val;
+                    zoni_log(ZONI_LOG_DEBUG, "MFHI $%d = HI = 0x%08X", rd, hi_val);
+                }
+            }
+            break;
+            
+        case MIPS_FUNC_MFLO:
+            // MFLO rd: rd = lo
+            {
+                if (rd != 0) {
+                    u32 lo_val = cpu->gpr.r[33];  // LO register
+                    cpu->gpr.r[rd] = lo_val;
+                    zoni_log(ZONI_LOG_DEBUG, "MFLO $%d = LO = 0x%08X", rd, lo_val);
+                }
+            }
+            break;
+            
+        case MIPS_FUNC_MTHI:
+            // MTHI rs: hi = rs
+            {
+                u32 rs_val = cpu->gpr.r[rs];
+                cpu->gpr.r[32] = rs_val;  // HI register
+                zoni_log(ZONI_LOG_DEBUG, "MTHI HI = $%d = 0x%08X", rs, rs_val);
+            }
+            break;
+            
+        case MIPS_FUNC_MTLO:
+            // MTLO rs: lo = rs
+            {
+                u32 rs_val = cpu->gpr.r[rs];
+                cpu->gpr.r[33] = rs_val;  // LO register
+                zoni_log(ZONI_LOG_DEBUG, "MTLO LO = $%d = 0x%08X", rs, rs_val);
+            }
+            break;
+            
+        case MIPS_FUNC_SLT:
+            // SLT rd, rs, rt: rd = (rs < rt) ? 1 : 0 (signed)
+            {
+                if (rd != 0) {
+                    s32 rs_val = (s32)cpu->gpr.r[rs];
+                    s32 rt_val = (s32)cpu->gpr.r[rt];
+                    u32 result = (rs_val < rt_val) ? 1 : 0;
+                    cpu->gpr.r[rd] = result;
+                    zoni_log(ZONI_LOG_DEBUG, "SLT $%d = ($%d < $%d) ? 1 : 0 = %d", 
+                             rd, rs, rt, result);
+                }
+            }
+            break;
+            
+        case MIPS_FUNC_SLTU:
+            // SLTU rd, rs, rt: rd = (rs < rt) ? 1 : 0 (unsigned)
+            {
+                if (rd != 0) {
+                    u32 rs_val = cpu->gpr.r[rs];
+                    u32 rt_val = cpu->gpr.r[rt];
+                    u32 result = (rs_val < rt_val) ? 1 : 0;
+                    cpu->gpr.r[rd] = result;
+                    zoni_log(ZONI_LOG_DEBUG, "SLTU $%d = ($%d < $%d) ? 1 : 0 = %d", 
+                             rd, rs, rt, result);
+                }
+            }
+            break;
+            
         case MIPS_FUNC_BREAK:
             // BREAK: Breakpoint instruction
             // This triggers a breakpoint exception for debugging
@@ -892,8 +992,14 @@ zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction
     u8 opcode = (instruction->raw >> 26) & 0x3F;
     u8 funct = instruction->raw & 0x3F;
     
-    // Debug: Log the instruction being executed (only in debug mode)
-    // zoni_log(ZONI_LOG_DEBUG, "Executing: raw=0x%08X, opcode=0x%02X", instruction->raw, opcode);
+    // Log instruction execution for development (every 1000th instruction)
+    static int instruction_count = 0;
+    instruction_count++;
+    if (instruction_count % 1000 == 0) {
+        char disasm[128];
+        zoni_cpu_decode_instruction(instruction, disasm, sizeof(disasm));
+        zoni_log(ZONI_LOG_DEBUG, "Instruction %d: PC=0x%08X, %s", instruction_count, cpu->pc, disasm);
+    }
     
     // Execute instruction based on opcode
     zoni_error_t result;
@@ -957,6 +1063,10 @@ zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction
             
         case MIPS_OP_JAL:
             result = zoni_cpu_execute_jal(cpu, instruction);
+            break;
+            
+        case MIPS_OP_COP0:
+            result = zoni_cpu_execute_cop0(cpu, instruction);
             break;
             
         default:
@@ -1207,6 +1317,88 @@ zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* inst
     zoni_log(ZONI_LOG_DEBUG, "JAL $31 = PC + 4 = 0x%08X + 4 = 0x%08X, PC = 0x%08X", 
              current_pc, current_pc + 4, new_pc);
     return ZONI_SUCCESS;
+}
+
+// COP0 (Coprocessor 0) instruction execution
+// COP0 handles system control operations like MFC0, MTC0, RFE
+zoni_error_t zoni_cpu_execute_cop0(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction) {
+    // Extract fields from instruction
+    u8 rs = (instruction->raw >> 21) & 0x1F;
+    u8 rt = (instruction->raw >> 16) & 0x1F;
+    u8 rd = (instruction->raw >> 11) & 0x1F;
+    u8 funct = instruction->raw & 0x3F;
+    
+    // Check if this is a COP0 function (rs & 0x10)
+    if (rs & 0x10) {
+        // COP0 function instruction
+        switch (funct) {
+            case 0x10: // RFE (Return From Exception)
+                // RFE: Restore Status Register from exception
+                cpu->cp0.n.SR = (cpu->cp0.n.SR & 0xFFFFFFF0) | ((cpu->cp0.n.SR >> 2) & 0x0F);
+                zoni_log(ZONI_LOG_DEBUG, "RFE: Restored Status Register");
+                return ZONI_SUCCESS;
+                
+            default:
+                zoni_log(ZONI_LOG_WARNING, "Unknown COP0 function: 0x%02X", funct);
+                return ZONI_ERROR_NOT_IMPLEMENTED;
+        }
+    } else {
+        // COP0 move instruction
+        switch (rs) {
+            case 0x00: // MFC0 (Move From Coprocessor 0)
+                // MFC0 rt, rd: rt = CP0[rd]
+                if (rt != 0) {
+                    u32 cp0_value = 0;
+                    switch (rd) {
+                        case 12: // Status Register
+                            cp0_value = cpu->cp0.n.SR;
+                            break;
+                        case 13: // Cause Register
+                            cp0_value = cpu->cp0.n.Cause;
+                            break;
+                        case 14: // EPC (Exception Program Counter)
+                            cp0_value = cpu->cp0.n.EPC;
+                            break;
+                        case 15: // Processor ID
+                            cp0_value = cpu->cp0.n.PRid;
+                            break;
+                        default:
+                            zoni_log(ZONI_LOG_WARNING, "MFC0: Unknown CP0 register %d", rd);
+                            cp0_value = 0;
+                            break;
+                    }
+                    cpu->gpr.r[rt] = cp0_value;
+                    zoni_log(ZONI_LOG_DEBUG, "MFC0 $%d = CP0[%d] = 0x%08X", rt, rd, cp0_value);
+                }
+                return ZONI_SUCCESS;
+                
+            case 0x04: // MTC0 (Move To Coprocessor 0)
+                // MTC0 rt, rd: CP0[rd] = rt
+                u32 rt_value = cpu->gpr.r[rt];
+                switch (rd) {
+                    case 12: // Status Register
+                        cpu->cp0.n.SR = rt_value;
+                        zoni_log(ZONI_LOG_DEBUG, "MTC0 CP0[12] = $%d = 0x%08X", rt, rt_value);
+                        break;
+                    case 13: // Cause Register
+                        cpu->cp0.n.Cause = rt_value;
+                        zoni_log(ZONI_LOG_DEBUG, "MTC0 CP0[13] = $%d = 0x%08X", rt, rt_value);
+                        break;
+                    case 14: // EPC (Exception Program Counter)
+                        cpu->cp0.n.EPC = rt_value;
+                        zoni_log(ZONI_LOG_DEBUG, "MTC0 CP0[14] = $%d = 0x%08X", rt, rt_value);
+                        break;
+                    default:
+                        zoni_log(ZONI_LOG_WARNING, "MTC0: Unknown CP0 register %d", rd);
+                        break;
+                }
+                return ZONI_SUCCESS;
+                
+            default:
+                zoni_log(ZONI_LOG_WARNING, "Unknown COP0 move: rs=0x%02X", rs);
+                return ZONI_ERROR_NOT_IMPLEMENTED;
+        }
+    }
 }
 
 // SYSCALL instruction handler

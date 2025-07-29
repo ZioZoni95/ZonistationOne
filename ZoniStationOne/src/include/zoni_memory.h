@@ -10,7 +10,10 @@
 #define ZONI_MEMORY_H
 
 #include "zoni_common.h"
-#include "zoni_hardware.h"
+
+// Forward declarations
+typedef struct zoni_hardware_s zoni_hardware_t;
+typedef struct zoni_gpu_s zoni_gpu_t;
 
 // PlayStation memory map
 #define PSX_MEMORY_REGIONS 9
@@ -38,12 +41,13 @@ typedef struct {
 } zoni_memory_region_t;
 
 // Memory management structure
-typedef struct {
+typedef struct zoni_memory_s {
     zoni_memory_region_t regions[PSX_MEMORY_REGIONS];
     u8* ram;                    // Main RAM (8MB)
     u8* bios;                   // BIOS (512KB)
     u8* scratchpad;             // Scratchpad (1KB)
-    zoni_hardware_t hardware;   // Hardware registers
+    struct zoni_hardware_s* hardware;   // Hardware registers
+    zoni_gpu_t* gpu;            // GPU system (optional)
     
     // Memory access callbacks
     zoni_error_t (*read8_callback)(u32 address, u8* value);

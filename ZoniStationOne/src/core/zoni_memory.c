@@ -4,6 +4,7 @@
  */
 
 #include "zoni_memory.h"
+#include "zoni_hardware.h"
 #include "zoni_endian.h"
 #include <string.h>
 
@@ -42,12 +43,14 @@ zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
                           memory->ram, true, true, "RAM");
     zoni_memory_map_region(memory, PSX_MEM_BIOS, PSX_BIOS_BASE, PSX_BIOS_SIZE, 
                           memory->bios, true, false, "BIOS");
+    zoni_memory_map_region(memory, PSX_MEM_BIOS_KSEG1, 0xBFC00000, PSX_BIOS_SIZE, 
+                          memory->bios, true, false, "BIOS KSEG1");
     zoni_memory_map_region(memory, PSX_MEM_SCRATCHPAD, PSX_SCRATCHPAD_BASE, PSX_SCRATCHPAD_SIZE, 
                           memory->scratchpad, true, true, "Scratchpad");
     
-    // Initialize hardware regions (read-only for now)
+    // Initialize hardware regions
     zoni_memory_map_region(memory, PSX_MEM_HW_REG, PSX_HW_BASE, PSX_HW_END - PSX_HW_BASE + 1, 
-                          NULL, true, false, "Hardware Registers");
+                          NULL, true, true, "Hardware Registers");
     zoni_memory_map_region(memory, PSX_MEM_CDROM, PSX_CDROM_BASE, PSX_CDROM_END - PSX_CDROM_BASE + 1, 
                           NULL, true, false, "CDROM Controller");
     zoni_memory_map_region(memory, PSX_MEM_SPU, PSX_SPU_BASE, PSX_SPU_END - PSX_SPU_BASE + 1, 
@@ -55,15 +58,25 @@ zoni_error_t zoni_memory_init(zoni_memory_t* memory) {
     zoni_memory_map_region(memory, PSX_MEM_EXPANSION, PSX_EXPANSION_BASE, PSX_EXPANSION_END - PSX_EXPANSION_BASE + 1, 
                           NULL, true, false, "Expansion");
     zoni_memory_map_region(memory, PSX_MEM_CACHE_CTRL, PSX_CACHE_CTRL_BASE, PSX_CACHE_CTRL_END - PSX_CACHE_CTRL_BASE + 1, 
-                          NULL, true, false, "Cache Control");
+                          NULL, true, true, "Cache Control");
     
-    // Initialize hardware
-    zoni_error_t hw_result = zoni_hardware_init(&memory->hardware);
+    // Allocate and initialize hardware
+    memory->hardware = zoni_calloc(1, sizeof(struct zoni_hardware_s));
+    if (!memory->hardware) {
+        zoni_log(ZONI_LOG_ERROR, "Failed to allocate hardware structure");
+        zoni_memory_shutdown(memory);
+        return ZONI_ERROR_OUT_OF_MEMORY;
+    }
+    
+    zoni_error_t hw_result = zoni_hardware_init(memory->hardware);
     if (hw_result != ZONI_SUCCESS) {
         zoni_log(ZONI_LOG_ERROR, "Failed to initialize hardware");
         zoni_memory_shutdown(memory);
         return hw_result;
     }
+    
+    // Connect hardware to memory system
+    memory->hardware->memory = memory;
     
     zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
     return ZONI_SUCCESS;
@@ -73,7 +86,10 @@ void zoni_memory_shutdown(zoni_memory_t* memory) {
     if (!memory) return;
     
     // Shutdown hardware
-    zoni_hardware_shutdown(&memory->hardware);
+    if (memory->hardware) {
+        zoni_hardware_shutdown(memory->hardware);
+        zoni_free(memory->hardware);
+    }
     
     // Free allocated memory
     zoni_free(memory->ram);
@@ -97,6 +113,11 @@ void zoni_memory_reset(zoni_memory_t* memory) {
     // Clear scratchpad
     if (memory->scratchpad) {
         memset(memory->scratchpad, 0, PSX_SCRATCHPAD_SIZE);
+    }
+    
+    // Reset hardware
+    if (memory->hardware) {
+        zoni_hardware_reset(memory->hardware);
     }
     
     // Reset statistics
@@ -174,7 +195,7 @@ zoni_error_t zoni_memory_read8(zoni_memory_t* memory, u32 address, u8* value) {
         *value = reg->data[offset];
     } else {
         // Hardware register read - use hardware module
-        *value = zoni_hw_read8(&memory->hardware, address);
+        *value = zoni_hw_read8(memory->hardware, address);
     }
     
     memory->read_count++;
@@ -206,7 +227,7 @@ zoni_error_t zoni_memory_read16(zoni_memory_t* memory, u32 address, u16* value) 
         *value = zoni_read_le16(&reg->data[offset]);
     } else {
         // Hardware register read - use hardware module
-        *value = zoni_hw_read16(&memory->hardware, address);
+        *value = zoni_hw_read16(memory->hardware, address);
     }
     
     memory->read_count++;
@@ -238,7 +259,7 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
         *value = zoni_read_le32(&reg->data[offset]);
     } else {
         // Hardware register read - use hardware module
-        *value = zoni_hw_read32(&memory->hardware, address);
+        *value = zoni_hw_read32(memory->hardware, address);
     }
     
     memory->read_count++;
@@ -263,7 +284,7 @@ zoni_error_t zoni_memory_write8(zoni_memory_t* memory, u32 address, u8 value) {
         reg->data[offset] = value;
     } else {
         // Hardware register write - use hardware module
-        zoni_error_t hw_result = zoni_hw_write8(&memory->hardware, address, value);
+        zoni_error_t hw_result = zoni_hw_write8(memory->hardware, address, value);
         if (hw_result != ZONI_SUCCESS) {
             #ifdef ZONI_DEBUG
             zoni_log(ZONI_LOG_WARNING, "Hardware write8 failed: 0x%08X = 0x%02X", address, value);
@@ -301,7 +322,7 @@ zoni_error_t zoni_memory_write16(zoni_memory_t* memory, u32 address, u16 value) 
         zoni_write_le16(&reg->data[offset], value);
     } else {
         // Hardware register write - use hardware module
-        zoni_error_t hw_result = zoni_hw_write16(&memory->hardware, address, value);
+        zoni_error_t hw_result = zoni_hw_write16(memory->hardware, address, value);
         if (hw_result != ZONI_SUCCESS) {
             #ifdef ZONI_DEBUG
             zoni_log(ZONI_LOG_WARNING, "Hardware write16 failed: 0x%08X = 0x%04X", address, value);
@@ -339,7 +360,7 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
         zoni_write_le32(&reg->data[offset], value);
     } else {
         // Hardware register write - use hardware module
-        zoni_error_t hw_result = zoni_hw_write32(&memory->hardware, address, value);
+        zoni_error_t hw_result = zoni_hw_write32(memory->hardware, address, value);
         if (hw_result != ZONI_SUCCESS) {
             #ifdef ZONI_DEBUG
             zoni_log(ZONI_LOG_WARNING, "Hardware write32 failed: 0x%08X = 0x%08X", address, value);

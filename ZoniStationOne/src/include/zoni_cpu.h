@@ -225,6 +225,7 @@ zoni_error_t zoni_cpu_execute_lb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instr
 zoni_error_t zoni_cpu_execute_sb(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
 zoni_error_t zoni_cpu_execute_j(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
 zoni_error_t zoni_cpu_execute_jal(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
+zoni_error_t zoni_cpu_execute_cop0(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
 
 // Advanced instruction execution functions
 zoni_error_t zoni_cpu_execute_syscall(zoni_cpu_regs_t* cpu, zoni_instruction_t* instruction);
