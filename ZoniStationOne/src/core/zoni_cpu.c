@@ -465,6 +465,7 @@ zoni_error_t zoni_cpu_read16(zoni_cpu_regs_t* cpu, u32 address, u16* value) {
 
 zoni_error_t zoni_cpu_read32(zoni_cpu_regs_t* cpu, u32 address, u32* value) {
     ZONI_UNUSED(cpu);
+    
     if (!g_memory) return ZONI_ERROR_INITIALIZATION_FAILED;
     return zoni_memory_read32(g_memory, address, value);
 }
@@ -496,11 +497,7 @@ u32 zoni_cpu_get_register(zoni_cpu_regs_t* cpu, u8 reg) {
 void zoni_cpu_set_register(zoni_cpu_regs_t* cpu, u8 reg, u32 value) {
     if (reg >= 34) return;
     if (reg == 0) return; // r0 is always zero
-    u32 old_value = cpu->gpr.r[reg];
     cpu->gpr.r[reg] = value;
-    if (old_value != value) {
-        zoni_log(ZONI_LOG_DEBUG, "Register $%d: 0x%08X -> 0x%08X", reg, old_value, value);
-    }
 }
 
 // CPU initialization
@@ -589,11 +586,6 @@ zoni_error_t zoni_cpu_step(zoni_cpu_regs_t* cpu) {
         return result;
     }
     
-    // Debug: Log instruction execution
-    char disasm[128];
-    zoni_cpu_decode_instruction(&instruction, disasm, sizeof(disasm));
-    zoni_log(ZONI_LOG_DEBUG, "PC=0x%08X: %s (0x%08X)", cpu->pc, disasm, instruction.raw);
-    
     // Execute the instruction
     result = zoni_cpu_execute_instruction(cpu, &instruction);
     if (result != ZONI_SUCCESS) {
@@ -670,11 +662,7 @@ zoni_error_t zoni_cpu_step(zoni_cpu_regs_t* cpu) {
                 result = zoni_cpu_execute_instruction(cpu, &delay_instruction);
                 if (result == ZONI_SUCCESS) {
                     zoni_log(ZONI_LOG_INFO, "Executed delay slot instruction at 0x%08X", delay_slot_pc);
-                } else {
-                    zoni_log(ZONI_LOG_ERROR, "Failed to execute delay slot instruction at 0x%08X", delay_slot_pc);
                 }
-            } else {
-                zoni_log(ZONI_LOG_ERROR, "Failed to fetch delay slot instruction at 0x%08X", delay_slot_pc);
             }
             
             // Restore original PC and then take the branch
@@ -1256,8 +1244,10 @@ zoni_error_t zoni_cpu_execute_bne(zoni_cpu_regs_t* cpu, zoni_instruction_t* inst
     u32 old_pc = cpu->pc;
     
     if (rs_val != rt_val) {
-        zoni_log(ZONI_LOG_DEBUG, "BNE $%d != $%d, should branch to 0x%08X + 4 + (%d << 2) = 0x%08X", 
-                 rs, rt, old_pc, offset, old_pc + 4 + (offset << 2));
+        u32 new_pc = cpu->pc + 4 + (offset << 2);
+        cpu->pc = new_pc;
+        zoni_log(ZONI_LOG_DEBUG, "BNE $%d != $%d, PC = 0x%08X + 4 + (%d << 2) = 0x%08X", 
+                 rs, rt, old_pc, offset, new_pc);
     } else {
         zoni_log(ZONI_LOG_DEBUG, "BNE $%d (0x%08X) == $%d (0x%08X), no branch", 
                  rs, rs_val, rt, rt_val);

@@ -11,10 +11,16 @@
 #include "zoni_spu.h"
 #include "zoni_cdrom.h"
 
+//-------------mod panda-----------
+#include "zoni_bus.h"
+zoni_bus_t g_bus;
+
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
     ZONI_UNUSED(argv);
     
+     zoni_set_log_level(ZONI_LOG_DEBUG); 
+
     zoni_log(ZONI_LOG_INFO, "ZoniStationOne v%s - PlayStation 1 Emulator", ZONI_VERSION_STRING);
     zoni_log(ZONI_LOG_INFO, "================================================");
     
@@ -64,7 +70,9 @@ int main(int argc, char* argv[]) {
         .display_height = 480
     };
     
-    result = zoni_gpu_init(&gpu, &gpu_config);
+    //------mod panda------
+    
+   result = zoni_gpu_init(&gpu, &gpu_config);
     if (result != ZONI_SUCCESS) {
         zoni_log(ZONI_LOG_ERROR, "GPU initialization failed");
         zoni_bios_shutdown(&bios);
@@ -72,6 +80,19 @@ int main(int argc, char* argv[]) {
         zoni_memory_shutdown(&memory);
         return 1;
     }
+
+    // Initialize I/O Bus (GPU, SPU, CD-ROM can be added later)
+    zoni_bus_init(&g_bus, &gpu);
+
+
+   /* result = zoni_gpu_init(&gpu, &gpu_config);
+    if (result != ZONI_SUCCESS) {
+        zoni_log(ZONI_LOG_ERROR, "GPU initialization failed");
+        zoni_bios_shutdown(&bios);
+        zoni_cpu_shutdown(&cpu);
+        zoni_memory_shutdown(&memory);
+        return 1;
+    }*/
     
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);
