@@ -257,9 +257,11 @@ zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) 
         u32 offset = address - reg->base_address;
         // MIPS R3000A uses little-endian byte order
         *value = zoni_read_le32(&reg->data[offset]);
+        zoni_log(ZONI_LOG_DEBUG, "Memory read32: 0x%08X = 0x%08X (RAM offset: 0x%08X)", address, *value, offset);
     } else {
         // Hardware register read - use hardware module
         *value = zoni_hw_read32(memory->hardware, address);
+        zoni_log(ZONI_LOG_DEBUG, "Memory read32: 0x%08X = 0x%08X (Hardware)", address, *value);
     }
     
     memory->read_count++;
@@ -358,6 +360,7 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
         u32 offset = address - reg->base_address;
         // MIPS R3000A uses little-endian byte order
         zoni_write_le32(&reg->data[offset], value);
+        zoni_log(ZONI_LOG_DEBUG, "Memory write32: 0x%08X = 0x%08X (RAM offset: 0x%08X)", address, value, offset);
     } else {
         // Hardware register write - use hardware module
         zoni_error_t hw_result = zoni_hw_write32(memory->hardware, address, value);
@@ -367,6 +370,7 @@ zoni_error_t zoni_memory_write32(zoni_memory_t* memory, u32 address, u32 value) 
             #endif
             return hw_result;
         }
+        zoni_log(ZONI_LOG_DEBUG, "Memory write32: 0x%08X = 0x%08X (Hardware)", address, value);
     }
     
     memory->write_count++;

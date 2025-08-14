@@ -294,9 +294,8 @@ zoni_error_t zoni_bios_setup_boot_state(zoni_bios_t* bios, zoni_cpu_regs_t* cpu)
         // Status Register: Enable COP0, BEV=1 (Bootstrap Exception Vectors), TS=1 (TLB Shutdown)
         // Set cache status bits that BIOS expects for cache initialization
         // Use the same Status Register value as the reference implementation
-        // 0x10900000: COP0 enabled | BEV = 1 | TS = 1
-        // Add cache status bits that BIOS expects after cache initialization
-        cpu->cp0.n.SR = 0x10900000;  // COP0 enabled | BEV = 1 | TS = 1
+        // 0x10600000: COP0 enabled | BEV = 1 | TS = 1
+        cpu->cp0.n.SR = 0x10600000;  // COP0 enabled | BEV = 1 | TS = 1
         cpu->cp0.n.PRid = 0x00000002; // PRevID = Revision ID (R3000A)
         
         zoni_log(ZONI_LOG_INFO, "Real BIOS boot state configured");
@@ -316,8 +315,8 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
         return ZONI_SUCCESS;
     }
     
-    // Execute BIOS with development timeout and detailed logging
-            const int max_cycles = 200000;  // 200K cycles to see significant BIOS progress
+    // Execute BIOS with reduced timeout for early debugging
+    const int max_cycles = 100000;  // 100K cycles for early debugging
     int cycles = 0;
     u32 last_pc = 0;
     int same_pc_count = 0;

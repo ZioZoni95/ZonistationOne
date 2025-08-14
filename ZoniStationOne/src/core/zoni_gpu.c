@@ -65,8 +65,8 @@ zoni_error_t zoni_gpu_init(zoni_gpu_t* gpu, const zoni_gpu_config_t* config) {
     gpu->frame_interval = (config->mode == ZONI_GPU_MODE_NTSC) ? 16667 : 20000; // 60Hz vs 50Hz
     gpu->last_frame_time = SDL_GetPerformanceCounter();
     
-    // Initialize GPU registers
-    gpu->status = ZONI_GPU_STATUS_READY | ZONI_GPU_STATUS_DMA_READY;
+    // Initialize GPU registers - use same value as reference implementation
+    gpu->status = 0x10802000;  // Same as reference implementation
     gpu->display_width = 640;
     gpu->display_height = 480;
     
