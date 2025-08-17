@@ -16,6 +16,7 @@ typedef struct zoni_hardware_s zoni_hardware_t;
 typedef struct zoni_gpu_s zoni_gpu_t;
 typedef struct zoni_spu_s zoni_spu_t;
 typedef struct zoni_cdrom_s zoni_cdrom_t;
+typedef struct zoni_timer_system_s zoni_timer_system_t;
 
 // PlayStation memory map
 #define PSX_MEMORY_REGIONS 9
@@ -52,6 +53,7 @@ typedef struct zoni_memory_s {
     zoni_gpu_t* gpu;            // GPU system (optional)
     struct zoni_spu_s* spu;     // SPU system (optional)
     struct zoni_cdrom_s* cdrom; // CD-ROM system (optional)
+    struct zoni_timer_system_s* timer_system; // Timer system (optional)
     
     // Memory access callbacks
     zoni_error_t (*read8_callback)(u32 address, u8* value);

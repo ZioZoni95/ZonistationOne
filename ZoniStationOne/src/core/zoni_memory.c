@@ -6,6 +6,7 @@
  #include "zoni_memory.h"
  #include "zoni_hardware.h"
  #include "zoni_endian.h"
+ #include "zoni_timer.h"
  #include <string.h>
  
  // ----------modifiche panda--------
@@ -82,6 +83,9 @@
      
      // Connect hardware to memory system
      memory->hardware->memory = memory;
+     
+     // Connect timer system to memory
+     memory->timer_system = zoni_timer_get_system();
      
      zoni_log(ZONI_LOG_INFO, "Memory system initialized successfully");
      return ZONI_SUCCESS;
@@ -188,23 +192,50 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
      
-     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
-     if (!reg || !reg->readable) {
-         zoni_log(ZONI_LOG_WARNING, "Invalid read8 at address 0x%08X", address);
-         *value = 0;
-         return ZONI_ERROR_INVALID_PARAMETER;
-     }
+     // Mask virtual → physical (29-bit) - following PCSX ReARMed approach
+     u32 addr_phys = address & 0x1FFFFFFF;
      
-     if (reg->data) {
-         u32 offset = address - reg->base_address;
-         *value = reg->data[offset];
-     } else {
-         // Hardware register read - use hardware module
-         *value = zoni_hw_read8(memory->hardware, address);
+     // 1️⃣ I/O Registers (Scratchpad)
+     if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
+         *value = zoni_hw_read8(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
      }
-     
-     memory->read_count++;
-     return ZONI_SUCCESS;
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         *value = zoni_hw_read8(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         *value = zoni_hw_read8(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         *value = memory->ram[ram_offset];
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 3️⃣ BIOS
+     if (addr_phys >= 0x1FC00000 && addr_phys < 0x1FC80000) {
+         *value = memory->bios[addr_phys - 0x1FC00000];
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 4️⃣ Default
+     *value = 0;
+     zoni_log(ZONI_LOG_WARNING, "Invalid read8 at address 0x%08X (phys 0x%08X)", address, addr_phys);
+     return ZONI_ERROR_INVALID_PARAMETER;
  }
  
  zoni_error_t zoni_memory_read16(zoni_memory_t* memory, u32 address, u16* value) {
@@ -219,24 +250,50 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
      
-     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
-     if (!reg || !reg->readable) {
-         zoni_log(ZONI_LOG_WARNING, "Invalid read16 at address 0x%08X", address);
-         *value = 0;
-         return ZONI_ERROR_INVALID_PARAMETER;
-     }
+     // Mask virtual → physical (29-bit) - following PCSX ReARMed approach
+     u32 addr_phys = address & 0x1FFFFFFF;
      
-     if (reg->data) {
-         u32 offset = address - reg->base_address;
-         // MIPS R3000A uses little-endian byte order
-         *value = zoni_read_le16(&reg->data[offset]);
-     } else {
-         // Hardware register read - use hardware module
-         *value = zoni_hw_read16(memory->hardware, address);
+     // 1️⃣ I/O Registers (Scratchpad)
+     if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
+         *value = zoni_hw_read16(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
      }
-     
-     memory->read_count++;
-     return ZONI_SUCCESS;
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         *value = zoni_hw_read16(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         *value = zoni_hw_read16(memory->hardware, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         *value = zoni_read_le16(&memory->ram[ram_offset]);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 3️⃣ BIOS
+     if (addr_phys >= 0x1FC00000 && addr_phys < 0x1FC80000) {
+         *value = zoni_read_le16(&memory->bios[addr_phys - 0x1FC00000]);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 4️⃣ Default
+     *value = 0;
+     zoni_log(ZONI_LOG_WARNING, "Invalid read16 at address 0x%08X (phys 0x%08X)", address, addr_phys);
+     return ZONI_ERROR_INVALID_PARAMETER;
  }
  
  zoni_error_t zoni_memory_read32(zoni_memory_t* memory, u32 address, u32* value) {
@@ -288,28 +345,30 @@
  
      // 1️⃣ I/O Registers
      if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
-         *value = zoni_bus_read32(&g_bus, addr_phys);
+         *value = zoni_hw_read32(memory->hardware, addr_phys);
          memory->read_count++;
          return ZONI_SUCCESS;
      }
 
      // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
      if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
-         *value = zoni_bus_read32(&g_bus, addr_phys);
+         *value = zoni_hw_read32(memory->hardware, addr_phys);
          memory->read_count++;
          return ZONI_SUCCESS;
      }
 
      // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
      if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
-         *value = zoni_bus_read32(&g_bus, addr_phys);
+         *value = zoni_hw_read32(memory->hardware, addr_phys);
          memory->read_count++;
          return ZONI_SUCCESS;
      }
  
-     // 2️⃣ RAM (2MB)
-     if (addr_phys < 0x00200000) {
-         *value = zoni_read_le32(&memory->ram[addr_phys & 0x001FFFFC]);
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         *value = zoni_read_le32(&memory->ram[ram_offset]);
          memory->read_count++;
          return ZONI_SUCCESS;
      }
@@ -333,29 +392,41 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
      
-     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
-     if (!reg || !reg->writable) {
-         #ifdef ZONI_DEBUG
-         zoni_log(ZONI_LOG_WARNING, "Invalid write8 at address 0x%08X", address);
-         #endif
-         return ZONI_ERROR_INVALID_PARAMETER;
-     }
+     // Mask virtual → physical (29-bit) - following PCSX ReARMed approach
+     u32 addr_phys = address & 0x1FFFFFFF;
      
-     if (reg->data) {
-         u32 offset = address - reg->base_address;
-         reg->data[offset] = value;
-     } else {
-         // Hardware register write - use hardware module
-         zoni_error_t hw_result = zoni_hw_write8(memory->hardware, address, value);
-         if (hw_result != ZONI_SUCCESS) {
-             #ifdef ZONI_DEBUG
-             zoni_log(ZONI_LOG_WARNING, "Hardware write8 failed: 0x%08X = 0x%02X", address, value);
-             #endif
-             return hw_result;
-         }
+     // 1️⃣ I/O Registers (Scratchpad)
+     if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
+         zoni_hw_write8(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
      }
-     
-     memory->write_count++;
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         zoni_hw_write8(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         zoni_hw_write8(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         memory->ram[ram_offset] = value;
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 3️⃣ BIOS non scrivibile → ignora
+     zoni_log(ZONI_LOG_DEBUG, "MEM WRITE8 ignored (BIOS) [0x%08X] <- 0x%02X", addr_phys, value);
      return ZONI_SUCCESS;
  }
  
@@ -370,30 +441,41 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
      
-     const zoni_memory_region_t* reg = zoni_memory_find_region(memory, address);
-     if (!reg || !reg->writable) {
-         #ifdef ZONI_DEBUG
-         zoni_log(ZONI_LOG_WARNING, "Invalid write16 at address 0x%08X", address);
-         #endif
-         return ZONI_ERROR_INVALID_PARAMETER;
-     }
+     // Mask virtual → physical (29-bit) - following PCSX ReARMed approach
+     u32 addr_phys = address & 0x1FFFFFFF;
      
-     if (reg->data) {
-         u32 offset = address - reg->base_address;
-         // MIPS R3000A uses little-endian byte order
-         zoni_write_le16(&reg->data[offset], value);
-     } else {
-         // Hardware register write - use hardware module
-         zoni_error_t hw_result = zoni_hw_write16(memory->hardware, address, value);
-         if (hw_result != ZONI_SUCCESS) {
-             #ifdef ZONI_DEBUG
-             zoni_log(ZONI_LOG_WARNING, "Hardware write16 failed: 0x%08X = 0x%04X", address, value);
-             #endif
-             return hw_result;
-         }
+     // 1️⃣ I/O Registers (Scratchpad)
+     if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
+         zoni_hw_write16(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
      }
-     
-     memory->write_count++;
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         zoni_hw_write16(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         zoni_hw_write16(memory->hardware, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         zoni_write_le16(&memory->ram[ram_offset], value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+ 
+     // 3️⃣ BIOS non scrivibile → ignora
+     zoni_log(ZONI_LOG_DEBUG, "MEM WRITE16 ignored (BIOS) [0x%08X] <- 0x%04X", addr_phys, value);
      return ZONI_SUCCESS;
  }
  
@@ -440,7 +522,7 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
  
-     // Mask virtual → physical (29-bit)
+     // Mask virtual → physical (29-bit) - following PCSX ReARMed approach
      u32 addr_phys = address & 0x1FFFFFFF;
  
      // Check alignment
@@ -449,30 +531,32 @@
          return ZONI_ERROR_INVALID_PARAMETER;
      }
  
-     // 1️⃣ I/O Registers
+     // 1️⃣ I/O Registers (Scratchpad)
      if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
-         zoni_bus_write32(&g_bus, addr_phys, value);
+         zoni_hw_write32(memory->hardware, addr_phys, value);
          memory->write_count++;
          return ZONI_SUCCESS;
      }
 
      // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
      if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
-         zoni_bus_write32(&g_bus, addr_phys, value);
+         zoni_hw_write32(memory->hardware, addr_phys, value);
          memory->write_count++;
          return ZONI_SUCCESS;
      }
 
      // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
      if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
-         zoni_bus_write32(&g_bus, addr_phys, value);
+         zoni_hw_write32(memory->hardware, addr_phys, value);
          memory->write_count++;
          return ZONI_SUCCESS;
      }
  
-     // 2️⃣ RAM (2MB)
-     if (addr_phys < 0x00200000) {
-         zoni_write_le32(&memory->ram[addr_phys & 0x001FFFFC], value);
+     // 2️⃣ RAM (8MB) - following PCSX ReARMed's psxM mapping
+     if (addr_phys < 0x00800000) {
+         // Use the same masking as PCSX ReARMed: & 0x1FFFFF for 2MB RAM
+         u32 ram_offset = addr_phys & 0x1FFFFF;
+         zoni_write_le32(&memory->ram[ram_offset], value);
          memory->write_count++;
          return ZONI_SUCCESS;
      }

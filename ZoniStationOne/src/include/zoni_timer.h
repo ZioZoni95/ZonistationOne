@@ -12,12 +12,24 @@
 #define ZONI_TIMER_IRQ_1 0x20  // Timer 1 interrupt  
 #define ZONI_TIMER_IRQ_2 0x40  // Timer 2 interrupt
 
-// Timer mode bits
+// Timer mode bits (following PCSX ReARMed)
 #define ZONI_TIMER_MODE_IRQ_ENABLE 0x1000
 #define ZONI_TIMER_MODE_IRQ_TARGET 0x0800
 #define ZONI_TIMER_MODE_IRQ_REPEAT 0x0400
 #define ZONI_TIMER_MODE_IRQ_PULSE  0x0200
 #define ZONI_TIMER_MODE_CLOCK_SRC  0x0100
+
+// Additional timer mode bits for PCSX ReARMed compatibility
+#define ZONI_TIMER_MODE_SYNC_ENABLE  0x0001
+#define ZONI_TIMER_MODE_BLANK_PAUSE  0x0002
+#define ZONI_TIMER_MODE_COUNT_TARGET 0x0008
+#define ZONI_TIMER_MODE_IRQ_OVERFLOW 0x0020
+#define ZONI_TIMER_MODE_IRQ_REGEN    0x0040
+#define ZONI_TIMER_MODE_PIXEL_CLOCK  0x0100
+#define ZONI_TIMER_MODE_HSYNC_CLOCK  0x0100
+#define ZONI_TIMER_MODE_ONE_EIGHTH   0x0200
+#define ZONI_TIMER_MODE_COUNT_EQ_TARGET 0x0800
+#define ZONI_TIMER_MODE_OVERFLOW     0x1000
 
 // Timer structure (following PCSX ReARMed structure)
 typedef struct {
@@ -25,14 +37,14 @@ typedef struct {
     u16 target;         // Timer target value
     u32 rate;           // Timer rate (cycles per increment)
     u32 irq;            // Interrupt bit for this timer
-    u32 counter_state;  // Current counter state
+    u32 counter_state;  // Current counter state (0=overflow, 1=target)
     u32 irq_state;      // Interrupt state
     u32 cycle;          // Cycle counter
     u32 cycle_start;    // Cycle when timer started
 } zoni_timer_t;
 
 // Timer system structure
-typedef struct {
+typedef struct zoni_timer_system_s {
     zoni_timer_t timers[ZONI_TIMER_COUNT];
     u32 h_sync_count;   // Horizontal sync counter
     u32 frame_counter;   // Frame counter
@@ -56,5 +68,8 @@ void zoni_timer_write_target(zoni_timer_system_t* timer_system, u32 index, u32 v
 // Interrupt handling
 bool zoni_timer_check_interrupts(zoni_timer_system_t* timer_system);
 u32 zoni_timer_get_interrupt_status(zoni_timer_system_t* timer_system);
+
+// Global timer system access
+zoni_timer_system_t* zoni_timer_get_system(void);
 
 #endif // ZONI_TIMER_H

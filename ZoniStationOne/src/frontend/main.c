@@ -13,7 +13,7 @@
 
 //-------------mod panda-----------
 #include "zoni_bus.h"
-zoni_bus_t g_bus;
+// g_bus is defined in zoni_bus.c
 
 int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
@@ -82,17 +82,15 @@ int main(int argc, char* argv[]) {
     }
 
     // Initialize I/O Bus (GPU, SPU, CD-ROM can be added later)
-    zoni_bus_init(&g_bus, &gpu);
-
-
-   /* result = zoni_gpu_init(&gpu, &gpu_config);
+    result = zoni_bus_init(&g_bus);
     if (result != ZONI_SUCCESS) {
-        zoni_log(ZONI_LOG_ERROR, "GPU initialization failed");
+        zoni_log(ZONI_LOG_ERROR, "Bus initialization failed");
+        zoni_gpu_shutdown(&gpu);
         zoni_bios_shutdown(&bios);
         zoni_cpu_shutdown(&cpu);
         zoni_memory_shutdown(&memory);
         return 1;
-    }*/
+    }
     
     // Connect CPU to memory
     zoni_cpu_set_memory(&memory);

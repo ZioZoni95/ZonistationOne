@@ -1,7 +1,7 @@
 #include "zoni_bus.h"
 #include "zoni_gpu.h"
 #include "zoni_timer.h"
-#include "zoni_log.h"
+#include "zoni_common.h"
 
 // Global bus instance
 zoni_bus_t g_bus;
@@ -11,8 +11,17 @@ zoni_error_t zoni_bus_init(zoni_bus_t* bus) {
         return ZONI_ERROR_INVALID_PARAMETER;
     }
 
-    // Initialize GPU
-    zoni_error_t gpu_result = zoni_gpu_init(&bus->gpu);
+    // Initialize GPU with default configuration
+    zoni_gpu_config_t gpu_config = {
+        .mode = ZONI_GPU_MODE_NTSC,
+        .enable_display = true,
+        .enable_vblank = true,
+        .frame_rate = 60,
+        .display_width = 640,
+        .display_height = 480
+    };
+    
+    zoni_error_t gpu_result = zoni_gpu_init(&bus->gpu, &gpu_config);
     if (gpu_result != ZONI_SUCCESS) {
         return gpu_result;
     }
@@ -44,10 +53,10 @@ u32 zoni_bus_read32(zoni_bus_t* bus, u32 addr) {
     switch (addr) {
         // --- GPU ---
         case 0x1F801810:  // GP0 read
-            value = zoni_gpu_read_gp0(bus->gpu);
+            value = zoni_gpu_read_gp0(&bus->gpu);
             break;
         case 0x1F801814:  // GP1 status
-            value = zoni_gpu_read_gp1(bus->gpu);  // Return actual GPU status
+            value = zoni_gpu_read_gp1(&bus->gpu);  // Return actual GPU status
             break;
 
         // --- Timer System (0x1F801100-0x1F80112F) ---
@@ -147,10 +156,10 @@ void zoni_bus_write32(zoni_bus_t* bus, u32 addr, u32 value) {
     switch (addr) {
         // --- GPU ---
         case 0x1F801810:  // GP0
-            zoni_gpu_write_gp0(bus->gpu, value);
+            zoni_gpu_write_gp0(&bus->gpu, value);
             break;
         case 0x1F801814:  // GP1
-            zoni_gpu_write_gp1(bus->gpu, value);
+            zoni_gpu_write_gp1(&bus->gpu, value);
             break;
 
         // --- Timer System (0x1F801100-0x1F80112F) ---

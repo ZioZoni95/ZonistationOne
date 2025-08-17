@@ -4,11 +4,13 @@
  */
 
 #include "zoni_bios.h"
-#include "zoni_memory.h"
 #include "zoni_cpu.h"
+#include "zoni_memory.h"
 #include "zoni_hardware.h"
-#include <stdio.h>
+#include "zoni_timer.h"
+#include "zoni_common.h"
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // BIOS file validation
@@ -345,6 +347,15 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
         // Update DMA controller every few cycles
         if (cycles % 10 == 0 && memory->hardware) {
             zoni_dma_update(memory->hardware);
+        }
+        
+        // Update timers every cycle
+        zoni_timer_update(zoni_timer_get_system(), cycles);
+        
+        // Check for timer interrupts
+        if (zoni_timer_check_interrupts(zoni_timer_get_system())) {
+            zoni_log(ZONI_LOG_INFO, "Timer interrupt triggered at cycle %d", cycles);
+            // For now, we'll continue execution to see if this helps the BIOS loop
         }
         
         cycles++;
