@@ -13,7 +13,7 @@
 void gte_init(Gte* gte) {
     LOG_GTE_INFO("GTE initialized");
     
-    LOG_DEBUG("Initializing GTE...\n");
+    LOG_GTE_DEBUG("Initializing GTE...\n");
     
     // Clear all data registers
     memset(gte->data, 0, sizeof(gte->data));
@@ -25,14 +25,14 @@ void gte_init(Gte* gte) {
     gte->busy = false;
     gte->cycles_remaining = 0;
     
-    LOG_DEBUG("GTE Initialized\n");
+    LOG_GTE_DEBUG("GTE Initialized\n");
 }
 
 // --- GTE Register Access ---
 
 int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
     if (reg >= 32) {
-        LOG_ERROR("GTE: Invalid data register read: %u\n", reg);
+        LOG_GTE_ERROR("GTE: Invalid data register read: %u\n", reg);
         return 0;
     }
     return gte->data[reg];
@@ -40,7 +40,7 @@ int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
 
 void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) {
-        LOG_ERROR("GTE: Invalid data register write: %u = 0x%08x\n", reg, value);
+        LOG_GTE_ERROR("GTE: Invalid data register write: %u = 0x%08x\n", reg, value);
         return;
     }
     gte->data[reg] = value;
@@ -48,7 +48,7 @@ void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
 
 int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
     if (reg >= 32) {
-        LOG_ERROR("GTE: Invalid control register read: %u\n", reg);
+        LOG_GTE_ERROR("GTE: Invalid control register read: %u\n", reg);
         return 0;
     }
     return gte->control[reg];
@@ -56,7 +56,7 @@ int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
 
 void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) {
-        LOG_ERROR("GTE: Invalid control register write: %u = 0x%08x\n", reg, value);
+        LOG_GTE_ERROR("GTE: Invalid control register write: %u = 0x%08x\n", reg, value);
         return;
     }
     gte->control[reg] = value;
@@ -123,7 +123,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             break;
             
         default:
-            LOG_WARN("GTE: Unhandled instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
+            LOG_GTE_WARN("GTE: Unhandled instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
             break;
     }
     
@@ -134,21 +134,21 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
 
 void gte_rtps(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: RTPS (Perspective Transformation Single Point) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: RTPS (Perspective Transformation Single Point) - TODO: Implement\n");
     // TODO: Implement perspective transformation for single point
     // This transforms a 3D point to 2D screen coordinates
 }
 
 void gte_rtpt(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: RTPT (Perspective Transformation Triangle) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: RTPT (Perspective Transformation Triangle) - TODO: Implement\n");
     // TODO: Implement perspective transformation for triangle
     // This transforms three 3D points to 2D screen coordinates
 }
 
 void gte_nclip(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: NCLIP (Normal Clipping) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: NCLIP (Normal Clipping) - TODO: Implement\n");
     // TODO: Implement normal clipping
     // This calculates the cross product of two vectors for clipping
 }
@@ -156,43 +156,43 @@ void gte_nclip(Gte* gte) {
 void gte_mvmva(Gte* gte, uint32_t instruction) {
     (void)gte;
     (void)instruction;
-    LOG_DEBUG("GTE: MVMVA (Matrix-Vector Multiplication) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: MVMVA (Matrix-Vector Multiplication) - TODO: Implement\n");
     // TODO: Implement matrix-vector multiplication
     // This performs various matrix operations based on instruction bits
 }
 
 void gte_sqr(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: SQR (Square Root) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: SQR (Square Root) - TODO: Implement\n");
     // TODO: Implement square root calculation
 }
 
 void gte_op(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: OP (Outer Product) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: OP (Outer Product) - TODO: Implement\n");
     // TODO: Implement outer product calculation
 }
 
 void gte_dcpl(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: DCPL (Depth Cueing) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: DCPL (Depth Cueing) - TODO: Implement\n");
     // TODO: Implement depth cueing
 }
 
 void gte_intpl(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: INTPL (Interpolation) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: INTPL (Interpolation) - TODO: Implement\n");
     // TODO: Implement interpolation
 }
 
 void gte_avsz3(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: AVSZ3 (Average Z 3 points) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: AVSZ3 (Average Z 3 points) - TODO: Implement\n");
     // TODO: Implement average Z calculation for 3 points
 }
 
 void gte_avsz4(Gte* gte) {
     (void)gte;
-    LOG_DEBUG("GTE: AVSZ4 (Average Z 4 points) - TODO: Implement\n");
+    LOG_GTE_DEBUG("GTE: AVSZ4 (Average Z 4 points) - TODO: Implement\n");
     // TODO: Implement average Z calculation for 4 points
 } 

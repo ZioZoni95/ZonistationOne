@@ -12,7 +12,7 @@
 #include "interconnect.h"
 // vram.h is implicitly included via gpu.h
 
-// Logging: Only use LOG_ERROR/LOG_INFO as per new log system. No per-draw logs.
+// Logging: Only use LOG_ERROR/LOG_GPU_INFO as per new log system. No per-draw logs.
 
 // Example: Replace LOG_GPU_INFO or LOG_GPU_DEBUG for frequent register accesses and commands with LOG_GPU_TRACE or wrap in a higher debug level check.
 #ifdef LOG_GPU_TRACE
@@ -69,7 +69,7 @@ static void clear_gp0_command_buffer(Gpu* gpu) {
  */
 static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_command_buffer.count >= MAX_GPU_COMMAND_WORDS) {
-        LOG_ERROR("FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x\n", gpu->gp0_current_opcode);
+        LOG_GPU_ERROR("FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x", gpu->gp0_current_opcode);
         // Consider triggering a CPU exception or other error handling
         exit(EXIT_FAILURE); // Exit for now, as this indicates a major issue
     }
@@ -81,7 +81,7 @@ static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
 
 /** GP1(0x00): Soft Reset */
 static void gp1_reset(Gpu* gpu, uint32_t value) {
-    LOG_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
+    LOG_GPU_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
     (void)value; // value is unused for this command
     // Only reset GPU state, do NOT clear VRAM
     gpu_soft_reset(gpu);
@@ -89,7 +89,7 @@ static void gp1_reset(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x01): Reset Command Buffer */
 static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
-    LOG_INFO("GPU: Reset Command Buffer (GP1 Cmd 0x01)\n");
+    LOG_GPU_INFO("GPU: Reset Command Buffer (GP1 Cmd 0x01)\n");
     (void)value; // value is unused for this command
     clear_gp0_command_buffer(gpu);
     gpu->gp0_words_remaining = 0;
@@ -101,7 +101,7 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x02): Acknowledge GPU Interrupt */
 static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
-    LOG_INFO("GPU: Acknowledge IRQ (GP1 Cmd 0x02)\n");
+    LOG_GPU_INFO("GPU: Acknowledge IRQ (GP1 Cmd 0x02)\n");
      (void)value; // value is unused for this command
      gpu->interrupt = false; // Clear the interrupt flag (STAT[24])
 }
@@ -110,7 +110,7 @@ static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
 static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     // Bit 0: 0 = Enable Display, 1 = Disable Display
     gpu->display_disabled = (value & 1);
-    LOG_INFO("GPU: Display Enable = %s (GP1 Cmd 0x03)\n", gpu->display_disabled ? "Disabled" : "Enabled");
+    LOG_GPU_INFO("GPU: Display Enable = %s (GP1 Cmd 0x03)\n", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
 /** GP1(0x04): DMA Direction / Request settings */
@@ -122,7 +122,7 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
         case 2: gpu->dma_setting = GPU_DMA_CpuToGp0; break;
         case 3: gpu->dma_setting = GPU_DMA_VRamToCpu; break;
     }
-    LOG_INFO("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
+    LOG_GPU_INFO("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
 }
 
 /** GP1(0x05): Start of Display area in VRAM */
@@ -131,7 +131,7 @@ static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
     // Bits 10-18: Y start coordinate in VRAM (512 height)
     gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
-    LOG_INFO("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)\n",
+    LOG_GPU_INFO("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)\n",
         gpu->display_vram_x_start, gpu->display_vram_y_start);
 }
 
@@ -141,7 +141,7 @@ static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
     // Bits 12-23: Hsync End coordinate (dotclock units)
     gpu->display_horiz_start = (uint16_t)(value & 0xFFF);
     gpu->display_horiz_end = (uint16_t)((value >> 12) & 0xFFF);
-    LOG_INFO("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)\n",
+    LOG_GPU_INFO("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)\n",
         gpu->display_horiz_start, gpu->display_horiz_end);
 }
 
@@ -151,7 +151,7 @@ static void gp1_display_vertical_range(Gpu* gpu, uint32_t value) {
     // Bits 10-19: Vsync End coordinate (scanline units)
     gpu->display_line_start = (uint16_t)(value & 0x3FF);
     gpu->display_line_end = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_INFO("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)\n",
+    LOG_GPU_INFO("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)\n",
         gpu->display_line_start, gpu->display_line_end);
 }
 
@@ -171,9 +171,9 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     gpu->interlaced = ((value >> 5) & 1);
     // Bit 7: Unsupported "Reverseflag"
     if ((value >> 7) & 1) {
-        LOG_WARN("Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
+        LOG_GPU_WARN("Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
     }
-    LOG_INFO("GPU: Display Mode set (GP1 Cmd 0x08)\n");
+    LOG_GPU_INFO("GPU: Display Mode set (GP1 Cmd 0x08)\n");
 }
 
 
@@ -186,14 +186,14 @@ static void gp0_nop(Gpu* gpu) {
 
 /** GP0(0x01): Clear Cache (Texture Cache Invalidation) */
 static void gp0_clear_cache(Gpu* gpu) {
-    LOG_INFO("GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)\n");
+    LOG_GPU_INFO("GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)\n");
     (void)gpu;
 }
 
 /** GP0(0x02): Fill Rectangle in VRAM */
 static void gp0_fill_rectangle(Gpu* gpu) {
     // Minimal stub: Pretend to fill, do nothing, but don't hang
-    LOG_INFO("GP0(0x02): Fill Rectangle (Stubbed, no-op)\n");
+    LOG_GPU_INFO("GP0(0x02): Fill Rectangle (Stubbed, no-op)\n");
     (void)gpu;
 }
 
@@ -207,7 +207,7 @@ static void gp0_draw_mode(Gpu* gpu) {
         case 0: gpu->texture_depth = T4Bit; break;
         case 1: gpu->texture_depth = T8Bit; break;
         case 2: gpu->texture_depth = T15Bit; break;
-        default: LOG_WARN("Warn: GP0(E1) Unknown texture depth %d\n", (value >> 7) & 3); break;
+        default: LOG_GPU_WARN("Warn: GP0(E1) Unknown texture depth %d\n", (value >> 7) & 3); break;
     }
     gpu->dithering = ((value >> 9) & 1);
     gpu->draw_to_display = ((value >> 10) & 1);
@@ -347,11 +347,11 @@ static void gp0_image_load(Gpu* gpu) {
     uint32_t image_size_pixels_rounded = (image_size_pixels + 1) & ~1; // Round up for pairs
     uint32_t words_to_load = image_size_pixels_rounded / 2;            // Each word contains 2 pixels
 
-    LOG_INFO("GP0(0xA0): Setup Image Load to VRAM (%u,%u) Size=(%ux%u) -> Expecting %u words\n",
+    LOG_GPU_INFO("GP0(0xA0): Setup Image Load to VRAM (%u,%u) Size=(%ux%u) -> Expecting %u words\n",
            gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, words_to_load);
 
     if (words_to_load == 0 || ((uint64_t)words_to_load * 4) > VRAM_SIZE) { // Basic sanity check
-        LOG_WARN("Warning: Invalid image load size %u words requested.\n", words_to_load);
+        LOG_GPU_WARN("Warning: Invalid image load size %u words requested.\n", words_to_load);
         gpu->gp0_words_remaining = 0; gpu->gp0_mode = GP0_MODE_COMMAND; return; }
 
     gpu->gp0_words_remaining = words_to_load;
@@ -362,7 +362,7 @@ static void gp0_image_load(Gpu* gpu) {
 /** GP0(0xC0): Copy Rectangle (VRAM to CPU/DMA) */
 static void gp0_image_store(Gpu* gpu) {
     // Minimal stub: Pretend to start a VRAM-to-CPU transfer
-    LOG_INFO("GP0(0xC0): Image Store (Stubbed, no VRAM read)\n");
+    LOG_GPU_INFO("GP0(0xC0): Image Store (Stubbed, no VRAM read)\n");
     (void)gpu;
 }
 
@@ -375,7 +375,7 @@ static void gp0_image_store(Gpu* gpu) {
  */
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     LOG_GPU_INFO("GPU full initialization (with VRAM)");
-    LOG_INFO("GPU Initializing (full)...\n");
+    LOG_GPU_INFO("GPU Initializing (full)...\n");
     vram_init(&gpu->vram); // Init VRAM only on full reset
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
@@ -401,7 +401,7 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     gpu->inter = inter;
-    LOG_INFO("GPU Initialized (State reset, VRAM initialized).\n");
+    LOG_GPU_INFO("GPU Initialized (State reset, VRAM initialized).\n");
 }
 
 /**
@@ -410,7 +410,7 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
  */
 void gpu_soft_reset(Gpu* gpu) {
     LOG_GPU_INFO("GPU soft reset (no VRAM)");
-    LOG_INFO("GPU Soft Reset (no VRAM clear)...\n");
+    LOG_GPU_INFO("GPU Soft Reset (no VRAM clear)...\n");
     // All state reset EXCEPT VRAM
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
     gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
@@ -435,13 +435,13 @@ void gpu_soft_reset(Gpu* gpu) {
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     // gpu->inter remains unchanged
-    LOG_INFO("GPU Soft Reset complete (VRAM preserved).\n");
+    LOG_GPU_INFO("GPU Soft Reset complete (VRAM preserved).\n");
 }
 
 /** Processes commands/data sent to GP0 port */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
     if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+        LOG_GPU_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     }
     // Handle IMAGE_LOAD state first
     if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD) {
@@ -537,7 +537,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
 /** Processes commands sent to GP1 port */
 void gpu_gp1(Gpu* gpu, uint32_t command) {
     if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+        LOG_GPU_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     }
     uint32_t opcode = (command >> 24) & 0xFF;
     switch (opcode) {
@@ -615,5 +615,5 @@ void gpu_trigger_vblank_irq(Gpu* gpu) {
     // (You may want to set a vblank flag or call a callback here if needed for rendering.)
     // Example: gpu->in_vblank = true;
     // (No call to interconnect_request_irq here)
-    LOG_INFO("[GPU] VBlank event (no IRQ0 requested, handled by Timer0)");
+    LOG_GPU_INFO("[GPU] VBlank event (no IRQ0 requested, handled by Timer0)");
 }
