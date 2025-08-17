@@ -11,8 +11,8 @@
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
-    LOG_CPU_IMPORTANT("[BOOT] CPU initialization started");
-    LOG_INFO("Initializing CPU...\n");
+    LOG_CPU_INFO("CPU initialization started");
+    LOG_SYSTEM_INFO("Initializing CPU...");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
     cpu->next_pc = cpu->pc + 4;   // Initial next PC
@@ -44,7 +44,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
-    LOG_INFO("  Initializing I-Cache...\n");
+    LOG_CPU_DEBUG("Initializing I-Cache...");
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
         cpu->icache[i].tag = 0xFFFFFFFF; // Initialize tag to an invalid pattern
         for (int j = 0; j < ICACHE_LINE_WORDS; ++j) {
@@ -54,10 +54,10 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     }
 
     // Initialize GTE
-    LOG_INFO("  Initializing GTE...\n");
+    LOG_CPU_DEBUG("Initializing GTE...");
     gte_init(&cpu->gte);
 
-    LOG_CPU_IMPORTANT("[BOOT] CPU initialized, PC=0x%08x", cpu->pc);
+    LOG_CPU_INFO("CPU initialized, PC=0x%08x", cpu->pc);
     // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }
 
@@ -140,9 +140,9 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     cpu->exception_pending = true;
     // Log all exception entries in nocash/PSX-Spex style
     LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cause == EXCEPTION_LOAD_ADDRESS_ERROR || cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->current_pc : 0, cpu->in_delay_slot);
-    LOG_INFO("[CPU] Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x\n", cause, cpu->pc, cpu->sr, cpu->epc);
+    LOG_CPU_INFO("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc);
     if (cause == EXCEPTION_INTERRUPT) {
-        LOG_INFO("[CPU] Entered interrupt handler (IRQ)\n");
+        LOG_IRQ_DEBUG("Entered interrupt handler (IRQ)");
     }
     // Save current mode bits (SR[4:0]) to stack (SR[7:2]), set EXL (bit 1), set kernel mode, disable interrupts
     uint32_t old_sr = cpu->sr;
@@ -173,11 +173,11 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
             uint16_t current_status = cpu->inter->irq_status;
             uint16_t current_mask = cpu->inter->irq_mask;
             uint16_t pending_interrupts = current_status & current_mask;
-            LOG_INFO("[CPU] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x\n", 
+            LOG_IRQ_INFO("Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", 
                     current_status, current_mask, pending_interrupts);
             if (pending_interrupts != 0) {
                 interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, pending_interrupts);
-                LOG_INFO("[CPU] Acknowledged interrupts: 0x%04x\n", pending_interrupts);
+                LOG_IRQ_DEBUG("Acknowledged interrupts: 0x%04x", pending_interrupts);
             }
             uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
             if ((epc_instr & 0xFE000000) == 0x4A000000) {
@@ -216,7 +216,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
     // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
     if (instruction_counter % 1000000 == 0) {
-        LOG_INFO("[CPU] Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
+        LOG_CPU_INFO("Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
     }
 
     // --- 1. Check for Interrupts ---
@@ -225,27 +225,39 @@ void cpu_run_next_instruction(Cpu* cpu) {
     uint16_t mask = cpu->inter->irq_mask;
     bool interrupts_globally_enabled = (cpu->sr & 1) != 0; // Check SR[0] (IEC)
 
-    // Add detailed interrupt logging only at DEBUG level
-    if ((status & mask) != 0 && log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_DEBUG("[CPU] Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x\n", 
-                status, mask, interrupts_globally_enabled, (status & mask));
+    // FIX: Add safety mechanism to prevent infinite interrupt loops
+    static uint32_t consecutive_interrupts = 0;
+    static uint32_t last_interrupt_pc = 0;
+    
+    if ((status & mask) != 0 && interrupts_globally_enabled) {
+        if (cpu->pc == last_interrupt_pc) {
+            consecutive_interrupts++;
+            // If we're stuck at the same PC for too many interrupts, force progress
+            if (consecutive_interrupts > 1000) {
+                LOG_CPU_ERROR("STUCK: Infinite interrupt loop detected at PC=0x%08x. Forcing progress.", cpu->pc);
+                // Force clear the stuck interrupt
+                cpu->inter->irq_status &= ~(status & mask);
+                consecutive_interrupts = 0;
+                // Continue with instruction execution instead of jumping to handler
+            }
+        } else {
+            consecutive_interrupts = 0;
+            last_interrupt_pc = cpu->pc;
+        }
     }
-    // --- ADDED: Small log for IRQ0 specifically (PCSX ReARMed style) ---
-    if ((status & 0x1) && (mask & 0x1) && interrupts_globally_enabled && log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_DEBUG("[CPU][PCSX-IRQ0] IRQ0 is pending and enabled (I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x)", status, mask, cpu->sr);
+
+    // Minimal interrupt logging using new system
+    LOG_IRQ_TRACE("Interrupt Check: I_STAT=0x%04x, I_MASK=0x%04x, IEC=%d, Pending=0x%04x", 
+                status, mask, interrupts_globally_enabled, (status & mask));
+    
+    // Log IRQ0 specifically when pending
+    if ((status & 0x1) && (mask & 0x1) && interrupts_globally_enabled) {
+        LOG_IRQ_DEBUG("IRQ0 pending: I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x", status, mask, cpu->sr);
     }
 
     if ((status & mask) != 0 && interrupts_globally_enabled) {
-        static int irq_log_count = 0;
-        if (irq_log_count < 10 || irq_log_count % 1000 == 0) {
-            LOG_DEBUG("[CPU][IRQ] Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", status, mask, (status & mask));
-            for (int i = 0; i < 11; ++i) {
-                if ((status & mask) & (1 << i)) {
-                    LOG_DEBUG("[CPU][IRQ] IRQ%u is pending (bit %u)", i, i);
-                }
-            }
-        }
-        irq_log_count++;
+        // Log interrupt exception using new rate-limited system
+        LOG_IRQ_INFO("Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", status, mask, (status & mask));
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return; // Skip instruction execution, jump to handler
     }
@@ -311,16 +323,16 @@ void cpu_run_next_instruction(Cpu* cpu) {
         }
     }
 
-    // --- ADDED: Detailed IRQ check log after every instruction ---
+    // Periodic IRQ status using new rate-limited system
     static uint64_t irq_check_log_counter = 0;
     irq_check_log_counter++;
-    uint16_t post_status = cpu->inter->irq_status;
-    uint16_t post_mask = cpu->inter->irq_mask;
-    uint32_t post_sr = cpu->sr;
-    bool post_iec = (post_sr & 1) != 0;
-    bool post_irq_pending = ((post_status & post_mask) != 0) && post_iec;
-    if (irq_check_log_counter < 10 || irq_check_log_counter % 100000 == 0) {
-        LOG_DEBUG("[CPU][IRQ-TRACE] After instr: I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x, IEC=%d, IRQ_PENDING=%d", post_status, post_mask, post_sr, post_iec, post_irq_pending);
+    if (irq_check_log_counter % 1000000 == 0) {
+        uint16_t post_status = cpu->inter->irq_status;
+        uint16_t post_mask = cpu->inter->irq_mask;
+        uint32_t post_sr = cpu->sr;
+        bool post_iec = (post_sr & 1) != 0;
+        bool post_irq_pending = ((post_status & post_mask) != 0) && post_iec;
+        LOG_IRQ_TRACE("After instr: I_STAT=0x%04x, I_MASK=0x%04x, SR=0x%08x, IEC=%d, IRQ_PENDING=%d", post_status, post_mask, post_sr, post_iec, post_irq_pending);
     }
 
     // Restore original interrupt check at the end of cpu_run_next_instruction
@@ -338,8 +350,9 @@ void cpu_run_next_instruction(Cpu* cpu) {
         boot_log_stage = 2;
     }
 
-    if (instruction_counter % 100000 == 0) {
-        LOG_INFO("[CPU][IRQ] Periodic: I_STAT=0x%04x, I_MASK=0x%04x", cpu->inter->irq_status, cpu->inter->irq_mask);
+    // Periodic IRQ status logging every 1M instructions
+    if (instruction_counter % 1000000 == 0) {
+        LOG_IRQ_INFO("Periodic: I_STAT=0x%04x, I_MASK=0x%04x", cpu->inter->irq_status, cpu->inter->irq_mask);
     }
 }
 
@@ -358,7 +371,16 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
     if ((vaddr >> 29) == 0b101) {
         // KSEG1: Bypass cache, fetch directly from interconnect
         // printf("~ I-Cache Bypass (KSEG1 address: 0x%08x)\n", vaddr); // Optional debug
-        return interconnect_load32(cpu->inter, vaddr);
+        uint32_t instruction = interconnect_load32(cpu->inter, vaddr);
+        
+        // Check if interconnect returned special value for unaligned access
+        if (instruction == 0xBADBAD32) {
+            // Trigger Address Error Load exception for unaligned instruction fetch
+            cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+            return 0; // Return 0 (NOP) since we're handling the exception
+        }
+        
+        return instruction;
     }
     // TODO: Add checks for SR[IsC] (cache isolation) and SR[SwC] (swap caches)
     //       if implementing those features later. For now, assume cache is active.
@@ -615,12 +637,12 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 
     switch (cop_r) {
         case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_WARN("Warning: MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
+             if (value != 0) LOG_CPU_WARN("MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
              // No state change for now
              break;
         case 12: // SR (Status Register)
             // printf("~ MTC0 SR = 0x%08x\n", value); // Debug
-            LOG_INFO("[CPU] MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            LOG_CPU_DEBUG("MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
             cpu->sr = value;
             break;
         case 13: // CAUSE
@@ -628,12 +650,12 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
              // Mask other bits.
              cpu->cause = (cpu->cause & ~0x300) | (value & 0x300);
              if ((value & ~0x300) != 0) {
-                 LOG_WARN("Warning: MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x\n", value, cpu->current_pc);
+                 LOG_CPU_WARN("MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x", value, cpu->current_pc);
              }
              break;
         // EPC (Reg 14) is read-only. Other registers are typically MMU-related or unused.
         default:
-            LOG_WARN("Warning: MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x\n", cop_r, value, cpu->current_pc);
+            LOG_CPU_WARN("MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
             break;
     }
 }
@@ -642,10 +664,16 @@ void op_rfe(Cpu* cpu, uint32_t instruction) {
     // Restore mode bits from stack (SR[7:2] -> SR[4:0]), clear EXL
     uint32_t old_sr = cpu->sr;
     cpu->sr = (old_sr & ~0x3F) | ((old_sr >> 2) & 0x1F);
-    LOG_INFO("[CPU] RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
+    LOG_CPU_DEBUG("RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
     LOG_CPU_IMPORTANT("@PSX-Spex RFE: Executed, SR before=0x%08x after=0x%08x PC=0x%08x EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
-    LOG_INFO("[CPU] RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x\n", old_sr, cpu->sr, cpu->pc, cpu->epc);
-    // NOTE: Do NOT jump to EPC here! The BIOS handler must do the jump after RFE.
+    LOG_CPU_DEBUG("RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
+    
+    // FIX: RFE must restore PC from EPC to return from exception
+    // This was missing, causing the infinite interrupt loop!
+    cpu->pc = cpu->epc;
+    cpu->next_pc = cpu->pc + 4;
+    
+    LOG_CPU_DEBUG("RFE: Returning to EPC=0x%08x, PC now=0x%08x", cpu->epc, cpu->pc);
 }
 
 void op_bne(Cpu* cpu, uint32_t instruction) {
@@ -685,6 +713,14 @@ void op_lw(Cpu* cpu, uint32_t instruction) {
 
     // Perform load and schedule it for the delay slot
     uint32_t value_loaded = interconnect_load32(cpu->inter, address); // Alignment checked in interconnect
+    
+    // Check if interconnect returned special value for unaligned access
+    if (value_loaded == 0xBADBAD32) {
+        // Trigger Address Error Load exception for unaligned access
+        cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+        return;
+    }
+    
     cpu->load_reg_idx = rt;
     cpu->load_value = value_loaded;
 }

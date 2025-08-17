@@ -264,6 +264,16 @@ void timers_schedule_next_event(Timers* timers, int timer_index) {
         LOG_TIMERS_INFO("[TIMER] timers_schedule_next_event for Timer%d (count=%d)", timer_index, ++schedule_call_count[timer_index]);
     }
     Timer* t = &timers->timers[timer_index];
+    
+    // Special handling for Timer0 (VBlank) - schedule every frame, not every cycle
+    if (timer_index == 0) {
+        // Timer0 should fire every frame (60Hz), not every few cycles
+        uint32_t frame_cycles = timers_calculate_frame_cycles();
+        eventq_schedule(timers->inter, EVQ_TIMER0, frame_cycles);
+        return;
+    }
+    
+    // For other timers, use the original logic
     uint32_t cycles_until_event = 0;
     if (t->reset_on_target && t->target != 0) {
         if (t->counter < t->target)
@@ -393,5 +403,11 @@ void timers_on_vblank(Timers* timers) {
         interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
+    } else if (t0->interrupt_requested) {
+        // Log when IRQ is already pending (but only occasionally to avoid spam)
+        static int irq_already_pending_count = 0;
+        if (irq_already_pending_count < 3) {
+            LOG_TIMERS_INFO("[VBlank] IRQ0 already pending, skipping request (count=%d)", ++irq_already_pending_count);
+        }
     }
 }

@@ -120,8 +120,21 @@ uint32_t eventq_next_cycle(const struct Interconnect* sys) {
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed
 
 static void evq_handle_vblank(struct Interconnect* sys) {
-    eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
-    LOG_EVENT_DEBUG("[VBlank] Handler called. Next VBlank scheduled at cycle: %u", sys->evq_target_cycle[EVQ_VBLANK]);
+    // FIX: Only reschedule VBlank if it's not already scheduled
+    // This prevents the infinite VBlank loop that was causing the stuck state
+    if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
+        eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
+        LOG_EVENT_DEBUG("[VBlank] Handler called. Next VBlank scheduled at cycle: %u", sys->evq_target_cycle[EVQ_VBLANK]);
+    } else {
+        LOG_EVENT_DEBUG("[VBlank] Handler called but VBlank already scheduled, skipping reschedule");
+    }
+    
+    // FIX: Trigger VBlank interrupt (IRQ1) to wake up the BIOS
+    if (sys->irq_mask & 0x0002) { // Check if IRQ1 (VBlank) is enabled
+        sys->irq_status |= 0x0002; // Set IRQ1 bit
+        LOG_EVENT_DEBUG("[VBlank] IRQ1 (VBlank) triggered: I_STAT=0x%04x", sys->irq_status);
+    }
+    
     timers_on_vblank(&sys->timers_state);
 }
 

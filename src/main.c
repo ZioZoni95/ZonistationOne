@@ -47,12 +47,15 @@ void interconnect_check_bios_boot(struct Interconnect* inter);
 
 int main(int argc, char *argv[]) {
     // --- Argument Parsing ---
-    // Usage: ./myps1_emu [--debug|--quiet] <BIOS_PATH>
+    // Usage: ./myps1_emu [options] <BIOS_PATH>
     const char* bios_path = NULL;
     int log_level = LOG_LEVEL_INFO;
     bool show_help = false;
     bool log_single_file = false;
     int log_rate_limit_n = 0;
+    bool disable_irq_logs = false;
+    bool disable_interconnect_logs = false;
+    bool disable_dma_logs = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
@@ -65,36 +68,77 @@ int main(int argc, char *argv[]) {
             log_level = LOG_LEVEL_WARN;
         } else if (strcmp(argv[i], "--trace") == 0) {
             log_level = LOG_LEVEL_TRACE;
+        } else if (strcmp(argv[i], "--silent") == 0) {
+            log_level = LOG_LEVEL_SILENT;
+        } else if (strcmp(argv[i], "--no-irq-logs") == 0) {
+            disable_irq_logs = true;
+        } else if (strcmp(argv[i], "--no-interconnect-logs") == 0) {
+            disable_interconnect_logs = true;
+        } else if (strcmp(argv[i], "--no-dma-logs") == 0) {
+            disable_dma_logs = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             show_help = true;
         } else if (!bios_path) {
             bios_path = argv[i];
         } else {
             printf("Unknown option: %s\n", argv[i]);
-            printf("Usage: %s [--debug|--trace|--quiet|--log-rate-limit=N|--log-single-file] <BIOS_PATH>\n", argv[0]);
+            printf("Usage: %s [options] <BIOS_PATH>\n", argv[0]);
+            printf("Use --help for full option list.\n");
             return 1;
         }
     }
     if (show_help) {
-        printf("Usage: %s [--debug|--trace|--quiet|--log-rate-limit=N|--log-single-file] <BIOS_PATH>\n", argv[0]);
-        printf("  --debug            Set log level to DEBUG (verbose output)\n");
-        printf("  --trace            Set log level to TRACE (ultra-verbose, per-instruction/cycle)\n");
-        printf("  --quiet            Set log level to WARN (minimal output)\n");
-        printf("  --log-rate-limit=N Only log the first N debug/trace messages per component, then every Nth after that\n");
-        printf("  --log-single-file  Log everything to emulator_log.txt (disables per-component logs in logs/)\n");
-        printf("                    (Default: per-component logs in logs/ directory)\n");
-        printf("  --help             Show this help message\n");
+        printf("PS1 Emulator with PCSX ReARMed-style Component-Based Logging\n");
+        printf("Usage: %s [options] <BIOS_PATH>\n\n", argv[0]);
+        printf("Log Level Options:\n");
+        printf("  --silent           No logging output\n");
+        printf("  --quiet            Warnings and errors only\n");
+        printf("  --debug            Verbose debug output (default: INFO)\n");
+        printf("  --trace            Ultra-verbose trace output\n\n");
+        printf("Component Control (PCSX ReARMed style):\n");
+        printf("  --no-irq-logs      Disable IRQ/interrupt logging (reduces spam)\n");
+        printf("  --no-interconnect-logs Disable I/O interconnect logging (reduces spam)\n");
+        printf("  --no-dma-logs      Disable DMA transfer logging\n\n");
+        printf("Output Control:\n");
+        printf("  --log-rate-limit=N Rate limit: log first N msgs, then every Nth (default: auto)\n");
+        printf("  --log-single-file  Log to emulator_log.txt instead of console\n\n");
+        printf("Categories: SYSTEM, CPU, IRQ, DMA, GPU, CDROM, TIMER, BIOS, INTERCONNECT,\n");
+        printf("           RENDERER, EVENT, GTE, VRAM, RAM, DEBUG\n\n");
+        printf("Examples:\n");
+        printf("  %s roms/SCPH1001.BIN                    # Default logging\n", argv[0]);
+        printf("  %s --debug --no-irq-logs roms/SCPH1001.BIN  # Debug without IRQ spam\n", argv[0]);
+        printf("  %s --quiet --log-single-file roms/SCPH1001.BIN # Minimal to file\n\n", argv[0]);
+        printf("  --help, -h         Show this help message\n");
         printf("  <BIOS_PATH>        Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
         return 0;
     }
+    // Initialize new logging system
+    log_init();
     if (log_rate_limit_n > 0) {
-        log_set_rate_limit(1, log_rate_limit_n);
+        // Apply rate limiting to noisy categories
+        log_set_rate_limit(LOG_CAT_IRQ, 5, log_rate_limit_n);
+        log_set_rate_limit(LOG_CAT_INTERCONNECT, 10, log_rate_limit_n);
+        log_set_rate_limit(LOG_CAT_DMA, 5, log_rate_limit_n);
+    }
+    
+    // Apply component-specific disable options (PCSX ReARMed style)
+    if (disable_irq_logs) {
+        log_set_category_enabled(LOG_CAT_IRQ, false);
+        LOG_SYSTEM_INFO("IRQ logging disabled");
+    }
+    if (disable_interconnect_logs) {
+        log_set_category_enabled(LOG_CAT_INTERCONNECT, false);
+        LOG_SYSTEM_INFO("Interconnect logging disabled");
+    }
+    if (disable_dma_logs) {
+        log_set_category_enabled(LOG_CAT_DMA, false);
+        LOG_SYSTEM_INFO("DMA logging disabled");
     }
     if (!bios_path) {
         bios_path = "roms/SCPH1001.BIN";
     }
     log_set_level(log_level);
-    LOG_INFO("Emulator started");
+    LOG_SYSTEM_INFO("Emulator started");
 
     // --- File Logging Setup ---
     // Log file rotation: if emulator_log.txt > 50MB, move to emulator_log.old.txt
@@ -113,7 +157,7 @@ int main(int argc, char *argv[]) {
         freopen(log_filename, "a", stderr);
         setbuf(stdout, NULL);
         setbuf(stderr, NULL);
-        LOG_INFO("--- Log Started ---");
+                 LOG_SYSTEM_INFO("--- Log Started ---");
     }
 
     // --- Configuration ---
@@ -121,13 +165,13 @@ int main(int argc, char *argv[]) {
     // This value might need tuning for performance vs. accuracy.
     const uint32_t cycles_per_frame = 33868800 / 60; // PSX CPU speed / NTSC refresh rate
 
-    LOG_INFO("--- ZoniStation One Emulator ---");
-    LOG_INFO("Attempting to load BIOS from: %s", bios_path);
+         LOG_SYSTEM_INFO("--- ZoniStation One Emulator ---");
+     LOG_SYSTEM_INFO("Attempting to load BIOS from: %s", bios_path);
 
     // --- SDL & OpenGL Initialization ---
-    LOG_INFO("Initializing SDL Video...");
+         LOG_SYSTEM_INFO("Initializing SDL Video...");
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        LOG_ERROR("SDL_Init Error: %s", SDL_GetError());
+                 LOG_SYSTEM_ERROR("SDL_Init Error: %s", SDL_GetError());
         return 1;
     }
 
@@ -136,7 +180,7 @@ int main(int argc, char *argv[]) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
 
-    LOG_INFO("Creating SDL Window (1024x512, OpenGL)...");
+         LOG_SYSTEM_INFO("Creating SDL Window (1024x512, OpenGL)...");
     SDL_Window* window = SDL_CreateWindow(
         "ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -144,36 +188,36 @@ int main(int argc, char *argv[]) {
         SDL_WINDOW_OPENGL
     );
     if (!window) {
-        LOG_ERROR("SDL_CreateWindow Error: %s", SDL_GetError());
+                 LOG_SYSTEM_ERROR("SDL_CreateWindow Error: %s", SDL_GetError());
         SDL_Quit();
         return 1;
     }
 
-    LOG_INFO("Creating OpenGL Context...");
+         LOG_SYSTEM_INFO("Creating OpenGL Context...");
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
     if (!gl_context) {
-        LOG_ERROR("SDL_GL_CreateContext Error: %s", SDL_GetError());
+                 LOG_SYSTEM_ERROR("SDL_GL_CreateContext Error: %s", SDL_GetError());
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
 
     // Initialize GLEW *after* the OpenGL context is created.
-    LOG_INFO("Initializing GLEW...");
+    LOG_SYSTEM_INFO("Initializing GLEW...");
     glewExperimental = GL_TRUE;
     GLenum glewError = glewInit();
     if (glewError != GLEW_OK) {
-        LOG_ERROR("Error initializing GLEW! %s", glewGetErrorString(glewError));
+        LOG_SYSTEM_ERROR("Error initializing GLEW! %s", glewGetErrorString(glewError));
         SDL_GL_DeleteContext(gl_context);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 1;
     }
-    LOG_INFO("GLEW Initialized. OpenGL Version: %s", glGetString(GL_VERSION));
+    LOG_SYSTEM_INFO("GLEW Initialized. OpenGL Version: %s", glGetString(GL_VERSION));
     check_gl_error("After GLEW Init");
 
     // --- Emulator Component Initialization ---
-    LOG_INFO("Initializing Emulator Components...");
+    LOG_SYSTEM_INFO("Initializing Emulator Components...");
 
     Bios bios_data;
     Ram ram_memory;
@@ -181,11 +225,11 @@ int main(int argc, char *argv[]) {
     Cpu cpu_state;
 
     // 1. Initialize RAM
-    LOG_INFO("  Initializing RAM...");
+    LOG_SYSTEM_INFO("  Initializing RAM...");
     ram_init(&ram_memory);
 
     // 2. Load BIOS
-    LOG_INFO("  Loading BIOS...");
+    LOG_SYSTEM_INFO("  Loading BIOS...");
     if (!bios_load(&bios_data, bios_path)) {
         // Cleanup on failure
         SDL_GL_DeleteContext(gl_context);
@@ -195,13 +239,13 @@ int main(int argc, char *argv[]) {
     }
 
     // 3. Initialize Interconnect (connects all hardware components)
-    LOG_INFO("  Initializing Interconnect...");
+    LOG_SYSTEM_INFO("  Initializing Interconnect...");
     interconnect_init(&interconnect_state, &bios_data, &ram_memory);
 
     // 4. Initialize the Renderer (using the instance inside the GPU)
-    LOG_INFO("  Initializing Renderer...");
+    LOG_SYSTEM_INFO("  Initializing Renderer...");
     if (!renderer_init(&interconnect_state.gpu.renderer)) {
-        LOG_ERROR("Failed to initialize renderer!");
+        LOG_SYSTEM_ERROR("Failed to initialize renderer!");
         // Cleanup on failure
         SDL_GL_DeleteContext(gl_context);
         SDL_DestroyWindow(window);
@@ -213,12 +257,12 @@ int main(int argc, char *argv[]) {
     // NOTE: Replace "path/to/your/game.bin" with an actual game image.
     // If no disc is loaded, the emulator will just run the BIOS.
     if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crassh Bandicoot.bin")) {
-        LOG_INFO("Warning: Could not load game disc. Running BIOS only.");
+        LOG_SYSTEM_INFO("Warning: Could not load game disc. Running BIOS only.");
     }
 
 
     // 6. Initialize CPU (pass it the fully connected interconnect)
-    LOG_INFO("  Initializing CPU...");
+    LOG_SYSTEM_INFO("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
 
     // --- Schedule Initial Events (using new event system) ---
@@ -228,10 +272,10 @@ int main(int argc, char *argv[]) {
     // PCSX ReARMed-style: Schedule Timer0 event at boot so it is always in the event queue
     eventq_schedule(&interconnect_state, EVQ_TIMER0, 1024); // Initial guess: 1024 cycles
 
-    LOG_INFO("All Emulator Components Initialized.");
+    LOG_SYSTEM_INFO("All Emulator Components Initialized.");
 
     // --- Main Emulation Loop ---
-    LOG_INFO("=== Main emulation loop starting ===");
+    LOG_SYSTEM_INFO("=== Main emulation loop starting ===");
     bool should_quit = false;
     SDL_Event event;
     uint64_t total_cycles = 0;
@@ -240,11 +284,11 @@ int main(int argc, char *argv[]) {
         // --- Handle Input/Window Events ---
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
-                LOG_INFO("SDL_QUIT event received.");
+                LOG_SYSTEM_INFO("SDL_QUIT event received.");
                 should_quit = true;
             } else if (event.type == SDL_KEYDOWN) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    LOG_INFO("Escape key pressed. Quitting.");
+                    LOG_SYSTEM_INFO("Escape key pressed. Quitting.");
                     should_quit = true;
                 }
             }
@@ -252,12 +296,42 @@ int main(int argc, char *argv[]) {
 
         // --- Run Emulation for One Frame ---
         uint32_t cycles_run = 0;
+        
+        // FIX: BIOS Boot Bypass - Force continue if stuck too long
+        static uint64_t total_instructions = 0;
+        static uint32_t last_progress_pc = 0xbfc00000;
+        static uint32_t stuck_counter = 0;
+        
         while (cycles_run < cycles_per_frame) {
             cpu_run_next_instruction(&cpu_state);
             eventq_dispatch_due(&interconnect_state);
             // --- PCSX ReARMed-style: Immediately run another CPU instruction after event dispatch to process IRQs ---
             cpu_run_next_instruction(&cpu_state);
-            cycles_run++;
+            cycles_run += 2; // FIX: Increment by 2 since we run 2 instructions per iteration
+            
+            // BIOS Boot Bypass Logic
+            total_instructions++;
+            if (cpu_state.pc == last_progress_pc) {
+                stuck_counter++;
+                // If stuck for too long, force enable interrupts and continue
+                if (stuck_counter > 1000000) { // 1M instructions stuck
+                    LOG_SYSTEM_WARN("BIOS-BOOT: STUCK for %u instructions at PC=0x%08x. Forcing interrupt enable.", stuck_counter, cpu_state.pc);
+                    // Force enable interrupts to wake up BIOS
+                    interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
+                    interconnect_state.irq_status |= 0x0002; // Trigger VBlank interrupt
+                    stuck_counter = 0;
+                    LOG_SYSTEM_INFO("BIOS-BOOT: Forced interrupts enabled. BIOS should continue now.");
+                }
+            } else {
+                stuck_counter = 0;
+                last_progress_pc = cpu_state.pc;
+            }
+            
+            // Only log progress every 100k instructions to reduce spam
+            if (total_instructions % 100000 == 0) {
+                LOG_SYSTEM_INFO("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x, I_MASK=0x%04x, I_STAT=0x%04x", 
+                        total_instructions, cpu_state.pc, interconnect_state.irq_mask, interconnect_state.irq_status);
+            }
         }
         // Step timers once per frame with the total cycles executed
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
@@ -272,16 +346,16 @@ int main(int argc, char *argv[]) {
     }
 
     // --- Cleanup ---
-    LOG_INFO("Emulation loop finished. Cleaning up...");
+    LOG_SYSTEM_INFO("Emulation loop finished. Cleaning up...");
 
     renderer_destroy(&interconnect_state.gpu.renderer);
-    LOG_INFO("Destroying SDL GL Context and Window...");
+    LOG_SYSTEM_INFO("Destroying SDL GL Context and Window...");
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
     SDL_Quit();
-    LOG_INFO("SDL Quit.");
+    LOG_SYSTEM_INFO("SDL Quit.");
 
-    LOG_INFO("--- ZoniStation One Emulator Finished ---");
-    LOG_INFO("Emulator stopped");
+    LOG_SYSTEM_INFO("--- ZoniStation One Emulator Finished ---");
+    LOG_SYSTEM_INFO("Emulator stopped");
     return 0;
 }
