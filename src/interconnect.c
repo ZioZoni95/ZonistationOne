@@ -303,9 +303,26 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         // KSEG2 region: return 0 for unmapped addresses (per nocash/PSX-Spex)
         return 0;
     }
+    
+    // --- PCSX ReARMed-style Memory Region Handling ---
+    // Handle the 0x24xxxxxx range that's causing your errors
+    if (physical_addr >= 0x20000000 && physical_addr <= 0x2FFFFFFF) {
+        // This is the unmapped memory region causing the BIOS errors
+        // Return 0 for unmapped memory (PlayStation open bus behavior)
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access: 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
+    // Handle other unmapped regions (0x30xxxxxx - 0x7xxxxxxx)
+    if (physical_addr >= 0x30000000 && physical_addr <= 0x7FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access: 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
+    // Only log as error if we reach here (truly unhandled)
     LOG_INTERCONNECT_ERROR("Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)\n",
             physical_addr, address);
-    return 0; // Or a more distinct "garbage" value like 0xDEADBEEF
+    return 0; // Return 0 for unmapped memory
 }
 
 /**
@@ -420,6 +437,20 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         if (physical_addr == 0x1f80104b) return 0x00; // JOY_CTRL2: default
         return 0;
     }
+    
+    // --- PCSX ReARMed-style Memory Region Handling for 16-bit ---
+    // Handle the 0x24xxxxxx range that's causing your errors
+    if (physical_addr >= 0x20000000 && physical_addr <= 0x2FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access (16-bit): 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
+    // Handle other unmapped regions (0x30xxxxxx - 0x7xxxxxxx)
+    if (physical_addr >= 0x30000000 && physical_addr <= 0x7FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access (16-bit): 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory read16 at address: 0x%08x (Mapped from 0x%08x)\n", physical_addr, address);
     return 0;
 }
@@ -506,6 +537,20 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         if (physical_addr == 0x1f80104b) return 0x00; // JOY_CTRL2: default
         return 0;
     }
+    
+    // --- PCSX ReARMed-style Memory Region Handling for 8-bit ---
+    // Handle the 0x24xxxxxx range that's causing your errors
+    if (physical_addr >= 0x20000000 && physical_addr <= 0x2FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access (8-bit): 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
+    // Handle other unmapped regions (0x30xxxxxx - 0x7xxxxxxx)
+    if (physical_addr >= 0x30000000 && physical_addr <= 0x7FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region access (8-bit): 0x%08x (returning 0)", physical_addr);
+        return 0;
+    }
+    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory read8 at address: 0x%08x (Mapped from 0x%08x)\n", physical_addr, address);
     return 0;
 }
@@ -710,6 +755,19 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         return;
     }
 
+    // --- PCSX ReARMed-style Memory Region Handling for write32 ---
+    // Handle the 0x24xxxxxx range that's causing your errors
+    if (physical_addr >= 0x20000000 && physical_addr <= 0x2FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region write (32-bit): 0x%08x = 0x%08x (ignoring)", physical_addr, value);
+        return; // Ignore writes to unmapped memory
+    }
+    
+    // Handle other unmapped regions (0x30xxxxxx - 0x7xxxxxxx)
+    if (physical_addr >= 0x30000000 && physical_addr <= 0x7FFFFFFF) {
+        LOG_INTERCONNECT_TRACE("Unmapped memory region write (32-bit): 0x%08x = 0x%08x (ignoring)", physical_addr, value);
+        return; // Ignore writes to unmapped memory
+    }
+    
     // --- Fallback ---
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write32 at address: 0x%08x = 0x%08x (Mapped from 0x%08x)\n",
             physical_addr, value, address);

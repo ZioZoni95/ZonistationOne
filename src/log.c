@@ -3,30 +3,21 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 static int global_log_level = LOG_LEVEL_INFO;
 static int log_single_file_mode = 0;
 static FILE* single_log_file = NULL;
 
-#define MAX_COMPONENTS 16
-#define MAX_LOG_LINES 5000  // Reduced from 10000 for better performance
-#define MAX_LOG_SIZE_MB 10  // Maximum log file size in MB
-
-// Per-component rate limiting
+// Per-component rate limiting counters
 static struct {
     char name[32];
-    FILE* file;
-    int line_count;
     int debug_counter;
     int trace_counter;
-    int last_debug_log;
-    int last_trace_log;
-} log_files[MAX_COMPONENTS];
-static int log_file_count = 0;
+} log_counters[16];
+static int log_counter_count = 0;
 
 int log_rate_limit_enabled = 1;  // Enable by default
-int log_rate_limit_n = 100;      // Much more aggressive rate limiting
+int log_rate_limit_n = 100;      // Aggressive rate limiting
 
 void log_set_rate_limit(int enabled, int n) {
     log_rate_limit_enabled = enabled;
@@ -45,8 +36,8 @@ static int should_skip_log(const char* component, int level) {
     if (log_rate_limit_enabled && (level == LOG_LEVEL_DEBUG || level == LOG_LEVEL_TRACE)) {
         // Find component index
         int idx = -1;
-        for (int i = 0; i < log_file_count; ++i) {
-            if (strcmp(log_files[i].name, component) == 0) { 
+        for (int i = 0; i < log_counter_count; ++i) {
+            if (strcmp(log_counters[i].name, component) == 0) { 
                 idx = i; 
                 break; 
             }
@@ -54,73 +45,34 @@ static int should_skip_log(const char* component, int level) {
         
         if (idx == -1) {
             // New component, initialize counters
-            if (log_file_count < MAX_COMPONENTS) {
-                idx = log_file_count;
-                log_files[idx].debug_counter = 0;
-                log_files[idx].trace_counter = 0;
-                log_files[idx].last_debug_log = 0;
-                log_files[idx].last_trace_log = 0;
+            if (log_counter_count < 16) {
+                idx = log_counter_count;
+                strncpy(log_counters[idx].name, component, sizeof(log_counters[idx].name)-1);
+                log_counters[idx].name[sizeof(log_counters[idx].name)-1] = '\0';
+                log_counters[idx].debug_counter = 0;
+                log_counters[idx].trace_counter = 0;
+                log_counter_count++;
             } else {
                 return 1; // Too many components
             }
         }
         
         if (level == LOG_LEVEL_DEBUG) {
-            log_files[idx].debug_counter++;
+            log_counters[idx].debug_counter++;
             // Log first 10, then every 100th
-            if (log_files[idx].debug_counter <= 10) return 0;
-            if (log_files[idx].debug_counter % 100 == 0) return 0;
+            if (log_counters[idx].debug_counter <= 10) return 0;
+            if (log_counters[idx].debug_counter % 100 == 0) return 0;
             return 1;
         } else if (level == LOG_LEVEL_TRACE) {
-            log_files[idx].trace_counter++;
+            log_counters[idx].trace_counter++;
             // Log first 5, then every 500th
-            if (log_files[idx].trace_counter <= 5) return 0;
-            if (log_files[idx].trace_counter % 500 == 0) return 0;
+            if (log_counters[idx].trace_counter <= 5) return 0;
+            if (log_counters[idx].trace_counter % 500 == 0) return 0;
             return 1;
         }
     }
     
     return 0;
-}
-
-static FILE* get_log_file(const char* component) {
-    for (int i = 0; i < log_file_count; ++i) {
-        if (strcmp(log_files[i].name, component) == 0) {
-            // Check for log rotation
-            if (log_files[i].line_count >= MAX_LOG_LINES) {
-                // Close current file
-                fclose(log_files[i].file);
-                // Rotate: rename to _old.txt
-                char old_path[128];
-                snprintf(old_path, sizeof(old_path), "logs/%s_old.txt", component);
-                char path[128];
-                snprintf(path, sizeof(path), "logs/%s.txt", component);
-                remove(old_path); // Remove old backup if exists
-                rename(path, old_path); // Rename current to old
-                // Open new file
-                log_files[i].file = fopen(path, "w");
-                log_files[i].line_count = 0;
-            }
-            return log_files[i].file;
-        }
-    }
-    // Open new file
-    if (log_file_count >= MAX_COMPONENTS) return NULL;
-    mkdir("logs", 0777); // Ensure logs/ exists
-    char path[128];
-    snprintf(path, sizeof(path), "logs/%s.txt", component);
-    FILE* f = fopen(path, "a");
-    if (!f) return NULL;
-    strncpy(log_files[log_file_count].name, component, sizeof(log_files[log_file_count].name)-1);
-    log_files[log_file_count].name[sizeof(log_files[log_file_count].name)-1] = '\0';
-    log_files[log_file_count].file = f;
-    log_files[log_file_count].line_count = 0;
-    log_files[log_file_count].debug_counter = 0;
-    log_files[log_file_count].trace_counter = 0;
-    log_files[log_file_count].last_debug_log = 0;
-    log_files[log_file_count].last_trace_log = 0;
-    ++log_file_count;
-    return f;
 }
 
 void log_set_level(int level) {
@@ -169,7 +121,7 @@ void log_component(const char* component, int level, const char* fmt, ...) {
     // Early filtering for performance
     if (should_skip_log(component, level)) return;
     
-    // Single file mode
+    // Single file mode (if enabled)
     if (log_single_file_mode && single_log_file) {
         va_list args;
         va_start(args, fmt);
@@ -181,22 +133,21 @@ void log_component(const char* component, int level, const char* fmt, ...) {
         return;
     }
     
-    // Per-component file mode
-    FILE* f = get_log_file(component);
-    if (!f) return;
+    // Terminal output only - much faster!
+    const char* level_str = "INFO";
+    switch (level) {
+        case LOG_LEVEL_FATAL: level_str = "FATAL"; break;
+        case LOG_LEVEL_ERROR: level_str = "ERROR"; break;
+        case LOG_LEVEL_WARN:  level_str = "WARN";  break;
+        case LOG_LEVEL_INFO:  level_str = "INFO";  break;
+        case LOG_LEVEL_DEBUG: level_str = "DEBUG"; break;
+        case LOG_LEVEL_TRACE: level_str = "TRACE"; break;
+    }
     
+    fprintf(stderr, "[%s][%s] ", level_str, component);
     va_list args;
     va_start(args, fmt);
-    vfprintf(f, fmt, args);
-    fprintf(f, "\n");
+    vfprintf(stderr, fmt, args);
     va_end(args);
-    
-    // Increment line count for this component
-    for (int i = 0; i < log_file_count; ++i) {
-        if (strcmp(log_files[i].name, component) == 0) {
-            log_files[i].line_count++;
-            break;
-        }
-    }
-    fflush(f);
+    fprintf(stderr, "\n");
 } 
