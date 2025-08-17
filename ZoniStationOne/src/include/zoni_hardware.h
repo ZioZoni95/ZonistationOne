@@ -40,6 +40,47 @@ typedef struct zoni_memory_s zoni_memory_t;
 #define HW_DMA_PCR         0x1F8010F0
 #define HW_DMA_ICR         0x1F8010F4
 
+// DMA channel control register bits
+#define DMA_CHCR_TR        0x01000000  // Transfer direction (0=to device, 1=from device)
+#define DMA_CHCR_CO        0x02000000  // Chopping enable
+#define DMA_CHCR_CH        0x04000000  // Chopping DMA window size
+#define DMA_CHCR_LN        0x08000000  // Link to next block
+#define DMA_CHCR_TD        0x10000000  // Transfer direction (0=to device, 1=from device)
+#define DMA_CHCR_DR        0x20000000  // DMA request
+#define DMA_CHCR_LE        0x40000000  // Link enable
+#define DMA_CHCR_DE        0x80000000  // DMA enable
+
+// DMA block control register
+#define DMA_BCR_SIZE       0x0000FFFF  // Transfer size
+#define DMA_BCR_BS         0xFFFF0000  // Block size
+
+// DMA priority control register
+#define DMA_PCR_PRIO0      0x000000FF  // DMA0 priority
+#define DMA_PCR_PRIO1      0x0000FF00  // DMA1 priority
+#define DMA_PCR_PRIO2      0x00FF0000  // DMA2 priority
+#define DMA_PCR_PRIO3      0xFF000000  // DMA3 priority
+
+// DMA interrupt control register
+#define DMA_ICR_IRQ0       0x00000001  // DMA0 interrupt
+#define DMA_ICR_IRQ1       0x00000002  // DMA1 interrupt
+#define DMA_ICR_IRQ2       0x00000004  // DMA2 interrupt
+#define DMA_ICR_IRQ3       0x00000008  // DMA3 interrupt
+#define DMA_ICR_IRQ4       0x00000010  // DMA4 interrupt
+#define DMA_ICR_IRQ5       0x00000020  // DMA5 interrupt
+#define DMA_ICR_IRQ6       0x00000040  // DMA6 interrupt
+#define DMA_ICR_IRQ7       0x00000080  // DMA7 interrupt
+#define DMA_ICR_MASTER     0x80000000  // Master interrupt enable
+
+// DMA channel structure
+typedef struct {
+    u32 madr;      // Memory address
+    u32 bcr;       // Block control
+    u32 chcr;      // Channel control
+    bool active;   // Channel active
+    u32 current_addr;  // Current transfer address
+    u32 remaining;     // Remaining bytes to transfer
+} zoni_dma_channel_t;
+
 // Interrupt registers
 #define HW_ISTAT           0x1F801070  // Interrupt Status
 #define HW_IMASK           0x1F801074  // Interrupt Mask
@@ -78,6 +119,12 @@ typedef struct zoni_memory_s zoni_memory_t;
 typedef struct zoni_hardware_s {
     u8 scratchpad[PSX_HW_SCRATCH_SIZE];  // Scratchpad memory
     u8 hw_regs[PSX_HW_SIZE];            // Hardware registers
+    
+    // DMA controller state
+    zoni_dma_channel_t dma_channels[7];  // DMA channels 0-6
+    u32 dma_pcr;                         // Priority control register
+    u32 dma_icr;                         // Interrupt control register
+    
     zoni_memory_t* memory;               // Pointer to memory system for GPU access
 } zoni_hardware_t;
 
@@ -85,6 +132,13 @@ typedef struct zoni_hardware_s {
 zoni_error_t zoni_hardware_init(zoni_hardware_t* hw);
 void zoni_hardware_shutdown(zoni_hardware_t* hw);
 void zoni_hardware_reset(zoni_hardware_t* hw);
+
+// DMA controller functions
+void zoni_dma_init(zoni_hardware_t* hw);
+void zoni_dma_reset(zoni_hardware_t* hw);
+void zoni_dma_update(zoni_hardware_t* hw);
+zoni_error_t zoni_dma_write_channel(zoni_hardware_t* hw, u32 channel, u32 reg, u32 value);
+u32 zoni_dma_read_channel(zoni_hardware_t* hw, u32 channel, u32 reg);
 
 // Hardware read/write functions
 u8 zoni_hw_read8(zoni_hardware_t* hw, u32 address);

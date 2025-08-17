@@ -290,7 +290,20 @@
      if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
          *value = zoni_bus_read32(&g_bus, addr_phys);
          memory->read_count++;
-         zoni_log(ZONI_LOG_DEBUG, "MEM READ32 I/O [0x%08X] -> 0x%08X", addr_phys, *value);
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         *value = zoni_bus_read32(&g_bus, addr_phys);
+         memory->read_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         *value = zoni_bus_read32(&g_bus, addr_phys);
+         memory->read_count++;
          return ZONI_SUCCESS;
      }
  
@@ -298,7 +311,6 @@
      if (addr_phys < 0x00200000) {
          *value = zoni_read_le32(&memory->ram[addr_phys & 0x001FFFFC]);
          memory->read_count++;
-         zoni_log(ZONI_LOG_DEBUG, "MEM READ32 RAM [0x%08X] -> 0x%08X", addr_phys, *value);
          return ZONI_SUCCESS;
      }
  
@@ -306,7 +318,6 @@
      if (addr_phys >= 0x1FC00000 && addr_phys < 0x1FC80000) {
          *value = zoni_read_le32(&memory->bios[addr_phys - 0x1FC00000]);
          memory->read_count++;
-         zoni_log(ZONI_LOG_DEBUG, "MEM READ32 BIOS [0x%08X] -> 0x%08X", addr_phys, *value);
          return ZONI_SUCCESS;
      }
  
@@ -442,7 +453,20 @@
      if (addr_phys >= 0x1F800000 && addr_phys <= 0x1F8003FF) {
          zoni_bus_write32(&g_bus, addr_phys, value);
          memory->write_count++;
-         zoni_log(ZONI_LOG_DEBUG, "MEM WRITE32 I/O [0x%08X] <- 0x%08X", addr_phys, value);
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣b Hardware Registers (0x1F801000-0x1F801FFF)
+     if (addr_phys >= 0x1F801000 && addr_phys <= 0x1F801FFF) {
+         zoni_bus_write32(&g_bus, addr_phys, value);
+         memory->write_count++;
+         return ZONI_SUCCESS;
+     }
+
+     // 1️⃣c Cache Control Region (0x1FFE0000-0x1FFEFFFF)
+     if (addr_phys >= 0x1FFE0000 && addr_phys <= 0x1FFEFFFF) {
+         zoni_bus_write32(&g_bus, addr_phys, value);
+         memory->write_count++;
          return ZONI_SUCCESS;
      }
  
@@ -450,7 +474,6 @@
      if (addr_phys < 0x00200000) {
          zoni_write_le32(&memory->ram[addr_phys & 0x001FFFFC], value);
          memory->write_count++;
-         zoni_log(ZONI_LOG_DEBUG, "MEM WRITE32 RAM [0x%08X] <- 0x%08X", addr_phys, value);
          return ZONI_SUCCESS;
      }
  

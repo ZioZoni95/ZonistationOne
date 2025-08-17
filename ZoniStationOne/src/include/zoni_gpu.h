@@ -24,13 +24,16 @@ typedef enum {
     ZONI_GPU_MODE_PAL = 1     // 50Hz, 640x480
 } zoni_gpu_mode_t;
 
-// GPU status register bits
-typedef enum {
-    ZONI_GPU_STATUS_READY = 0x04000000,
-    ZONI_GPU_STATUS_DMA_READY = 0x02000000,
-    ZONI_GPU_STATUS_VBLANK = 0x08000000,
-    ZONI_GPU_STATUS_DISPLAY_ENABLED = 0x80000000
-} zoni_gpu_status_t;
+// GPU status register bits (following PCSX ReARMed)
+#define PSXGPU_LCF     (1u<<31)  // Line counter flag
+#define PSXGPU_nBUSY   (1u<<26)  // GPU not busy
+#define PSXGPU_ILACE   (1u<<22)  // Interlace mode
+#define PSXGPU_RGB24   (1u<<21)  // RGB24 mode
+#define PSXGPU_DHEIGHT (1u<<19)  // Double height mode
+#define PSXGPU_FIELD   (1u<<13)  // Field mode
+
+// Default GPU status (matching PCSX ReARMed)
+#define PSX_GPU_STATUS_DEFAULT (PSXGPU_nBUSY | PSXGPU_DHEIGHT | PSXGPU_FIELD)  // 0x10802000
 
 // GPU command types
 typedef enum {

@@ -342,8 +342,7 @@ zoni_error_t zoni_cpu_execute_addiu(zoni_cpu_regs_t* cpu, zoni_instruction_t* in
         u32 rs_val = cpu->gpr.r[rs];
         u32 result = rs_val + immediate;
         cpu->gpr.r[rt] = result;
-                        // zoni_log(ZONI_LOG_DEBUG, "ADDIU $%d = $%d (0x%08X) + %u = 0x%08X", 
-                //          rt, rs, rs_val, immediate, result);
+        return ZONI_SUCCESS;
     }
     return ZONI_SUCCESS;
 }
@@ -1140,6 +1139,14 @@ zoni_error_t zoni_cpu_execute_instruction(zoni_cpu_regs_t* cpu, zoni_instruction
     
     // Process load delay slots after executing instruction
     zoni_cpu_dload_step(cpu);
+    
+    // Log only important instructions during BIOS execution
+    if (cpu->pc >= 0xBFC00000 && cpu->pc < 0xBFC80000) {
+        // Only log non-NOP instructions and important operations
+        if (instruction != 0x00000000 && instruction != 0x00000000) {
+            zoni_log(ZONI_LOG_DEBUG, "BIOS: PC=0x%08X, inst=0x%08X", cpu->pc, instruction);
+        }
+    }
     
     return result;
 }

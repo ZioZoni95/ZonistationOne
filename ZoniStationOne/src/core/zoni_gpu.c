@@ -65,7 +65,7 @@
      gpu->last_frame_time = SDL_GetPerformanceCounter();
      
      // Initialize GPU registers
-     gpu->status = ZONI_GPU_STATUS_READY | ZONI_GPU_STATUS_DMA_READY;
+     gpu->status = PSX_GPU_STATUS_DEFAULT;  // 0x10802000 - matching PCSX ReARMed
      gpu->display_width = 640;
      gpu->display_height = 480;
      
@@ -116,10 +116,12 @@
  }
  
  void zoni_gpu_reset(zoni_gpu_t* gpu) {
-     if (!gpu) return;
+     if (!gpu || !gpu->initialized) {
+         return;
+     }
      
-     // Reset GPU registers
-     gpu->status = ZONI_GPU_STATUS_READY | ZONI_GPU_STATUS_DMA_READY;
+     // Reset GPU state to defaults
+     gpu->status = PSX_GPU_STATUS_DEFAULT;  // 0x10802000 - matching PCSX ReARMed
      gpu->read = 0;
      gpu->gp0 = 0;
      gpu->gp1 = 0;
@@ -353,9 +355,9 @@
      
      u32 status = gpu->status;
      
-     // Update status based on current state
+     // Update status based on current state (following PCSX ReARMed)
      if (gpu->display_enabled) {
-         status |= ZONI_GPU_STATUS_DISPLAY_ENABLED;
+         status |= PSXGPU_nBUSY;  // GPU ready
      }
      
      return status;
@@ -437,14 +439,15 @@
  void zoni_gpu_vblank(zoni_gpu_t* gpu) {
      if (!gpu || !gpu->initialized) return;
      
-     gpu->status |= ZONI_GPU_STATUS_VBLANK;
+     // Set vblank flag in status
+     gpu->status |= PSXGPU_FIELD;  // Use PlayStation GPU constant
      gpu->vblank_count++;
  }
  
  bool zoni_gpu_is_vblank(zoni_gpu_t* gpu) {
      if (!gpu || !gpu->initialized) return false;
      
-     return (gpu->status & ZONI_GPU_STATUS_VBLANK) != 0;
+     return (gpu->status & PSXGPU_FIELD) != 0;  // Use PlayStation GPU constant
  }
  
  // Debug functions

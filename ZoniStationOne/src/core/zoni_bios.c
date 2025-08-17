@@ -4,6 +4,9 @@
  */
 
 #include "zoni_bios.h"
+#include "zoni_memory.h"
+#include "zoni_cpu.h"
+#include "zoni_hardware.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -317,7 +320,7 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
     }
     
     // Execute BIOS with development timeout and detailed logging
-            const int max_cycles = 200000;  // 200K cycles to see significant BIOS progress
+            const int max_cycles = 500000;  // 500K cycles to reach GPU initialization (following PCSX ReARMed)
     int cycles = 0;
     u32 last_pc = 0;
     int same_pc_count = 0;
@@ -337,6 +340,11 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
                 zoni_log(ZONI_LOG_ERROR, "BIOS execution failed at cycle %d, PC=0x%08X", cycles, cpu->pc);
                 return result;
             }
+        }
+        
+        // Update DMA controller every few cycles
+        if (cycles % 10 == 0 && memory->hardware) {
+            zoni_dma_update(memory->hardware);
         }
         
         cycles++;
@@ -362,7 +370,7 @@ zoni_error_t zoni_bios_execute(zoni_bios_t* bios, zoni_cpu_regs_t* cpu, zoni_mem
         
         // Log progress every 5000 cycles with more detail
         if (cycles % 5000 == 0) {
-            zoni_log(ZONI_LOG_INFO, "BIOS: %d cycles, PC=0x%08X, same_pc=%d", cycles, cpu->pc, same_pc_count);
+            zoni_log(ZONI_LOG_INFO, "BIOS: %d cycles, PC=0x%08X", cycles, cpu->pc);
         }
     }
     

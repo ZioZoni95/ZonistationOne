@@ -19,7 +19,7 @@ int main(int argc, char* argv[]) {
     ZONI_UNUSED(argc);
     ZONI_UNUSED(argv);
     
-     zoni_set_log_level(ZONI_LOG_DEBUG); 
+     zoni_set_log_level(ZONI_LOG_INFO); 
 
     zoni_log(ZONI_LOG_INFO, "ZoniStationOne v%s - PlayStation 1 Emulator", ZONI_VERSION_STRING);
     zoni_log(ZONI_LOG_INFO, "================================================");
