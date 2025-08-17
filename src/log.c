@@ -1,153 +1,210 @@
 #include "log.h"
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <stdint.h>
 
-static int global_log_level = LOG_LEVEL_INFO;
-static int log_single_file_mode = 0;
-static FILE* single_log_file = NULL;
+// PCSX ReARMed-style logging system implementation
 
-// Per-component rate limiting counters
-static struct {
-    char name[32];
-    int debug_counter;
-    int trace_counter;
-} log_counters[16];
-static int log_counter_count = 0;
+// --- Global State ---
+static LogLevel current_log_level = LOG_LEVEL_INFO;
+static LogCategoryState category_states[LOG_CAT_COUNT];
+static FILE* log_output_file = NULL;
+static bool log_initialized = false;
 
-int log_rate_limit_enabled = 1;  // Enable by default
-int log_rate_limit_n = 100;      // Aggressive rate limiting
+// --- Category Names ---
+static const char* category_names[LOG_CAT_COUNT] = {
+    "SYSTEM",
+    "CPU",
+    "IRQ", 
+    "DMA",
+    "GPU",
+    "CDROM",
+    "TIMER",
+    "BIOS",
+    "INTERCONNECT",
+    "RENDERER",
+    "EVENT",
+    "GTE",
+    "VRAM",
+    "RAM",
+    "DEBUG"
+};
 
-void log_set_rate_limit(int enabled, int n) {
-    log_rate_limit_enabled = enabled;
-    log_rate_limit_n = n > 0 ? n : 100;
+// --- Level Names ---
+static const char* level_names[] = {
+    "SILENT",
+    "ERROR",
+    "WARN",
+    "INFO", 
+    "DEBUG",
+    "TRACE"
+};
+
+// --- Initialization ---
+void log_init(void) {
+    if (log_initialized) return;
+    
+    // Initialize all categories with default settings
+    for (int i = 0; i < LOG_CAT_COUNT; i++) {
+        category_states[i].count = 0;
+        category_states[i].limit_first = 10;    // Log first 10 messages
+        category_states[i].limit_every = 1000;  // Then every 1000th message
+        category_states[i].enabled = true;      // All categories enabled by default
+    }
+    
+    // Set stricter limits for noisy categories
+    category_states[LOG_CAT_IRQ].limit_first = 5;
+    category_states[LOG_CAT_IRQ].limit_every = 10000;
+    
+    category_states[LOG_CAT_INTERCONNECT].limit_first = 5;
+    category_states[LOG_CAT_INTERCONNECT].limit_every = 5000;
+    
+    category_states[LOG_CAT_CPU].limit_first = 10;
+    category_states[LOG_CAT_CPU].limit_every = 100000;
+    
+    category_states[LOG_CAT_DMA].limit_first = 5;
+    category_states[LOG_CAT_DMA].limit_every = 1000;
+    
+    log_output_file = stderr; // Default output
+    log_initialized = true;
 }
 
-// Early filtering - return true if we should skip this log message
-static int should_skip_log(const char* component, int level) {
-    // Always allow FATAL and ERROR
-    if (level <= LOG_LEVEL_ERROR) return 0;
+// --- Configuration Functions ---
+void log_set_level(LogLevel level) {
+    current_log_level = level;
+}
+
+LogLevel log_get_current_level(void) {
+    return current_log_level;
+}
+
+void log_set_category_enabled(LogCategory category, bool enabled) {
+    if (!log_initialized) log_init();
+    if (category >= 0 && category < LOG_CAT_COUNT) {
+        category_states[category].enabled = enabled;
+    }
+}
+
+void log_set_rate_limit(LogCategory category, uint32_t first_n, uint32_t every_n) {
+    if (!log_initialized) log_init();
+    if (category >= 0 && category < LOG_CAT_COUNT) {
+        category_states[category].limit_first = first_n;
+        category_states[category].limit_every = every_n;
+    }
+}
+
+void log_set_output_file(const char* filename) {
+    if (!log_initialized) log_init();
     
-    // Always allow WARN and INFO
-    if (level <= LOG_LEVEL_INFO) return 0;
+    if (log_output_file && log_output_file != stderr && log_output_file != stdout) {
+        fclose(log_output_file);
+    }
     
-    // Rate limiting for DEBUG and TRACE
-    if (log_rate_limit_enabled && (level == LOG_LEVEL_DEBUG || level == LOG_LEVEL_TRACE)) {
-        // Find component index
-        int idx = -1;
-        for (int i = 0; i < log_counter_count; ++i) {
-            if (strcmp(log_counters[i].name, component) == 0) { 
-                idx = i; 
-                break; 
-            }
+    if (filename) {
+        log_output_file = fopen(filename, "a");
+        if (!log_output_file) {
+            log_output_file = stderr;
+            fprintf(stderr, "[LOG] Failed to open log file '%s', using stderr\n", filename);
         }
-        
-        if (idx == -1) {
-            // New component, initialize counters
-            if (log_counter_count < 16) {
-                idx = log_counter_count;
-                strncpy(log_counters[idx].name, component, sizeof(log_counters[idx].name)-1);
-                log_counters[idx].name[sizeof(log_counters[idx].name)-1] = '\0';
-                log_counters[idx].debug_counter = 0;
-                log_counters[idx].trace_counter = 0;
-                log_counter_count++;
-            } else {
-                return 1; // Too many components
-            }
-        }
-        
-        if (level == LOG_LEVEL_DEBUG) {
-            log_counters[idx].debug_counter++;
-            // Log first 10, then every 100th
-            if (log_counters[idx].debug_counter <= 10) return 0;
-            if (log_counters[idx].debug_counter % 100 == 0) return 0;
-            return 1;
-        } else if (level == LOG_LEVEL_TRACE) {
-            log_counters[idx].trace_counter++;
-            // Log first 5, then every 500th
-            if (log_counters[idx].trace_counter <= 5) return 0;
-            if (log_counters[idx].trace_counter % 500 == 0) return 0;
-            return 1;
-        }
+    } else {
+        log_output_file = stderr;
+    }
+}
+
+// --- Rate Limiting Logic ---
+bool log_should_print(LogCategory category, LogLevel level) {
+    if (!log_initialized) log_init();
+    
+    // Check global log level
+    if (level > current_log_level) {
+        return false;
     }
     
-    return 0;
-}
-
-void log_set_level(int level) {
-    global_log_level = level;
-}
-
-void log_set_single_file(int enabled) {
-    log_single_file_mode = enabled;
-    if (enabled && !single_log_file) {
-        single_log_file = fopen("emulator_log.txt", "w");
-    } else if (!enabled && single_log_file) {
-        fclose(single_log_file);
-        single_log_file = NULL;
+    // Check category bounds
+    if (category < 0 || category >= LOG_CAT_COUNT) {
+        return false;
     }
-}
-
-void log_msg(int level, const char* fmt, ...) {
-    if (level > global_log_level) return;
-    const char* level_str = "INFO";
-    switch (level) {
-        case LOG_LEVEL_FATAL: level_str = "FATAL"; break;
-        case LOG_LEVEL_ERROR: level_str = "ERROR"; break;
-        case LOG_LEVEL_WARN:  level_str = "WARN";  break;
-        case LOG_LEVEL_INFO:  level_str = "INFO";  break;
-        case LOG_LEVEL_DEBUG: level_str = "DEBUG"; break;
-        case LOG_LEVEL_TRACE: level_str = "TRACE"; break;
-    }
-    fprintf(stderr, "[%s] ", level_str);
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
-    fprintf(stderr, "\n");
-    if (level == LOG_LEVEL_FATAL) {
-        // Optionally abort on fatal
-        fflush(stderr);
-        abort();
-    }
-}
-
-int log_get_level(void) { return global_log_level; }
-
-void log_component(const char* component, int level, const char* fmt, ...) {
-    if (level > global_log_level) return;
     
-    // Early filtering for performance
-    if (should_skip_log(component, level)) return;
+    // Check if category is enabled
+    if (!category_states[category].enabled) {
+        return false;
+    }
     
-    // Single file mode (if enabled)
-    if (log_single_file_mode && single_log_file) {
-        va_list args;
-        va_start(args, fmt);
-        fprintf(single_log_file, "[%s] ", component);
-        vfprintf(single_log_file, fmt, args);
-        fprintf(single_log_file, "\n");
-        va_end(args);
-        fflush(single_log_file);
+    // Always allow critical messages
+    if (level <= LOG_LEVEL_ERROR) {
+        return true;
+    }
+    
+    // Apply rate limiting for non-critical messages
+    LogCategoryState* state = &category_states[category];
+    state->count++;
+    
+    // Allow first N messages
+    if (state->count <= state->limit_first) {
+        return true;
+    }
+    
+    // Then only every Nth message
+    if (state->limit_every > 0 && (state->count % state->limit_every == 0)) {
+        return true;
+    }
+    
+    return false;
+}
+
+// --- Core Logging Function ---
+void log_print(LogCategory category, LogLevel level, const char* format, ...) {
+    if (!log_should_print(category, level)) {
         return;
     }
     
-    // Terminal output only - much faster!
-    const char* level_str = "INFO";
-    switch (level) {
-        case LOG_LEVEL_FATAL: level_str = "FATAL"; break;
-        case LOG_LEVEL_ERROR: level_str = "ERROR"; break;
-        case LOG_LEVEL_WARN:  level_str = "WARN";  break;
-        case LOG_LEVEL_INFO:  level_str = "INFO";  break;
-        case LOG_LEVEL_DEBUG: level_str = "DEBUG"; break;
-        case LOG_LEVEL_TRACE: level_str = "TRACE"; break;
+    // Get current time
+    time_t now = time(NULL);
+    struct tm* tm_info = localtime(&now);
+    
+    // Print timestamp, level, and category
+    fprintf(log_output_file, "[%02d:%02d:%02d][%s][%s] ", 
+            tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,
+            level_names[level],
+            category_names[category]);
+    
+    // Print the actual message
+    va_list args;
+    va_start(args, format);
+    vfprintf(log_output_file, format, args);
+    va_end(args);
+    
+    // Add newline if not present
+    if (format[strlen(format) - 1] != '\n') {
+        fprintf(log_output_file, "\n");
     }
     
-    fprintf(stderr, "[%s][%s] ", level_str, component);
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
-    va_end(args);
-    fprintf(stderr, "\n");
-} 
+    // Flush immediately for critical messages
+    if (level <= LOG_LEVEL_WARN) {
+        fflush(log_output_file);
+    }
+}
+
+// --- Helper Functions ---
+const char* log_category_name(LogCategory category) {
+    if (category >= 0 && category < LOG_CAT_COUNT) {
+        return category_names[category];
+    }
+    return "UNKNOWN";
+}
+
+// --- Debug Information ---
+void log_print_stats(void) {
+    if (!log_initialized) log_init();
+    
+    fprintf(log_output_file, "\n=== Logging Statistics ===\n");
+    for (int i = 0; i < LOG_CAT_COUNT; i++) {
+        LogCategoryState* state = &category_states[i];
+        fprintf(log_output_file, "%12s: %8u messages (enabled=%s, limits=%u/%u)\n",
+                category_names[i], state->count, 
+                state->enabled ? "yes" : "no",
+                state->limit_first, state->limit_every);
+    }
+    fprintf(log_output_file, "==========================\n\n");
+    fflush(log_output_file);
+}

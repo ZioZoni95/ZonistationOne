@@ -4,7 +4,7 @@
 #include "event_scheduler.h" // For eventq_schedule
 #include "interconnect.h"   // For Interconnect struct (needed for event system)
 
-// Logging: Only use LOG_ERROR for DMA hardware faults. No per-transfer logs.
+// Logging: Only use LOG_DMA_ERROR for DMA hardware faults. No per-transfer logs.
 
 // Example: Replace LOG_DMA_INFO or LOG_DMA_DEBUG for frequent register accesses with LOG_DMA_TRACE or wrap in a higher debug level check.
 #ifdef LOG_DMA_TRACE
@@ -40,7 +40,7 @@ void channel_set_control(DmaChannel* ch, uint32_t value) {
         case 1: ch->sync = REQUEST; break;
         case 2: ch->sync = LINKED_LIST; break;
         default:
-            LOG_WARN("Warning: Invalid DMA Sync mode %d written to CHCR\n", (value >> 9) & 3);
+            LOG_DMA_WARN("Warning: Invalid DMA Sync mode %d written to CHCR\n", (value >> 9) & 3);
             break;
     }
     // ch->chopping_dma_sz = (value >> 16) & 7; // Not implemented
@@ -121,7 +121,7 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
             case 0x8: // CHCR
                 return channel_get_control(ch);
             default:
-                LOG_WARN("Warning: Unhandled DMA Channel read at offset 0x%x (Channel %d, Reg %x)\n", offset, channel_index, register_offset);
+                LOG_DMA_WARN("Warning: Unhandled DMA Channel read at offset 0x%x (Channel %d, Reg %x)\n", offset, channel_index, register_offset);
                 return 0;
         }
     } else { // Main DMA Register Access
@@ -141,7 +141,7 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
                     return dicr;
                 }
             default:
-                LOG_ERROR("Error: Unhandled DMA Main register read at offset 0x%x\n", offset);
+                LOG_DMA_ERROR("Error: Unhandled DMA Main register read at offset 0x%x\n", offset);
                 return 0;
         }
     }
@@ -210,7 +210,7 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 }
                 break;
             default:
-                LOG_ERROR("Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);
+                LOG_DMA_ERROR("Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);
                 break;
         }
     }

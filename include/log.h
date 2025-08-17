@@ -4,118 +4,160 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
 
-// Log levels
-#define LOG_LEVEL_FATAL 0
-#define LOG_LEVEL_ERROR 1
-#define LOG_LEVEL_WARN  2
-#define LOG_LEVEL_INFO  3
-#define LOG_LEVEL_DEBUG 4
-#define LOG_LEVEL_TRACE 5
+// PCSX ReARMed-style logging system with component categories and rate limiting
 
-// Set the global log level (default: INFO)
-void log_set_level(int level);
+// --- Log Levels ---
+typedef enum {
+    LOG_LEVEL_SILENT = 0,
+    LOG_LEVEL_ERROR = 1,
+    LOG_LEVEL_WARN = 2,
+    LOG_LEVEL_INFO = 3,
+    LOG_LEVEL_DEBUG = 4,
+    LOG_LEVEL_TRACE = 5
+} LogLevel;
 
-// Logging function
-void log_msg(int level, const char* fmt, ...);
+// --- Log Categories (PCSX ReARMed style) ---
+typedef enum {
+    LOG_CAT_SYSTEM = 0,     // General system messages
+    LOG_CAT_CPU = 1,        // CPU execution, instructions
+    LOG_CAT_IRQ = 2,        // Interrupt handling
+    LOG_CAT_DMA = 3,        // DMA transfers
+    LOG_CAT_GPU = 4,        // Graphics operations
+    LOG_CAT_CDROM = 5,      // CD-ROM operations
+    LOG_CAT_TIMER = 6,      // Timer events
+    LOG_CAT_BIOS = 7,       // BIOS calls and operations
+    LOG_CAT_INTERCONNECT = 8, // Memory/IO interconnect
+    LOG_CAT_RENDERER = 9,   // OpenGL rendering
+    LOG_CAT_EVENT = 10,     // Event scheduler
+    LOG_CAT_GTE = 11,       // Geometry Transform Engine
+    LOG_CAT_VRAM = 12,      // VRAM operations
+    LOG_CAT_RAM = 13,       // RAM operations
+    LOG_CAT_DEBUG = 14,     // Debugger operations
+    LOG_CAT_COUNT = 15      // Total number of categories
+} LogCategory;
 
-// Convenience macros
-#define LOG_FATAL(...) log_msg(LOG_LEVEL_FATAL, __VA_ARGS__)
-#define LOG_ERROR(...) log_msg(LOG_LEVEL_ERROR, __VA_ARGS__)
-#define LOG_WARN(...)  log_msg(LOG_LEVEL_WARN,  __VA_ARGS__)
-#define LOG_INFO(...)  log_msg(LOG_LEVEL_INFO,  __VA_ARGS__)
-#define LOG_DEBUG(...) log_msg(LOG_LEVEL_DEBUG, __VA_ARGS__)
-#define LOG_TRACE(...) log_msg(LOG_LEVEL_TRACE, __VA_ARGS__)
+// --- Rate Limiting Structure ---
+typedef struct {
+    uint32_t count;         // How many times this has been logged
+    uint32_t limit_first;   // Log first N messages
+    uint32_t limit_every;   // Then log every Nth message
+    bool enabled;           // Is this category enabled?
+} LogCategoryState;
 
-int log_get_level(void);
+// --- Core Logging Functions ---
+void log_init(void);
+void log_set_level(LogLevel level);
+void log_set_category_enabled(LogCategory category, bool enabled);
+void log_set_rate_limit(LogCategory category, uint32_t first_n, uint32_t every_n);
+void log_set_output_file(const char* filename);
+bool log_should_print(LogCategory category, LogLevel level);
 
-// Component-based logging
-void log_component(const char* component, int level, const char* fmt, ...);
+// Internal logging function
+void log_print(LogCategory category, LogLevel level, const char* format, ...);
 
-// Per-component macros (expand as needed)
-#define LOG_CPU_DEBUG(fmt, ...) log_component("cpu", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_CPU_INFO(fmt, ...)  log_component("cpu", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_CPU_WARN(fmt, ...)  log_component("cpu", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_CPU_ERROR(fmt, ...) log_component("cpu", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_CPU_TRACE(fmt, ...) log_component("cpu", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define LOG_CPU_IMPORTANT(...)   log_component("cpu", LOG_LEVEL_INFO, __VA_ARGS__)
+// --- Direct Component-Specific Macros (PCSX ReARMed style) ---
+// These call log_print directly to avoid circular definitions
+#define LOG_SYSTEM_ERROR(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_SYSTEM_WARN(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_SYSTEM_INFO(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_SYSTEM_DEBUG(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_GPU_DEBUG(fmt, ...) log_component("gpu", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_GPU_INFO(fmt, ...)  log_component("gpu", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_GPU_WARN(fmt, ...)  log_component("gpu", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_GPU_ERROR(fmt, ...) log_component("gpu", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_GPU_TRACE(fmt, ...) log_component("gpu", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_CPU_ERROR(...) log_print(LOG_CAT_CPU, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_CPU_WARN(...) log_print(LOG_CAT_CPU, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_CPU_INFO(...) log_print(LOG_CAT_CPU, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_CPU_DEBUG(...) log_print(LOG_CAT_CPU, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_CPU_TRACE(...) log_print(LOG_CAT_CPU, LOG_LEVEL_TRACE, __VA_ARGS__)
 
-#define LOG_BIOS_DEBUG(fmt, ...) log_component("bios", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_BIOS_INFO(fmt, ...)  log_component("bios", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_BIOS_WARN(fmt, ...)  log_component("bios", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_BIOS_ERROR(fmt, ...) log_component("bios", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_BIOS_TRACE(fmt, ...) log_component("bios", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_IRQ_ERROR(...) log_print(LOG_CAT_IRQ, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_IRQ_WARN(...) log_print(LOG_CAT_IRQ, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_IRQ_INFO(...) log_print(LOG_CAT_IRQ, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_IRQ_DEBUG(...) log_print(LOG_CAT_IRQ, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_IRQ_TRACE(...) log_print(LOG_CAT_IRQ, LOG_LEVEL_TRACE, __VA_ARGS__)
 
-#define LOG_INTERCONNECT_DEBUG(fmt, ...) log_component("interconnect", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_INTERCONNECT_INFO(fmt, ...)  log_component("interconnect", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_INTERCONNECT_WARN(fmt, ...)  log_component("interconnect", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_INTERCONNECT_ERROR(fmt, ...) log_component("interconnect", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_INTERCONNECT_TRACE(fmt, ...) log_component("interconnect", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_DMA_ERROR(...) log_print(LOG_CAT_DMA, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_DMA_WARN(...) log_print(LOG_CAT_DMA, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_DMA_INFO(...) log_print(LOG_CAT_DMA, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_DMA_DEBUG(...) log_print(LOG_CAT_DMA, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_DMA_TRACE(...) log_print(LOG_CAT_DMA, LOG_LEVEL_TRACE, __VA_ARGS__)
 
-#define LOG_RENDERER_DEBUG(fmt, ...) log_component("renderer", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_RENDERER_INFO(fmt, ...)  log_component("renderer", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_RENDERER_WARN(fmt, ...)  log_component("renderer", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_RENDERER_ERROR(fmt, ...) log_component("renderer", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_RENDERER_TRACE(fmt, ...) log_component("renderer", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_GPU_ERROR(...) log_print(LOG_CAT_GPU, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_GPU_WARN(...) log_print(LOG_CAT_GPU, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_GPU_INFO(...) log_print(LOG_CAT_GPU, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_GPU_DEBUG(...) log_print(LOG_CAT_GPU, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_GPU_TRACE(...) log_print(LOG_CAT_GPU, LOG_LEVEL_TRACE, __VA_ARGS__)
 
-#define LOG_VRAM_DEBUG(fmt, ...) log_component("vram", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_VRAM_INFO(fmt, ...)  log_component("vram", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_VRAM_WARN(fmt, ...)  log_component("vram", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_VRAM_ERROR(fmt, ...) log_component("vram", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_VRAM_TRACE(fmt, ...) log_component("vram", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_CDROM_ERROR(...) log_print(LOG_CAT_CDROM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_CDROM_WARN(...) log_print(LOG_CAT_CDROM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_CDROM_INFO(...) log_print(LOG_CAT_CDROM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_CDROM_DEBUG(...) log_print(LOG_CAT_CDROM, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_CDROM_DEBUG(fmt, ...) log_component("cdrom", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_CDROM_INFO(fmt, ...)  log_component("cdrom", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_CDROM_WARN(fmt, ...)  log_component("cdrom", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_CDROM_ERROR(fmt, ...) log_component("cdrom", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_CDROM_TRACE(fmt, ...) log_component("cdrom", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
-#define LOG_CDROM_IMPORTANT(...) log_component("cdrom", LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_TIMER_ERROR(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_TIMER_WARN(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_TIMER_INFO(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_TIMER_DEBUG(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_DMA_DEBUG(fmt, ...) log_component("dma", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_DMA_INFO(fmt, ...)  log_component("dma", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_DMA_WARN(fmt, ...)  log_component("dma", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_DMA_ERROR(fmt, ...) log_component("dma", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DMA_TRACE(fmt, ...) log_component("dma", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_BIOS_ERROR(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_BIOS_WARN(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_BIOS_INFO(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_BIOS_DEBUG(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_TIMERS_DEBUG(fmt, ...) log_component("timers", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_TIMERS_INFO(fmt, ...)  log_component("timers", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_TIMERS_WARN(fmt, ...)  log_component("timers", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_TIMERS_ERROR(fmt, ...) log_component("timers", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_TIMERS_TRACE(fmt, ...) log_component("timers", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_INTERCONNECT_ERROR(...) log_print(LOG_CAT_INTERCONNECT, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_INTERCONNECT_WARN(...) log_print(LOG_CAT_INTERCONNECT, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_INTERCONNECT_INFO(...) log_print(LOG_CAT_INTERCONNECT, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_INTERCONNECT_DEBUG(...) log_print(LOG_CAT_INTERCONNECT, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_INTERCONNECT_TRACE(...) log_print(LOG_CAT_INTERCONNECT, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_GTE_DEBUG(fmt, ...) log_component("gte", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_GTE_INFO(fmt, ...)  log_component("gte", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_GTE_WARN(fmt, ...)  log_component("gte", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_GTE_ERROR(fmt, ...) log_component("gte", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_GTE_TRACE(fmt, ...) log_component("gte", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_RENDERER_ERROR(...) log_print(LOG_CAT_RENDERER, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_RENDERER_WARN(...) log_print(LOG_CAT_RENDERER, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_RENDERER_INFO(...) log_print(LOG_CAT_RENDERER, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_RENDERER_DEBUG(...) log_print(LOG_CAT_RENDERER, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_RAM_DEBUG(fmt, ...) log_component("ram", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_RAM_INFO(fmt, ...)  log_component("ram", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_RAM_WARN(fmt, ...)  log_component("ram", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_RAM_ERROR(fmt, ...) log_component("ram", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_RAM_TRACE(fmt, ...) log_component("ram", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_EVENT_ERROR(...) log_print(LOG_CAT_EVENT, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_EVENT_WARN(...) log_print(LOG_CAT_EVENT, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_EVENT_INFO(...) log_print(LOG_CAT_EVENT, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_EVENT_DEBUG(...) log_print(LOG_CAT_EVENT, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#define LOG_DEBUGGER_DEBUG(fmt, ...) log_component("debugger", LOG_LEVEL_DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_DEBUGGER_INFO(fmt, ...)  log_component("debugger", LOG_LEVEL_INFO, fmt, ##__VA_ARGS__)
-#define LOG_DEBUGGER_WARN(fmt, ...)  log_component("debugger", LOG_LEVEL_WARN, fmt, ##__VA_ARGS__)
-#define LOG_DEBUGGER_ERROR(fmt, ...) log_component("debugger", LOG_LEVEL_ERROR, fmt, ##__VA_ARGS__)
-#define LOG_DEBUGGER_TRACE(fmt, ...) log_component("debugger", LOG_LEVEL_TRACE, fmt, ##__VA_ARGS__)
+#define LOG_GTE_ERROR(...) log_print(LOG_CAT_GTE, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_GTE_WARN(...) log_print(LOG_CAT_GTE, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_GTE_INFO(...) log_print(LOG_CAT_GTE, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_GTE_DEBUG(...) log_print(LOG_CAT_GTE, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-// ... add more as needed
+#define LOG_VRAM_ERROR(...) log_print(LOG_CAT_VRAM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_VRAM_WARN(...) log_print(LOG_CAT_VRAM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_VRAM_INFO(...) log_print(LOG_CAT_VRAM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_VRAM_DEBUG(...) log_print(LOG_CAT_VRAM, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-// Global log rate-limiting (for debug/trace):
-extern int log_rate_limit_enabled;
-extern int log_rate_limit_n;
-void log_set_rate_limit(int enabled, int n);
-// Call log_set_rate_limit(1, N) to enable, 0 to disable.
+#define LOG_RAM_ERROR(...) log_print(LOG_CAT_RAM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_RAM_WARN(...) log_print(LOG_CAT_RAM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_RAM_INFO(...) log_print(LOG_CAT_RAM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_RAM_DEBUG(...) log_print(LOG_CAT_RAM, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-// Single file logging mode
-void log_set_single_file(int enabled);
+#define LOG_DEBUGGER_ERROR(...) log_print(LOG_CAT_DEBUG, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_DEBUGGER_WARN(...) log_print(LOG_CAT_DEBUG, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_DEBUGGER_INFO(...) log_print(LOG_CAT_DEBUG, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_DEBUGGER_DEBUG(...) log_print(LOG_CAT_DEBUG, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
-#endif // LOG_H 
+// Legacy compatibility for custom macros
+#define LOG_TIMERS_ERROR(...) LOG_TIMER_ERROR(__VA_ARGS__)
+#define LOG_TIMERS_WARN(...) LOG_TIMER_WARN(__VA_ARGS__)
+#define LOG_TIMERS_INFO(...) LOG_TIMER_INFO(__VA_ARGS__)
+#define LOG_TIMERS_DEBUG(...) LOG_TIMER_DEBUG(__VA_ARGS__)
+
+#define LOG_CDROM_IMPORTANT(...) LOG_CDROM_INFO(__VA_ARGS__)
+#define LOG_CPU_IMPORTANT(...) LOG_CPU_INFO(__VA_ARGS__)
+
+// --- Simple fallback macros for old code (no categories) ---
+#define LOG_INFO(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_ERROR(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_WARN(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_DEBUG(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_TRACE(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_TRACE, __VA_ARGS__)
+
+// Old function compatibility
+LogLevel log_get_current_level(void);
+#define log_get_level() log_get_current_level()
+const char* log_category_name(LogCategory category);
+
+#endif // LOG_H
