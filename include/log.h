@@ -115,4 +115,7 @@ extern int log_rate_limit_n;
 void log_set_rate_limit(int enabled, int n);
 // Call log_set_rate_limit(1, N) to enable, 0 to disable.
 
+// Single file logging mode
+void log_set_single_file(int enabled);
+
 #endif // LOG_H 
