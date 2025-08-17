@@ -383,7 +383,7 @@ void timers_on_vblank(Timers* timers) {
     t0->counter = 0;
     t0->reached_target_flag = false;
     // Only clear interrupt_requested if the IRQ was acknowledged (handled in interconnect)
-    if (t0->interrupt_requested && /* IRQ0 was acknowledged */) {
+    if (t0->interrupt_requested) {
         LOG_TIMERS_INFO("[Timer0] IRQ0 acknowledged, clearing interrupt_requested flag.");
         t0->interrupt_requested = false;
     }
