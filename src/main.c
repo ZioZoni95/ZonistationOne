@@ -253,11 +253,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // 5. Load a game disc into the CD-ROM drive
-    // NOTE: Replace "path/to/your/game.bin" with an actual game image.
-    // If no disc is loaded, the emulator will just run the BIOS.
+    // 5. Load a game disc into the CD-ROM drive (OPTIONAL)
+    // NOTE: The emulator can run BIOS-only without a game disc
+    // If no disc is loaded, the emulator will just run the BIOS to its menu.
+    LOG_SYSTEM_INFO("Attempting to load game disc (optional)...");
     if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crassh Bandicoot.bin")) {
-        LOG_SYSTEM_INFO("Warning: Could not load game disc. Running BIOS only.");
+        LOG_SYSTEM_INFO("No game disc loaded. Running BIOS-only mode.");
+        // Initialize CD-ROM in "no disc" state for BIOS menu
+        interconnect_state.cdrom.disc_present = false;
+        interconnect_state.cdrom.current_state = CD_STATE_IDLE;
+        LOG_SYSTEM_INFO("CD-ROM initialized in no-disc state for BIOS menu.");
+    } else {
+        LOG_SYSTEM_INFO("Game disc loaded successfully.");
     }
 
 
@@ -301,6 +308,7 @@ int main(int argc, char *argv[]) {
         static uint64_t total_instructions = 0;
         static uint32_t last_progress_pc = 0xbfc00000;
         static uint32_t stuck_counter = 0;
+        static bool bios_menu_reached = false;
         
         while (cycles_run < cycles_per_frame) {
             cpu_run_next_instruction(&cpu_state);
@@ -309,12 +317,26 @@ int main(int argc, char *argv[]) {
             cpu_run_next_instruction(&cpu_state);
             cycles_run += 2; // FIX: Increment by 2 since we run 2 instructions per iteration
             
-            // BIOS Boot Bypass Logic
+            // BIOS Boot Bypass Logic - Improved
             total_instructions++;
+            
+            // Check if we've reached the BIOS menu (common patterns)
+            if (!bios_menu_reached && 
+                (cpu_state.pc == 0x80000000 || 
+                 (cpu_state.pc >= 0x80000000 && cpu_state.pc < 0x80200000) ||
+                 cpu_state.pc == 0x80000080)) {
+                bios_menu_reached = true;
+                LOG_SYSTEM_INFO("BIOS-BOOT: BIOS menu reached at PC=0x%08x after %llu instructions", 
+                               cpu_state.pc, total_instructions);
+                // Enable interrupts for BIOS menu operation
+                interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
+                LOG_SYSTEM_INFO("BIOS-BOOT: Interrupts enabled for BIOS menu operation.");
+            }
+            
             if (cpu_state.pc == last_progress_pc) {
                 stuck_counter++;
                 // If stuck for too long, force enable interrupts and continue
-                if (stuck_counter > 1000000) { // 1M instructions stuck
+                if (stuck_counter > 500000) { // Reduced from 1M to 500K for faster recovery
                     LOG_SYSTEM_WARN("BIOS-BOOT: STUCK for %u instructions at PC=0x%08x. Forcing interrupt enable.", stuck_counter, cpu_state.pc);
                     // Force enable interrupts to wake up BIOS
                     interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
