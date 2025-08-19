@@ -196,6 +196,20 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return timer_read32(&inter->timers_state, timer_index, register_offset);
     }
     
+    // TEST: Add missing hardware register read handlers for 32-bit access
+    if (physical_addr == 0x1f801010) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801010 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801020) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801020 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801030) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801030 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         LOG_IRQ_TRACE("Read32 from IRQ_STATUS (0x1f801070): Returning 0x%04x", inter->irq_status);
@@ -292,8 +306,23 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     // --- Hardware Register Checks (Specific Addresses First) ---
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
+        
+        // TEST: Add missing hardware registers that BIOS is trying to access
+        if (physical_addr == 0x1f801010) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801010 (unknown register) - returning 0x00");
+            return 0x00; // Return 0 for now to see if BIOS continues
+        }
+        if (physical_addr == 0x1f801020) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801020 (unknown register) - returning 0x00");
+            return 0x00; // Return 0 for now to see if BIOS continues
+        }
+        if (physical_addr == 0x1f801030) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801030 (unknown register) - returning 0x00");
+            return 0x00; // Return 0 for now to see if BIOS continues
+        }
+        
         // LOG_INTERCONNECT_TRACE("[HWREG] Read32 at 0x%08x", physical_addr); // Uncomment for deep debug
-        return *(uint32_t *)&hwregs[offset];
+        return hwregs[offset];
     }
 
     // --- Fallback for Unhandled Addresses ---
@@ -382,13 +411,27 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10;
-        uint32_t register_offset = physical_addr & 0xF;
+        int timer_index = timer_base_offset / 0x10; // Each timer block is 0x10 bytes wide
+        uint32_t register_offset = physical_addr & 0xF; // Offset within the timer block (0, 4, 8)
 
         // LOG_INFO("~ Read16 from Timer %d Offset 0x%x\n", timer_index, register_offset);
         return timer_read16(&inter->timers_state, timer_index, register_offset);
     }
-
+    
+    // TEST: Add missing hardware register read handlers for 16-bit access
+    if (physical_addr == 0x1f801010) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801010 (unknown register) - returning 0x0000");
+        return 0x0000; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801020) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801020 (unknown register) - returning 0x0000");
+        return 0x0000; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801030) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801030 (unknown register) - returning 0x0000");
+        return 0x0000; // Return 0 for now to see if BIOS continues
+    }
+    
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         LOG_IRQ_TRACE("Read16 from IRQ_STATUS (0x1f801070): Returning 0x%04x", inter->irq_status);
@@ -522,6 +565,21 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         LOG_INTERCONNECT_WARN("Warning: Unhandled 8-bit read from Timer range: 0x%08x\n", physical_addr);
         return 0; // Return 0 for safety
     }
+    
+    // TEST: Add missing hardware register read handlers for 8-bit access
+    if (physical_addr == 0x1f801010) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801010 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801020) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801020 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    if (physical_addr == 0x1f801030) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801030 (unknown register) - returning 0x00");
+        return 0x00; // Return 0 for now to see if BIOS continues
+    }
+    
     // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8 at 0x%08x\n", physical_addr);
@@ -819,8 +877,23 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     // --- Hardware Register Checks (Specific Addresses First) ---
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
+        
+        // TEST: Add missing hardware register write handlers
+        if (physical_addr == 0x1f801010) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801010 (unknown register)", value);
+            return; // Don't store, just log
+        }
+        if (physical_addr == 0x1f801020) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801020 (unknown register)", value);
+            return; // Don't store, just log
+        }
+        if (physical_addr == 0x1f801030) {
+            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801030 (unknown register)", value);
+            return; // Don't store, just log
+        }
+        
         // LOG_INTERCONNECT_TRACE("[HWREG] Write32 at 0x%08x = 0x%08x", physical_addr, value); // Uncomment for deep debug
-        *(uint32_t *)&hwregs[offset] = value;
+        hwregs[offset] = value;
         return;
     }
 
@@ -933,6 +1006,21 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         timer_write16(&inter->timers_state, timer_index, register_offset, value);
         return; // Handled
      }
+     
+     // TEST: Add missing hardware register write handlers for 16-bit access
+     if (physical_addr == 0x1f801010) {
+         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801010 (unknown register)", value);
+         return; // Don't store, just log
+     }
+     if (physical_addr == 0x1f801020) {
+         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801020 (unknown register)", value);
+         return; // Don't store, just log
+     }
+     if (physical_addr == 0x1f801030) {
+         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801030 (unknown register)", value);
+         return; // Don't store, just log
+     }
+     
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         static uint32_t irq_status_write_count = 0;
@@ -1110,6 +1198,21 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         // Ignoring is safest for now.
         return;
     }
+    
+    // TEST: Add missing hardware register write handlers for 8-bit access
+    if (physical_addr == 0x1f801010) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801010 (unknown register)", value);
+        return; // Don't store, just log
+    }
+    if (physical_addr == 0x1f801020) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801020 (unknown register)", value);
+        return; // Don't store, just log
+    }
+    if (physical_addr == 0x1f801030) {
+        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801030 (unknown register)", value);
+        return; // Don't store, just log
+    }
+    
     // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8 at 0x%08x = 0x%02x\n", physical_addr, value);
