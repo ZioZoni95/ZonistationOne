@@ -13,16 +13,26 @@
 struct Interconnect;
 struct Cdrom;
 
-// --- CDROM Register Indices ---
-// How the 4 physical 8-bit registers (1F801800h-1F801803h) map based on Index register (1800h) value
-// Offset refers to the physical address LSB (0-3)
-#define CDREG_INDEX       0 // Offset 0: Write Index Select; Read Status Register
-#define CDREG_COMMAND     1 // Offset 1: Write Command Register (Requires Index 0)
-#define CDREG_RESPONSE    1 // Offset 1: Read Response FIFO (Requires Index 1)
-#define CDREG_PARAMETER   2 // Offset 2: Write Parameter FIFO (Requires Index 0)
-#define CDREG_DATA        2 // Offset 2: Read Data FIFO/Buffer (Requires Index 2)
-#define CDREG_REQUEST     3 // Offset 3: Write Request Register (Index 0); Write IRQ Enable/Ack (Index 1)
-#define CDREG_IRQ_EN_FLAG 3 // Offset 3: Read IRQ Enable/Flags (Requires Index 1)
+// --- PSX-SPX CDROM Register Layout ---
+// Bank-switched registers based on ADDRESS register (0x1F801800) bits 0-1
+// All registers are 8-bit, bank switching controls functionality
+
+// Physical addresses (offsets from 0x1F801800)
+#define CDROM_REG0  0  // 0x1F801800: HSTS (read all banks) / ADDRESS (write all banks)
+#define CDROM_REG1  1  // 0x1F801801: Bank-switched read/write
+#define CDROM_REG2  2  // 0x1F801802: Bank-switched read/write  
+#define CDROM_REG3  3  // 0x1F801803: Bank-switched read/write
+
+// Bank-switched register functions per PSX-SPX:
+// Read functions:
+// Bank 0,2: HSTS, RESULT, RDDATA, HINTMSK
+// Bank 1,3: HSTS, RESULT, RDDATA, HINTSTS
+
+// Write functions:
+// Bank 0: ADDRESS, COMMAND, PARAMETER, HCHPCTL
+// Bank 1: ADDRESS, WRDATA, HINTMSK, HCLRCTL  
+// Bank 2: ADDRESS, CI, ATV0, ATV1
+// Bank 3: ADDRESS, ATV2, ATV3, ADPCTL
 
 // --- CDROM Commands (Partial List) ---
 #define CDC_GETSTAT     0x01 // Get current drive status
@@ -37,15 +47,29 @@ struct Cdrom;
 
 #define CD_SECTOR_SIZE 2352 // Common raw sector size for Mode 2
 
-// --- Simple FIFO Placeholder ---
-// Represents Parameter and Response FIFOs (limited size).
-// NOTE: A proper FIFO implementation needs better head/tail/wrap logic.
+// --- PSX-SPX CDROM Status Register (HSTS) Bits ---
+#define HSTS_RA_MASK    0x03  // Bits 0-1: Register bank (R/W)
+#define HSTS_ADPBUSY    0x04  // Bit 2: ADPCM busy (R, 1=playing XA-ADPCM)
+#define HSTS_PRMEMPT    0x08  // Bit 3: Parameter empty (R, 1=parameter FIFO empty)  
+#define HSTS_PRMWRDY    0x10  // Bit 4: Parameter write ready (R, 1=parameter FIFO not full)
+#define HSTS_RSLRRDY    0x20  // Bit 5: Result read ready (R, 1=result FIFO not empty)
+#define HSTS_DRQSTS     0x40  // Bit 6: Data request (R, 1=data read/write pending)
+#define HSTS_BUSYSTS    0x80  // Bit 7: Busy status (R, 1=HC05 busy acknowledging command)
+
+// --- PSX-SPX CDROM Interrupt Types (HINTSTS bits 0-2) ---
+#define INT_NOINTR      0  // No interrupt pending
+#define INT_DATAREADY   1  // New sector (ReadN/ReadS) or report packet available
+#define INT_COMPLETE    2  // Command finished processing (after INT3)
+#define INT_ACKNOWLEDGE 3  // Command received and acknowledged (all commands)  
+#define INT_DATAEND     4  // Reached end of disc/track (auto-pause enabled)
+#define INT_DISKERROR   5  // Command error, read error, license error, lid opened
+
+// --- CDROM FIFO Structure ---
 #define FIFO_SIZE 16
 typedef struct {
     uint8_t data[FIFO_SIZE];
     uint8_t count;    // Number of bytes currently in FIFO
     uint8_t read_ptr; // Index of the next byte to read
-    // uint8_t write_ptr; // Needed for proper wrap-around
 } Fifo8;
 
 // --- CDROM Internal State ---
@@ -58,74 +82,61 @@ typedef enum {
 } CdromState;
 
 // --- CDROM State Structure ---
-// Holds the complete state of the emulated CD-ROM drive and controller.
+// Holds the complete state of the emulated CD-ROM drive and controller per PSX-SPX.
 typedef struct Cdrom {
-    // --- Controller Registers/State ---
-    /** @brief Currently selected register index (0-3), written via 1800h.0 */
-    uint8_t index;
-    /** @brief Cached Status register value (read via 1800h.0). Updated dynamically. */
-    uint8_t status;
-    /**
-     * @brief Interrupt Enable register cache (written/read via 1803h.1, lower 5 bits: INT1-5 enable)
-     *
-     * If a flag is set while the enable bit is not set, the flag is latched. If the enable bit is set later and the flag is still set, IRQ2 is requested (late enable logic).
-     */
-    uint8_t interrupt_enable;
-    /**
-     * @brief Interrupt Flags cache (read via 1803h.1 upper 3 bits?, cleared by writing 1 to corresponding bit in 1803h.1)
-     *
-     * Flags are set by command completion or error, and are only cleared by explicit write. If any enabled flag is set, IRQ2 is requested.
-     */
-    uint8_t interrupt_flags; // Bits 0-4 -> INT1-5 Pending? Check docs. Often mapped to upper bits on read.
-
-    // --- FIFOs ---
-    /** @brief FIFO for command parameters written via 1802h.0 */
+    // --- PSX-SPX Controller Registers ---
+    /** @brief Current register bank (0-3) from ADDRESS register bits 0-1 */
+    uint8_t register_bank;
+    /** @brief HSTS register (0x1F801800 read) - drive/controller status */
+    uint8_t hsts_register;
+    /** @brief HINTSTS register - interrupt type (bits 0-2) and flags (bits 3-4) */
+    uint8_t hintsts_register; 
+    /** @brief HINTMSK register - interrupt enable mask */
+    uint8_t hintmsk_register;
+    
+    // --- PSX-SPX FIFOs ---
+    /** @brief Parameter FIFO for command parameters (16 bytes max) */
     Fifo8 param_fifo;
-    /** @brief FIFO for command responses read via 1801h.1 */
-    Fifo8 response_fifo;
-    // TODO: Add Data FIFO/Buffer for sector data (read via 1802h.2)
-
-      // --- Data Buffer for Polled Reads --- <<< NEW SECTION
-    /** @brief Buffer to hold the last read sector's data */
+    /** @brief Result FIFO for command responses (16 bytes max) */
+    Fifo8 result_fifo;
+    
+    // --- Data Buffer for Sector Reads ---
+    /** @brief Buffer to hold sector data for RDDATA reads */
     uint8_t data_buffer[CD_SECTOR_SIZE];
-    /** @brief Number of bytes currently available in the data buffer */
+    /** @brief Number of bytes available in data buffer */
     uint32_t data_buffer_count;
-    /** @brief Read pointer within the data buffer */
+    /** @brief Read pointer within data buffer */
     uint32_t data_buffer_read_ptr;
-    // --------------------------------------- <<< END NEW SECTION
-
-    // --- Internal State Machine ---
+    
+    // --- Drive State Machine ---
     /** @brief Current operational state of the drive */
     CdromState current_state;
-    /** @brief Command code currently being processed */
+    /** @brief Command currently being processed */
     uint8_t pending_command;
 
-    // --- Timing & Scheduling --- <<< NEW SECTION
+    // --- Timing & Scheduling ---
     /** @brief Cycles until the current command is complete */
     uint32_t cycles_until_event;
-    /** @brief The second part of a command to execute after a delay */
+    /** @brief Completion handler for delayed commands */
     void (*pending_completion_handler)(struct Cdrom*);
 
-    /** @brief Logical Block Address (LBA) target set by SetLoc command */
+    // --- Drive Parameters ---
+    /** @brief Logical Block Address target set by SetLoc */
     uint32_t target_lba;
-    // TODO: Add timers for command completion delays (Seek, Read, Init etc.)
-
-    // --- Disc Handling ---
-    /** @brief Flag indicating if a valid disc image is loaded */
-    bool disc_present;
-    /** @brief Flag indicating if the loaded disc is an Audio CD */
-    bool is_cd_da; // TODO: Determine this from CUE sheet or GetID?
-// --- Mode Settings (Set by SetMode 0x0E) --- <<< NEW SECTION
     /** @brief Drive speed (0=normal, 1=double) */
     bool double_speed;
-    /** @brief Sector size bit (0=2048 bytes, 1=2340 bytes) */
-    bool sector_size_is_2340; // True if mode bit 5 is 1
-
-    /** @brief File handle for the loaded .bin or .iso disc image */
+    /** @brief Sector size selection (0=2048 bytes, 1=2340 bytes) */
+    bool sector_size_is_2340;
+    
+    // --- Disc State ---
+    /** @brief Flag indicating if a valid disc is loaded */
+    bool disc_present;
+    /** @brief Flag indicating if the disc is audio CD */
+    bool is_cd_da;
+    /** @brief File handle for disc image (.bin/.iso) */
     FILE* disc_file;
-    // TODO: Add sector buffer, disc size LBA, track information
 
-    /** @brief Pointer back to the interconnect for requesting interrupts */
+    /** @brief Pointer to interconnect for interrupt requests */
     struct Interconnect* inter;
 
 } Cdrom;
@@ -141,20 +152,19 @@ typedef struct Cdrom {
 void cdrom_init(Cdrom* cdrom, struct Interconnect* inter);
 
 /**
- * @brief Reads an 8-bit value from a CD-ROM controller register address.
- * Handles register indexing based on cdrom->index.
+ * @brief Reads an 8-bit value from a CD-ROM register address per PSX-SPX bank switching.
+ * Handles bank-switched register access based on register_bank (ADDRESS bits 0-1).
  * @param cdrom Pointer to the Cdrom state structure.
- * @param addr The physical address being accessed (1F801800h - 1F801803h).
- * @return The 8-bit value read from the effective register.
+ * @param addr The physical address being accessed (0x1F801800 - 0x1F801803).
+ * @return The 8-bit value read from the bank-switched register.
  */
 uint8_t cdrom_read_register(Cdrom* cdrom, uint32_t addr);
 
 /**
- * @brief Writes an 8-bit value to a CD-ROM controller register address.
- * Handles register indexing and triggers command execution.
- * NOTE: Responsible for triggering IRQ2 (CDROM) after command execution if needed.
+ * @brief Writes an 8-bit value to a CD-ROM register address per PSX-SPX bank switching.
+ * Handles bank-switched register access and triggers command execution.
  * @param cdrom Pointer to the Cdrom state structure.
- * @param addr The physical address being accessed (1F801800h - 1F801803h).
+ * @param addr The physical address being accessed (0x1F801800 - 0x1F801803).
  * @param value The 8-bit value to write.
  */
 void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value);

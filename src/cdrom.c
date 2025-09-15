@@ -22,7 +22,7 @@ static void log_cdrom_command(uint8_t cmd) {
 }
 // 2. Log every read from the CDROM response register
 static void log_cdrom_response_read(Cdrom* cdrom) {
-    LOG_CDROM_IMPORTANT("[CDROM] Response register read. FIFO count: %d, Status: 0x%02x", cdrom->response_fifo.count, cdrom->status);
+    LOG_CDROM_IMPORTANT("[CDROM] Response register read. FIFO count: %d, HSTS: 0x%02x", cdrom->result_fifo.count, cdrom->hsts_register);
 }
 // 3. Log when the response FIFO is pushed or popped
 static void log_fifo_push(uint8_t value) {
@@ -121,33 +121,53 @@ static bool fifo_is_empty(Fifo8* fifo) { return fifo->count == 0; }
 static bool fifo_is_full(Fifo8* fifo) { return fifo->count >= FIFO_SIZE; }
 static uint8_t bcd_to_int(uint8_t bcd) { return ((bcd >> 4) * 10) + (bcd & 0x0F); }
 
-// --- Status Register Bits (from nocash specs) ---
-#define STAT_PRMEMPT    (1 << 2) // Parameter FIFO empty
-#define STAT_PRMWRDY    (1 << 3) // Parameter FIFO not full
-#define STAT_RSLRDY     (1 << 4) // Response FIFO Not Empty
-#define STAT_DTEN       (1 << 5) // Data FIFO Not Empty
-#define STAT_BUSY       (1 << 6)
-#define STAT_MOTORON    (1 << 7) // Motor is on
+// --- PSX-SPX CDROM Register & Status Constants ---
+#define CDROM_REG0  0  // HSTS (read) / ADDRESS (write)
+#define CDROM_REG1  1  // RESULT/COMMAND (bank-switched)
+#define CDROM_REG2  2  // RDDATA/PARAMETER (bank-switched)  
+#define CDROM_REG3  3  // HINTSTS,HINTMSK/HCHPCTL,HCLRCTL (bank-switched)
+
+// HSTS register bits per PSX-SPX
+#define HSTS_RA_MASK    0x03  // Bits 0-1: Register bank
+#define HSTS_ADPBUSY    0x04  // Bit 2: ADPCM busy
+#define HSTS_PRMEMPT    0x08  // Bit 3: Parameter empty
+#define HSTS_PRMWRDY    0x10  // Bit 4: Parameter write ready  
+#define HSTS_RSLRRDY    0x20  // Bit 5: Result read ready
+#define HSTS_DRQSTS     0x40  // Bit 6: Data request
+#define HSTS_BUSYSTS    0x80  // Bit 7: Busy status
+
+// Interrupt types per PSX-SPX (HINTSTS bits 0-2)
+#define INT_NOINTR      0  // No interrupt
+#define INT_DATAREADY   1  // Data ready
+#define INT_COMPLETE    2  // Command complete  
+#define INT_ACKNOWLEDGE 3  // Command acknowledge
+#define INT_DATAEND     4  // Data end
+#define INT_DISKERROR   5  // Disk error
 
 // --- Internal Helper Functions ---
 
-// Improved: Set/latch interrupt flag and request IRQ2 if enabled (robust late enable logic)
-static void cdrom_set_irq_flag(Cdrom* cdrom, uint8_t irq_bit) {
-    uint8_t prev_flags = cdrom->interrupt_flags;
-    if ((cdrom->interrupt_flags & irq_bit) == 0) {
-        cdrom->interrupt_flags |= irq_bit;
-        LOG_CDROM_DEBUG("[CDROM] set_irq_flag: Set 0x%02x, flags now 0x%02x (was 0x%02x)", irq_bit, cdrom->interrupt_flags, prev_flags);
-        LOG_CDROM_DEBUG("[CDROM] (set_irq_flag) enable=0x%02x, flags=0x%02x", cdrom->interrupt_enable, cdrom->interrupt_flags);
+// Set interrupt type in HINTSTS register per PSX-SPX
+static void set_interrupt_type(Cdrom* cdrom, uint8_t int_type) {
+    if (int_type > INT_DISKERROR) {
+        LOG_CDROM_ERROR("Invalid interrupt type: %d", int_type);
+        return;
+    }
+    
+    // Clear previous interrupt type (bits 0-2) and set new type
+    cdrom->hintsts_register = (cdrom->hintsts_register & 0xF8) | (int_type & 0x07);
+    
+    LOG_CDROM_DEBUG("[CDROM] Set interrupt type: %d (HINTSTS=0x%02x)", 
+                    int_type, cdrom->hintsts_register);
+    
+    // Request IRQ only if interrupt type is not INT_NOINTR
+    if (int_type != INT_NOINTR) {
         interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM");
     }
 }
 
-// Replace trigger_interrupt to use cdrom_set_irq_flag
-static void trigger_interrupt(Cdrom* cdrom, uint8_t int_code) {
-    if (int_code > 0 && int_code < 8) {
-        uint8_t flag_bit = 1 << (int_code - 1);
-        cdrom_set_irq_flag(cdrom, flag_bit);
-    }
+// Replace trigger_interrupt to use PSX-SPX interrupt types
+static void trigger_interrupt(Cdrom* cdrom, uint8_t int_type) {
+    set_interrupt_type(cdrom, int_type);
 }
 
 static void cdrom_schedule_event(Cdrom* cdrom, uint32_t cycles, void (*handler)(Cdrom*)) {
@@ -156,74 +176,96 @@ static void cdrom_schedule_event(Cdrom* cdrom, uint32_t cycles, void (*handler)(
     eventq_schedule(cdrom->inter, EVQ_CDROM, cycles);
 }
 
-static void update_status_register(Cdrom* cdrom) {
-    uint8_t old_status = cdrom->status;
-    uint8_t preserved_bits = cdrom->status & (STAT_BUSY | STAT_MOTORON);
-    cdrom->status = (cdrom->index & 0x03) | preserved_bits;
-
-    if (fifo_is_empty(&cdrom->param_fifo)) cdrom->status |= STAT_PRMEMPT;
-    if (!fifo_is_full(&cdrom->param_fifo)) cdrom->status |= STAT_PRMWRDY;
-    if (!fifo_is_empty(&cdrom->response_fifo)) cdrom->status |= STAT_RSLRDY;
-    if (cdrom->data_buffer_count > cdrom->data_buffer_read_ptr) cdrom->status |= STAT_DTEN;
-    log_cdrom_status_change(old_status, cdrom->status);
+static void update_hsts_register(Cdrom* cdrom) {
+    uint8_t old_hsts = cdrom->hsts_register;
+    
+    // Start with current register bank in bits 0-1
+    cdrom->hsts_register = cdrom->register_bank & HSTS_RA_MASK;
+    
+    // Bit 2: ADPBUSY (ADPCM busy) - always 0 for now
+    // cdrom->hsts_register |= HSTS_ADPBUSY;  // Set when XA-ADPCM playing
+    
+    // Bit 3: PRMEMPT (Parameter empty) 
+    if (fifo_is_empty(&cdrom->param_fifo)) {
+        cdrom->hsts_register |= HSTS_PRMEMPT;
+    }
+    
+    // Bit 4: PRMWRDY (Parameter write ready)
+    if (!fifo_is_full(&cdrom->param_fifo)) {
+        cdrom->hsts_register |= HSTS_PRMWRDY;
+    }
+    
+    // Bit 5: RSLRRDY (Result read ready)
+    if (!fifo_is_empty(&cdrom->result_fifo)) {
+        cdrom->hsts_register |= HSTS_RSLRRDY;
+    }
+    
+    // Bit 6: DRQSTS (Data request) - set when data buffer has unread data
+    if (cdrom->data_buffer_read_ptr < cdrom->data_buffer_count) {
+        cdrom->hsts_register |= HSTS_DRQSTS;
+    }
+    
+    // Bit 7: BUSYSTS (Busy status) - set when processing command
+    if (cdrom->current_state == CD_STATE_CMD_EXEC) {
+        cdrom->hsts_register |= HSTS_BUSYSTS;
+    }
+    
+    // Log status changes for debugging
+    log_cdrom_status_change(old_hsts, cdrom->hsts_register);
 }
 
 // --- Command Handlers (This is where the main logic is filled in) ---
 
 static void cmd_get_stat(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: GetStat (0x01)\n");    
-    fifo_clear(&cdrom->response_fifo);
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3); // INT3: Response Ready
+    fifo_clear(&cdrom->result_fifo);
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3: Command acknowledged
 }
 
-// <<< MODIFIED: Implemented two-stage Init >>>
+// Init command per PSX-SPX: Sets mode=20h, activates motor, Standby, abort all commands
 static void cmd_init(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: Init (0x0A) - Step 1\n");
     cdrom->current_state = CD_STATE_CMD_EXEC;
-    cdrom->status |= STAT_BUSY | STAT_MOTORON;
-
+    
     // First response is immediate (acknowledges command)
-    update_status_register(cdrom);
-    fifo_clear(&cdrom->response_fifo);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3);
+    update_hsts_register(cdrom);
+    fifo_clear(&cdrom->result_fifo);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3: Command acknowledged
 
-    // Schedule the second part (actual init and completion response)
+    // Schedule the completion response  
     cdrom_schedule_event(cdrom, 300000, cmd_init_complete);
 }
 
 static void cmd_init_complete(Cdrom* cdrom) {
     LOG_CDROM_INFO("  CDROM Init - Step 2 (Completion)\n");
-    cdrom->status &= ~STAT_BUSY;
-
-    // Reset internal state
-    cdrom->interrupt_enable = 0;
-    cdrom->interrupt_flags = 0;
+    
+    // Reset internal state per PSX-SPX
+    cdrom->hintmsk_register = 0;
     fifo_clear(&cdrom->param_fifo);
     cdrom->double_speed = false;
     cdrom->sector_size_is_2340 = false;
     cdrom->current_state = CD_STATE_IDLE;
     
-    // Second response (signals command is finished)
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 2); // INT2: Command Complete
-    // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (2 - 1));
+    // Second response (signals init is finished)
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_COMPLETE); // INT2: Command complete
 }
 
 // <<< MODIFIED: Implemented two-stage GetID >>>
 static void cmd_get_id(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: GetID (0x1A) - Step 1\n");
     cdrom->current_state = CD_STATE_CMD_EXEC;
-    cdrom->status |= STAT_BUSY;
+    cdrom->hsts_register |= HSTS_BUSYSTS;
 
     // First response is immediate (acknowledges command)
-    update_status_register(cdrom);
-    fifo_clear(&cdrom->response_fifo);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3);
+    update_hsts_register(cdrom);
+    fifo_clear(&cdrom->result_fifo);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE);
     
     // Schedule the result
     cdrom_schedule_event(cdrom, 100000, cmd_get_id_complete);
@@ -231,30 +273,30 @@ static void cmd_get_id(Cdrom* cdrom) {
 
 static void cmd_get_id_complete(Cdrom* cdrom) {
     LOG_CDROM_INFO("  CDROM GetID - Step 2 (Completion)");
-    cdrom->status &= ~STAT_BUSY;
+    cdrom->hsts_register &= ~HSTS_BUSYSTS;
 
     if (!cdrom->disc_present) {
         LOG_CDROM_IMPORTANT("[BOOT] BIOS is checking for disc: NO DISC PRESENT");
         // No Disc Error response
-        uint8_t error_status = (cdrom->status & ~STAT_RSLRDY) | 0x10; // Nocash says STAT=10h for No Disc Error
-        fifo_push(&cdrom->response_fifo, error_status);
-        fifo_push(&cdrom->response_fifo, 0x80); // Error Code: No Disc
-        for(int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
+        uint8_t error_status = (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10; // Nocash says STAT=10h for No Disc Error
+        fifo_push(&cdrom->result_fifo, error_status);
+        fifo_push(&cdrom->result_fifo, 0x80); // Error Code: No Disc
+        for(int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
         LOG_CDROM_IMPORTANT("[BOOT] CDROM INT5 (error) triggered: No disc");
-        trigger_interrupt(cdrom, 5); // INT5: Error
+        trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
     } else {
         LOG_CDROM_IMPORTANT("[BOOT] BIOS is checking for disc: DISC PRESENT");
         // Standard Licensed Disc response (SCEA)
-        update_status_register(cdrom);
-        fifo_push(&cdrom->response_fifo, cdrom->status);
-        fifo_push(&cdrom->response_fifo, 0x02); // Status: Licensed
-        fifo_push(&cdrom->response_fifo, 0x00); // Disc Type: CD-ROM
-        fifo_push(&cdrom->response_fifo, 0x00);
-        fifo_push(&cdrom->response_fifo, 'S');
-        fifo_push(&cdrom->response_fifo, 'C');
-        fifo_push(&cdrom->response_fifo, 'E');
-        fifo_push(&cdrom->response_fifo, 'A');
-        trigger_interrupt(cdrom, 2); // INT2: Command Complete
+        update_hsts_register(cdrom);
+        fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+        fifo_push(&cdrom->result_fifo, 0x02); // Status: Licensed
+        fifo_push(&cdrom->result_fifo, 0x00); // Disc Type: CD-ROM
+        fifo_push(&cdrom->result_fifo, 0x00);
+        fifo_push(&cdrom->result_fifo, 'S');
+        fifo_push(&cdrom->result_fifo, 'C');
+        fifo_push(&cdrom->result_fifo, 'E');
+        fifo_push(&cdrom->result_fifo, 'A');
+        trigger_interrupt(cdrom, INT_COMPLETE); // INT2: Command Complete
     }
     cdrom->current_state = CD_STATE_IDLE;
     // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (2 - 1));
@@ -264,46 +306,55 @@ static void cmd_get_id_complete(Cdrom* cdrom) {
 static void cmd_pause(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: Pause (0x09)\n");
     cdrom->current_state = CD_STATE_CMD_EXEC;
-    cdrom->status |= STAT_BUSY;
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3);
+    cdrom->hsts_register |= HSTS_BUSYSTS;
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE);
     cdrom_schedule_event(cdrom, 150000, cmd_pause_complete);
 }
 
 static void cmd_pause_complete(Cdrom* cdrom) {
     LOG_CDROM_INFO("  CDROM Pause - Complete\n");
-    cdrom->status &= ~STAT_BUSY;
+    cdrom->hsts_register &= ~HSTS_BUSYSTS;
     cdrom->current_state = CD_STATE_IDLE;
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 2);
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_COMPLETE);
     // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (2 - 1));
 }
 
-// --- Main command dispatcher: Only block if busy, not if interrupt pending ---
+// Main command dispatcher per PSX-SPX - only block if BUSYSTS set
 static void cdrom_handle_command(Cdrom* cdrom, uint8_t command) {
     LOG_CDROM_DEBUG("[CDROM] Command received: 0x%02x", command);
+    
+    // Log parameters if any
     if (!fifo_is_empty(&cdrom->param_fifo)) {
         char param_str[64] = {0};
         for (int i = 0; i < cdrom->param_fifo.count; ++i) {
             int len = strlen(param_str);
-            snprintf(param_str + len, sizeof(param_str) - len, "0x%02x ", cdrom->param_fifo.data[i]);
+            snprintf(param_str + len, sizeof(param_str) - len, "0x%02x ", 
+                    cdrom->param_fifo.data[(cdrom->param_fifo.read_ptr + i) % FIFO_SIZE]);
         }
         LOG_CDROM_DEBUG("[CDROM] Command parameters: %s", param_str);
     }
+    
+    // Log first command received during boot
     static int first_cdrom_cmd_logged = 0;
     if (!first_cdrom_cmd_logged) {
         LOG_CDROM_INFO("[BOOT] First CDROM command received: 0x%02x", command);
         first_cdrom_cmd_logged = 1;
     }
-    if (cdrom->status & STAT_BUSY) {
-        LOG_CDROM_WARN("CDROM: Command 0x%02x IGNORED (busy)", command);
+    
+    // Check if busy per PSX-SPX - commands are ignored if BUSYSTS is set
+    if (cdrom->hsts_register & HSTS_BUSYSTS) {
+        LOG_CDROM_WARN("CDROM: Command 0x%02x IGNORED (BUSYSTS set)", command);
         return;
     }
+    
     cdrom->pending_command = command;
-    cdrom->status |= STAT_BUSY;
-    update_status_register(cdrom);
+    cdrom->current_state = CD_STATE_CMD_EXEC; // Sets BUSYSTS via update_hsts_register
+    update_hsts_register(cdrom);
+    
     switch (command) {
         case CDC_GETSTAT: cmd_get_stat(cdrom); break;
         case CDC_SETLOC:  cmd_set_loc(cdrom); break;
@@ -317,35 +368,44 @@ static void cdrom_handle_command(Cdrom* cdrom, uint8_t command) {
         case CDC_GETID:   cmd_get_id(cdrom); break;
         default:
             LOG_CDROM_ERROR("CDROM Error: Unhandled command 0x%02x", command);
-            cdrom->status &= ~STAT_BUSY;
-            update_status_register(cdrom);
+            cdrom->current_state = CD_STATE_IDLE;
+            update_hsts_register(cdrom);
             break;
     }
 }
 
 // --- Core Public Functions ---
 
-// cdrom_init: No changes needed
 void cdrom_init(Cdrom* cdrom, struct Interconnect* inter) {
-    LOG_CDROM_INFO("CDROM initialized");
-    LOG_CDROM_INFO("Initializing CD-ROM...\n");
+    LOG_CDROM_INFO("Initializing CD-ROM with PSX-SPX compliance...\n");
     memset(cdrom, 0, sizeof(Cdrom));
     cdrom->inter = inter;
-    cdrom->status = STAT_PRMEMPT | STAT_PRMWRDY;
+    
+    // Initialize registers per PSX-SPX
+    cdrom->register_bank = 0;
+    cdrom->hsts_register = HSTS_PRMEMPT | HSTS_PRMWRDY; // Parameter FIFO empty and ready
+    cdrom->hintsts_register = INT_NOINTR; // No interrupt pending
+    cdrom->hintmsk_register = 0; // All interrupts disabled initially
+    
+    // Initialize state
     cdrom->disc_present = false;
     cdrom->disc_file = NULL;
     cdrom->current_state = CD_STATE_IDLE;
+    
+    // Initialize FIFOs
     fifo_init(&cdrom->param_fifo);
-    fifo_init(&cdrom->response_fifo);
-    LOG_CDROM_DEBUG("  CDROM Initial Status: 0x%02x\n", cdrom->status);
+    fifo_init(&cdrom->result_fifo);
+    
+    LOG_CDROM_DEBUG("CDROM initialized - HSTS: 0x%02x, HINTSTS: 0x%02x", 
+                    cdrom->hsts_register, cdrom->hintsts_register);
 }
 
 static void cmd_set_loc(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: SetLoc (0x02)\n");
     if (cdrom->param_fifo.count < 3) {
         LOG_CDROM_WARN("  ERROR: SetLoc requires 3 parameters.\n");
-        cdrom->status &= ~STAT_BUSY;
-        update_status_register(cdrom);
+        cdrom->current_state = CD_STATE_IDLE;
+        update_hsts_register(cdrom);
         return;
     }
     uint8_t m = bcd_to_int(fifo_pop(&cdrom->param_fifo));
@@ -353,21 +413,16 @@ static void cmd_set_loc(Cdrom* cdrom) {
     uint8_t f = bcd_to_int(fifo_pop(&cdrom->param_fifo));
     cdrom->target_lba = (m * 60 * 75) + (s * 75) + f - 150;
     LOG_CDROM_INFO("  Set LBA to %u (M:%u S:%u F:%u)\n", cdrom->target_lba, m, s, f);
-    cdrom->current_state = CD_STATE_CMD_EXEC;
-    // Set busy flag already set by dispatcher
     cdrom_schedule_event(cdrom, 10000, cmd_set_loc_complete);
 }
 
-// ADDED completion handler
 static void cmd_set_loc_complete(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD set_loc_complete)\n");
-    cdrom->status &= ~STAT_BUSY;
-    fifo_clear(&cdrom->param_fifo);
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3); // INT3
     cdrom->current_state = CD_STATE_IDLE;
-    // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (3 - 1));
+    fifo_clear(&cdrom->param_fifo);
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3
 }
 
 // REMOVED cdrom_maybe_request_irq2
@@ -401,82 +456,106 @@ bool cdrom_load_disc(Cdrom* cdrom, const char* bin_filename) {
     return true;
 }
 
-// cdrom_read_register: No changes needed
+// cdrom_read_register: PSX-SPX compliant bank-switched register reading
 uint8_t cdrom_read_register(Cdrom* cdrom, uint32_t addr) {
     uint8_t offset = addr & 3;
-    uint8_t reg_index = cdrom->index & 0x3;
+    uint8_t bank = cdrom->register_bank & 3;
+    
     switch (offset) {
-        case CDREG_INDEX:
-            update_status_register(cdrom);
-            return cdrom->status;
-        case CDREG_RESPONSE:
+        case CDROM_REG0: // HSTS (read all banks)
+            update_hsts_register(cdrom);
+            return cdrom->hsts_register;
+            
+        case CDROM_REG1: // RESULT (all banks)
             log_cdrom_response_read(cdrom);
-            if (reg_index == 1) {
-                uint8_t value = fifo_pop(&cdrom->response_fifo);
-                update_status_register(cdrom);
-                // Only re-assert IRQ2 if FIFO is not empty and INT3 is enabled, and INT3 is not already flagged
-                if (!fifo_is_empty(&cdrom->response_fifo) && (cdrom->interrupt_enable & (1 << 2)) && !(cdrom->interrupt_flags & (1 << 2))) {
-                    cdrom_set_irq_flag(cdrom, 1 << 2); // INT3: Response Ready
-                }
+            if (!fifo_is_empty(&cdrom->result_fifo)) {
+                uint8_t value = fifo_pop(&cdrom->result_fifo);
+                update_hsts_register(cdrom);
                 return value;
             }
             return 0;
-        case CDREG_DATA:
-            if (reg_index == 2 && cdrom->data_buffer_read_ptr < cdrom->data_buffer_count) {
+            
+        case CDROM_REG2: // RDDATA (all banks)  
+            if (cdrom->data_buffer_read_ptr < cdrom->data_buffer_count) {
                 uint8_t value = cdrom->data_buffer[cdrom->data_buffer_read_ptr++];
-                update_status_register(cdrom);
+                update_hsts_register(cdrom);
                 return value;
             }
             return 0;
-        case CDREG_IRQ_EN_FLAG:
-            if (reg_index == 1) {
-                return (cdrom->interrupt_enable & 0x1F) | ((cdrom->interrupt_flags & 0x7) << 5);
+            
+        case CDROM_REG3: // Bank-switched: HINTMSK (banks 0,2) / HINTSTS (banks 1,3)
+            if (bank == 1 || bank == 3) {
+                // HINTSTS: bits 0-2=interrupt type, bits 3-4=flags, bits 5-7=reserved (always 1)
+                return cdrom->hintsts_register | 0xE0;
+            } else {
+                // HINTMSK: bits 0-2=interrupt enable, bits 5-7=reserved (always 1)  
+                return cdrom->hintmsk_register | 0xE0;
             }
-            return 0;
+            
         default:
             return 0;
     }
 }
 
-// cdrom_write_register: Real fix for register/index handling and command acceptance
+// cdrom_write_register: PSX-SPX compliant bank-switched register writing  
 void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
     uint8_t offset = addr & 3;
-    uint8_t reg_index = cdrom->index & 0x3;
+    uint8_t bank = cdrom->register_bank & 3;
+    
     switch (offset) {
-        case CDREG_INDEX:
-            cdrom->index = value & 3;
+        case CDROM_REG0: // ADDRESS (write all banks) - sets register bank
+            cdrom->register_bank = value & 3;
+            update_hsts_register(cdrom);
             return;
-        case CDREG_COMMAND:
-            if (reg_index == 0) {
-                if (!(cdrom->status & STAT_BUSY)) {
+            
+        case CDROM_REG1: // Bank-switched: COMMAND (bank 0) / WRDATA (bank 1)
+            if (bank == 0) {
+                // COMMAND - only accept if not busy per PSX-SPX
+                if (!(cdrom->hsts_register & HSTS_BUSYSTS)) {
                     cdrom_handle_command(cdrom, value);
                 }
+            } else if (bank == 1) {
+                // WRDATA - for sound map XA-ADPCM upload (not implemented)
+                LOG_CDROM_WARN("WRDATA write not implemented: 0x%02x", value);
             }
             return;
-        case CDREG_PARAMETER:
-            if (reg_index == 0) {
+            
+        case CDROM_REG2: // Bank-switched: PARAMETER (bank 0) / CI (bank 2) 
+            if (bank == 0) {
+                // PARAMETER - add to parameter FIFO
                 fifo_push(&cdrom->param_fifo, value);
-                update_status_register(cdrom);
+                update_hsts_register(cdrom);
+            } else if (bank == 2) {
+                // CI - XA-ADPCM configuration (not implemented)
+                LOG_CDROM_WARN("CI write not implemented: 0x%02x", value);
             }
             return;
-        case CDREG_REQUEST:
-            if (reg_index == 0) {
-                if (value & 0x80) {
+            
+        case CDROM_REG3: // Bank-switched register 3
+            if (bank == 0) {
+                // HCHPCTL - host chip control
+                if (value & 0x80) { // BFRD - request sector buffer read
+                    LOG_CDROM_DEBUG("BFRD: Buffer read request");
+                }
+                if (value & 0x40) { // BFWR - request sector buffer write  
+                    LOG_CDROM_DEBUG("BFWR: Buffer write request");
+                }
+            } else if (bank == 1) {
+                // HCLRCTL - interrupt acknowledge and control
+                if (value & 0x07) { // CLRINT - acknowledge interrupt
+                    cdrom->hintsts_register &= ~0x07; // Clear interrupt type
+                    set_interrupt_type(cdrom, INT_NOINTR);
+                }
+                if (value & 0x40) { // CLRPRM - clear parameter FIFO
                     fifo_clear(&cdrom->param_fifo);
-                    update_status_register(cdrom);
+                    update_hsts_register(cdrom);
                 }
-            } else if (reg_index == 1) {
-                cdrom->interrupt_enable = value & 0x1F;
-                cdrom->interrupt_flags &= ~(value & 0x1F);
-                if (value & 0x40) {
-                    cdrom->interrupt_flags = 0;
-                }
-                // Late enable logic
-                if (cdrom->interrupt_enable & cdrom->interrupt_flags) {
-                    interconnect_request_irq(cdrom->inter, IRQ_CDROM, "CDROM late enable");
+                if (value & 0x80) { // CHPRST - reset decoder chip  
+                    LOG_CDROM_INFO("CDROM decoder reset requested");
                 }
             }
             return;
+            
         default:
             return;
     }
@@ -485,28 +564,28 @@ void cdrom_write_register(Cdrom* cdrom, uint32_t addr, uint8_t value) {
 static void cmd_read_n(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: ReadN (0x06)\n");
     cdrom->current_state = CD_STATE_CMD_EXEC;
-    cdrom->status |= STAT_BUSY;
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3); // First response
+    cdrom->hsts_register |= HSTS_BUSYSTS;
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3: First response
     cdrom_schedule_event(cdrom, 200000, cmd_read_n_complete);
 }
 
 // ADDED completion handler
 static void cmd_read_n_complete(Cdrom* cdrom) {
     LOG_CDROM_INFO("  CDROM ReadN - Complete\n");
-    cdrom->status &= ~STAT_BUSY;
+    cdrom->hsts_register &= ~HSTS_BUSYSTS;
 
     // --- Actual sector reading implementation ---
     if (!cdrom->disc_present || !cdrom->disc_file) {
         LOG_CDROM_WARN("  CDROM ReadN: No disc present!\n");
         cdrom->current_state = CD_STATE_ERROR;
         // Set error status and trigger INT5
-        update_status_register(cdrom);
-        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-        fifo_push(&cdrom->response_fifo, 0x80); // Error code: No Disc
-        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-        trigger_interrupt(cdrom, 5); // INT5: Error
+        update_hsts_register(cdrom);
+        fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+        fifo_push(&cdrom->result_fifo, 0x80); // Error code: No Disc
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+        trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
         return;
     }
 
@@ -515,11 +594,11 @@ static void cmd_read_n_complete(Cdrom* cdrom) {
     if (fseek(cdrom->disc_file, sector_offset, SEEK_SET) != 0) {
         LOG_CDROM_WARN("  CDROM ReadN: fseek failed for LBA %u!\n", cdrom->target_lba);
         cdrom->current_state = CD_STATE_ERROR;
-        update_status_register(cdrom);
-        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-        fifo_push(&cdrom->response_fifo, 0x81); // Error code: Seek error
-        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-        trigger_interrupt(cdrom, 5); // INT5: Error
+        update_hsts_register(cdrom);
+        fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+        fifo_push(&cdrom->result_fifo, 0x81); // Error code: Seek error
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+        trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
         return;
     }
 
@@ -527,25 +606,24 @@ static void cmd_read_n_complete(Cdrom* cdrom) {
     if (bytes_read != CD_USER_DATA_SIZE) {
         LOG_CDROM_WARN("  CDROM ReadN: fread failed or incomplete for LBA %u!\n", cdrom->target_lba);
         cdrom->current_state = CD_STATE_ERROR;
-        update_status_register(cdrom);
-        fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-        fifo_push(&cdrom->response_fifo, 0x82); // Error code: Read error
-        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-        trigger_interrupt(cdrom, 5); // INT5: Error
+        update_hsts_register(cdrom);
+        fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+        fifo_push(&cdrom->result_fifo, 0x82); // Error code: Read error
+        for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+        trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
         return;
     }
 
     cdrom->data_buffer_count = CD_USER_DATA_SIZE;
     cdrom->data_buffer_read_ptr = 0;
-    cdrom->status |= STAT_DTEN; // Set Data FIFO not empty flag
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 1); // INT1: Data Ready
+    cdrom->hsts_register |= HSTS_DRQSTS; // Set Data FIFO not empty flag
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_DATAREADY); // INT1: Data Ready
     cdrom->current_state = CD_STATE_READING;
 
     // Increment LBA for continuous reading
     cdrom->target_lba++;
-    // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (1 - 1));
 }
 
 static void cmd_seek_l(Cdrom* cdrom) {
@@ -560,19 +638,19 @@ static void cmd_set_mode(Cdrom* cdrom) {
     cdrom->is_cd_da = (mode & 0x40) != 0;
     cdrom->sector_size_is_2340 = (mode & 0x20) != 0;
 
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 3); // INT3
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3
     // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (3 - 1));
 }
 
 static void cmd_stop(Cdrom* cdrom) {
     LOG_CDROM_INFO("~ CDROM CMD: Stop (0x08)\n");
     cdrom->current_state = CD_STATE_IDLE;
-    cdrom->status &= ~(STAT_BUSY | STAT_MOTORON);
-    update_status_register(cdrom);
-    fifo_push(&cdrom->response_fifo, cdrom->status);
-    trigger_interrupt(cdrom, 2); // INT2
+    cdrom->hsts_register &= ~(HSTS_BUSYSTS | HSTS_DRQSTS);
+    update_hsts_register(cdrom);
+    fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
+    trigger_interrupt(cdrom, INT_COMPLETE); // INT2
     // REMOVED: cdrom_maybe_request_irq2(cdrom, 1 << (2 - 1));
 }
 
@@ -590,42 +668,42 @@ void cdrom_step(Cdrom* cdrom, uint32_t cycles) {
                 if (!cdrom->disc_present || !cdrom->disc_file) {
                     LOG_CDROM_WARN("  [CDROM] Continuous Read: No disc present!\n");
                     cdrom->current_state = CD_STATE_ERROR;
-                    update_status_register(cdrom);
-                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-                    fifo_push(&cdrom->response_fifo, 0x80); // Error code: No Disc
-                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    update_hsts_register(cdrom);
+                    fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->result_fifo, 0x80); // Error code: No Disc
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+                    trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
                     return;
                 }
                 long sector_offset = (long)cdrom->target_lba * CD_USER_DATA_SIZE;
                 if (fseek(cdrom->disc_file, sector_offset, SEEK_SET) != 0) {
                     LOG_CDROM_WARN("  [CDROM] Continuous Read: fseek failed for LBA %u!\n", cdrom->target_lba);
                     cdrom->current_state = CD_STATE_ERROR;
-                    update_status_register(cdrom);
-                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-                    fifo_push(&cdrom->response_fifo, 0x81); // Error code: Seek error
-                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    update_hsts_register(cdrom);
+                    fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->result_fifo, 0x81); // Error code: Seek error
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+                    trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
                     return;
                 }
                 size_t bytes_read = fread(cdrom->data_buffer, 1, CD_USER_DATA_SIZE, cdrom->disc_file);
                 if (bytes_read != CD_USER_DATA_SIZE) {
                     LOG_CDROM_WARN("  [CDROM] Continuous Read: fread failed or incomplete for LBA %u!\n", cdrom->target_lba);
                     cdrom->current_state = CD_STATE_ERROR;
-                    update_status_register(cdrom);
-                    fifo_push(&cdrom->response_fifo, (cdrom->status & ~STAT_RSLRDY) | 0x10); // Error status
-                    fifo_push(&cdrom->response_fifo, 0x82); // Error code: Read error
-                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->response_fifo, 0);
-                    trigger_interrupt(cdrom, 5); // INT5: Error
+                    update_hsts_register(cdrom);
+                    fifo_push(&cdrom->result_fifo, (cdrom->hsts_register & ~HSTS_RSLRRDY) | 0x10); // Error status
+                    fifo_push(&cdrom->result_fifo, 0x82); // Error code: Read error
+                    for (int i = 0; i < 6; ++i) fifo_push(&cdrom->result_fifo, 0);
+                    trigger_interrupt(cdrom, INT_DISKERROR); // INT5: Error
                     return;
                 }
                 cdrom->data_buffer_count = CD_USER_DATA_SIZE;
                 cdrom->data_buffer_read_ptr = 0;
-                cdrom->status |= STAT_DTEN;
-                update_status_register(cdrom);
-                fifo_push(&cdrom->response_fifo, cdrom->status);
+                cdrom->hsts_register |= HSTS_DRQSTS;
+                update_hsts_register(cdrom);
+                fifo_push(&cdrom->result_fifo, cdrom->hsts_register);
                 LOG_CDROM_INFO("  [CDROM] Delivering sector LBA %u, INT1\n", cdrom->target_lba);
-                trigger_interrupt(cdrom, 1); // INT1: Data Ready
+                trigger_interrupt(cdrom, INT_DATAREADY); // INT1: Data Ready
                 cdrom->target_lba++;
             } else {
                 // Wait for the CPU to read out the previous sector
@@ -639,25 +717,25 @@ void cdrom_step(Cdrom* cdrom, uint32_t cycles) {
 
 void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd) {
     // 1. Set busy flag immediately
-    cdrom->status |= STAT_BUSY;
+    cdrom->hsts_register |= HSTS_BUSYSTS;
     LOG_CDROM_INFO("[CDROM] CMD: 0x%02X (Set busy flag)\n", cmd);
 
     // 2. Populate response FIFO (example for Test command 0x19)
-    fifo_clear(&cdrom->response_fifo);
+    fifo_clear(&cdrom->result_fifo);
     switch (cmd) {
         case 0x19: // Test
-            fifo_push(&cdrom->response_fifo, 0x00); // Example: status OK
+            fifo_push(&cdrom->result_fifo, 0x00); // Example: status OK
             LOG_CDROM_INFO("[CDROM] Test command response: 0x00\n");
             break;
         // Add other commands as needed
         default:
-            fifo_push(&cdrom->response_fifo, 0x00); // Default response
+            fifo_push(&cdrom->result_fifo, 0x00); // Default response
             LOG_CDROM_INFO("[CDROM] Default command response: 0x00\n");
             break;
     }
 
     // 3. Clear busy flag and parameter FIFO after processing
-    cdrom->status &= ~STAT_BUSY;
+    cdrom->hsts_register &= ~HSTS_BUSYSTS;
     fifo_clear(&cdrom->param_fifo);
     LOG_CDROM_INFO("[CDROM] CMD: 0x%02X (Clear busy flag, param FIFO)\n", cmd);
 
@@ -668,31 +746,38 @@ void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd) {
 
 void cmd_test(Cdrom *cdrom) {
     uint8_t subcmd = fifo_is_empty(&cdrom->param_fifo) ? 0 : fifo_pop(&cdrom->param_fifo);
-    printf("CDROM: cmd_test called, subcmd=0x%02x\n", subcmd);
-    fifo_clear(&cdrom->response_fifo);
     
-    // Handle specific test subcommands
+    LOG_CDROM_IMPORTANT("[BOOT] CDROM Test cmd 0x19, subcmd 0x%02x", subcmd);
+    fifo_clear(&cdrom->result_fifo);
+    
     switch (subcmd) {
-        case 0x20: // Get CDROM Controller Version/Date
+        case 0x20: // Get CDROM Controller Version/Date per PSX-SPX
             LOG_CDROM_IMPORTANT("[BOOT] BIOS Test subcmd 0x20 - Controller version request");
-            fifo_push(&cdrom->response_fifo, 0x1c); // Version info (SCPH-1001 compatible)
-            fifo_push(&cdrom->response_fifo, 0x94);
-            fifo_push(&cdrom->response_fifo, 0x00);
-            fifo_push(&cdrom->response_fifo, 0x00);
+            
+            // PSX-SPX format: 19h,20h --> INT3(yy,mm,dd,ver)
+            // Return SCPH-1001 compatible version (94h,09h,19h,C0h)
+            fifo_push(&cdrom->result_fifo, 0x94); // Year: 1994 (BCD)
+            fifo_push(&cdrom->result_fifo, 0x09); // Month: September (BCD)
+            fifo_push(&cdrom->result_fifo, 0x19); // Day: 19 (BCD)
+            fifo_push(&cdrom->result_fifo, 0xC0); // Version: vC0 (BCD)
             break;
+            
+        case 0x21: // Get Drive Switches per PSX-SPX
+            fifo_push(&cdrom->result_fifo, 0x00); // POS0=0, DOOR=0 (closed)
+            break;
+            
         default:
-            // Generic handshake response for unknown subcmds
-            printf("CDROM: Handshake response for subcmd=0x%02x\n", subcmd);
-            fifo_push(&cdrom->response_fifo, 0x1c);
-            fifo_push(&cdrom->response_fifo, 0x94);
-            fifo_push(&cdrom->response_fifo, 0x00);
-            fifo_push(&cdrom->response_fifo, 0x00);
+            LOG_CDROM_WARN("Unknown test subcmd 0x%02x, returning generic response", subcmd);
+            // Generic response for unknown subcommands
+            fifo_push(&cdrom->result_fifo, 0x00);
+            fifo_push(&cdrom->result_fifo, 0x00);  
+            fifo_push(&cdrom->result_fifo, 0x00);
+            fifo_push(&cdrom->result_fifo, 0x00);
             break;
     }
     
-    // Always trigger interrupt to notify BIOS that command completed
-    update_status_register(cdrom);
-    cdrom->status |= 0x20;  // Response ready
-    trigger_interrupt(cdrom, 3);  // INT3 for successful command completion
+    // Update status and trigger interrupt
+    update_hsts_register(cdrom);
+    trigger_interrupt(cdrom, INT_ACKNOWLEDGE); // INT3: Command acknowledged
     LOG_CDROM_IMPORTANT("[BOOT] CDROM Test command completed, INT3 triggered");
 }
