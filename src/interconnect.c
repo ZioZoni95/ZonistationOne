@@ -5,6 +5,11 @@
 #include "dma.h"
 #include "gpu.h"
 #include "ram.h"
+#include "spu.h"
+#include "mdec.h"
+#include "pio.h"
+#include "memcard.h"
+#include "controller.h"
 
 // Using new PCSX ReARMed-style logging system
 
@@ -112,8 +117,16 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     dma_init(&inter->dma, inter); // Initialize DMA controller state
     gpu_init_full(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
-
     cdrom_init(&inter->cdrom,inter);
+    sio_init(&inter->sio); // Initialize SIO controller state
+
+    // Initialize new hardware components
+    spu_init(&inter->spu);                    // Initialize SPU state
+    mdec_init(&inter->mdec);                  // Initialize MDEC state
+    pio_init(&inter->pio);                    // Initialize PIO state
+    memcard_init(&inter->memcard);            // Initialize Memory Card state
+    controller_init(&inter->controller1, 0);  // Initialize Controller 1
+    controller_init(&inter->controller2, 1);  // Initialize Controller 2
 
     // Initialize Interrupt Controller state
     inter->irq_status = 0; // No pending interrupts
@@ -122,7 +135,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize Timer state <<< ADD THIS CALL
     timers_init(&inter->timers_state, inter);
     
-    LOG_INTERCONNECT_INFO("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, IRQ states set).");
+    LOG_INTERCONNECT_INFO("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, SPU, MDEC, PIO, MemCard, Controllers, IRQ states set).");
 }
 
 
@@ -194,6 +207,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
         // LOG_INFO("~ Read32 from Timer %d Offset 0x%x\n", timer_index, register_offset);
         return timer_read32(&inter->timers_state, timer_index, register_offset);
+    }
+    
+    // --- Check SIO Range ---
+    if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+        uint32_t offset = physical_addr - SIO_START;
+        return sio_load(&inter->sio, offset);
     }
     
     // TEST: Add missing hardware register read handlers for 32-bit access
@@ -287,8 +306,20 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
     // SPU Region (0x1f801C00 - 0x1f801E7F)
     if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Read32 from SPU region: Address 0x%08x (Ignoring, returning 0)\n", physical_addr); // Often noisy
-         return 0; // SPU not implemented yet
+        uint32_t offset = physical_addr - SPU_START;
+        return spu_load32(&inter->spu, offset);
+    }
+
+    // MDEC Region
+    if (physical_addr >= MDEC_START && physical_addr <= MDEC_END) {
+        uint32_t offset = physical_addr - MDEC_START;
+        return mdec_load32(&inter->mdec, offset);
+    }
+
+    // PIO Region (Expansion Region 1)
+    if (physical_addr >= PIO_START && physical_addr <= PIO_END) {
+        uint32_t offset = physical_addr - PIO_START;
+        return pio_load32(&inter->pio, offset);
     }
 
     // Expansion 1 Region (0x1f000000 - 0x1f7fffff)
@@ -306,6 +337,17 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     // --- Hardware Register Checks (Specific Addresses First) ---
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
+        
+        // TEMPORARY DEBUG: Check if BIOS is accessing SPU range
+        if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
+            static uint32_t spu_access_count = 0;
+            spu_access_count++;
+            if (spu_access_count <= 5) {
+                LOG_INTERCONNECT_ERROR("SPU ACCESS DETECTED: addr=0x%08x (SPU+0x%03x) count=%u - MISSING SPU IMPLEMENTATION!", 
+                        physical_addr, physical_addr - SPU_START, spu_access_count);
+            }
+            return 0; // Return 0 for now - SPU not implemented
+        }
         
         // TEST: Add missing hardware registers that BIOS is trying to access
         if (physical_addr == 0x1f801010) {
@@ -373,8 +415,17 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
      }
     
     // Only log as error if we reach here (truly unhandled)
-    LOG_INTERCONNECT_ERROR("Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)\n",
-            physical_addr, address);
+    // TEMPORARY DEBUG: Log unhandled reads for debugging current stuck state
+    static uint32_t unhandled_read_count = 0;
+    unhandled_read_count++;
+    if (unhandled_read_count <= 10) {
+        LOG_INTERCONNECT_ERROR("UNHANDLED READ32: addr=0x%08x (virt=0x%08x) count=%u - PC likely stuck in loop", 
+                physical_addr, address, unhandled_read_count);
+    } else if (unhandled_read_count % 1000 == 0) {
+        LOG_INTERCONNECT_ERROR("UNHANDLED READ32: addr=0x%08x (virt=0x%08x) count=%u - PC likely stuck", 
+                physical_addr, address, unhandled_read_count);
+    }
+    
     return 0; // Return 0 for unmapped memory
 }
 
@@ -416,6 +467,12 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
         // LOG_INFO("~ Read16 from Timer %d Offset 0x%x\n", timer_index, register_offset);
         return timer_read16(&inter->timers_state, timer_index, register_offset);
+    }
+    
+    // --- Check SIO Range ---
+    if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+        uint32_t offset = physical_addr - SIO_START;
+        return (uint16_t)sio_load(&inter->sio, offset);
     }
     
     // TEST: Add missing hardware register read handlers for 16-bit access
@@ -564,6 +621,12 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         // 8-bit reads from timers are generally undefined or read partial registers.
         LOG_INTERCONNECT_WARN("Warning: Unhandled 8-bit read from Timer range: 0x%08x\n", physical_addr);
         return 0; // Return 0 for safety
+    }
+    
+    // --- Check SIO Range ---
+    if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+        uint32_t offset = physical_addr - SIO_START;
+        return (uint8_t)sio_load(&inter->sio, offset);
     }
     
     // TEST: Add missing hardware register read handlers for 8-bit access
@@ -718,6 +781,13 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         timer_write32(&inter->timers_state, timer_index, register_offset, value);
         return; // Handled
     }
+    
+    // --- Check SIO Range ---
+    if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+        uint32_t offset = physical_addr - SIO_START;
+        sio_store(&inter->sio, offset, value);
+        return;
+    }
     // --- Hardware Register Checks (Specific Addresses First) ---
 
     // Interrupt Controller Registers
@@ -843,8 +913,23 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // SPU Region
     if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Write32 to SPU region: Address 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value); // Noisy
-         return; // SPU not implemented
+        uint32_t offset = physical_addr - SPU_START;
+        spu_store32(&inter->spu, offset, value);
+        return;
+    }
+
+    // MDEC Region
+    if (physical_addr >= MDEC_START && physical_addr <= MDEC_END) {
+        uint32_t offset = physical_addr - MDEC_START;
+        mdec_store32(&inter->mdec, offset, value);
+        return;
+    }
+
+    // PIO Region (Expansion Region 1)
+    if (physical_addr >= PIO_START && physical_addr <= PIO_END) {
+        uint32_t offset = physical_addr - PIO_START;
+        pio_store32(&inter->pio, offset, value);
+        return;
     }
 
     // Main RAM Region
@@ -1005,6 +1090,13 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         }
         timer_write16(&inter->timers_state, timer_index, register_offset, value);
         return; // Handled
+     }
+     
+     // --- Check SIO Range ---
+     if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+         uint32_t offset = physical_addr - SIO_START;
+         sio_store(&inter->sio, offset, value);
+         return;
      }
      
      // TEST: Add missing hardware register write handlers for 16-bit access
@@ -1196,6 +1288,13 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         // 8-bit writes to timers are generally undefined or write partial registers.
         LOG_INTERCONNECT_WARN("Warning: Unhandled 8-bit write to Timer range: 0x%08x = 0x%02x\n", physical_addr, value);
         // Ignoring is safest for now.
+        return;
+    }
+    
+    // --- Check SIO Range ---
+    if (physical_addr >= SIO_START && physical_addr <= SIO_END) {
+        uint32_t offset = physical_addr - SIO_START;
+        sio_store(&inter->sio, offset, value);
         return;
     }
     

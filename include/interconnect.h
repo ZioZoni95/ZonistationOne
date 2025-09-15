@@ -12,6 +12,12 @@
 #include "gpu.h"
 #include "timers.h"
 #include "cdrom.h"
+#include "sio.h"
+#include "spu.h"
+#include "mdec.h"
+#include "pio.h"
+#include "memcard.h"
+#include "controller.h"
 
 
 /* --- Memory Map Definitions (Physical Addresses) ---
@@ -61,10 +67,25 @@
 #define TIMERS_SIZE  0x30 // Covers Timers 0, 1, 2
 #define TIMERS_END   (TIMERS_START + TIMERS_SIZE - 1)
 
+// SIO (Serial I/O) Registers
+#define SIO_START 0x1f801040
+#define SIO_SIZE  0x20 // Covers SIO0 and SIO1
+#define SIO_END   (SIO_START + SIO_SIZE - 1)
+
 // SPU (Sound Processing Unit) Registers
 #define SPU_START 0x1f801C00
 #define SPU_SIZE  640 // From Nocash specs
 #define SPU_END   (SPU_START + SPU_SIZE - 1)
+
+// MDEC (Motion Decoder) Registers
+#define MDEC_START 0x1f801820
+#define MDEC_SIZE  8 // Command register and Status register
+#define MDEC_END   (MDEC_START + MDEC_SIZE - 1)
+
+// PIO (Parallel I/O) - Expansion Region 1
+#define PIO_START 0x1f000000
+// PIO_SIZE is defined in pio.h
+#define PIO_END   (PIO_START + PIO_SIZE - 1)
 
 // GPU Registers (GP0, GP1/GPUSTAT)
 #define GPU_START 0x1f801810
@@ -119,8 +140,15 @@ typedef struct Interconnect {
     uint16_t irq_status; // I_STAT Register state (reflects pending IRQs)
     uint16_t irq_mask;   // I_MASK Register state (enables/disables IRQs)
     // --------------------------------
-    Timers timers_state; // <<< ADD THIS MEMBER
-    Cdrom cdrom;
+    Timers timers_state; // Timers state (embedded directly)
+    Cdrom cdrom;         // CDROM controller state (embedded directly)
+    Sio sio;             // SIO controller state (embedded directly)
+    Spu spu;             // SPU state (embedded directly)
+    Mdec mdec;           // MDEC state (embedded directly)
+    Pio pio;             // PIO state (embedded directly)
+    Memcard memcard;     // Memory Card controller state (embedded directly)
+    Controller controller1; // Controller 1 state (embedded directly)
+    Controller controller2; // Controller 2 state (embedded directly)
 
     // --- Event System State (for event_scheduler) ---
     // These fields are used by the central event/timing system to schedule and dispatch hardware events.
@@ -132,7 +160,7 @@ typedef struct Interconnect {
     uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
     // --------------------------------
 
-    // Add pointers/state for other peripherals here later (Timers, SPU, CDROM, etc.)
+    // Add pointers/state for other peripherals here later (Multitap, etc.)
 
 } Interconnect;
 
