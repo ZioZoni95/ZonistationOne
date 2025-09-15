@@ -49,13 +49,14 @@ int main(int argc, char *argv[]) {
     // --- Argument Parsing ---
     // Usage: ./myps1_emu [options] <BIOS_PATH>
     const char* bios_path = NULL;
-    int log_level = LOG_LEVEL_INFO;
+    int log_level = LOG_LEVEL_WARN; // Changed: Default to WARN for better performance
     bool show_help = false;
     bool log_single_file = false;
     int log_rate_limit_n = 0;
     bool disable_irq_logs = false;
     bool disable_interconnect_logs = false;
     bool disable_dma_logs = false;
+    bool fast_mode = false; // PERFORMANCE: New fast mode option
 
     for (int i = 1; i < argc; ++i) {
         if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
@@ -76,6 +77,8 @@ int main(int argc, char *argv[]) {
             disable_interconnect_logs = true;
         } else if (strcmp(argv[i], "--no-dma-logs") == 0) {
             disable_dma_logs = true;
+        } else if (strcmp(argv[i], "--fast") == 0) {
+            fast_mode = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             show_help = true;
         } else if (!bios_path) {
@@ -93,8 +96,9 @@ int main(int argc, char *argv[]) {
         printf("Log Level Options:\n");
         printf("  --silent           No logging output\n");
         printf("  --quiet            Warnings and errors only\n");
-        printf("  --debug            Verbose debug output (default: INFO)\n");
-        printf("  --trace            Ultra-verbose trace output\n\n");
+        printf("  --debug            Verbose debug output (default: WARN)\n");
+        printf("  --trace            Ultra-verbose trace output\n");
+        printf("  --fast             Performance mode: minimal logging, max speed\n\n");
         printf("Component Control (PCSX ReARMed style):\n");
         printf("  --no-irq-logs      Disable IRQ/interrupt logging (reduces spam)\n");
         printf("  --no-interconnect-logs Disable I/O interconnect logging (reduces spam)\n");
@@ -112,13 +116,38 @@ int main(int argc, char *argv[]) {
         printf("  <BIOS_PATH>        Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
         return 0;
     }
-    // Initialize new logging system
+    // Initialize new logging system with performance optimizations
     log_init();
+    
+    // PERFORMANCE: Apply aggressive rate limiting by default for noisy categories
+    log_set_rate_limit(LOG_CAT_CPU, 3, 10000);          // First 3 CPU logs, then every 10000th
+    log_set_rate_limit(LOG_CAT_IRQ, 2, 5000);           // First 2 IRQ logs, then every 5000th
+    log_set_rate_limit(LOG_CAT_INTERCONNECT, 5, 50000); // First 5 interconnect logs, then every 50000th
+    log_set_rate_limit(LOG_CAT_DMA, 3, 10000);          // First 3 DMA logs, then every 10000th
+    log_set_rate_limit(LOG_CAT_GPU, 5, 1000);           // First 5 GPU logs, then every 1000th
+    log_set_rate_limit(LOG_CAT_CDROM, 10, 1000);        // First 10 CDROM logs, then every 1000th
+    
     if (log_rate_limit_n > 0) {
-        // Apply rate limiting to noisy categories
+        // Override with user-specified rate limiting
         log_set_rate_limit(LOG_CAT_IRQ, 5, log_rate_limit_n);
         log_set_rate_limit(LOG_CAT_INTERCONNECT, 10, log_rate_limit_n);
         log_set_rate_limit(LOG_CAT_DMA, 5, log_rate_limit_n);
+        log_set_rate_limit(LOG_CAT_CPU, 3, log_rate_limit_n);
+        log_set_rate_limit(LOG_CAT_GPU, 5, log_rate_limit_n);
+        log_set_rate_limit(LOG_CAT_CDROM, 10, log_rate_limit_n);
+    }
+    
+    // PERFORMANCE: Fast mode - disable most logging for maximum speed
+    if (fast_mode) {
+        log_level = LOG_LEVEL_ERROR;  // Only errors
+        log_set_category_enabled(LOG_CAT_CPU, false);
+        log_set_category_enabled(LOG_CAT_IRQ, false);
+        log_set_category_enabled(LOG_CAT_INTERCONNECT, false);
+        log_set_category_enabled(LOG_CAT_DMA, false);
+        log_set_category_enabled(LOG_CAT_GPU, false);
+        log_set_category_enabled(LOG_CAT_TIMER, false);
+        // Keep SYSTEM, BIOS, CDROM for critical messages
+        LOG_SYSTEM_INFO("Fast mode enabled - minimal logging for maximum performance");
     }
     
     // Apply component-specific disable options (PCSX ReARMed style)
