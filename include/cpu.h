@@ -26,6 +26,8 @@ typedef enum {
     EXCEPTION_INTERRUPT        = 0x00, // Hardware Interrupt requested (from I_STAT/I_MASK)
     EXCEPTION_LOAD_ADDRESS_ERROR = 0x04, // Data Load/Instruction Fetch Address Error (Alignment or Bus Error)
     EXCEPTION_STORE_ADDRESS_ERROR= 0x05, // Data Store Address Error (Alignment or Bus Error)
+    EXCEPTION_BUS_ERROR_INSTR  = 0x06, // Bus Error on instruction fetch
+    EXCEPTION_BUS_ERROR_DATA   = 0x07, // Bus Error on data access
     EXCEPTION_SYSCALL          = 0x08, // Syscall instruction executed
     EXCEPTION_BREAK            = 0x09, // Break instruction executed
     EXCEPTION_ILLEGAL_INSTRUCTION= 0x0a, // CPU encountered an undefined/illegal instruction
@@ -102,7 +104,16 @@ typedef struct Cpu {
     uint32_t sr;            // COP0 Reg 12: Status Register (Interrupt enables, Cache isolation, etc.).
     uint32_t cause;         // COP0 Reg 13: Cause Register (Exception code, pending interrupts, branch delay flag).
     uint32_t epc;           // COP0 Reg 14: Exception Program Counter (Address of instruction causing exception).
-    // Note: Other COP0 registers (Breakpoint, DCIC, etc.) are not fully modeled yet.
+    uint32_t prid;          // COP0 Reg 15: Processor Revision Identifier (should return 0x00000002)
+    uint32_t bad_vaddr;     // COP0 Reg 8:  Bad Virtual Address (for address error exceptions)
+    uint32_t tar;           // COP0 Reg 6:  Target Address (for branch exceptions)
+    
+    // Debug registers (used by LibCrypt copy protection):
+    uint32_t bpc;           // COP0 Reg 3:  Breakpoint Program Counter
+    uint32_t bda;           // COP0 Reg 5:  Breakpoint Data Address  
+    uint32_t dcic;          // COP0 Reg 7:  Debug and Cache Invalidate Control
+    uint32_t bpcm;          // COP0 Reg 11: Breakpoint PC Mask
+    uint32_t bdam;          // COP0 Reg 9:  Breakpoint Data Address Mask
 
     // --- Connection to Memory System ---
     Interconnect* inter;    // Pointer to the interconnect module for memory accesses.

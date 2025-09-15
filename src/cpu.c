@@ -141,6 +141,16 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->sr = (1 << 22);    // Status Register: BEV=1 (bootstrap exception vector)
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
+    cpu->prid = 0x00000002; // Processor ID: CXD8606CQ CPU per PSX-SPX
+    cpu->bad_vaddr = 0;     // Bad Virtual Address (cleared)
+    cpu->tar = 0;           // Target Address (cleared)
+    
+    // Initialize debug registers (used by LibCrypt)
+    cpu->bpc = 0;           // Breakpoint Program Counter (cleared)
+    cpu->bda = 0;           // Breakpoint Data Address (cleared)
+    cpu->dcic = 0;          // Debug and Cache Invalidate Control (cleared)
+    cpu->bpcm = 0;          // Breakpoint PC Mask (cleared)
+    cpu->bdam = 0;          // Breakpoint Data Address Mask (cleared)
 
     // Initialize I-Cache
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
@@ -877,10 +887,33 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value = cpu_reg(cpu, cpu_r);
 
     switch (cop_r) {
-        case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_CPU_DEBUG("MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x", cop_r, value);
-             // No state change for now
-             break;
+        case 3:  // BPC (Breakpoint Program Counter)
+            cpu->bpc = value;
+            LOG_CPU_DEBUG("MTC0 write to BPC: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
+        case 5:  // BDA (Breakpoint Data Address)
+            cpu->bda = value;
+            LOG_CPU_DEBUG("MTC0 write to BDA: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
+        case 6:  // TAR (Target Address)
+            cpu->tar = value;
+            LOG_CPU_DEBUG("MTC0 write to TAR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
+        case 7:  // DCIC (Debug and Cache Invalidate Control)
+            cpu->dcic = value;
+            LOG_CPU_DEBUG("MTC0 write to DCIC: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
+        case 8:  // BadVaddr (Bad Virtual Address) - Read-only, ignore writes
+            LOG_CPU_DEBUG("MTC0 attempted write to read-only BadVaddr register (PC=0x%08x)", cpu->current_pc);
+            break;
+        case 9:  // BDAM (Breakpoint Data Address Mask)
+            cpu->bdam = value;
+            LOG_CPU_DEBUG("MTC0 write to BDAM: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
+        case 11: // BPCM (Breakpoint PC Mask)
+            cpu->bpcm = value;
+            LOG_CPU_DEBUG("MTC0 write to BPCM: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
+            break;
         case 12: // SR (Status Register)
             // printf("~ MTC0 SR = 0x%08x\n", value); // Debug
             LOG_CPU_DEBUG("MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
@@ -894,7 +927,13 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
                  LOG_CPU_WARN("MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x", value, cpu->current_pc);
              }
              break;
-        // EPC (Reg 14) is read-only. Other registers are typically MMU-related or unused.
+        case 14: // EPC (Exception Program Counter) - Read-only, ignore writes
+            LOG_CPU_DEBUG("MTC0 attempted write to read-only EPC register (PC=0x%08x)", cpu->current_pc);
+            break;
+        case 15: // PRID (Processor Revision Identifier) - Read-only, ignore writes
+            LOG_CPU_DEBUG("MTC0 attempted write to read-only PRID register (PC=0x%08x)", cpu->current_pc);
+            break;
+        // Other registers are typically MMU-related or unused.
         default:
             // Silently ignore unhandled COP0 registers - too noisy for normal operation
             break;
@@ -1056,9 +1095,17 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value_read = 0; // Default value if read fails or is unhandled
 
     switch (cop_r_src) {
-        case 12: value_read = cpu->sr; break; // SR
-        case 13: value_read = cpu->cause; break; // CAUSE
-        case 14: value_read = cpu->epc; break; // EPC
+        case 3:  value_read = cpu->bpc; break;      // BPC (Breakpoint Program Counter)
+        case 5:  value_read = cpu->bda; break;      // BDA (Breakpoint Data Address)
+        case 6:  value_read = cpu->tar; break;      // TAR (Target Address)
+        case 7:  value_read = cpu->dcic; break;     // DCIC (Debug and Cache Invalidate Control)
+        case 8:  value_read = cpu->bad_vaddr; break; // BadVaddr (Bad Virtual Address)
+        case 9:  value_read = cpu->bdam; break;     // BDAM (Breakpoint Data Address Mask)
+        case 11: value_read = cpu->bpcm; break;     // BPCM (Breakpoint PC Mask)
+        case 12: value_read = cpu->sr; break;       // SR (Status Register)
+        case 13: value_read = cpu->cause; break;    // CAUSE (Cause Register)
+        case 14: value_read = cpu->epc; break;      // EPC (Exception Program Counter)
+        case 15: value_read = cpu->prid; break;     // PRID (Processor Revision Identifier)
         // Add reads for other COP0 registers if needed (mostly MMU/debug related)
         default:
             LOG_WARN("Warning: MFC0 read from unhandled COP0 Register %u (PC=0x%08x)\n", cop_r_src, cpu->current_pc);

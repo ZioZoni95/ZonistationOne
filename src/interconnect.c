@@ -1,6 +1,7 @@
 #include "interconnect.h" // Includes associated header and headers for components (gpu.h, dma.h etc.)
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>   // For memset
 #include "log.h"
 #include "dma.h"
 #include "gpu.h"
@@ -114,6 +115,10 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     LOG_INTERCONNECT_INFO("Interconnect initialized");
     inter->bios = bios;
     inter->ram = ram;
+    
+    // Initialize scratchpad memory (1KB D-Cache used as Fast RAM)
+    memset(inter->scratchpad, 0x00, SCRATCHPAD_SIZE);
+    
     dma_init(&inter->dma, inter); // Initialize DMA controller state
     gpu_init_full(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
@@ -287,15 +292,34 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return bios_load32(inter->bios, offset); // Delegate to BIOS module
     }
 
-    // Main RAM Region (0x00000000 - 0x001fffff)
-    if (physical_addr <= RAM_END) {
+    // Scratchpad Memory Region (0x1F800000 - 0x1F8003FF)
+    // PSX-SPX: 1KB D-Cache used as Fast RAM
+    if (physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) {
+        uint32_t offset = physical_addr - SCRATCHPAD_START;
+        if (offset % 4 != 0) {
+            LOG_INTERCONNECT_ERROR("Unaligned scratchpad load32 address: 0x%08x", physical_addr);
+            return 0;
+        }
+        // Little-endian 32-bit load from scratchpad
+        uint32_t b0 = inter->scratchpad[offset + 0];
+        uint32_t b1 = inter->scratchpad[offset + 1];
+        uint32_t b2 = inter->scratchpad[offset + 2];
+        uint32_t b3 = inter->scratchpad[offset + 3];
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
+
+    // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
         // Special handling for address 0x00000000 (known PlayStation BIOS issue)
         if (physical_addr == 0x00000000) {
             // Suppress warnings for this common BIOS behavior - only log at TRACE level
             LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (known PSX issue - returning 0)");
             return 0x00000000; // Return 0 for null pointer access (per PCSX ReARMed)
         }
-        return ram_load32(inter->ram, physical_addr); // Delegate to RAM module
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
+        return ram_load32(inter->ram, ram_offset); // Delegate to RAM module
     }
 
     // Timer Region (General Check - 0x1f801100 - 0x1f80112F)
@@ -514,16 +538,19 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         return 0;
     }
 
-    // Main RAM Region
-    if (physical_addr <= RAM_END) {
+    // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
         // Special handling for address 0x00000000 (known PlayStation BIOS issue)
         if (physical_addr == 0x00000000) {
             // Suppress warnings for this common BIOS behavior - only log at TRACE level
             LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (16-bit, known PSX issue - returning 0)");
             return 0x0000; // Return 0 for null pointer access (per PCSX ReARMed)
         }
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
         // (Removed RAM Read/Write logs for performance)
-        return ram_load16(inter->ram, physical_addr);
+        return ram_load16(inter->ram, ram_offset);
     }
 
     // BIOS Region (Unlikely, but check)
@@ -674,16 +701,19 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         }
     }
 
-    // Main RAM Region
-    if (physical_addr <= RAM_END) {
+    // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
         // Special handling for address 0x00000000 (known PlayStation BIOS issue)
         if (physical_addr == 0x00000000) {
             // Suppress warnings for this common BIOS behavior - only log at TRACE level
             LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (8-bit, known PSX issue - returning 0)");
             return 0x00; // Return 0 for null pointer access (per PCSX ReARMed)
         }
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
         // (Removed RAM Read/Write logs for performance)
-        return ram_load8(inter->ram, physical_addr);
+        return ram_load8(inter->ram, ram_offset);
     }
 
     // Other regions (SPU, Timers, GPU, DMA, Exp2, MemCtrl) are less likely for 8-bit reads
@@ -932,16 +962,35 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         return;
     }
 
-    // Main RAM Region
-    if (physical_addr <= RAM_END) {
+    // Scratchpad Memory Region (0x1F800000 - 0x1F8003FF)
+    // PSX-SPX: 1KB D-Cache used as Fast RAM
+    if (physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) {
+        uint32_t offset = physical_addr - SCRATCHPAD_START;
+        if (offset % 4 != 0) {
+            LOG_INTERCONNECT_ERROR("Unaligned scratchpad store32 address: 0x%08x", physical_addr);
+            return;
+        }
+        // Little-endian 32-bit store to scratchpad
+        inter->scratchpad[offset + 0] = (uint8_t)(value & 0xFF);
+        inter->scratchpad[offset + 1] = (uint8_t)((value >> 8) & 0xFF);
+        inter->scratchpad[offset + 2] = (uint8_t)((value >> 16) & 0xFF);
+        inter->scratchpad[offset + 3] = (uint8_t)((value >> 24) & 0xFF);
+        return;
+    }
+
+    // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
         // Special handling for address 0x00000000 (known PlayStation BIOS issue)
         if (physical_addr == 0x00000000) {
             // Suppress warnings for this common BIOS behavior - only log at TRACE level
             LOG_INTERCONNECT_TRACE("BIOS writing to address 0x00000000 (32-bit, known PSX issue - ignoring)");
             return; // Ignore writes to null pointer (per PCSX ReARMed)
         }
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
         // (Removed RAM Read/Write logs for performance)
-        ram_store32(inter->ram, physical_addr, value); // Delegate
+        ram_store32(inter->ram, ram_offset, value); // Delegate
         return;
     }
 
@@ -1184,10 +1233,13 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         return; // Handled
     }
 
-    // Main RAM Region
-    if (physical_addr <= RAM_END) {
+    // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
         // (Removed RAM Read/Write logs for performance)
-        ram_store16(inter->ram, physical_addr, value); // Delegate
+        ram_store16(inter->ram, ram_offset, value); // Delegate
         return;
     }
 
@@ -1336,10 +1388,13 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
          return; // SPU not implemented
     }
 
-     // Main RAM Region
-    if (physical_addr <= RAM_END) {
+     // Main RAM Region with mirroring (0x00000000 - 0x007FFFFF)
+    // PSX-SPX: 2MB RAM can be mirrored to the first 8MB (enabled by default)
+    if (physical_addr <= 0x007FFFFF) {
+        // Mirror 2MB RAM across 8MB address space
+        uint32_t ram_offset = physical_addr % RAM_SIZE;
         // (Removed RAM Read/Write logs for performance)
-        ram_store8(inter->ram, physical_addr, value); // Delegate
+        ram_store8(inter->ram, ram_offset, value); // Delegate
         return;
     }
 
