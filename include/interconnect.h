@@ -109,6 +109,11 @@
 // Cache Control Register (KSEG2)
 #define CACHE_CONTROL_ADDR 0xfffe0130
 
+// Scratchpad Memory (1KB D-Cache used as Fast RAM)
+#define SCRATCHPAD_START 0x1f800000
+#define SCRATCHPAD_SIZE  1024
+#define SCRATCHPAD_END   (SCRATCHPAD_START + SCRATCHPAD_SIZE - 1)
+
 /* --- Interrupt Line Definitions ---
  * Defines symbolic names for the PSX hardware interrupt request lines (0-10).
  * These correspond to bits in the I_STAT and I_MASK registers.
@@ -133,6 +138,7 @@
 typedef struct Interconnect {
     Bios* bios; // Pointer to the loaded BIOS data
     Ram* ram;   // Pointer to the main RAM data buffer
+    uint8_t scratchpad[SCRATCHPAD_SIZE]; // 1KB Scratchpad (D-Cache used as Fast RAM)
     Gpu gpu;    // GPU state (embedded directly)
     Dma dma;    // DMA controller state (embedded directly)
 
