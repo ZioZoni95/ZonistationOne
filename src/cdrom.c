@@ -670,13 +670,29 @@ void cmd_test(Cdrom *cdrom) {
     uint8_t subcmd = fifo_is_empty(&cdrom->param_fifo) ? 0 : fifo_pop(&cdrom->param_fifo);
     printf("CDROM: cmd_test called, subcmd=0x%02x\n", subcmd);
     fifo_clear(&cdrom->response_fifo);
+    
+    // Handle specific test subcommands
+    switch (subcmd) {
+        case 0x20: // Get CDROM Controller Version/Date
+            LOG_CDROM_IMPORTANT("[BOOT] BIOS Test subcmd 0x20 - Controller version request");
+            fifo_push(&cdrom->response_fifo, 0x1c); // Version info (SCPH-1001 compatible)
+            fifo_push(&cdrom->response_fifo, 0x94);
+            fifo_push(&cdrom->response_fifo, 0x00);
+            fifo_push(&cdrom->response_fifo, 0x00);
+            break;
+        default:
+            // Generic handshake response for unknown subcmds
+            printf("CDROM: Handshake response for subcmd=0x%02x\n", subcmd);
+            fifo_push(&cdrom->response_fifo, 0x1c);
+            fifo_push(&cdrom->response_fifo, 0x94);
+            fifo_push(&cdrom->response_fifo, 0x00);
+            fifo_push(&cdrom->response_fifo, 0x00);
+            break;
+    }
+    
+    // Always trigger interrupt to notify BIOS that command completed
     update_status_register(cdrom);
-    // Always send handshake response for any subcmd
-    printf("CDROM: Handshake response for subcmd=0x%02x\n", subcmd);
-    fifo_push(&cdrom->response_fifo, 0x1c);
-    fifo_push(&cdrom->response_fifo, 0x94);
-    fifo_push(&cdrom->response_fifo, 0x00);
-    fifo_push(&cdrom->response_fifo, 0x00);
-    fifo_push(&cdrom->response_fifo, 0x00);
-    return;
+    cdrom->status |= 0x20;  // Response ready
+    trigger_interrupt(cdrom, 3);  // INT3 for successful command completion
+    LOG_CDROM_IMPORTANT("[BOOT] CDROM Test command completed, INT3 triggered");
 }

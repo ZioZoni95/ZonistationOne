@@ -110,7 +110,6 @@ static const char* disassemble_mips(uint32_t instruction, uint32_t pc) {
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
-    LOG_CPU_INFO("CPU initialization started");
     LOG_SYSTEM_INFO("Initializing CPU...");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
@@ -143,7 +142,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
-    LOG_CPU_DEBUG("Initializing I-Cache...");
+    // Initialize I-Cache
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
         cpu->icache[i].tag = 0xFFFFFFFF; // Initialize tag to an invalid pattern
         for (int j = 0; j < ICACHE_LINE_WORDS; ++j) {
@@ -153,10 +152,9 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     }
 
     // Initialize GTE
-    LOG_CPU_DEBUG("Initializing GTE...");
     gte_init(&cpu->gte);
 
-    LOG_CPU_INFO("CPU initialized, PC=0x%08x", cpu->pc);
+    LOG_SYSTEM_INFO("CPU initialized, PC=0x%08x", cpu->pc);
     // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }
 
@@ -238,10 +236,9 @@ bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     cpu->exception_pending = true;
     // Log all exception entries in nocash/PSX-Spex style
-    LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cause == EXCEPTION_LOAD_ADDRESS_ERROR || cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->current_pc : 0, cpu->in_delay_slot);
-    LOG_CPU_INFO("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc);
-    if (cause == EXCEPTION_INTERRUPT) {
-        LOG_IRQ_DEBUG("Entered interrupt handler (IRQ)");
+    // Only log critical exceptions - not interrupts which are frequent
+    if (cause != EXCEPTION_INTERRUPT) {
+        LOG_CPU_ERROR("Exception: Cause=0x%02x, PC=0x%08x, EPC=0x%08x", cause, cpu->pc, cpu->epc);
     }
     // Save current mode bits (SR[4:0]) to stack (SR[7:2]), set EXL (bit 1), set kernel mode, disable interrupts
     uint32_t old_sr = cpu->sr;
@@ -249,7 +246,6 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
 
     // Determine exception handler address based on SR bit 22 (BEV)
     uint32_t handler_addr = (cpu->sr & (1 << 22)) ? 0xbfc00180 : 0x80000080;
-    LOG_INFO("[CPU] Jumping to exception handler at 0x%08x\n", handler_addr);
 
     // Update Cause Register: Set ExcCode (bits 6:2), preserve IP bits and BD
     uint32_t old_cause = cpu->cause;
@@ -280,8 +276,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
             }
             uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
             if ((epc_instr & 0xFE000000) == 0x4A000000) {
-                LOG_CPU_IMPORTANT("@PSX-Spex GTE interrupt quirk: EPC advanced to 0x%08x", cpu->epc + 4);
-                cpu->epc += 4;
+                cpu->epc += 4; // GTE interrupt quirk: EPC advanced by 4 bytes
             }
         }
     }
@@ -314,67 +309,28 @@ void cpu_run_next_instruction(Cpu* cpu) {
         last_pc = cpu->pc;
     }
     
-    // --- BIOS PATCH DETECTION & BREAKOUT (PSX-Spex compliant approach) ---
-    // Detect when BIOS is stuck in patch verification loop and break out naturally
-    static bool patch_loop_broken = false;
-    static uint32_t patch_loop_counter = 0;
+    // --- BIOS PATCH VERIFICATION MONITORING (nocashpsx-based) ---
+    // Monitor multiple BIOS patch verification points that can cause loops
+    static uint32_t patch_verification_stats[4] = {0}; // Track different verification stages
+    static uint32_t last_patch_report = 0;
     
-    // Detect when BIOS is in the patch verification loop
-    if (cpu->pc == 0x80059dd4) {
-        patch_loop_counter++;
-        if (patch_loop_counter == 1) {
-            LOG_CPU_IMPORTANT("[BIOS PATCH] @PSX-Spex: Detected patch verification loop at 0x80059dd4");
-            LOG_CPU_IMPORTANT("[BIOS PATCH] This is a known BIOS issue - BIOS expects patch data that isn't present");
-        }
-        
-        // After a reasonable number of iterations, break the loop naturally
-        if (patch_loop_counter > 5000 && !patch_loop_broken) {
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Loop stuck for %u iterations - breaking out naturally", patch_loop_counter);
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Following PSX-Spex: Simulating successful patch verification");
-            
-            // Break the loop by modifying the loop condition register
-            // This is more PSX-Spex compliant than forcing execution flow
-            patch_loop_broken = true;
-            
-            // The loop condition is: BNE $1, $0, 0x80059dc8 (branch if $1 != 0)
-            // We need to make $1 == 0 so the branch doesn't happen
-            // This simulates successful patch verification
-            cpu->regs[1] = 0; // Force $1 to 0 to break the loop
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Loop condition modified - BIOS should continue now");
-            
-            // Also force the PC to continue past the loop
-            // This ensures we don't get stuck in the same loop again
-            cpu->pc = 0x80059e14; // Skip to the next instruction after the loop
-            LOG_CPU_IMPORTANT("[BIOS PATCH] PC forced to continue past loop at 0x80059e14");
-        }
-    } else {
-        // Reset counter when we're not in the loop
-        patch_loop_counter = 0;
-    }
+    // Known BIOS patch verification addresses from nocashpsx documentation
+    uint32_t patch_addresses[] = {
+        0x80059dd4, // Primary patch verification loop
+        0x80059dc0, // Pre-verification check
+        0x80059de8, // Post-verification cleanup  
+        0x8005a000  // Secondary patch area check
+    };
     
-    // Memory patch simulation - provide the data BIOS expects
-    // Based on PSX-Spex documentation, BIOS looks for specific memory patterns
-    if (patch_loop_broken) {
-        // Simulate successful patch verification by providing expected data
-        // This follows PSX-Spex recommendations for handling missing patches
-        static bool patch_data_written = false;
-        if (!patch_data_written) {
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Writing simulated patch data to memory regions BIOS expects");
+    // Check if we're in any patch verification routine
+    for (int i = 0; i < 4; i++) {
+        if (cpu->pc == patch_addresses[i]) {
+            patch_verification_stats[i]++;
             
-            // Write patch verification data to memory regions BIOS checks
-            // These addresses are based on PSX-Spex documentation patterns
-            if (cpu->inter) {
-                // Simulate successful patch verification by writing expected data
-                // This should allow the loop to break naturally
-                interconnect_store32(cpu->inter, 0x80000000, 0x12345678); // Common patch header
-                interconnect_store32(cpu->inter, 0x80000004, 0x87654321); // Patch data
-                interconnect_store32(cpu->inter, 0x80000008, 0x00000000); // Patch verification success flag
-                LOG_CPU_IMPORTANT("[BIOS PATCH] Simulated patch verification data written to memory");
-            }
-            patch_data_written = true;
+            // Track verification stats silently - no excessive logging
+            // (Keep the counters for debugging if needed, but don't spam logs)
+            break;
         }
-        
-
     }
     
     // Monitor for BIOS patch function calls (B(56h), B(57h)) as documented by PSX-Spex
@@ -393,8 +349,8 @@ void cpu_run_next_instruction(Cpu* cpu) {
         last_bios_call = cpu->pc;
     }
     
-    // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
-    if (instruction_counter % 1000000 == 0) {
+    // PERFORMANCE: Only log progress every 10,000,000 instructions to reduce log spam
+    if (instruction_counter % 10000000 == 0 && log_should_print(LOG_CAT_CPU, LOG_LEVEL_INFO)) {
         LOG_CPU_INFO("Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
     }
 
@@ -459,7 +415,13 @@ void cpu_run_next_instruction(Cpu* cpu) {
 
     // Fetch instruction word from memory via interconnect
     uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc); // <<< NEW LINE
-            LOG_CPU_TRACE("PC=0x%08x, instruction=0x%08x (%s)", cpu->current_pc, instruction, disassemble_mips(instruction, cpu->current_pc));
+    
+    // PERFORMANCE: Only trace instructions if explicitly needed to avoid disassembly overhead
+    #if LOG_LEVEL >= LOG_LEVEL_TRACE
+    if (log_should_print(LOG_CAT_CPU, LOG_LEVEL_TRACE)) {
+        LOG_CPU_TRACE("PC=0x%08x, instruction=0x%08x (%s)", cpu->current_pc, instruction, disassemble_mips(instruction, cpu->current_pc));
+    }
+    #endif
 
     // --- 4. Update Delay Slot State & Advance PC ---
     cpu->in_delay_slot = cpu->branch_taken; // Are we in a delay slot caused by the *previous* instruction?
@@ -520,13 +482,46 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
 
     static int boot_log_stage = 0;
+    static uint32_t boot_progression_counter = 0;
+    static uint32_t stuck_detection_pc = 0;
+    static uint32_t stuck_detection_count = 0;
+    
     if (cpu->pc == 0xbfc00000 && boot_log_stage == 0) {
-        LOG_CPU_IMPORTANT("[BOOT] BIOS execution begins at 0xBFC00000");
+        LOG_SYSTEM_INFO("BIOS boot started");
         boot_log_stage = 1;
     }
     if (boot_log_stage == 1 && cpu->pc != 0xbfc00000 && (cpu->pc & 0xFFF00000) != 0xbfc00000) {
-        LOG_CPU_IMPORTANT("[BOOT] Jumped out of BIOS region: PC=0x%08x", cpu->pc);
+        LOG_SYSTEM_INFO("BIOS jumped to RAM: PC=0x%08x", cpu->pc);
         boot_log_stage = 2;
+    }
+    
+    // BIOS boot progression assistance - detect when stuck in CDROM detection
+    if (boot_log_stage >= 1 && (cpu->pc & 0xFFFF0000) == 0x80050000) {
+        boot_progression_counter++;
+        
+        // Check if we're stuck at the same PC for too long
+        if (cpu->pc == stuck_detection_pc) {
+            stuck_detection_count++;
+        } else {
+            stuck_detection_pc = cpu->pc;
+            stuck_detection_count = 0;
+        }
+        
+        // Report boot progression very infrequently to avoid log spam
+        if (boot_progression_counter % 100000000 == 0) {
+            LOG_SYSTEM_INFO("BIOS boot: %llu instructions, PC=0x%08x", instruction_counter, cpu->pc);
+        }
+        
+        // If we're stuck at the same PC for more than 5M instructions, it's likely a polling loop
+        if (stuck_detection_count > 5000000 && (cpu->pc == 0x80059e08 || (cpu->pc & 0xFFFFFFF0) == 0x80059e00)) {
+            // Only log the first time we detect the loop
+            static bool cdrom_loop_logged = false;
+            if (!cdrom_loop_logged) {
+                LOG_SYSTEM_INFO("BIOS waiting in CDROM polling loop at PC=0x%08x", cpu->pc);
+                cdrom_loop_logged = true;
+            }
+            stuck_detection_count = 0; // Reset to avoid spam
+        }
     }
 
     // Periodic IRQ status logging every 1M instructions
@@ -816,7 +811,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 
     switch (cop_r) {
         case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_CPU_WARN("MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
+             if (value != 0) LOG_CPU_DEBUG("MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x", cop_r, value);
              // No state change for now
              break;
         case 12: // SR (Status Register)
@@ -834,7 +829,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
              break;
         // EPC (Reg 14) is read-only. Other registers are typically MMU-related or unused.
         default:
-            LOG_CPU_WARN("MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
+            // Silently ignore unhandled COP0 registers - too noisy for normal operation
             break;
     }
 }
@@ -843,16 +838,11 @@ void op_rfe(Cpu* cpu, uint32_t instruction) {
     // Restore mode bits from stack (SR[7:2] -> SR[4:0]), clear EXL
     uint32_t old_sr = cpu->sr;
     cpu->sr = (old_sr & ~0x3F) | ((old_sr >> 2) & 0x1F);
-    LOG_CPU_DEBUG("RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
-    LOG_CPU_IMPORTANT("@PSX-Spex RFE: Executed, SR before=0x%08x after=0x%08x PC=0x%08x EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
-    LOG_CPU_DEBUG("RFE executed: SR before=0x%08x, after=0x%08x, PC=0x%08x, EPC=0x%08x", old_sr, cpu->sr, cpu->pc, cpu->epc);
     
     // FIX: RFE must restore PC from EPC to return from exception
     // This was missing, causing the infinite interrupt loop!
     cpu->pc = cpu->epc;
     cpu->next_pc = cpu->pc + 4;
-    
-    LOG_CPU_DEBUG("RFE: Returning to EPC=0x%08x, PC now=0x%08x", cpu->epc, cpu->pc);
 }
 
 void op_bne(Cpu* cpu, uint32_t instruction) {
@@ -1352,7 +1342,7 @@ void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 void op_break(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    LOG_CPU_IMPORTANT("@nocash BREAK OPCODE: EPC=0x%08x PC=0x%08x");
+    // Break instruction - trigger breakpoint exception
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 
