@@ -151,6 +151,13 @@ void cpu_init(Cpu* cpu, Interconnect* inter);
 void cpu_run_next_instruction(Cpu* cpu);
 
 /**
+ * @brief Optimized version of cpu_run_next_instruction with minimal overhead.
+ * Use this for production performance - no debugging overhead.
+ * @param cpu Pointer to the Cpu state.
+ */
+void cpu_run_next_instruction_fast(Cpu* cpu);
+
+/**
  * @brief Decodes the fetched instruction and calls the appropriate handler function.
  * @param cpu Pointer to the Cpu state.
  * @param instruction The 32-bit instruction word to decode and execute.

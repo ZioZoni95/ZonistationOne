@@ -291,7 +291,66 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
 
 // --- Main Execution Cycle ---
 /**
- * @brief Executes one full CPU cycle.
+ * @brief Executes one full CPU cycle - OPTIMIZED VERSION with minimal overhead.
+ * Based on nocash PSX specifications - core MIPS R3000A emulation only.
+ */
+void cpu_run_next_instruction_fast(Cpu* cpu) {
+    // Clear exception flag at start of cycle
+    cpu->exception_pending = false;
+
+    // --- 1. Check for Interrupts (minimal overhead) ---
+    if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0 && (cpu->sr & 1)) {
+        cpu_exception(cpu, EXCEPTION_INTERRUPT);
+        return;
+    }
+
+    // --- 2. Handle Pending Load Delay ---
+    cpu_set_reg(cpu, cpu->load_reg_idx, cpu->load_value);
+    cpu->load_reg_idx = REG_ZERO;
+
+    // --- 3. Fetch Instruction ---
+    cpu->current_pc = cpu->pc;
+    
+    // PC alignment check
+    if (cpu->current_pc & 3) {
+        cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+        return;
+    }
+
+    uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc);
+
+    // --- 4. Update Delay Slot State & Advance PC ---
+    cpu->in_delay_slot = cpu->branch_taken;
+    cpu->branch_taken = false;
+    cpu->pc = cpu->next_pc;
+    cpu->next_pc = cpu->pc + 4;
+
+    // --- 5. Commit Register State ---
+    memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs));
+
+    // --- 6. Decode and Execute ---
+    decode_and_execute(cpu, instruction);
+    if (cpu->exception_pending) {
+        return;
+    }
+
+    // --- 7. Finalize State ---
+    cpu->out_regs[REG_ZERO] = 0;
+
+    // --- 8. Update CPU Cycle Counter ---
+    if (cpu->inter) {
+        cpu->inter->cpu_cycle_counter++;
+        
+        // Check for scheduled events (minimal overhead)
+        if (cpu->inter->cpu_cycle_counter >= cpu->inter->evq_next_cycle) {
+            eventq_dispatch_due(cpu->inter);
+        }
+    }
+}
+
+/**
+ * @brief Executes one full CPU cycle - DEBUG VERSION with extensive monitoring.
+ * Use only for debugging - has significant performance overhead!
  */
 void cpu_run_next_instruction(Cpu* cpu) {
     cpu->exception_pending = false; // Clear at start of cycle
@@ -752,6 +811,14 @@ void op_sw(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t address = cpu_reg(cpu, rs) + offset;
     uint32_t value = cpu_reg(cpu, rt); // Use input register set
+    
+    // DEBUG: Only flag writes to address 0x00000000 specifically as those are likely null pointer issues
+    // PS1 legitimately uses addresses 0x04-0x3FF for BIOS function vectors and system data
+    if (address == 0x00000000) {
+        LOG_WARN("NULL POINTER SW: addr=0x%08x, rs=r%u(0x%08x), offset=0x%08x, rt=r%u(0x%08x), PC=0x%08x, instr=0x%08x", 
+                  address, rs, cpu_reg(cpu, rs), offset, rt, value, cpu->current_pc, instruction);
+    }
+    
     interconnect_store32(cpu->inter, address, value); // Alignment checked in interconnect
 }
 
