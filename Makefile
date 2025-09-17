@@ -1,40 +1,72 @@
-# Makefile for PS1 Emulator and log splitter
+# PlayStation 1 Emulator - Fresh Start Makefile
+# Following guide.tex structure with PSX-SPX compliance
 
-# Source files for the emulator
-EMU_SRCS = src/main.c src/cpu.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/sio.c src/gte.c src/log.c src/event_scheduler.c src/spu.c src/mdec.c src/pio.c src/memcard.c src/controller.c
-EMU_OBJS = $(EMU_SRCS:.c=.o)
-EMU_BIN = myps1_emu
-
-# Test files
-TEST_SRCS = tests/cpu_minimal_test.c src/cpu.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/timers.c src/cdrom.c src/sio.c src/bios.c src/gte.c src/log.c src/event_scheduler.c src/renderer.c src/vram.c src/spu.c src/mdec.c src/pio.c src/memcard.c src/controller.c
-TEST_BIN = cpu_test
-
-# Compiler and flags
 CC = gcc
-CFLAGS = -std=c99 -g -Wall -Wextra \
-	-Iinclude \
-	-lSDL2 -lGL -lGLEW -lm
+CFLAGS = -std=c99 -Wall -Wextra -O2 -g
+INCLUDES = -Iinclude
+LIBS = 
+TARGET = myps1_emu
 
-# Log level is now set at runtime via log_set_level()
+# Source files
+SRCDIR = src
+SOURCES = $(wildcard $(SRCDIR)/*.c) main.c
 
-# Default target: build the emulator
-all: $(EMU_BIN)
+# Object files
+OBJDIR = obj
+OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
 
-$(EMU_BIN): $(EMU_SRCS)
-	$(CC) $(EMU_SRCS) -o $(EMU_BIN) $(CFLAGS)
+# Create directories
+$(shell mkdir -p $(OBJDIR)/$(SRCDIR))
 
-# Build and run the CPU test
-test: $(TEST_BIN)
-	./$(TEST_BIN)
+# Default target
+all: $(TARGET)
 
-$(TEST_BIN): $(TEST_SRCS)
-	$(CC) $(TEST_SRCS) -o $(TEST_BIN) $(CFLAGS)
+# Link executable
+$(TARGET): $(OBJECTS)
+	@echo "Linking $@..."
+	$(CC) $(OBJECTS) -o $@ $(LIBS)
+	@echo "Build complete: $@"
 
-# Build the log splitter utility
-split_log: split_log.c
-	$(CC) -o split_log split_log.c
+# Compile source files
+$(OBJDIR)/%.o: %.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-# Clean build artifacts
+# Build target for VS Code task
+build-debug: $(TARGET)
+	@echo "Debug build complete"
+
+# Clean
 clean:
-	rm -f $(EMU_BIN) $(TEST_BIN) split_log *.o *.txt \
-	logs/*.txt logs/*_old.txt 
+	@echo "Cleaning..."
+	rm -rf $(OBJDIR)
+	rm -f $(TARGET)
+	@echo "Clean complete"
+
+# Debug run
+debug: $(TARGET)
+	./$(TARGET) --debug --bios roms/SCPH1001.BIN
+
+# Normal run  
+run: $(TARGET)
+	./$(TARGET) --bios roms/SCPH1001.BIN
+
+# Test basic functionality
+test: $(TARGET)
+	@echo "Running basic tests..."
+	./$(TARGET) --bios roms/SCPH1001.BIN 2>&1 | head -50
+
+# Show file structure
+structure:
+	@echo "Project structure:"
+	@find . -type f -name "*.c" -o -name "*.h" | sort
+
+# Dependencies
+.PHONY: all clean debug run test structure build-debug
+
+# Automatic dependency generation
+-include $(OBJECTS:.o=.d)
+
+$(OBJDIR)/%.d: %.c
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) $(INCLUDES) -MM -MT $(@:.d=.o) $< > $@
