@@ -1,348 +1,209 @@
-# PlayStation 1 Emulator (ZonistationOne-2)
+# ZonistationOne PlayStation 1 Emulator
 
-A complete PlayStation 1 emulator implementation written in C, following strict PSX-SPX documentation compliance and a methodical step-by-step development approach.
+A personal PlayStation 1 emulator written in C, based on the excellent [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux) reference implementation. This project is designed for educational purposes and learning about emulation development.
 
-## 📋 Table of Contents
+![Emulator Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Platform](https://img.shields.io/badge/platform-Linux-lightgray)
+![Language](https://img.shields.io/badge/language-C-green)
+![License](https://img.shields.io/badge/license-Educational-yellow)
 
-- [Project Overview](#project-overview)
-- [Architecture](#architecture)
-- [Current Status](#current-status)
-- [Build Instructions](#build-instructions)
-- [Development Tools](#development-tools)
-- [Implementation Roadmap](#implementation-roadmap)
-- [Development Guidelines](#development-guidelines)
-- [Hardware Components](#hardware-components)
-- [File Structure](#file-structure)
-- [Contributing](#contributing)
+## 🎮 Features
 
-## 🎮 Project Overview
+### Currently Implemented
+- **MIPS R3000A CPU Core**: Basic instruction decoding and execution
+- **Memory System**: PlayStation 1 memory mapping with 2MB RAM, 512KB BIOS, 1KB scratchpad
+- **BIOS Loading**: Support for standard PlayStation BIOS files (SCPH1001.BIN)
+- **Instruction Set**: LUI, SW, SLL, J (Jump), NOP, and basic arithmetic operations
+- **Debug Features**: Instruction disassembly, register dumps, memory dumps, single-step execution
+- **Professional Build System**: Debug and release configurations with sanitizers
 
-This PlayStation 1 emulator is being developed following a complete architectural rewrite approach, prioritizing:
+### Emulation Status
+- ✅ CPU initialization and reset
+- ✅ BIOS loading and execution start
+- ✅ Memory address translation
+- ✅ Basic instruction execution (~54 instructions from BIOS)
+- ⏳ I/O register handling (placeholder warnings)
+- ❌ Graphics Processing Unit (GPU)
+- ❌ Sound Processing Unit (SPU)
+- ❌ CD-ROM drive
+- ❌ Game loading
 
-- **PSX-SPX Compliance**: All hardware implementations follow official PlayStation hardware specifications
-- **Component Isolation**: Clean separation between hardware subsystems for easier debugging
-- **Incremental Implementation**: Following guide.tex methodology for step-by-step development
-- **Analysis-Driven Development**: Using comprehensive tools to guide implementation priorities
-
-### Key Features
-
-- ✅ Complete hardware architecture skeleton (9 major components)
-- ✅ MIPS R3000A CPU with instruction decoding framework
-- ✅ Full PlayStation memory map implementation
-- ✅ PSX-SPX compliant register definitions
-- ✅ Comprehensive development tools suite
-- ✅ Clean build system with automatic dependency management
-
-## 🏗️ Architecture
-
-The emulator follows a component-based architecture with clear separation between hardware subsystems:
-
-```
-PlayStation System
-├── CPU (MIPS R3000A) - Central processing unit with instruction execution
-├── Memory - RAM, BIOS, Scratchpad, Hardware routing
-├── GPU - Graphics processing and display output
-├── DMA - Direct Memory Access controller (7 channels)
-├── Timer - 3 programmable timers with IRQ generation
-├── IRQ - Interrupt controller (11 IRQ sources)
-├── SPU - Sound Processing Unit
-├── CDROM - CD-ROM controller and drive emulation
-├── SIO - Serial I/O for controllers and memory cards
-└── MDEC - Motion decoder for FMV video
-```
-
-## 📊 Current Status
-
-### Completed Components ✅
-
-| Component | Status | Description |
-|-----------|--------|-------------|
-| **CPU** | 🟡 Skeleton | MIPS R3000A with instruction decoding framework |
-| **Memory** | 🟢 Complete | Full PSX memory map with hardware routing |
-| **GPU** | 🟡 Skeleton | GP0/GP1 commands, GPUSTAT register |
-| **DMA** | 🟡 Skeleton | 7-channel DMA controller |
-| **Timer** | 🟡 Skeleton | 3 timers with IRQ generation |
-| **IRQ** | 🟡 Skeleton | Interrupt controller |
-| **SPU** | 🟡 Skeleton | Sound processing unit |
-| **CDROM** | 🟡 Skeleton | CD-ROM controller |
-| **SIO** | 🟡 Skeleton | Serial I/O controller |
-| **MDEC** | 🟡 Skeleton | Motion decoder |
-
-### Implementation Status
-- 🟢 **Architecture**: 100% complete - All components integrated
-- 🟡 **CPU Instructions**: 10% - Basic framework with select instructions
-- 🔴 **Hardware Timing**: 0% - Awaiting CPU completion
-- 🔴 **Game Compatibility**: 0% - Future milestone
-
-## 🛠️ Build Instructions
+## 🚀 Quick Start
 
 ### Prerequisites
-- GCC compiler
-- Make build system
-- Python 3 (for development tools)
+- GCC compiler with C11 support
+- Make
+- PlayStation BIOS file (e.g., SCPH1001.BIN)
 
-### Building the Emulator
+### Building
+```bash
+# Clone the repository
+git clone https://github.com/ZioZoni95/ZonistationOne.git
+cd ZonistationOne
+
+# Build debug version (recommended for development)
+make debug
+
+# Or build optimized release version
+make release
+```
+
+### Running
+```bash
+# Run with your BIOS file
+./build/myps1_emu_debug --bios roms/SCPH1001.BIN --verbose
+
+# Enable debug mode for single-step execution
+./build/myps1_emu_debug --bios roms/SCPH1001.BIN --debug
+
+# Show help
+./build/myps1_emu_debug --help
+```
+
+## 📁 Project Structure
+
+```
+ZonistationOne/
+├── src/                    # Source files
+│   ├── main.c             # Entry point and CLI
+│   ├── emulator.c         # Main emulator loop and control
+│   ├── cpu.c              # MIPS R3000A CPU emulation
+│   └── memory.c           # Memory system and BIOS loading
+├── include/               # Header files
+│   ├── psx_types.h        # PlayStation data types and constants
+│   ├── emulator.h         # Emulator interface
+│   ├── cpu.h              # CPU function declarations
+│   └── memory.h           # Memory system interface
+├── build/                 # Build artifacts
+├── roms/                  # PlayStation BIOS files
+│   └── SCPH1001.BIN      # PlayStation BIOS (user-provided)
+└── Makefile              # Build system
+```
+
+## 🔧 Build Targets
 
 ```bash
-# Clean build
-make clean
-
-# Build debug version
-make
-
-# Or use VS Code task
-# Ctrl+Shift+P -> "Tasks: Run Task" -> "build-debug"
+make help           # Show available targets
+make debug          # Build with debug symbols and sanitizers
+make release        # Build optimized release version
+make clean          # Clean build artifacts
+make run-debug      # Build and run debug version
+make run            # Build and run release version
 ```
 
-### Running the Emulator
+## 🎯 Current Capabilities
 
-```bash
-# Run with BIOS
-./myps1_emu
+The emulator can currently:
+1. **Load PlayStation BIOS** (512KB) into memory
+2. **Initialize CPU** to proper reset state (PC=0xBFC00000)
+3. **Execute MIPS instructions** from BIOS code
+4. **Handle memory access** with proper address translation
+5. **Display debug information** including instruction disassembly
+6. **Run approximately 54 BIOS instructions** before encountering unimplemented features
 
-# The emulator will automatically:
-# 1. Initialize all hardware components  
-# 2. Load BIOS from roms/SCPH1001.BIN
-# 3. Start CPU execution from BIOS entry point
-# 4. Display execution progress
+### Sample Output
+```
+=== ZonistationOne PlayStation 1 Emulator v0.1.0 ===
+[Memory] Initialized 2048KB RAM, 512KB BIOS, 1024B scratchpad
+[CPU] Reset to PC=0xBFC00000, SP=0x801FFF00
+[Memory] Loaded BIOS: roms/SCPH1001.BIN (512KB)
+[Memory] BIOS header: 13 00 08 3C 3F 24 08 35
+
+=== Starting Emulation ===
+[CPU] 0xBFC00000: 0x3C080013  lui $t0, 0x0013
+[CPU] 0xBFC00004: 0x3508243F  ori $t0, $t0, 0x243F
+[CPU] 0xBFC00008: 0x3C011F80  lui $at, 0x1F80
+...
 ```
 
-## 🔧 Development Tools
+## 🛠️ Development
 
-Our comprehensive analysis tools help guide efficient implementation:
+### Architecture
+The emulator follows a modular design inspired by PCSX-Redux:
+- **CPU Module**: MIPS R3000A instruction decoding and execution
+- **Memory Module**: Address translation and hardware memory mapping  
+- **Emulator Module**: Main loop, initialization, and control
+- **Main Module**: Command-line interface and configuration
 
-### 1. BIOS Disassembler (`tools/bios_disasm.py`)
+### Adding Instructions
+To add new MIPS instructions:
+1. Add opcode constants in `include/cpu.h`
+2. Implement decoding logic in `cpu_execute_instruction()`
+3. Add disassembly support in `cpu_print_instruction()`
 
-Disassembles MIPS instructions from BIOS ROM for analysis.
-
-```bash
-# Disassemble first 100 instructions
-python3 tools/bios_disasm.py --count 100
-
-# Disassemble from specific offset  
-python3 tools/bios_disasm.py --offset 0x1000 --count 50
-
-# Export to file
-python3 tools/bios_disasm.py --output bios_analysis.txt
+### Memory Map
+```
+0x00000000 - 0x001FFFFF: Main RAM (2MB)
+0x1F000000 - 0x1F7FFFFF: Expansion Region 1
+0x1F800000 - 0x1F8003FF: Scratchpad (1KB)
+0x1F801000 - 0x1F802FFF: I/O Ports
+0x1FC00000 - 0x1FC7FFFF: BIOS ROM (512KB)
 ```
 
-**Features:**
-- Complete MIPS instruction decoding
-- Register name resolution
-- Memory address calculation
-- Jump target analysis
+## 🎓 Learning Resources
 
-### 2. Trace Analyzer (`tools/trace_analyzer.py`)
+This project is educational. Key resources for PlayStation 1 emulation:
+- [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux) - Modern PSX emulator
+- [No$PSX Specifications](https://problemkaputt.de/psx-spx.htm) - Detailed hardware documentation
+- [PSX.Dev Discord](https://discord.gg/QByKPpH) - PlayStation development community
+- [MIPS R3000A Manual](https://www.cs.cmu.edu/afs/cs/academic/class/15740-f97/public/doc/mips-isa.pdf) - CPU reference
 
-Analyzes CPU execution traces and instruction patterns.
+## ⚠️ Legal Notice
 
-```bash
-# Analyze execution trace
-python3 tools/trace_analyzer.py trace.log
+- This emulator is for **educational purposes only**
+- You must own original PlayStation BIOS files to use them
+- No copyrighted BIOS or game files are included
+- Respect intellectual property rights
 
-# Focus on specific instruction types
-python3 tools/trace_analyzer.py trace.log --filter-type branch
+## 🚧 Roadmap
 
-# Export statistics
-python3 tools/trace_analyzer.py trace.log --export-stats
-```
+### Phase 1 - CPU Foundation ✅
+- [x] Basic MIPS instruction set
+- [x] Memory system
+- [x] BIOS loading
+- [x] Debug features
 
-**Features:**
-- Instruction frequency counting
-- Register usage tracking
-- Branch prediction analysis
-- Performance hotspot identification
+### Phase 2 - Extended CPU 🔄
+- [ ] Complete MIPS R3000A instruction set
+- [ ] Coprocessor 0 (system control)
+- [ ] Exception handling
+- [ ] Interrupt system
 
-### 3. Memory Dump Analyzer (`tools/memory_dump.py`)
+### Phase 3 - Hardware
+- [ ] Graphics Processing Unit (GPU)
+- [ ] Sound Processing Unit (SPU)  
+- [ ] DMA controllers
+- [ ] Timers and I/O ports
+- [ ] CD-ROM drive
 
-Analyzes binary memory dumps and BIOS structure.
-
-```bash
-# Analyze BIOS structure
-python3 tools/memory_dump.py roms/SCPH1001.BIN
-
-# Dump specific memory range
-python3 tools/memory_dump.py memory.bin --offset 0x80000000 --size 0x1000
-
-# Compare memory dumps
-python3 tools/memory_dump.py dump1.bin dump2.bin --compare
-```
-
-**Features:**
-- Hex dump with ASCII representation
-- String extraction and analysis
-- Binary structure detection
-- Memory dump comparison
-
-### 4. Instruction Statistics (`tools/instruction_stats.py`)
-
-Analyzes instruction implementation priority based on BIOS usage.
-
-```bash
-# Analyze BIOS instruction usage
-python3 tools/instruction_stats.py
-
-# Extended analysis (more instructions)
-python3 tools/instruction_stats.py --instructions 5000
-
-# Custom BIOS file
-python3 tools/instruction_stats.py --bios path/to/bios.bin
-```
-
-**Output:**
-- Implementation priority analysis
-- BIOS usage frequency statistics  
-- Suggested implementation roadmap
-- Quick wins identification
-
-## 🗺️ Implementation Roadmap
-
-### Phase 1: Critical CPU Instructions (Next Step)
-
-Following the instruction statistics analysis, implement in this order:
-
-1. **LUI** - Load Upper Immediate (Most critical)
-2. **LW/SW** - Load/Store Word (Memory access)
-3. **BEQ/BNE** - Branch Equal/Not Equal (Control flow)
-4. **J/JAL** - Jump/Jump and Link (Function calls)
-5. **ADDIU/ADDI** - Add Immediate operations
-
-### Phase 2: Extended CPU Functionality
-
-6. **Arithmetic**: ADD, ADDU, SUB, SUBU
-7. **Logical**: AND, OR, XOR, NOR, ANDI, ORI
-8. **Shifts**: SLL, SRL, SRA and variants
-9. **Comparisons**: SLT, SLTU, SLTI, SLTIU
-10. **Multiply/Divide**: MULT, MULTU, DIV, DIVU + HI/LO
-
-### Phase 3: System Integration
-
-11. **Coprocessor**: MFC0, MTC0 (System control)
-12. **Exception Handling**: SYSCALL, BREAK, RFE
-13. **Memory Operations**: LB, LBU, LH, LHU, SB, SH
-14. **Advanced Loads**: LWL, LWR, SWL, SWR
-
-### Phase 4: Hardware Components
-
-15. **Timer System**: Implement proper timing and IRQs
-16. **DMA Controller**: Memory transfer automation
-17. **GPU Basics**: Command processing and framebuffer
-18. **SPU Integration**: Basic audio functionality
-
-## 📏 Development Guidelines
-
-### Code Style
-- Follow existing code formatting
-- Use descriptive variable names
-- Add comments for complex hardware behavior
-- Include PSX-SPX references for hardware implementations
-
-### Testing Approach
-1. **BIOS Testing**: Ensure each instruction works with BIOS code
-2. **Unit Testing**: Test individual instruction implementations
-3. **Integration Testing**: Verify component interactions
-4. **Game Testing**: Test with actual PlayStation games
-
-### Debugging Strategy
-- Use comprehensive logging for CPU execution
-- Implement instruction tracing for problematic areas
-- Compare behavior against known-good emulators
-- Use development tools for analysis
-
-## 🖥️ Hardware Components
-
-### CPU (psx_cpu.h/c)
-- **MIPS R3000A** with 32 general-purpose registers
-- **Instruction decoding** framework with opcode dispatch
-- **Exception handling** for illegal instructions and system calls
-- **Coprocessor 0** for system control
-
-### Memory (psx_memory.h/c)
-- **Complete PSX memory map** (2MB RAM, 512KB BIOS, etc.)
-- **Hardware register routing** to appropriate components
-- **Scratchpad memory** for fast local storage
-- **Memory-mapped I/O** handling
-
-### GPU (psx_gpu.h/c)
-- **GP0/GP1 command processing** framework
-- **GPUSTAT register** implementation
-- **Framebuffer management** placeholder
-- **Video output** system skeleton
-
-### Other Components
-Each component (DMA, Timer, IRQ, SPU, CDROM, SIO, MDEC) includes:
-- PSX-SPX compliant register definitions
-- Initialization and reset functionality
-- Basic I/O operation frameworks
-- Integration points for main system
-
-## 📁 File Structure
-
-```
-ZonistationOne-2/
-├── main.c                 # Main emulator entry point
-├── Makefile              # Build system configuration
-├── guide.tex             # Development guide (step-by-step)
-├── myps1_emu            # Compiled emulator executable
-│
-├── include/              # Header files
-│   ├── psx_types.h      # Common type definitions
-│   ├── psx_cpu.h        # CPU component interface
-│   ├── psx_memory.h     # Memory system interface
-│   ├── psx_gpu.h        # GPU component interface
-│   └── [other components]
-│
-├── src/                  # Source code implementation
-│   ├── psx_cpu.c        # CPU instruction execution
-│   ├── psx_memory.c     # Memory management
-│   ├── psx_gpu.c        # Graphics processing
-│   └── [other components]
-│
-├── tools/                # Development and analysis tools
-│   ├── bios_disasm.py   # BIOS disassembler
-│   ├── trace_analyzer.py # Execution trace analysis
-│   ├── memory_dump.py   # Memory dump analysis
-│   └── instruction_stats.py # Implementation priority analysis
-│
-├── roms/                 # BIOS files
-│   └── SCPH1001.BIN     # PlayStation BIOS ROM
-│
-├── games/                # Game disc images
-│   └── [game files]
-│
-└── obj/                  # Build artifacts (auto-generated)
-    └── [compiled objects]
-```
+### Phase 4 - Games
+- [ ] Game loading (CD-ROM images)
+- [ ] Save states
+- [ ] Controller input
+- [ ] Audio output
+- [ ] Video output
 
 ## 🤝 Contributing
 
-### Getting Started
-1. Read through this README completely
-2. Examine the guide.tex for development methodology
-3. Run the instruction statistics tool to understand priorities
-4. Start with Phase 1 CPU instruction implementation
+This is a personal learning project, but feedback and suggestions are welcome!
 
-### Development Process
-1. **Choose Next Instruction**: Use `instruction_stats.py` output
-2. **Implement Instruction**: Add to CPU instruction decoder
-3. **Test with BIOS**: Verify against BIOS execution
-4. **Update Documentation**: Document any special behaviors
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
-### Before Submitting
-- Ensure code builds cleanly (`make clean && make`)
-- Test BIOS execution doesn't regress
-- Update relevant documentation
-- Follow existing code style
+## 📜 License
 
-## 📚 References
+This project is for educational purposes. Code is inspired by and references the PCSX-Redux project.
 
-- **PSX-SPX**: PlayStation hardware documentation
-- **guide.tex**: Project-specific development guide
-- **MIPS R3000A**: Processor manual and instruction set
-- **PlayStation Development**: Official Sony documentation
+## 🙏 Acknowledgments
+
+- **PCSX-Redux Team** - For the excellent reference implementation and documentation
+- **Nicolas "Pixel" Noble** - Lead developer of PCSX-Redux
+- **PlayStation Community** - For preservation and reverse engineering efforts
+- **No$PSX Documentation** - Comprehensive hardware specifications
 
 ---
 
-**Ready to implement a PlayStation 1 emulator step by step!** 🎮
-
-The foundation is complete - time to bring the CPU instructions to life following the analysis-driven approach.
+*Built with ❤️ for learning and preservation of gaming history*
