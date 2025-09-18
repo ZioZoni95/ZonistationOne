@@ -135,6 +135,12 @@ void memory_write32(u32 addr, u32 value) {
         return;
     }
     
+    // Guide.tex: CACHE_CONTROL register - log and ignore since we don't implement caches yet
+    if (addr == 0xFFFE0130) {
+        printf("[MEMORY] CACHE_CONTROL write at 0x%08X = 0x%08X (ignored)\n", addr, value);
+        return;
+    }
+    
     printf("[MEMORY] ERROR: Unmapped write32 at 0x%08X = 0x%08X\n", addr, value);
 }
 
