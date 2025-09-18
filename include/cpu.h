@@ -89,4 +89,32 @@ instruction_type_t cpu_get_instruction_type(u32 opcode);
 #define OPCODE_SW       0x2B
 #define OPCODE_SWR      0x2E
 
+// SPECIAL function codes (for OPCODE_SPECIAL)
+#define FUNCT_SLL       0x00
+#define FUNCT_SRL       0x02
+#define FUNCT_SRA       0x03
+#define FUNCT_SLLV      0x04
+#define FUNCT_SRLV      0x06
+#define FUNCT_SRAV      0x07
+#define FUNCT_JR        0x08
+#define FUNCT_JALR      0x09
+#define FUNCT_MFHI      0x10
+#define FUNCT_MTHI      0x11
+#define FUNCT_MFLO      0x12
+#define FUNCT_MTLO      0x13
+#define FUNCT_MULT      0x18
+#define FUNCT_MULTU     0x19
+#define FUNCT_DIV       0x1A
+#define FUNCT_DIVU      0x1B
+#define FUNCT_ADD       0x20
+#define FUNCT_ADDU      0x21
+#define FUNCT_SUB       0x22
+#define FUNCT_SUBU      0x23
+#define FUNCT_AND       0x24
+#define FUNCT_OR        0x25
+#define FUNCT_XOR       0x26
+#define FUNCT_NOR       0x27
+#define FUNCT_SLT       0x2A
+#define FUNCT_SLTU      0x2B
+
 #endif // CPU_H

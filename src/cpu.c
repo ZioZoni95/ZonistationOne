@@ -104,25 +104,149 @@ psx_result_t cpu_execute_instruction(mips_cpu_t* cpu, psx_memory_t* memory,
             // R-type instructions
             u32 function = instr->opcode & 0x3F;
             switch (function) {
-                case 0x00: // SLL
+                case FUNCT_SLL: // SLL (Shift Left Logical)
                     if (instr->rd != 0) {  // Don't write to $zero
                         u32 shamt = (instr->opcode >> 6) & 0x1F;
                         cpu_set_register(cpu, instr->rd, rt_val << shamt);
                     }
                     break;
-                case 0x20: // ADD
+                case FUNCT_SRL: // SRL (Shift Right Logical)
+                    if (instr->rd != 0) {
+                        u32 shamt = (instr->opcode >> 6) & 0x1F;
+                        cpu_set_register(cpu, instr->rd, rt_val >> shamt);
+                    }
+                    break;
+                case FUNCT_SRA: // SRA (Shift Right Arithmetic)
+                    if (instr->rd != 0) {
+                        u32 shamt = (instr->opcode >> 6) & 0x1F;
+                        cpu_set_register(cpu, instr->rd, (u32)((s32)rt_val >> shamt));
+                    }
+                    break;
+                case FUNCT_SLLV: // SLLV (Shift Left Logical Variable)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rt_val << (rs_val & 0x1F));
+                    }
+                    break;
+                case FUNCT_SRLV: // SRLV (Shift Right Logical Variable)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rt_val >> (rs_val & 0x1F));
+                    }
+                    break;
+                case FUNCT_SRAV: // SRAV (Shift Right Arithmetic Variable)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, (u32)((s32)rt_val >> (rs_val & 0x1F)));
+                    }
+                    break;
+                case FUNCT_ADD: // ADD
                     if (instr->rd != 0) {
                         cpu_set_register(cpu, instr->rd, rs_val + rt_val);
                     }
                     break;
-                case 0x21: // ADDU
+                case FUNCT_ADDU: // ADDU
                     if (instr->rd != 0) {
                         cpu_set_register(cpu, instr->rd, rs_val + rt_val);
                     }
                     break;
-                case 0x08: // JR
+                case FUNCT_SUB: // SUB
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rs_val - rt_val);
+                    }
+                    break;
+                case FUNCT_SUBU: // SUBU
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rs_val - rt_val);
+                    }
+                    break;
+                case FUNCT_AND: // AND
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rs_val & rt_val);
+                    }
+                    break;
+                case FUNCT_OR: // OR
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rs_val | rt_val);
+                    }
+                    break;
+                case FUNCT_XOR: // XOR
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, rs_val ^ rt_val);
+                    }
+                    break;
+                case FUNCT_NOR: // NOR
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, ~(rs_val | rt_val));
+                    }
+                    break;
+                case FUNCT_SLT: // SLT (Set Less Than)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, ((s32)rs_val < (s32)rt_val) ? 1 : 0);
+                    }
+                    break;
+                case FUNCT_SLTU: // SLTU (Set Less Than Unsigned)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, (rs_val < rt_val) ? 1 : 0);
+                    }
+                    break;
+                case FUNCT_JR: // JR
                     cpu->next_pc = rs_val;
                     cpu->in_branch_delay_slot = true;
+                    break;
+                case FUNCT_JALR: // JALR (Jump and Link Register)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, cpu->next_pc);
+                    }
+                    cpu->next_pc = rs_val;
+                    cpu->in_branch_delay_slot = true;
+                    break;
+                case FUNCT_MFHI: // MFHI (Move From HI)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, cpu->hi);
+                    }
+                    break;
+                case FUNCT_MTHI: // MTHI (Move To HI)
+                    cpu->hi = rs_val;
+                    break;
+                case FUNCT_MFLO: // MFLO (Move From LO)
+                    if (instr->rd != 0) {
+                        cpu_set_register(cpu, instr->rd, cpu->lo);
+                    }
+                    break;
+                case FUNCT_MTLO: // MTLO (Move To LO)
+                    cpu->lo = rs_val;
+                    break;
+                case FUNCT_MULT: // MULT (Multiply)
+                    {
+                        s64 result = (s64)(s32)rs_val * (s64)(s32)rt_val;
+                        cpu->lo = (u32)(result & 0xFFFFFFFF);
+                        cpu->hi = (u32)(result >> 32);
+                    }
+                    break;
+                case FUNCT_MULTU: // MULTU (Multiply Unsigned)
+                    {
+                        u64 result = (u64)rs_val * (u64)rt_val;
+                        cpu->lo = (u32)(result & 0xFFFFFFFF);
+                        cpu->hi = (u32)(result >> 32);
+                    }
+                    break;
+                case FUNCT_DIV: // DIV (Divide)
+                    if (rt_val != 0) {
+                        cpu->lo = (u32)((s32)rs_val / (s32)rt_val);
+                        cpu->hi = (u32)((s32)rs_val % (s32)rt_val);
+                    } else {
+                        // Division by zero behavior (implementation defined)
+                        cpu->lo = ((s32)rs_val >= 0) ? 0xFFFFFFFF : 0x00000001;
+                        cpu->hi = rs_val;
+                    }
+                    break;
+                case FUNCT_DIVU: // DIVU (Divide Unsigned)
+                    if (rt_val != 0) {
+                        cpu->lo = rs_val / rt_val;
+                        cpu->hi = rs_val % rt_val;
+                    } else {
+                        // Division by zero behavior (implementation defined)
+                        cpu->lo = 0xFFFFFFFF;
+                        cpu->hi = rs_val;
+                    }
                     break;
                 default:
                     printf("[CPU] Unimplemented SPECIAL function: 0x%02X\n", function);
@@ -165,6 +289,30 @@ psx_result_t cpu_execute_instruction(mips_cpu_t* cpu, psx_memory_t* memory,
         case OPCODE_ADDIU: // Add immediate unsigned
             if (instr->rt != 0) {
                 cpu_set_register(cpu, instr->rt, rs_val + (s16)instr->immediate);
+            }
+            break;
+            
+        case OPCODE_SLTI: // Set Less Than Immediate
+            if (instr->rt != 0) {
+                cpu_set_register(cpu, instr->rt, ((s32)rs_val < (s16)instr->immediate) ? 1 : 0);
+            }
+            break;
+            
+        case OPCODE_SLTIU: // Set Less Than Immediate Unsigned
+            if (instr->rt != 0) {
+                cpu_set_register(cpu, instr->rt, (rs_val < (u32)(s16)instr->immediate) ? 1 : 0);
+            }
+            break;
+            
+        case OPCODE_ANDI: // AND immediate
+            if (instr->rt != 0) {
+                cpu_set_register(cpu, instr->rt, rs_val & instr->immediate);
+            }
+            break;
+            
+        case OPCODE_XORI: // XOR immediate
+            if (instr->rt != 0) {
+                cpu_set_register(cpu, instr->rt, rs_val ^ instr->immediate);
             }
             break;
             
@@ -264,13 +412,48 @@ void cpu_print_instruction(u32 address, const mips_instruction_t* instr) {
         case OPCODE_SPECIAL: {
             u32 function = instr->opcode & 0x3F;
             switch (function) {
-                case 0x00: printf("sll $%s, $%s, %d", register_names[instr->rd], 
-                                 register_names[instr->rt], (instr->opcode >> 6) & 0x1F); break;
-                case 0x20: printf("add $%s, $%s, $%s", register_names[instr->rd], 
-                                 register_names[instr->rs], register_names[instr->rt]); break;
-                case 0x21: printf("addu $%s, $%s, $%s", register_names[instr->rd],
-                                 register_names[instr->rs], register_names[instr->rt]); break;
-                case 0x08: printf("jr $%s", register_names[instr->rs]); break;
+                case FUNCT_SLL: printf("sll $%s, $%s, %d", register_names[instr->rd], 
+                                      register_names[instr->rt], (instr->opcode >> 6) & 0x1F); break;
+                case FUNCT_SRL: printf("srl $%s, $%s, %d", register_names[instr->rd], 
+                                      register_names[instr->rt], (instr->opcode >> 6) & 0x1F); break;
+                case FUNCT_SRA: printf("sra $%s, $%s, %d", register_names[instr->rd], 
+                                      register_names[instr->rt], (instr->opcode >> 6) & 0x1F); break;
+                case FUNCT_SLLV: printf("sllv $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rt], register_names[instr->rs]); break;
+                case FUNCT_SRLV: printf("srlv $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rt], register_names[instr->rs]); break;
+                case FUNCT_SRAV: printf("srav $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rt], register_names[instr->rs]); break;
+                case FUNCT_ADD: printf("add $%s, $%s, $%s", register_names[instr->rd], 
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_ADDU: printf("addu $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_SUB: printf("sub $%s, $%s, $%s", register_names[instr->rd],
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_SUBU: printf("subu $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_AND: printf("and $%s, $%s, $%s", register_names[instr->rd],
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_OR: printf("or $%s, $%s, $%s", register_names[instr->rd],
+                                     register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_XOR: printf("xor $%s, $%s, $%s", register_names[instr->rd],
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_NOR: printf("nor $%s, $%s, $%s", register_names[instr->rd],
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_SLT: printf("slt $%s, $%s, $%s", register_names[instr->rd],
+                                      register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_SLTU: printf("sltu $%s, $%s, $%s", register_names[instr->rd],
+                                       register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_JR: printf("jr $%s", register_names[instr->rs]); break;
+                case FUNCT_JALR: printf("jalr $%s, $%s", register_names[instr->rd], register_names[instr->rs]); break;
+                case FUNCT_MFHI: printf("mfhi $%s", register_names[instr->rd]); break;
+                case FUNCT_MTHI: printf("mthi $%s", register_names[instr->rs]); break;
+                case FUNCT_MFLO: printf("mflo $%s", register_names[instr->rd]); break;
+                case FUNCT_MTLO: printf("mtlo $%s", register_names[instr->rs]); break;
+                case FUNCT_MULT: printf("mult $%s, $%s", register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_MULTU: printf("multu $%s, $%s", register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_DIV: printf("div $%s, $%s", register_names[instr->rs], register_names[instr->rt]); break;
+                case FUNCT_DIVU: printf("divu $%s, $%s", register_names[instr->rs], register_names[instr->rt]); break;
                 default: printf("unknown_special(0x%02X)", function); break;
             }
             break;
@@ -279,6 +462,16 @@ void cpu_print_instruction(u32 address, const mips_instruction_t* instr) {
         case OPCODE_JAL: printf("jal 0x%08X", instr->target << 2); break;
         case OPCODE_ADDI: printf("addi $%s, $%s, %d", register_names[instr->rt], 
                                 register_names[instr->rs], (s16)instr->immediate); break;
+        case OPCODE_ADDIU: printf("addiu $%s, $%s, %d", register_names[instr->rt], 
+                                 register_names[instr->rs], (s16)instr->immediate); break;
+        case OPCODE_SLTI: printf("slti $%s, $%s, %d", register_names[instr->rt], 
+                                register_names[instr->rs], (s16)instr->immediate); break;
+        case OPCODE_SLTIU: printf("sltiu $%s, $%s, %d", register_names[instr->rt], 
+                                 register_names[instr->rs], (s16)instr->immediate); break;
+        case OPCODE_ANDI: printf("andi $%s, $%s, 0x%04X", register_names[instr->rt], 
+                                register_names[instr->rs], instr->immediate); break;
+        case OPCODE_XORI: printf("xori $%s, $%s, 0x%04X", register_names[instr->rt], 
+                                register_names[instr->rs], instr->immediate); break;
         case OPCODE_LUI: printf("lui $%s, 0x%04X", register_names[instr->rt], instr->immediate); break;
         case OPCODE_LW: printf("lw $%s, %d($%s)", register_names[instr->rt], 
                               (s16)instr->immediate, register_names[instr->rs]); break;
