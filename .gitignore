@@ -1,0 +1,48 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.exe
+
+# IDE and editor files
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# BIOS files (keep structure but not the actual files)
+roms/*.bin
+roms/*.BIN
+!roms/.gitkeep
+
+# Game ROMs/ISOs (if any)
+*.iso
+*.cue
+*.bin
+*.img
+*.pbp
+
+# Backup files
+*.bak
+*.backup
+
+# Core dumps
+core
+*.core
+
+# Address sanitizer files
+*.asan
+
+# Debugging files
+*.gdb_history

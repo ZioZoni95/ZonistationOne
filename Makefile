@@ -1,72 +1,52 @@
-# PlayStation 1 Emulator - Fresh Start Makefile
-# Following guide.tex structure with PSX-SPX compliance
+# Makefile for ZonistationOne PlayStation 1 Emulator
+# Based on PCSX-Redux reference implementation
+
+PROJECT_NAME = myps1_emu
+VERSION = 0.1.0
+
+SRC_DIR = src
+INC_DIR = include  
+BUILD_DIR = build
+ROMS_DIR = roms
 
 CC = gcc
-CFLAGS = -std=c99 -Wall -Wextra -O2 -g
-INCLUDES = -Iinclude
-LIBS = 
-TARGET = myps1_emu
+BASE_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Wshadow -Wformat=2 -Wcast-align \
+              -Wconversion -Wsign-conversion -Wnull-dereference -I$(INC_DIR)
+LDFLAGS = -lm
 
-# Source files
-SRCDIR = src
-SOURCES = $(wildcard $(SRCDIR)/*.c) main.c
+SOURCES = $(wildcard $(SRC_DIR)/*.c)
 
-# Object files
-OBJDIR = obj
-OBJECTS = $(SOURCES:%.c=$(OBJDIR)/%.o)
+.PHONY: all debug release clean help run-debug run
 
-# Create directories
-$(shell mkdir -p $(OBJDIR)/$(SRCDIR))
+all: debug
 
-# Default target
-all: $(TARGET)
+debug: | $(BUILD_DIR)
+	$(CC) $(BASE_CFLAGS) -g -O0 -DDEBUG $(SOURCES) -o $(BUILD_DIR)/$(PROJECT_NAME)_debug $(LDFLAGS) -fsanitize=address -fsanitize=undefined
+	@echo "Debug build complete: $(BUILD_DIR)/$(PROJECT_NAME)_debug"
 
-# Link executable
-$(TARGET): $(OBJECTS)
-	@echo "Linking $@..."
-	$(CC) $(OBJECTS) -o $@ $(LIBS)
-	@echo "Build complete: $@"
+release: | $(BUILD_DIR)
+	$(CC) $(BASE_CFLAGS) -O3 -DNDEBUG -march=native $(SOURCES) -o $(BUILD_DIR)/$(PROJECT_NAME) $(LDFLAGS)
+	@echo "Release build complete: $(BUILD_DIR)/$(PROJECT_NAME)"
 
-# Compile source files
-$(OBJDIR)/%.o: %.c
-	@echo "Compiling $<..."
-	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-# Build target for VS Code task
-build-debug: $(TARGET)
-	@echo "Debug build complete"
+run-debug: debug
+	./$(BUILD_DIR)/$(PROJECT_NAME)_debug --debug
 
-# Clean
+run: release
+	./$(BUILD_DIR)/$(PROJECT_NAME)
+
 clean:
-	@echo "Cleaning..."
-	rm -rf $(OBJDIR)
-	rm -f $(TARGET)
-	@echo "Clean complete"
+	rm -f $(BUILD_DIR)/*
+	@echo "Build artifacts cleaned"
 
-# Debug run
-debug: $(TARGET)
-	./$(TARGET) --debug --bios roms/SCPH1001.BIN
-
-# Normal run  
-run: $(TARGET)
-	./$(TARGET) --bios roms/SCPH1001.BIN
-
-# Test basic functionality
-test: $(TARGET)
-	@echo "Running basic tests..."
-	./$(TARGET) --bios roms/SCPH1001.BIN 2>&1 | head -50
-
-# Show file structure
-structure:
-	@echo "Project structure:"
-	@find . -type f -name "*.c" -o -name "*.h" | sort
-
-# Dependencies
-.PHONY: all clean debug run test structure build-debug
-
-# Automatic dependency generation
--include $(OBJECTS:.o=.d)
-
-$(OBJDIR)/%.d: %.c
-	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) $(INCLUDES) -MM -MT $(@:.d=.o) $< > $@
+help:
+	@echo "Available targets:"
+	@echo "  all         - Build debug version (default)"
+	@echo "  debug       - Build debug version with sanitizers"
+	@echo "  release     - Build optimized release version" 
+	@echo "  run-debug   - Build and run debug version"
+	@echo "  run         - Build and run release version"
+	@echo "  clean       - Remove build artifacts"
+	@echo "  help        - Show this help message"

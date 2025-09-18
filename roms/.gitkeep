@@ -1,0 +1,17 @@
+# PlayStation BIOS Directory
+
+Place your PlayStation BIOS files in this directory.
+
+## Required Files
+- `SCPH1001.BIN` - US BIOS (recommended)
+- `SCPH1000.BIN` - Japanese BIOS  
+- `SCPH1002.BIN` - European BIOS
+
+## Legal Notice
+You must legally own original PlayStation BIOS files to use them with this emulator.
+BIOS files are copyrighted and cannot be distributed with this project.
+
+## File Verification
+SCPH1001.BIN should be:
+- Size: 524,288 bytes (512 KB)
+- MD5: 924e392ed05558ffdb115408c263dccf
