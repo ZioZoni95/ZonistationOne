@@ -117,4 +117,35 @@ instruction_type_t cpu_get_instruction_type(u32 opcode);
 #define FUNCT_SLT       0x2A
 #define FUNCT_SLTU      0x2B
 
+// COP0 (Coprocessor 0) register definitions
+#define COP0_STATUS     12  // Status register
+#define COP0_CAUSE      13  // Cause register  
+#define COP0_EPC        14  // Exception Program Counter
+#define COP0_PRID       15  // Processor ID register
+#define COP0_BADVADDR   8   // Bad Virtual Address register
+#define COP0_JUMPDEST   6   // Jump destination register
+
+// COP0 function codes (bits 21-25 in rs field)
+#define COP0_MFC0       0x00  // Move From COP0
+#define COP0_MTC0       0x04  // Move To COP0
+#define COP0_CFC0       0x02  // Move Control From COP0
+#define COP0_CTC0       0x06  // Move Control To COP0
+#define COP0_RFE        0x10  // Return From Exception
+
+// COP0 Status register bits
+#define STATUS_IE       0x00000001  // Interrupt Enable
+#define STATUS_EXL      0x00000002  // Exception Level
+#define STATUS_ERL      0x00000004  // Error Level
+#define STATUS_IM       0x0000FF00  // Interrupt Mask (bits 8-15)
+#define STATUS_BEV      0x00400000  // Bootstrap Exception Vector
+#define STATUS_CU0      0x10000000  // Coprocessor 0 Usable
+#define STATUS_CU1      0x20000000  // Coprocessor 1 Usable
+#define STATUS_CU2      0x40000000  // Coprocessor 2 Usable
+#define STATUS_CU3      0x80000000  // Coprocessor 3 Usable
+
+// COP0 utility functions
+void cpu_cop0_mfc0(mips_cpu_t* cpu, u32 rt, u32 rd);
+void cpu_cop0_mtc0(mips_cpu_t* cpu, u32 rt, u32 rd);
+void cpu_cop0_rfe(mips_cpu_t* cpu);
+
 #endif // CPU_H
