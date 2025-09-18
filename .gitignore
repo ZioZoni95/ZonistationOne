@@ -1,0 +1,54 @@
+# ZonistationOne - PlayStation One Emulator
+# Git ignore file
+
+# Build artifacts
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dll
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Core dumps
+core
+core.*
+
+# Debug files
+*.dSYM/
+*.pdb
+
+# Backup files
+*~
+*.bak
+*.backup
+
+# Temporary files
+*.tmp
+*.temp
+
+# Local configuration
+config.local
+.env.local
+
+# Test coverage
+coverage/
+*.gcda
+*.gcno
+*.gcov
