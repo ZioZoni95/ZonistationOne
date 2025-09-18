@@ -34,6 +34,13 @@ void cpu_reset(mips_cpu_t* cpu) {
     // Initialize coprocessor 0 registers
     memset(cpu->cop0_regs, 0, sizeof(cpu->cop0_regs));
     
+    // Set PlayStation 1 specific COP0 register values
+    cpu->cop0_regs[COP0_PRID] = 0x00000002;      // Processor ID (R3000A)
+    cpu->cop0_regs[COP0_STATUS] = 0x10400000;    // Status: CU0=1, BEV=1 (boot exception vectors)
+    cpu->cop0_regs[COP0_CAUSE] = 0x00000000;     // No pending exceptions
+    cpu->cop0_regs[COP0_EPC] = 0x00000000;       // Exception PC
+    cpu->cop0_regs[COP0_BADVADDR] = 0x00000000;  // Bad virtual address
+    
     // Set initial CPU state
     cpu->in_branch_delay_slot = false;
     cpu->exception_pending = false;
@@ -343,6 +350,25 @@ psx_result_t cpu_execute_instruction(mips_cpu_t* cpu, psx_memory_t* memory,
             }
             break;
             
+        case OPCODE_COP0: { // Coprocessor 0 operations
+            u32 cop0_func = (instr->opcode >> 21) & 0x1F;
+            switch (cop0_func) {
+                case COP0_MFC0: // Move From COP0
+                    cpu_cop0_mfc0(cpu, instr->rt, instr->rd);
+                    break;
+                case COP0_MTC0: // Move To COP0
+                    cpu_cop0_mtc0(cpu, instr->rt, instr->rd);
+                    break;
+                case COP0_RFE:  // Return From Exception
+                    cpu_cop0_rfe(cpu);
+                    break;
+                default:
+                    printf("[CPU] Unimplemented COP0 function: 0x%02X\n", cop0_func);
+                    return PSX_ERROR_INVALID_INSTRUCTION;
+            }
+            break;
+        }
+            
         default:
             printf("[CPU] Unimplemented instruction opcode: 0x%02X\n", opcode);
             return PSX_ERROR_INVALID_INSTRUCTION;
@@ -473,6 +499,16 @@ void cpu_print_instruction(u32 address, const mips_instruction_t* instr) {
         case OPCODE_XORI: printf("xori $%s, $%s, 0x%04X", register_names[instr->rt], 
                                 register_names[instr->rs], instr->immediate); break;
         case OPCODE_LUI: printf("lui $%s, 0x%04X", register_names[instr->rt], instr->immediate); break;
+        case OPCODE_COP0: {
+            u32 cop0_func = (instr->opcode >> 21) & 0x1F;
+            switch (cop0_func) {
+                case COP0_MFC0: printf("mfc0 $%s, $%u", register_names[instr->rt], instr->rd); break;
+                case COP0_MTC0: printf("mtc0 $%s, $%u", register_names[instr->rt], instr->rd); break;
+                case COP0_RFE:  printf("rfe"); break;
+                default: printf("cop0_unknown(0x%02X)", cop0_func); break;
+            }
+            break;
+        }
         case OPCODE_LW: printf("lw $%s, %d($%s)", register_names[instr->rt], 
                               (s16)instr->immediate, register_names[instr->rs]); break;
         case OPCODE_SW: printf("sw $%s, %d($%s)", register_names[instr->rt],
@@ -494,4 +530,55 @@ instruction_type_t cpu_get_instruction_type(u32 opcode) {
     }
     
     return INSTR_TYPE_UNKNOWN;
+}
+
+// COP0 (Coprocessor 0) functions
+void cpu_cop0_mfc0(mips_cpu_t* cpu, u32 rt, u32 rd) {
+    if (rt == 0) return; // Don't write to $zero
+    
+    // Move from COP0 register to CPU register
+    if (rd < 32) {
+        cpu_set_register(cpu, rt, cpu->cop0_regs[rd]);
+    } else {
+        cpu_set_register(cpu, rt, 0);
+    }
+}
+
+void cpu_cop0_mtc0(mips_cpu_t* cpu, u32 rt, u32 rd) {
+    if (rd >= 32) return; // Invalid COP0 register
+    
+    u32 value = cpu_get_register(cpu, rt);
+    
+    // Handle special registers with read-only fields
+    switch (rd) {
+        case COP0_STATUS: // Status register
+            cpu->cop0_regs[COP0_STATUS] = value;
+            break;
+            
+        case COP0_CAUSE:  // Cause register (bits 10-11 writable only)
+            cpu->cop0_regs[COP0_CAUSE] = (cpu->cop0_regs[COP0_CAUSE] & ~0x0300) | (value & 0x0300);
+            break;
+            
+        case COP0_PRID:   // Processor ID - read only
+        case COP0_EPC:    // Exception PC - typically read only
+        case COP0_BADVADDR: // Bad virtual address - read only
+        case COP0_JUMPDEST: // Jump destination - read only
+            // Don't write to read-only registers
+            break;
+            
+        default:
+            cpu->cop0_regs[rd] = value;
+            break;
+    }
+}
+
+void cpu_cop0_rfe(mips_cpu_t* cpu) {
+    // Return From Exception - restore previous interrupt/exception state
+    u32 status = cpu->cop0_regs[COP0_STATUS];
+    
+    // Shift the interrupt enable stack right by 2 bits
+    // This restores the previous interrupt enable state
+    status = (status & ~0x3F) | ((status & 0x3C) >> 2);
+    
+    cpu->cop0_regs[COP0_STATUS] = status;
 }
