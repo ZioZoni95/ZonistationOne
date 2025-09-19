@@ -18,6 +18,7 @@ INCLUDES = -I$(INCDIR) -I$(SRCDIR)
 # Target executable
 TARGET = $(BUILDDIR)/zonistation-one
 TEST_DEBUGGER = $(BUILDDIR)/test-debugger
+TEST_DEBUGGER_BIOS = $(BUILDDIR)/test-debugger-bios
 
 # Source files (automatically find all .cpp files, excluding tests)
 SOURCES = $(shell find $(SRCDIR) -name "*.cpp" ! -name "test_*.cpp")
@@ -26,6 +27,9 @@ OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 # Test sources
 TEST_DEBUGGER_SOURCES = $(SRCDIR)/test_debugger.cpp $(filter-out $(SRCDIR)/main.cpp, $(SOURCES))
 TEST_DEBUGGER_OBJECTS = $(TEST_DEBUGGER_SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+
+TEST_DEBUGGER_BIOS_SOURCES = $(SRCDIR)/test_debugger_bios.cpp $(filter-out $(SRCDIR)/main.cpp, $(SOURCES))
+TEST_DEBUGGER_BIOS_OBJECTS = $(TEST_DEBUGGER_BIOS_SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 
 # Dependencies for automatic header dependency tracking
 DEPENDS = $(OBJECTS:.o=.d)
@@ -47,10 +51,21 @@ $(TEST_DEBUGGER): $(TEST_DEBUGGER_OBJECTS) | $(BUILDDIR)
 	$(CXX) $(TEST_DEBUGGER_OBJECTS) -o $@ $(LDFLAGS)
 	@echo "Debugger test build complete!"
 
+# Build enhanced BIOS debugger test  
+$(TEST_DEBUGGER_BIOS): $(TEST_DEBUGGER_BIOS_OBJECTS) | $(BUILDDIR)
+	@echo "Linking $(TEST_DEBUGGER_BIOS)..."
+	$(CXX) $(TEST_DEBUGGER_BIOS_OBJECTS) -o $@ $(LDFLAGS)
+	@echo "Enhanced BIOS debugger test build complete!"
+
 # Test debugger
 test-debugger: $(TEST_DEBUGGER)
 	@echo "Running debugger test..."
 	./$(TEST_DEBUGGER)
+
+# Test debugger with BIOS
+test-debugger-bios: $(TEST_DEBUGGER_BIOS)
+	@echo "Running enhanced BIOS debugger test..."
+	./$(TEST_DEBUGGER_BIOS)
 
 # Compile source files
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)

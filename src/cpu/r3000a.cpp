@@ -100,29 +100,20 @@ uint32_t CPU::fetchInstruction() {
 }
 
 void CPU::executeInstruction(uint32_t instruction) {
-    // TODO: Implement full MIPS instruction decoding and execution
-    // For now, just implement a basic NOP and halt on unknown instructions
-    
+    // Handle NOP early (most common instruction)
     if (instruction == 0) {
-        // NOP instruction
         return;
     }
     
-    // Extract opcode (bits 31-26)
-    uint32_t opcode = (instruction >> 26) & 0x3F;
+    // Decode instruction
+    InstructionInfo info(instruction);
     
-    // Very basic stub - just log unknown instructions for now
-    static int unknownCount = 0;
-    if (unknownCount < 10) { // Don't spam too much
-        ZONI_LOG_CPU_UNKNOWN_INSTRUCTION("Unknown instruction 0x%08x (opcode 0x%02x) at PC 0x%08x", 
-                                          instruction, opcode, m_pc);
-        unknownCount++;
-    }
-    
-    // For now, halt on unknown instructions to prevent infinite loops
-    if (unknownCount >= 10) {
-        ZONI_LOG_WARN(CPU, "Too many unknown instructions, halting");
-        m_halted = true;
+    // Dispatch to appropriate handler
+    uint32_t opcodeIndex = static_cast<uint32_t>(info.opcode);
+    if (opcodeIndex < 64 && s_primaryHandlers[opcodeIndex] != nullptr) {
+        (this->*s_primaryHandlers[opcodeIndex])(info);
+    } else {
+        handleUnknownInstruction(instruction, opcodeIndex);
     }
 }
 
@@ -145,12 +136,421 @@ void CPU::dumpState() const {
     
     // Print some key registers
     ZONI_LOG_INFO(CPU, "  Registers:");
-    for (int i = 0; i < 32; i += 4) {
-        ZONI_LOG_INFO(CPU, "    R%d-R%d: 0x%08x 0x%08x 0x%08x 0x%08x", 
-                     i, (i+3),
-                     m_registers[i], m_registers[i+1], 
-                     m_registers[i+2], m_registers[i+3]);
+}
+
+// Helper method for unknown instructions
+void CPU::handleUnknownInstruction(uint32_t instruction, uint32_t opcode) {
+    static int unknownCount = 0;
+    if (unknownCount < 10) { // Don't spam too much
+        ZONI_LOG_CPU_UNKNOWN_INSTRUCTION("Unknown instruction 0x%08x (opcode 0x%02x) at PC 0x%08x", 
+                                          instruction, opcode, m_pc);
+        unknownCount++;
+    }
+    
+    // For now, halt on unknown instructions to prevent infinite loops
+    if (unknownCount >= 10) {
+        ZONI_LOG_WARN(CPU, "Too many unknown instructions, halting");
+        m_halted = true;
     }
 }
+
+// ========================================
+// Primary instruction handlers
+// ========================================
+
+void CPU::handleSPECIAL(const InstructionInfo& info) {
+    uint32_t functIndex = static_cast<uint32_t>(info.specialFunct);
+    if (functIndex < 64 && s_specialHandlers[functIndex] != nullptr) {
+        (this->*s_specialHandlers[functIndex])(info);
+    } else {
+        handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+    }
+}
+
+void CPU::handleLUI(const InstructionInfo& info) {
+    // LUI rt, immediate - Load Upper Immediate
+    // Format: LUI rt, immediate
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t value = _ImmLU_(info.code); // Shift immediate to upper 16 bits
+    ZONI_LOG_CPU_INSTRUCTION("LUI R%d, 0x%04x (result: 0x%08x)", info.rt, info.immU, value);
+    
+    setRegister(info.rt, value);
+}
+
+void CPU::handleORI(const InstructionInfo& info) {
+    // ORI rt, rs, immediate - OR Immediate
+    // Format: ORI rt, rs, immediate
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t rsValue = getRegister(info.rs);
+    uint32_t result = rsValue | info.immU;
+    
+    ZONI_LOG_CPU_INSTRUCTION("ORI R%d, R%d, 0x%04x (0x%08x | 0x%04x = 0x%08x)", 
+                             info.rt, info.rs, info.immU, rsValue, info.immU, result);
+    
+    setRegister(info.rt, result);
+}
+
+void CPU::handleADDIU(const InstructionInfo& info) {
+    // ADDIU rt, rs, immediate - Add Immediate Unsigned
+    // Format: ADDIU rt, rs, immediate
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t rsValue = getRegister(info.rs);
+    uint32_t result = rsValue + static_cast<uint32_t>(info.imm); // Sign-extend and add
+    
+    ZONI_LOG_CPU_INSTRUCTION("ADDIU R%d, R%d, %d (0x%08x + %d = 0x%08x)", 
+                             info.rt, info.rs, info.imm, rsValue, info.imm, result);
+    
+    setRegister(info.rt, result);
+}
+
+void CPU::handleSW(const InstructionInfo& info) {
+    // SW rt, offset(rs) - Store Word
+    // Format: SW rt, offset(rs)
+    uint32_t baseAddr = getRegister(info.rs);
+    uint32_t address = baseAddr + static_cast<uint32_t>(info.imm); // Sign-extend offset
+    uint32_t value = getRegister(info.rt);
+    
+    ZONI_LOG_CPU_INSTRUCTION("SW R%d, %d(R%d) [0x%08x] = 0x%08x", 
+                             info.rt, info.imm, info.rs, address, value);
+    
+    // Check alignment (word access must be 4-byte aligned)
+    if (address & 0x3) {
+        ZONI_LOG_ERROR(CPU, "Unaligned store word access at 0x%08x", address);
+        // TODO: Generate alignment exception
+        m_halted = true;
+        return;
+    }
+    
+    if (m_memory) {
+        m_memory->write32(address, value);
+    } else {
+        ZONI_LOG_ERROR(CPU, "No memory interface available for SW");
+        m_halted = true;
+    }
+}
+
+void CPU::handleLW(const InstructionInfo& info) {
+    // LW rt, offset(rs) - Load Word
+    // Format: LW rt, offset(rs)
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t baseAddr = getRegister(info.rs);
+    uint32_t address = baseAddr + static_cast<uint32_t>(info.imm); // Sign-extend offset
+    
+    ZONI_LOG_CPU_INSTRUCTION("LW R%d, %d(R%d) [0x%08x]", 
+                             info.rt, info.imm, info.rs, address);
+    
+    // Check alignment (word access must be 4-byte aligned)
+    if (address & 0x3) {
+        ZONI_LOG_ERROR(CPU, "Unaligned load word access at 0x%08x", address);
+        // TODO: Generate alignment exception
+        m_halted = true;
+        return;
+    }
+    
+    if (m_memory) {
+        uint32_t value = m_memory->read32(address);
+        setRegister(info.rt, value);
+        ZONI_LOG_CPU_INSTRUCTION("  -> Loaded 0x%08x into R%d", value, info.rt);
+    } else {
+        ZONI_LOG_ERROR(CPU, "No memory interface available for LW");
+        m_halted = true;
+    }
+}
+
+// ========================================
+// SPECIAL function handlers  
+// ========================================
+
+void CPU::handleOR(const InstructionInfo& info) {
+    // OR rd, rs, rt - Bitwise OR
+    // Format: OR rd, rs, rt (SPECIAL funct=0x25)
+    if (info.rd == 0) return; // Can't write to register 0
+    
+    uint32_t rsValue = getRegister(info.rs);
+    uint32_t rtValue = getRegister(info.rt);
+    uint32_t result = rsValue | rtValue;
+    
+    ZONI_LOG_CPU_INSTRUCTION("OR R%d, R%d, R%d (0x%08x | 0x%08x = 0x%08x)", 
+                             info.rd, info.rs, info.rt, rsValue, rtValue, result);
+    
+    setRegister(info.rd, result);
+}
+
+void CPU::handleADDU(const InstructionInfo& info) {
+    // ADDU rd, rs, rt - Add Unsigned
+    // Format: ADDU rd, rs, rt (SPECIAL funct=0x21)
+    if (info.rd == 0) return; // Can't write to register 0
+    
+    uint32_t rsValue = getRegister(info.rs);
+    uint32_t rtValue = getRegister(info.rt);
+    uint32_t result = rsValue + rtValue;
+    
+    ZONI_LOG_CPU_INSTRUCTION("ADDU R%d, R%d, R%d (0x%08x + 0x%08x = 0x%08x)", 
+                             info.rd, info.rs, info.rt, rsValue, rtValue, result);
+    
+    setRegister(info.rd, result);
+}
+
+// ========================================
+// Stub handlers (not implemented yet)
+// ========================================
+
+void CPU::handleREGIMM(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleJ(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleJAL(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleBEQ(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleBNE(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleBLEZ(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleBGTZ(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleADDI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSLTI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSLTIU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleANDI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleXORI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleLB(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleLH(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleLBU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleLHU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSB(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSH(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSLL(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSRL(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSRA(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleJR(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleJALR(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSYSCALL(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleBREAK(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMFHI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMTHI(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMFLO(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMTLO(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMULT(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleMULTU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleDIV(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleDIVU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleADD(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSUB(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSUBU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleAND(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleXOR(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleNOR(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSLT(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+void CPU::handleSLTU(const InstructionInfo& info) {
+    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+}
+
+// ========================================
+// Dispatch tables (following PCSX-Redux pattern)  
+// ========================================
+
+const CPU::InstructionHandler CPU::s_primaryHandlers[64] = {
+    &CPU::handleSPECIAL,    // 0x00 - SPECIAL
+    &CPU::handleREGIMM,     // 0x01 - REGIMM
+    &CPU::handleJ,          // 0x02 - J
+    &CPU::handleJAL,        // 0x03 - JAL
+    &CPU::handleBEQ,        // 0x04 - BEQ
+    &CPU::handleBNE,        // 0x05 - BNE
+    &CPU::handleBLEZ,       // 0x06 - BLEZ
+    &CPU::handleBGTZ,       // 0x07 - BGTZ
+    &CPU::handleADDI,       // 0x08 - ADDI
+    &CPU::handleADDIU,      // 0x09 - ADDIU
+    &CPU::handleSLTI,       // 0x0A - SLTI
+    &CPU::handleSLTIU,      // 0x0B - SLTIU
+    &CPU::handleANDI,       // 0x0C - ANDI
+    &CPU::handleORI,        // 0x0D - ORI
+    &CPU::handleXORI,       // 0x0E - XORI
+    &CPU::handleLUI,        // 0x0F - LUI
+    nullptr,                // 0x10 - COP0 (not implemented yet)
+    nullptr,                // 0x11 - COP1
+    nullptr,                // 0x12 - COP2
+    nullptr,                // 0x13 - COP3
+    nullptr, nullptr, nullptr, nullptr,    // 0x14-0x17 - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x18-0x1B - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x1C-0x1F - Reserved
+    &CPU::handleLB,         // 0x20 - LB
+    &CPU::handleLH,         // 0x21 - LH
+    nullptr,                // 0x22 - LWL
+    &CPU::handleLW,         // 0x23 - LW
+    &CPU::handleLBU,        // 0x24 - LBU
+    &CPU::handleLHU,        // 0x25 - LHU
+    nullptr,                // 0x26 - LWR
+    nullptr,                // 0x27 - Reserved
+    &CPU::handleSB,         // 0x28 - SB
+    &CPU::handleSH,         // 0x29 - SH
+    nullptr,                // 0x2A - SWL
+    &CPU::handleSW,         // 0x2B - SW
+    nullptr, nullptr, nullptr, nullptr,    // 0x2C-0x2F - Reserved/SWR
+    nullptr, nullptr, nullptr, nullptr,    // 0x30-0x33 - Reserved/LWC2
+    nullptr, nullptr, nullptr, nullptr,    // 0x34-0x37 - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x38-0x3B - Reserved/SWC2
+    nullptr, nullptr, nullptr, nullptr,    // 0x3C-0x3F - Reserved
+};
+
+const CPU::InstructionHandler CPU::s_specialHandlers[64] = {
+    &CPU::handleSLL,        // 0x00 - SLL
+    nullptr,                // 0x01 - Reserved
+    &CPU::handleSRL,        // 0x02 - SRL
+    &CPU::handleSRA,        // 0x03 - SRA
+    nullptr,                // 0x04 - SLLV
+    nullptr,                // 0x05 - Reserved
+    nullptr,                // 0x06 - SRLV
+    nullptr,                // 0x07 - SRAV
+    &CPU::handleJR,         // 0x08 - JR
+    &CPU::handleJALR,       // 0x09 - JALR
+    nullptr, nullptr,       // 0x0A-0x0B - Reserved
+    &CPU::handleSYSCALL,    // 0x0C - SYSCALL
+    &CPU::handleBREAK,      // 0x0D - BREAK
+    nullptr, nullptr,       // 0x0E-0x0F - Reserved
+    &CPU::handleMFHI,       // 0x10 - MFHI
+    &CPU::handleMTHI,       // 0x11 - MTHI
+    &CPU::handleMFLO,       // 0x12 - MFLO
+    &CPU::handleMTLO,       // 0x13 - MTLO
+    nullptr, nullptr, nullptr, nullptr,    // 0x14-0x17 - Reserved
+    &CPU::handleMULT,       // 0x18 - MULT
+    &CPU::handleMULTU,      // 0x19 - MULTU
+    &CPU::handleDIV,        // 0x1A - DIV
+    &CPU::handleDIVU,       // 0x1B - DIVU
+    nullptr, nullptr, nullptr, nullptr,    // 0x1C-0x1F - Reserved
+    &CPU::handleADD,        // 0x20 - ADD
+    &CPU::handleADDU,       // 0x21 - ADDU
+    &CPU::handleSUB,        // 0x22 - SUB
+    &CPU::handleSUBU,       // 0x23 - SUBU
+    &CPU::handleAND,        // 0x24 - AND
+    &CPU::handleOR,         // 0x25 - OR
+    &CPU::handleXOR,        // 0x26 - XOR
+    &CPU::handleNOR,        // 0x27 - NOR
+    nullptr, nullptr,       // 0x28-0x29 - Reserved
+    &CPU::handleSLT,        // 0x2A - SLT
+    &CPU::handleSLTU,       // 0x2B - SLTU
+    nullptr, nullptr, nullptr, nullptr,    // 0x2C-0x2F - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x30-0x33 - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x34-0x37 - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x38-0x3B - Reserved
+    nullptr, nullptr, nullptr, nullptr,    // 0x3C-0x3F - Reserved
+};
 
 } // namespace ZonistationOne

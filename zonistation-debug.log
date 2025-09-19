@@ -96,3 +96,44 @@
 [0.023362] [INFO ] [SPU   ] Shutting down
 [0.023420] [INFO ] [GPU   ] Shutting down
 [0.023465] [INFO ] [DEBUG ] Debugger shutdown
+[0.000341] [INFO ] [SYSTEM] File logging enabled: zonistation-debug.log
+[0.001327] [INFO ] [SYSTEM] ZonistationOne PS1 Emulator - Starting...
+[0.001513] [INFO ] [SYSTEM] Log level set to: DEBUG
+[0.001556] [INFO ] [CORE  ] Creating ZonistationOne emulator instance
+[0.001575] [INFO ] [CORE  ] Initializing emulator components...
+[0.001591] [INFO ] [SYSTEM] ZonistationOne Logger initialized
+[0.006753] [INFO ] [MEMORY] Initializing memory subsystem
+[0.006891] [INFO ] [MEMORY] RAM size: 2048KB
+[0.006938] [INFO ] [MEMORY] VRAM size: 1024KB
+[0.006960] [INFO ] [MEMORY] BIOS size: 512KB
+[0.007016] [INFO ] [CPU   ] Initializing MIPS R3000A core
+[0.007040] [INFO ] [CPU   ] Resetting to initial state
+[0.007058] [INFO ] [CPU   ] Initialization complete
+[0.007083] [INFO ] [DEBUG ] Debugger initialized
+[0.007108] [INFO ] [GPU   ] Initializing graphics subsystem
+[0.007153] [INFO ] [GPU   ] Display resolution: 320x240
+[0.007164] [INFO ] [SPU   ] Initializing audio subsystem
+[0.007172] [INFO ] [CDROM ] Initializing CD-ROM subsystem
+[0.007196] [INFO ] [CORE  ] All components initialized successfully
+[0.007213] [INFO ] [SYSTEM] Loading file: bios_files/SCPH1001.BIN
+[0.007233] [INFO ] [CORE  ] Attempting to load file: bios_files/SCPH1001.BIN
+[0.007248] [INFO ] [BIOS  ] Loading BIOS: bios_files/SCPH1001.BIN
+[0.007994] [INFO ] [MEMORY] Loading BIOS into memory...
+[0.008142] [INFO ] [MEMORY] BIOS loaded successfully
+[0.008196] [INFO ] [BIOS  ] BIOS loaded successfully
+[0.008339] [INFO ] [SYSTEM] Emulator initialized successfully
+[0.008412] [INFO ] [CORE  ] Starting emulation loop...
+[0.008432] [DEBUG] [CPU   ] LUI R8, 0x0013 (result: 0x00130000)
+[0.008516] [DEBUG] [CPU   ] ORI R8, R8, 0x243f (0x00130000 | 0x243f = 0x0013243f)
+[0.008532] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.008543] [DEBUG] [CPU   ] SW R8, 4112(R1) [0x1f801010] = 0x0013243f
+[0.008554] [DEBUG] [CPU   ] ADDIU R8, R0, 2952 (0x00000000 + 2952 = 0x00000b88)
+[0.008565] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.008577] [DEBUG] [CPU   ] SW R8, 4192(R1) [0x1f801060] = 0x00000b88
+[0.008599] [WARN ] [CPU   ] Unknown instruction 0x0bf00054 (opcode 0x02) at PC 0xbfc00074
+[0.008646] [WARN ] [CPU   ] Unknown instruction 0x003c0800 (opcode 0x00) at PC 0xbfc00084
+[0.008659] [WARN ] [CPU   ] Unknown instruction 0x00350834 (opcode 0x00) at PC 0xbfc00088
+[0.008670] [WARN ] [CPU   ] Unknown instruction 0x003c011f (opcode 0x00) at PC 0xbfc0008c
+[0.008680] [WARN ] [CPU   ] Unknown instruction 0x00ac2810 (opcode 0x00) at PC 0xbfc00090
+[0.008703] [WARN ] [CPU   ] Unknown instruction 0x19951204 (opcode 0x06) at PC 0xbfc00104
+[0.008723] [WARN ] [CPU   ] Unknown instruction 0x00000003 (opcode 0x00) at PC 0xbfc00108

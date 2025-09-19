@@ -54,6 +54,9 @@ bool Emulator::initialize() {
         // Initialize debugger
         m_debugger = std::make_unique<Debugger>(this);
         
+        // Connect debugger to components
+        m_debugger->connectComponents(m_cpu.get(), m_memory.get());
+        
         // Initialize GPU
         m_gpu = std::make_unique<GPU>(m_memory.get());
         if (!m_gpu->initialize()) {
@@ -118,6 +121,11 @@ void Emulator::run() {
     }
     
     ZONI_LOG_INFO(CORE, "Emulation stopped");
+}
+
+void Emulator::stop() {
+    ZONI_LOG_INFO(CORE, "Stopping emulation...");
+    m_running = false;
 }
 
 void Emulator::executeFrame() {

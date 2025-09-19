@@ -116,6 +116,10 @@ private:
 // Compile-time logger definitions
 // These can be enabled/disabled per category to control verbosity
 
+// Enable specialized logging by uncommenting these defines:
+#define ENABLE_CPU_INSTRUCTION_LOGGING
+// #define ENABLE_MEMORY_ACCESS_LOGGING
+
 // High-frequency loggers (disabled by default to reduce noise)
 using CPU_TRACE_LOG = Logger::CategoryLogger<LogCategory::CPU, LogLevel::TRACE, false>;
 using MEMORY_TRACE_LOG = Logger::CategoryLogger<LogCategory::MEMORY, LogLevel::TRACE, false>;

@@ -51,6 +51,9 @@ public:
     Debugger(Emulator* emulator);
     ~Debugger();
     
+    // Component connection (call after emulator initialization)
+    void connectComponents(CPU* cpu, Memory* memory);
+    
     // Breakpoint management
     uint32_t addBreakpoint(uint32_t address, BreakpointType type, const std::string& label = "");
     bool removeBreakpoint(uint32_t id);

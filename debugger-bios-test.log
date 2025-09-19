@@ -1,0 +1,122 @@
+[0.000189] [INFO ] [SYSTEM] File logging enabled: debugger-bios-test.log
+[0.000414] [INFO ] [SYSTEM] ZonistationOne Enhanced Debugger Test - BIOS Edition
+[0.000553] [INFO ] [SYSTEM] This test will load real PlayStation BIOS and demonstrate debugging
+[0.000568] [INFO ] [CORE  ] Creating ZonistationOne emulator instance
+[0.000581] [INFO ] [CORE  ] Initializing emulator components...
+[0.000622] [INFO ] [SYSTEM] ZonistationOne Logger initialized
+[0.003958] [INFO ] [MEMORY] Initializing memory subsystem
+[0.004234] [INFO ] [MEMORY] RAM size: 2048KB
+[0.004295] [INFO ] [MEMORY] VRAM size: 1024KB
+[0.004379] [INFO ] [MEMORY] BIOS size: 512KB
+[0.004474] [INFO ] [CPU   ] Initializing MIPS R3000A core
+[0.004524] [INFO ] [CPU   ] Resetting to initial state
+[0.004654] [INFO ] [CPU   ] Initialization complete
+[0.004706] [INFO ] [DEBUG ] Debugger initialized
+[0.004752] [INFO ] [DEBUG ] Connected CPU and Memory to debugger
+[0.004799] [INFO ] [GPU   ] Initializing graphics subsystem
+[0.004823] [INFO ] [GPU   ] Display resolution: 320x240
+[0.004868] [INFO ] [SPU   ] Initializing audio subsystem
+[0.004919] [INFO ] [CDROM ] Initializing CD-ROM subsystem
+[0.004973] [INFO ] [CORE  ] All components initialized successfully
+[0.005017] [INFO ] [SYSTEM] Loading PlayStation BIOS...
+[0.005039] [INFO ] [CORE  ] Attempting to load file: bios_files/SCPH1001.BIN
+[0.005173] [INFO ] [BIOS  ] Loading BIOS: bios_files/SCPH1001.BIN
+[0.005991] [INFO ] [MEMORY] Loading BIOS into memory...
+[0.006136] [INFO ] [MEMORY] BIOS loaded successfully
+[0.006228] [INFO ] [BIOS  ] BIOS loaded successfully
+[0.006463] [INFO ] [SYSTEM] === ENHANCED DEBUGGER TEST WITH REAL BIOS ===
+[0.006544] [INFO ] [SYSTEM] Setting breakpoint at BIOS entry point...
+[0.006594] [INFO ] [DEBUG ] Added breakpoint #1: EXEC at 0x1FC00000 (BIOS Entry Point)
+[0.006648] [INFO ] [DEBUG ] Added breakpoint #2: EXEC at 0x1FC00010 (After First Instructions)
+[0.006683] [INFO ] [DEBUG ] Added breakpoint #3: WRITE at 0x1F801010 (I/O Register Write)
+[0.006738] [INFO ] [SYSTEM] Enabling instruction tracing...
+[0.006813] [INFO ] [SYSTEM] Initial CPU state:
+[0.006823] [INFO ] [DEBUG ] === CPU State ===
+[0.006830] [INFO ] [DEBUG ] PC: 0xbfc00000
+[0.006836] [INFO ] [DEBUG ] Cycle Count: 0
+[0.006845] [INFO ] [DEBUG ] Halted: No
+[0.006876] [INFO ] [DEBUG ] General Purpose Registers:
+[0.006911] [INFO ] [DEBUG ] R00-R03: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.006925] [INFO ] [DEBUG ] R04-R07: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.006933] [INFO ] [DEBUG ] R08-R11: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.006940] [INFO ] [DEBUG ] R12-R15: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.006971] [INFO ] [DEBUG ] R16-R19: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.006984] [INFO ] [DEBUG ] R20-R23: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.007016] [INFO ] [DEBUG ] R24-R27: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.007028] [INFO ] [DEBUG ] R28-R31: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.007075] [INFO ] [SYSTEM] BIOS memory content (first 128 bytes):
+[0.007105] [INFO ] [DEBUG ] === Memory Dump: 0xbfc00000 - 0xbfc0007f ===
+[0.007121] [INFO ] [DEBUG ] 0xbfc00000: 13 00 08 3c 3f 24 08 35 80 1f 01 3c 10 10 28 ac  ...<?$.5...<..(.
+[0.007134] [INFO ] [DEBUG ] 0xbfc00010: 00 00 00 00 88 0b 08 24 80 1f 01 3c 60 10 28 ac  .......$...<`.(.
+[0.007143] [INFO ] [DEBUG ] 0xbfc00020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.007153] [INFO ] [DEBUG ] 0xbfc00030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.007186] [INFO ] [DEBUG ] 0xbfc00040: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.007199] [INFO ] [DEBUG ] 0xbfc00050: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.007267] [INFO ] [DEBUG ] 0xbfc00060: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.007279] [INFO ] [DEBUG ] 0xbfc00070: 54 00 f0 0b 00 00 00 00 00 00 00 00 00 00 00 00  T...............
+[0.007285] [INFO ] [SYSTEM] First 10 BIOS instructions:
+[0.007335] [INFO ] [SYSTEM]   [0] 0xbfc00000: 0x3c080013 (LUI)
+[0.007424] [INFO ] [SYSTEM]   [1] 0xbfc00004: 0x3508243f (ORI)
+[0.007497] [INFO ] [SYSTEM]   [2] 0xbfc00008: 0x3c011f80 (LUI)
+[0.007540] [INFO ] [SYSTEM]   [3] 0xbfc0000c: 0xac281010 (SW)
+[0.007585] [INFO ] [SYSTEM]   [4] 0xbfc00010: 0x00000000 (SPECIAL)
+[0.007630] [INFO ] [SYSTEM]   [5] 0xbfc00014: 0x24080b88 (ADDIU)
+[0.007676] [INFO ] [SYSTEM]   [6] 0xbfc00018: 0x3c011f80 (LUI)
+[0.007722] [INFO ] [SYSTEM]   [7] 0xbfc0001c: 0xac281060 (SW)
+[0.007759] [INFO ] [SYSTEM]   [8] 0xbfc00020: 0x00000000 (SPECIAL)
+[0.007797] [INFO ] [SYSTEM]   [9] 0xbfc00024: 0x00000000 (SPECIAL)
+[0.007815] [INFO ] [SYSTEM] Starting emulation with active breakpoints...
+[0.007858] [INFO ] [SYSTEM] Note: Emulation will pause at breakpoints and show debugging info
+[0.008117] [INFO ] [CORE  ] Starting emulation loop...
+[0.008265] [DEBUG] [CPU   ] LUI R8, 0x0013 (result: 0x00130000)
+[0.008318] [DEBUG] [CPU   ] ORI R8, R8, 0x243f (0x00130000 | 0x243f = 0x0013243f)
+[0.008365] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.008410] [DEBUG] [CPU   ] SW R8, 4112(R1) [0x1f801010] = 0x0013243f
+[0.008457] [DEBUG] [CPU   ] ADDIU R8, R0, 2952 (0x00000000 + 2952 = 0x00000b88)
+[0.008507] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.008550] [DEBUG] [CPU   ] SW R8, 4192(R1) [0x1f801060] = 0x00000b88
+[0.008594] [WARN ] [CPU   ] Unknown instruction 0x0bf00054 (opcode 0x02) at PC 0xbfc00074
+[0.008637] [WARN ] [CPU   ] Unknown instruction 0x003c0800 (opcode 0x00) at PC 0xbfc00084
+[0.008690] [WARN ] [CPU   ] Unknown instruction 0x00350834 (opcode 0x00) at PC 0xbfc00088
+[0.008773] [WARN ] [CPU   ] Unknown instruction 0x003c011f (opcode 0x00) at PC 0xbfc0008c
+[0.008830] [WARN ] [CPU   ] Unknown instruction 0x00ac2810 (opcode 0x00) at PC 0xbfc00090
+[0.008882] [WARN ] [CPU   ] Unknown instruction 0x19951204 (opcode 0x06) at PC 0xbfc00104
+[0.008937] [WARN ] [CPU   ] Unknown instruction 0x00000003 (opcode 0x00) at PC 0xbfc00108
+[0.008997] [WARN ] [CPU   ] Unknown instruction 0x796e6f53 (opcode 0x1e) at PC 0xbfc0010c
+[0.009040] [WARN ] [CPU   ] Unknown instruction 0x6d6f4320 (opcode 0x1b) at PC 0xbfc00110
+[0.009063] [WARN ] [CPU   ] Unknown instruction 0x65747570 (opcode 0x19) at PC 0xbfc00114
+[0.009074] [WARN ] [CPU   ] Too many unknown instructions, halting
+[0.009083] [WARN ] [CORE  ] CPU is halted, stopping emulation
+[0.025109] [INFO ] [CORE  ] Emulation stopped
+[0.108480] [INFO ] [CORE  ] Emulator paused
+[0.108746] [INFO ] [SYSTEM] CPU state after brief execution:
+[0.108819] [INFO ] [DEBUG ] === CPU State ===
+[0.108838] [INFO ] [DEBUG ] PC: 0xbfc00114
+[0.108876] [INFO ] [DEBUG ] Cycle Count: 69
+[0.108927] [INFO ] [DEBUG ] Halted: Yes
+[0.108967] [INFO ] [DEBUG ] General Purpose Registers:
+[0.108983] [INFO ] [DEBUG ] R00-R03: 0x00000000 0x1f800000 0x00000000 0x00000000
+[0.109081] [INFO ] [DEBUG ] R04-R07: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109167] [INFO ] [DEBUG ] R08-R11: 0x00000b88 0x00000000 0x00000000 0x00000000
+[0.109208] [INFO ] [DEBUG ] R12-R15: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109265] [INFO ] [DEBUG ] R16-R19: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109284] [INFO ] [DEBUG ] R20-R23: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109300] [INFO ] [DEBUG ] R24-R27: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109313] [INFO ] [DEBUG ] R28-R31: 0x00000000 0x00000000 0x00000000 0x00000000
+[0.109358] [INFO ] [SYSTEM] Breakpoint statistics:
+[0.109412] [INFO ] [SYSTEM]   WRITE at 0x1F801010 (I/O Register Write): Hit 0 times
+[0.109434] [INFO ] [SYSTEM]   EXEC at 0x1FC00010 (After First Instructions): Hit 0 times
+[0.109488] [INFO ] [SYSTEM]   EXEC at 0x1FC00000 (BIOS Entry Point): Hit 0 times
+[0.109559] [INFO ] [SYSTEM] I/O register area after execution:
+[0.109668] [INFO ] [DEBUG ] === Memory Dump: 0x1f801000 - 0x1f80103f ===
+[0.109737] [INFO ] [DEBUG ] 0x1f801000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.109754] [INFO ] [DEBUG ] 0x1f801010: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.109769] [INFO ] [DEBUG ] 0x1f801020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.109809] [INFO ] [DEBUG ] 0x1f801030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+[0.109861] [INFO ] [DEBUG ] Cleared 3 breakpoints
+[0.109875] [INFO ] [SYSTEM] Enhanced debugger test with BIOS completed successfully!
+[0.109885] [INFO ] [SYSTEM] Check 'debugger-bios-test.log' for detailed execution log
+[0.109897] [INFO ] [CDROM ] Shutting down
+[0.109908] [INFO ] [SPU   ] Shutting down
+[0.109918] [INFO ] [GPU   ] Shutting down
+[0.109929] [INFO ] [DEBUG ] Debugger shutdown

@@ -1,0 +1,51 @@
+[0.000309] [INFO ] [SYSTEM] File logging enabled: test-debug.log
+[0.000574] [INFO ] [SYSTEM] ZonistationOne PS1 Emulator - Starting...
+[0.000634] [INFO ] [SYSTEM] Log level set to: TRACE
+[0.000681] [INFO ] [CORE  ] Creating ZonistationOne emulator instance
+[0.000727] [INFO ] [CORE  ] Initializing emulator components...
+[0.000743] [INFO ] [SYSTEM] ZonistationOne Logger initialized
+[0.006161] [INFO ] [MEMORY] Initializing memory subsystem
+[0.006293] [INFO ] [MEMORY] RAM size: 2048KB
+[0.006350] [INFO ] [MEMORY] VRAM size: 1024KB
+[0.006369] [INFO ] [MEMORY] BIOS size: 512KB
+[0.006410] [INFO ] [CPU   ] Initializing MIPS R3000A core
+[0.006455] [INFO ] [CPU   ] Resetting to initial state
+[0.006470] [INFO ] [CPU   ] Initialization complete
+[0.006510] [INFO ] [DEBUG ] Debugger initialized
+[0.006554] [INFO ] [GPU   ] Initializing graphics subsystem
+[0.006599] [INFO ] [GPU   ] Display resolution: 320x240
+[0.006643] [INFO ] [SPU   ] Initializing audio subsystem
+[0.006688] [INFO ] [CDROM ] Initializing CD-ROM subsystem
+[0.006707] [INFO ] [CORE  ] All components initialized successfully
+[0.006758] [INFO ] [SYSTEM] Loading file: bios_files/SCPH1001.BIN
+[0.006929] [INFO ] [CORE  ] Attempting to load file: bios_files/SCPH1001.BIN
+[0.006997] [INFO ] [BIOS  ] Loading BIOS: bios_files/SCPH1001.BIN
+[0.010551] [INFO ] [MEMORY] Loading BIOS into memory...
+[0.012041] [INFO ] [MEMORY] BIOS loaded successfully
+[0.012398] [INFO ] [BIOS  ] BIOS loaded successfully
+[0.012697] [INFO ] [SYSTEM] Emulator initialized successfully
+[0.012872] [INFO ] [CORE  ] Starting emulation loop...
+[0.012975] [DEBUG] [CPU   ] LUI R8, 0x0013 (result: 0x00130000)
+[0.013038] [DEBUG] [CPU   ] ORI R8, R8, 0x243f (0x00130000 | 0x243f = 0x0013243f)
+[0.013085] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.013132] [DEBUG] [CPU   ] SW R8, 4112(R1) [0x1f801010] = 0x0013243f
+[0.013179] [DEBUG] [CPU   ] ADDIU R8, R0, 2952 (0x00000000 + 2952 = 0x00000b88)
+[0.013225] [DEBUG] [CPU   ] LUI R1, 0x1f80 (result: 0x1f800000)
+[0.013273] [DEBUG] [CPU   ] SW R8, 4192(R1) [0x1f801060] = 0x00000b88
+[0.013321] [WARN ] [CPU   ] Unknown instruction 0x0bf00054 (opcode 0x02) at PC 0xbfc00074
+[0.013372] [WARN ] [CPU   ] Unknown instruction 0x003c0800 (opcode 0x00) at PC 0xbfc00084
+[0.013444] [WARN ] [CPU   ] Unknown instruction 0x00350834 (opcode 0x00) at PC 0xbfc00088
+[0.013501] [WARN ] [CPU   ] Unknown instruction 0x003c011f (opcode 0x00) at PC 0xbfc0008c
+[0.013557] [WARN ] [CPU   ] Unknown instruction 0x00ac2810 (opcode 0x00) at PC 0xbfc00090
+[0.013610] [WARN ] [CPU   ] Unknown instruction 0x19951204 (opcode 0x06) at PC 0xbfc00104
+[0.013658] [WARN ] [CPU   ] Unknown instruction 0x00000003 (opcode 0x00) at PC 0xbfc00108
+[0.013705] [WARN ] [CPU   ] Unknown instruction 0x796e6f53 (opcode 0x1e) at PC 0xbfc0010c
+[0.013765] [WARN ] [CPU   ] Unknown instruction 0x6d6f4320 (opcode 0x1b) at PC 0xbfc00110
+[0.013831] [WARN ] [CPU   ] Unknown instruction 0x65747570 (opcode 0x19) at PC 0xbfc00114
+[0.013882] [WARN ] [CPU   ] Too many unknown instructions, halting
+[0.013928] [WARN ] [CORE  ] CPU is halted, stopping emulation
+[0.029842] [INFO ] [CORE  ] Emulation stopped
+[0.030040] [INFO ] [CDROM ] Shutting down
+[0.030113] [INFO ] [SPU   ] Shutting down
+[0.030163] [INFO ] [GPU   ] Shutting down
+[0.030215] [INFO ] [DEBUG ] Debugger shutdown

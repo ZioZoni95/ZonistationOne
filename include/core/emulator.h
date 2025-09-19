@@ -27,6 +27,7 @@ namespace ZonistationOne {
         // Main emulation control
         bool initialize();
         void run();
+        void stop();
         void shutdown();
         void reset();
         

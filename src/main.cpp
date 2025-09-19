@@ -12,8 +12,12 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <thread>
+#include <chrono>
 #include "core/emulator.h"
 #include "core/logger.h"
+#include "core/debug_console.h"
+#include "core/debugger.h"
 
 void printUsage(const char* programName) {
     std::cout << "ZonistationOne PS1 Emulator\n";
@@ -24,8 +28,22 @@ void printUsage(const char* programName) {
     std::cout << "  -q, --quiet          Enable quiet (WARN+) logging\n";
     std::cout << "  -t, --trace          Enable trace logging (very verbose)\n";
     std::cout << "  --log-file FILE      Enable file logging to FILE\n";
-    std::cout << "  --log-level LEVEL    Set log level (TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\n\n";
-    std::cout << "FILE can be a BIOS file (.bin) or ISO image (.iso/.cue)\n";
+    std::cout << "  --log-level LEVEL    Set log level (TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\n";
+    std::cout << "  --debug              Enable interactive debugger mode\n";
+    std::cout << "  --debug-console      Start with debug console interface\n";
+    std::cout << "  --break-on-start     Set breakpoint at BIOS entry (0xBFC00000)\n";
+    std::cout << "  --step-mode          Start emulation in step-by-step mode\n\n";
+    std::cout << "FILE can be a BIOS file (.bin) or ISO image (.iso/.cue)\n\n";
+    std::cout << "Debug Commands (when --debug-console is active):\n";
+    std::cout << "  help                 Show debug commands\n";
+    std::cout << "  run                  Start/resume emulation\n";
+    std::cout << "  pause                Pause emulation\n";
+    std::cout << "  step                 Execute one instruction\n";
+    std::cout << "  bp <addr>            Set breakpoint at address (hex)\n";
+    std::cout << "  info cpu             Show CPU state\n";
+    std::cout << "  info mem <addr>      Show memory at address\n";
+    std::cout << "  disasm <addr> <cnt>  Disassemble instructions\n";
+    std::cout << "  quit                 Exit emulator\n";
 }
 
 ZonistationOne::LogLevel parseLogLevel(const std::string& level) {
@@ -50,6 +68,10 @@ int main(int argc, char* argv[]) {
     std::string logFile;
     std::string inputFile;
     bool enableFileLogging = false;
+    bool debugMode = false;
+    bool debugConsole = false;
+    bool breakOnStart = false;
+    bool stepMode = false;
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -79,7 +101,18 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: --log-level requires a level" << std::endl;
                 return 1;
             }
-        } else if (arg.starts_with("-")) {
+        } else if (arg == "--debug") {
+            debugMode = true;
+        } else if (arg == "--debug-console") {
+            debugConsole = true;
+            debugMode = true;
+        } else if (arg == "--break-on-start") {
+            breakOnStart = true;
+            debugMode = true;
+        } else if (arg == "--step-mode") {
+            stepMode = true;
+            debugMode = true;
+        } else if (arg.substr(0, 1) == "-") {
             std::cerr << "Unknown option: " << arg << std::endl;
             printUsage(argv[0]);
             return 1;
@@ -137,7 +170,39 @@ int main(int argc, char* argv[]) {
         }
         
         ZONI_LOG_INFO(SYSTEM, "Emulator initialized successfully");
-        emulator->run();
+        
+        // Set up debugging if requested
+        std::unique_ptr<ZonistationOne::DebugConsole> console;
+        
+        if (debugMode) {
+            // Enable debug features
+            auto debugger = emulator->getDebugger();
+            if (debugger && !debugConsole) {
+                // Enable tracing for non-console debug mode
+                debugger->setInstructionTrace(true);
+                ZONI_LOG_INFO(SYSTEM, "Debug mode enabled with instruction tracing");
+            }
+        }
+        
+        if (debugConsole) {
+            // Interactive debug console mode
+            console = std::make_unique<ZonistationOne::DebugConsole>(emulator.get());
+            console->setBreakOnStart(breakOnStart);
+            console->setStepMode(stepMode);
+            
+            ZONI_LOG_INFO(SYSTEM, "Starting debug console interface...");
+            console->start();
+            
+            // Debug console will handle emulation control
+            // Keep the main thread alive until console quits
+            while (console->isRunning()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
+        } else {
+            // Normal emulation mode
+            emulator->run();
+        }
         
     } catch (const std::exception& e) {
         ZONI_LOG_CRITICAL(SYSTEM, "Fatal error: %s", e.what());

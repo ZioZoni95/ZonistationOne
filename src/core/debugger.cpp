@@ -27,6 +27,12 @@ Debugger::~Debugger() {
     ZONI_LOG_INFO(DEBUGGER, "Debugger shutdown");
 }
 
+void Debugger::connectComponents(CPU* cpu, Memory* memory) {
+    m_cpu = cpu;
+    m_memory = memory;
+    ZONI_LOG_INFO(DEBUGGER, "Connected CPU and Memory to debugger");
+}
+
 uint32_t Debugger::addBreakpoint(uint32_t address, BreakpointType type, const std::string& label) {
     uint32_t id = m_nextBreakpointId++;
     address = normalizeAddress(address);
