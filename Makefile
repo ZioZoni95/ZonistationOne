@@ -1,145 +1,124 @@
-# ZonistationOne - PlayStation One Emulator
-# Makefile
-
-# Project settings
-PROJECT_NAME := zonistation-one
-VERSION := 1.0.0
-
-# Directories
-SRC_DIR := src
-BUILD_DIR := build
-CORE_DIR := $(SRC_DIR)/core
+# ZonistationOne PlayStation 1 Emulator Makefile
+# Based on modern C++ standards with reference to PCSX-Redux architecture
 
 # Compiler settings
-CC := gcc
-CFLAGS := -Wall -Wextra -std=c99 -O2 -g
-CPPFLAGS := -I$(SRC_DIR) -DVERSION=\"$(VERSION)\"
-LDFLAGS := -lm
+CXX = g++
+CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -g
+LDFLAGS = 
 
-# Debug build settings
-DEBUG_CFLAGS := -Wall -Wextra -std=c99 -O0 -g -DDEBUG
-DEBUG_LDFLAGS := -lm
+# Directories
+SRCDIR = src
+INCDIR = include
+BUILDDIR = build
+OBJDIR = $(BUILDDIR)/obj
 
-# Source files
-CORE_SOURCES := $(wildcard $(CORE_DIR)/*.c)
-MAIN_SOURCES := $(SRC_DIR)/main.c
-ALL_SOURCES := $(CORE_SOURCES) $(MAIN_SOURCES)
+# Include paths
+INCLUDES = -I$(INCDIR) -I$(SRCDIR)
 
-# Object files
-CORE_OBJECTS := $(CORE_SOURCES:$(CORE_DIR)/%.c=$(BUILD_DIR)/core/%.o)
-MAIN_OBJECTS := $(MAIN_SOURCES:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
-ALL_OBJECTS := $(CORE_OBJECTS) $(MAIN_OBJECTS)
+# Target executable
+TARGET = $(BUILDDIR)/zonistation-one
+TEST_DEBUGGER = $(BUILDDIR)/test-debugger
 
-# Targets
-TARGET := $(BUILD_DIR)/$(PROJECT_NAME)
-DEBUG_TARGET := $(BUILD_DIR)/$(PROJECT_NAME)-debug
+# Source files (automatically find all .cpp files, excluding tests)
+SOURCES = $(shell find $(SRCDIR) -name "*.cpp" ! -name "test_*.cpp")
+OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+
+# Test sources
+TEST_DEBUGGER_SOURCES = $(SRCDIR)/test_debugger.cpp $(filter-out $(SRCDIR)/main.cpp, $(SOURCES))
+TEST_DEBUGGER_OBJECTS = $(TEST_DEBUGGER_SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+
+# Dependencies for automatic header dependency tracking
+DEPENDS = $(OBJECTS:.o=.d)
 
 # Default target
+.PHONY: all clean debug release run test-debugger
+
 all: $(TARGET)
 
-# Debug target
-debug: CFLAGS = $(DEBUG_CFLAGS)
-debug: LDFLAGS = $(DEBUG_LDFLAGS)
-debug: $(DEBUG_TARGET)
-
-# Create build directories
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-	mkdir -p $(BUILD_DIR)/core
-
-# Build main target
-$(TARGET): $(BUILD_DIR) $(ALL_OBJECTS)
+# Build target
+$(TARGET): $(OBJECTS) | $(BUILDDIR)
 	@echo "Linking $(TARGET)..."
-	$(CC) $(ALL_OBJECTS) -o $@ $(LDFLAGS)
-	@echo "Build complete: $(TARGET)"
+	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS)
+	@echo "Build complete!"
 
-# Build debug target
-$(DEBUG_TARGET): $(BUILD_DIR) $(ALL_OBJECTS)
-	@echo "Linking debug target $(DEBUG_TARGET)..."
-	$(CC) $(ALL_OBJECTS) -o $@ $(LDFLAGS)
-	@echo "Debug build complete: $(DEBUG_TARGET)"
+# Build debugger test
+$(TEST_DEBUGGER): $(TEST_DEBUGGER_OBJECTS) | $(BUILDDIR)
+	@echo "Linking $(TEST_DEBUGGER)..."
+	$(CXX) $(TEST_DEBUGGER_OBJECTS) -o $@ $(LDFLAGS)
+	@echo "Debugger test build complete!"
 
-# Compile core source files
-$(BUILD_DIR)/core/%.o: $(CORE_DIR)/%.c
+# Test debugger
+test-debugger: $(TEST_DEBUGGER)
+	@echo "Running debugger test..."
+	./$(TEST_DEBUGGER)
+
+# Compile source files
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
 	@echo "Compiling $<..."
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
-# Compile main source files
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	@echo "Compiling $<..."
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+# Create directories
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
 
-# Clean build files
-clean:
-	@echo "Cleaning build directory..."
-	rm -rf $(BUILD_DIR)
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
 
-# Install target (optional)
-install: $(TARGET)
-	@echo "Installing $(PROJECT_NAME)..."
-	sudo cp $(TARGET) /usr/local/bin/$(PROJECT_NAME)
-	@echo "Installation complete"
+# Debug build
+debug: CXXFLAGS += -DDEBUG -g3 -O0
+debug: $(TARGET)
 
-# Uninstall target (optional)
-uninstall:
-	@echo "Uninstalling $(PROJECT_NAME)..."
-	sudo rm -f /usr/local/bin/$(PROJECT_NAME)
-	@echo "Uninstall complete"
+# Release build  
+release: CXXFLAGS += -DNDEBUG -O3
+release: $(TARGET)
 
 # Run the emulator
 run: $(TARGET)
-	@echo "Running $(PROJECT_NAME)..."
 	./$(TARGET)
-
-# Run with debug
-run-debug: $(DEBUG_TARGET)
-	@echo "Running $(PROJECT_NAME) in debug mode..."
-	./$(DEBUG_TARGET) -v -d
 
 # Run with BIOS
 run-bios: $(TARGET)
-	@echo "Running $(PROJECT_NAME) with BIOS..."
-	./$(TARGET) -b bios_files/SCPH1001.BIN -v
+	./$(TARGET) bios_files/SCPH1001.BIN
 
-# Show help
-help:
-	@echo "ZonistationOne - PlayStation One Emulator"
-	@echo "Available targets:"
-	@echo "  all          - Build release version (default)"
-	@echo "  debug        - Build debug version"
-	@echo "  clean        - Clean build files"
-	@echo "  install      - Install to system"
-	@echo "  uninstall    - Remove from system"
-	@echo "  run          - Build and run emulator"
-	@echo "  run-debug    - Build and run debug version"
-	@echo "  run-bios     - Build and run with BIOS file"
-	@echo "  help         - Show this help message"
-	@echo ""
-	@echo "Build variables:"
-	@echo "  CC=$(CC)"
-	@echo "  CFLAGS=$(CFLAGS)"
-	@echo "  VERSION=$(VERSION)"
+# Clean build files
+clean:
+	@echo "Cleaning build files..."
+	rm -rf $(BUILDDIR)
 
-# Print project information
+# Install dependencies (Ubuntu/Debian)
+install-deps:
+	@echo "Installing development dependencies..."
+	sudo apt-get update
+	sudo apt-get install -y build-essential g++ cmake pkg-config \
+		libgl1-mesa-dev libglu1-mesa-dev \
+		libasound2-dev libpulse-dev \
+		libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+# Print build info
 info:
-	@echo "Project: $(PROJECT_NAME) v$(VERSION)"
-	@echo "Source files: $(words $(ALL_SOURCES))"
-	@echo "Object files: $(words $(ALL_OBJECTS))"
-	@echo "Build directory: $(BUILD_DIR)"
+	@echo "ZonistationOne PS1 Emulator Build Configuration"
+	@echo "=============================================="
+	@echo "Compiler: $(CXX)"
+	@echo "Flags: $(CXXFLAGS)"
+	@echo "Sources: $(words $(SOURCES)) files"
 	@echo "Target: $(TARGET)"
 
-# Show dependencies
-deps:
-	@echo "Core dependencies:"
-	@echo "  - Standard C library"
-	@echo "  - Math library (libm)"
-	@echo ""
-	@echo "Optional dependencies:"
-	@echo "  - BIOS file (SCPH1001.BIN or compatible)"
+# Include dependency files
+-include $(DEPENDS)
 
-# Phony targets
-.PHONY: all debug clean install uninstall run run-debug run-bios help info deps
-
-# Build rule dependencies
-$(CORE_OBJECTS): $(CORE_DIR)/system.h $(CORE_DIR)/logger.h $(CORE_DIR)/memory.h $(CORE_DIR)/emulator.h
-$(MAIN_OBJECTS): $(CORE_DIR)/system.h $(CORE_DIR)/emulator.h $(CORE_DIR)/logger.h
+# Help target
+help:
+	@echo "ZonistationOne PS1 Emulator Makefile"
+	@echo "===================================="
+	@echo "Available targets:"
+	@echo "  all         - Build the emulator (default)"
+	@echo "  debug       - Build with debug information"
+	@echo "  release     - Build optimized release version"
+	@echo "  test-debugger - Build and run debugger functionality test"
+	@echo "  clean       - Remove all build files"
+	@echo "  run         - Build and run the emulator"
+	@echo "  run-bios    - Build and run with BIOS file"
+	@echo "  install-deps- Install build dependencies (Ubuntu/Debian)"
+	@echo "  info        - Show build configuration"
+	@echo "  help        - Show this help message"

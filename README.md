@@ -1,214 +1,143 @@
-# ZonistationOne - PlayStation One Emulator
+# ZonistationOne - PlayStation 1 Emulator
 
-A PlayStation One emulator written in C, inspired by the PCSX Redux architecture.
+A PlayStation 1 emulator written in modern C++, inspired by PCSX-Redux but built from scratch with a focus on accuracy, performance, and clean architecture.
 
-## Features
+## Project Status
 
-- **Modular Architecture**: Clean separation between CPU, GPU, SPU, memory, and I/O systems
-- **MIPS R3000A CPU**: Interpreted execution of PlayStation One instructions
-- **Memory Management**: Accurate PlayStation memory map emulation
-- **Graphics Processing**: GPU command processing and VRAM management  
-- **Audio Processing**: SPU sound synthesis and effects
-- **CD-ROM Support**: Disc loading and audio playback
-- **Debug Support**: Logging, tracing, and debugging capabilities
+🚧 **Early Development** - This emulator is in the very early stages of development. Currently implemented:
 
-## Project Structure
+- [x] Basic project structure and build system
+- [x] Core emulator framework with component separation
+- [x] Memory management system with PS1 memory map
+- [x] MIPS R3000A CPU core (basic stub)
+- [x] GPU subsystem (basic stub)
+- [x] SPU audio subsystem (basic stub)  
+- [x] CD-ROM drive emulation (basic stub)
+- [x] BIOS loading support
+
+### Next Steps
+
+- [ ] Complete MIPS R3000A instruction set implementation
+- [ ] Implement basic GPU rendering pipeline
+- [ ] Add SPU audio processing
+- [ ] CD-ROM ISO parsing and file system support
+- [ ] Controller input handling
+- [ ] Memory card support
+- [ ] GUI interface
+- [ ] Game compatibility testing
+
+## Architecture
+
+ZonistationOne follows a modular architecture with clear separation of concerns:
 
 ```
 src/
-├── main.c              # Main entry point
-└── core/               # Core emulation components
-    ├── system.h        # System definitions and constants
-    ├── emulator.h/c    # Main emulator orchestration
-    ├── logger.h/c      # Logging system
-    ├── memory.h/c      # Memory management
-    ├── cpu.h/c         # MIPS R3000A CPU emulation
-    ├── gpu.h/c         # Graphics processing unit
-    ├── spu.h/c         # Sound processing unit
-    └── cdrom.h/c       # CD-ROM controller
+├── core/        - Main emulator coordination and timing
+├── cpu/         - MIPS R3000A CPU emulation
+├── memory/      - Memory management and address translation
+├── gpu/         - Graphics Processing Unit
+├── spu/         - Sound Processing Unit  
+├── cdrom/       - CD-ROM drive emulation
+└── gui/         - User interface (planned)
+
+include/         - Header files
+build/           - Build artifacts
+external/        - Third-party dependencies
+docs/            - Documentation
 ```
 
 ## Building
 
-### Requirements
+### Prerequisites
 
-- GCC or compatible C compiler
-- Make
-- Standard C libraries
-- Math library (libm)
+- Modern C++ compiler with C++20 support (GCC 10+, Clang 12+, MSVC 2022+)
+- Make or similar build system
+- Development libraries (OpenGL, audio, etc. - to be added)
 
-### Compile
+### Build Instructions
 
 ```bash
-# Build release version
+# Clone the repository
+git clone <your-repo-url>
+cd ZonistationOne-2
+
+# Install dependencies (Ubuntu/Debian)
+make install-deps
+
+# Build the emulator
 make
 
-# Build debug version
+# Or build debug version
 make debug
 
-# Clean build files
-make clean
+# Run with BIOS
+make run-bios
 ```
 
-### Installation
+### Build Targets
 
-```bash
-# Install to system (requires sudo)
-make install
-
-# Uninstall from system
-make uninstall
-```
+- `make all` - Build the emulator (default)
+- `make debug` - Build with debug symbols and logging
+- `make release` - Build optimized release version
+- `make clean` - Clean build artifacts
+- `make run` - Build and run emulator
+- `make run-bios` - Build and run with BIOS file
+- `make help` - Show all available targets
 
 ## Usage
 
-### Basic Usage
-
 ```bash
-# Run emulator
+# Run emulator (basic)
 ./build/zonistation-one
 
-# Show help
-./build/zonistation-one --help
-```
-
-### With BIOS
-
-```bash
 # Load BIOS file
-./build/zonistation-one -b path/to/bios.bin
+./build/zonistation-one bios_files/SCPH1001.BIN
 
-# Verbose logging
-./build/zonistation-one -b path/to/bios.bin -v
-
-# Debug mode
-./build/zonistation-one -b path/to/bios.bin -v -d
+# Load game ISO (planned)
+./build/zonistation-one game.iso
 ```
-
-### Command Line Options
-
-- `-h, --help` - Show help message
-- `-b, --bios <file>` - Specify BIOS file path
-- `-v, --verbose` - Enable verbose logging
-- `-d, --debug` - Enable debug mode
-- `--version` - Show version information
-
-## PlayStation One Hardware
-
-### Technical Specifications
-
-- **CPU**: MIPS R3000A 32-bit RISC @ 33.8688 MHz
-- **Memory**: 2MB main RAM, 1MB video RAM, 512KB sound RAM
-- **GPU**: Custom 2D/3D graphics synthesizer
-- **SPU**: 24-channel ADPCM sound processor
-- **Storage**: CD-ROM (1x speed, 150 KB/s)
-
-### Memory Map
-
-| Address Range | Size | Description |
-|---------------|------|-------------|
-| 0x00000000-0x001FFFFF | 2MB | Main RAM |
-| 0x1F800000-0x1F8003FF | 1KB | Scratchpad |
-| 0x1F801000-0x1F802FFF | 8KB | Hardware Registers |
-| 0x1FC00000-0x1FC7FFFF | 512KB | BIOS ROM |
 
 ## BIOS Files
 
-The emulator requires a PlayStation One BIOS file to function. Common BIOS files:
+You need a PlayStation 1 BIOS file to run the emulator. Place your BIOS file (e.g., `SCPH1001.BIN`) in the `bios_files/` directory. 
 
-- **SCPH1001.BIN** - North America NTSC
-- **SCPH1002.BIN** - Europe PAL  
-- **SCPH1000.BIN** - Japan NTSC
+**Note:** You must own a legal copy of the PlayStation 1 BIOS to use it with this emulator.
 
-Place BIOS files in the `bios_files/` directory or specify the path using the `-b` option.
+## Design Philosophy
 
-## Development Status
+ZonistationOne aims to:
 
-### Implemented ✅
-- Project structure and build system
-- Logging and debugging infrastructure
-- Memory management system
-- Basic CPU framework
-- GPU, SPU, CD-ROM stub implementations
-- Command line interface
+1. **Accuracy First** - Prioritize correct emulation over speed hacks
+2. **Modern C++** - Use contemporary C++ features and best practices
+3. **Clean Architecture** - Maintain clear separation between components
+4. **Extensibility** - Design for easy modification and improvement
+5. **Documentation** - Keep code well-documented and understandable
 
-### TODO 🚧
-- **CPU**: Complete MIPS R3000A instruction set implementation
-- **GPU**: Command processing and rendering pipeline
-- **SPU**: Audio synthesis and ADPCM decoding
-- **CD-ROM**: Disc image loading and sector reading
-- **Controllers**: Input handling and controller protocols
-- **DMA**: Direct memory access between components
-- **Timers**: System timing and interrupt generation
+## Inspiration
 
-### Future Enhancements 🔮
-- Save state support
-- Memory cards
-- Multi-threading
-- Hardware acceleration
-- GUI interface
-- Debugger interface
+This project draws inspiration from:
 
-## Architecture
-
-The emulator follows a modular design inspired by PCSX Redux:
-
-```
-┌─────────────┐
-│    Main     │ - Entry point, command line parsing
-└──────┬──────┘
-       │
-┌──────▼──────┐
-│  Emulator   │ - Central orchestration, timing
-└──────┬──────┘
-       │
-   ┌───┴───┐
-   │       │
-┌──▼─┐  ┌─▼──┐
-│CPU │  │GPU │  - Core components
-└────┘  └────┘
-   │       │
-┌──▼─┐  ┌─▼──┐
-│SPU │  │I/O │  - Audio and peripherals
-└────┘  └────┘
-   │
-┌──▼──────┐
-│ Memory  │ - Unified memory management
-└─────────┘
-```
+- **PCSX-Redux** - Modern PS1 emulator with excellent debugging features
+- **DuckStation** - High-accuracy PS1 emulator
+- **Mednafen** - Multi-system emulator known for accuracy
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+Contributions are welcome! This is a learning project, so:
 
-### Code Style
-
-- Use C99 standard
-- 4-space indentation
-- Clear, descriptive naming
-- Comprehensive error handling
-- Detailed logging for debugging
+- Clean, documented code is preferred
+- Test your changes thoroughly  
+- Follow existing code style
+- Add comments explaining complex emulation logic
 
 ## License
 
-This project is open source. See LICENSE file for details.
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
 
-## Acknowledgments
+## Disclaimer
 
-- **PCSX Redux** - Architectural inspiration and reference implementation
-- **PlayStation Development Community** - Hardware documentation and research
-- **MIPS Technologies** - Processor documentation
-
-## Contact
-
-- Author: ZioZoni95
-- Project: ZonistationOne
-- Repository: [GitHub Link]
+This emulator is for educational and preservation purposes. You must own the original PlayStation 1 BIOS and games to use them with this emulator.
 
 ---
 
-*ZonistationOne - Bringing PlayStation One games back to life through accurate emulation.*
+**ZonistationOne** - Because even PlayStation deserves a fresh take on emulation! 🎮

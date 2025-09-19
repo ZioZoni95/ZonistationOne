@@ -58,6 +58,9 @@
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
   "files.associations": {
     "stdio.h": "c",
-    "debugger.h": "c"
+    "debugger.h": "c",
+    "future": "cpp",
+    "system_error": "cpp",
+    "regex": "cpp"
   }
 }
