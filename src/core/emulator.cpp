@@ -51,6 +51,9 @@ bool Emulator::initialize() {
             return false;
         }
         
+        // Connect CPU to Memory for cache operations
+        m_memory->setCPU(m_cpu.get());
+        
         // Initialize debugger
         m_debugger = std::make_unique<Debugger>(this);
         

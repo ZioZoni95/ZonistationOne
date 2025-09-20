@@ -14,6 +14,9 @@
 namespace ZonistationOne {
     class InterruptController;
     class TimerModule;
+    class MemoryController;
+    class SIOController;
+    class CPU;  // Forward declaration for cache operations
 }
 
 namespace ZonistationOne {
@@ -38,6 +41,9 @@ namespace ZonistationOne {
         
         // BIOS loading
         bool loadBIOS(const std::vector<uint8_t>& biosData);
+        
+        // CPU reference for cache operations
+        void setCPU(CPU* cpu) { m_cpu = cpu; }
         
         // Direct memory access for components
         uint8_t* getRAMPtr() { return m_ram.data(); }
@@ -83,6 +89,7 @@ namespace ZonistationOne {
         // Hardware register offsets (Redux patterns)
         static constexpr uint32_t MEMCTRL_BASE = 0x1f801000;  // Memory control registers
         static constexpr uint32_t RAM_SIZE_REG = 0x1f801060;  // RAM size register
+        static constexpr uint32_t SIO_BASE = 0x1f801040;      // SIO Controller registers
         static constexpr uint32_t IRQ_CTRL_BASE = 0x1f801070; // Interrupt control
         static constexpr uint32_t DMA_BASE = 0x1f801080;      // DMA registers
         static constexpr uint32_t TIMER_BASE = 0x1f801100;    // Timer/Counter registers
@@ -107,6 +114,11 @@ namespace ZonistationOne {
         // Modular hardware components (Redux architecture)
         std::unique_ptr<InterruptController> m_interruptController;
         std::unique_ptr<TimerModule> m_timerModule;
+        std::unique_ptr<MemoryController> m_memoryController;
+        std::unique_ptr<SIOController> m_sioController;
+        
+        // CPU reference for cache operations
+        CPU* m_cpu = nullptr;
         
         bool m_biosLoaded = false;
     };

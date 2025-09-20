@@ -7,6 +7,9 @@
 #include "core/logger.h"
 #include "core/interrupt.h"
 #include "core/timer.h"
+#include "memory/memory_controller.h"
+#include "core/sio_controller.h"
+#include "cpu/r3000a.h"  // For cache operations
 #include <iostream>
 #include <cstring>
 
@@ -29,6 +32,8 @@ Memory::Memory() {
     // Create modular hardware components (Redux architecture)
     m_interruptController = std::make_unique<InterruptController>();
     m_timerModule = std::make_unique<TimerModule>();
+    m_memoryController = std::make_unique<MemoryController>();
+    m_sioController = std::make_unique<SIOController>();
 }
 
 Memory::~Memory() {
@@ -62,6 +67,8 @@ void Memory::reset() {
     // Reset modular hardware components (Redux architecture)
     m_interruptController->reset();
     m_timerModule->reset();
+    m_memoryController->reset();
+    m_sioController->reset();
     
     // Don't reset BIOS as it should persist
 }
@@ -152,6 +159,16 @@ uint32_t Memory::read32(uint32_t address) {
     }
     
     // Hardware registers - delegate to modular components (Redux architecture)
+    // Memory Controller (0x1f801010, 0x1f801014-0x1f80101c, 0x1f801060)  
+    if ((address >= 0x1f801010 && address <= 0x1f80101c) || address == 0x1f801060) {
+        return m_memoryController->readRegister(address);
+    }
+    
+    // SIO Controller (0x1f801040-0x1f80105f)
+    if (address >= 0x1f801040 && address <= 0x1f80105f) {
+        return m_sioController->readRegister(address);
+    }
+    
     // Interrupt Controller (0x1f801070-0x1f801074)
     if (address == IREG || address == IMASK) {
         return m_interruptController->readRegister(address);
@@ -246,11 +263,26 @@ void Memory::write32(uint32_t address, uint32_t value) {
             case 0x00000804:
             case 0x0001e90c:  // TOCA World Touring Cars, FlushCache operation
                 ZONI_LOG_INFO(MEMORY, "BIU: Cache invalidation requested (0x%08x)", value);
-                // TODO: CPU cache invalidation when CPU interface is available
+                // Perform actual cache invalidation if CPU is available
+                if (m_cpu) {
+                    if (value == 0x0001e90c) {
+                        m_cpu->flushCache();  // Full cache flush
+                    } else {
+                        m_cpu->invalidateInstructionCache();
+                        m_cpu->invalidateDataCache();
+                    }
+                } else {
+                    ZONI_LOG_WARN(MEMORY, "Cache invalidation requested but CPU not available");
+                }
                 break;
             case 0x0001e988:
                 ZONI_LOG_INFO(MEMORY, "BIU: Cache configuration set (0x%08x)", value);
-                // TODO: Set memory lookup tables when needed
+                // Configure cache mode if CPU is available
+                if (m_cpu) {
+                    m_cpu->configureCacheMode(value);
+                } else {
+                    ZONI_LOG_WARN(MEMORY, "Cache configuration requested but CPU not available");
+                }
                 break;
             default:
                 ZONI_LOG_DEBUG(MEMORY, "BIU: Unknown cache control value 0x%08x", value);
@@ -260,6 +292,18 @@ void Memory::write32(uint32_t address, uint32_t value) {
     }
     
     // Hardware registers - delegate to modular components (Redux architecture)
+    // Memory Controller (0x1f801010, 0x1f801014-0x1f80101c, 0x1f801060)
+    if ((address >= 0x1f801010 && address <= 0x1f80101c) || address == 0x1f801060) {
+        m_memoryController->writeRegister(address, value);
+        return;
+    }
+    
+    // SIO Controller (0x1f801040-0x1f80105f)
+    if (address >= 0x1f801040 && address <= 0x1f80105f) {
+        m_sioController->writeRegister(address, value);
+        return;
+    }
+    
     // Interrupt Controller (0x1f801070-0x1f801074)
     if (address == IREG || address == IMASK) {
         m_interruptController->writeRegister(address, value);

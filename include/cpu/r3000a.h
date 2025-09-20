@@ -36,6 +36,12 @@ class Memory;    class CPU {
         // Debug
         void dumpState() const;
         
+        // Cache control operations
+        void invalidateInstructionCache();
+        void invalidateDataCache();
+        void flushCache();
+        void configureCacheMode(uint32_t config);
+        
     private:
         void executeInstruction(uint32_t instruction);
         uint32_t fetchInstruction();
@@ -66,14 +72,20 @@ class Memory;    class CPU {
         void handleLW(const InstructionInfo& info);
         void handleLBU(const InstructionInfo& info);
         void handleLHU(const InstructionInfo& info);
+        void handleLWL(const InstructionInfo& info);  // Load Word Left
+        void handleLWR(const InstructionInfo& info);  // Load Word Right
         void handleSB(const InstructionInfo& info);
         void handleSH(const InstructionInfo& info);
         void handleSW(const InstructionInfo& info);
+        void handleSWL(const InstructionInfo& info);  // Store Word Left
         
         // SPECIAL function handlers
         void handleSLL(const InstructionInfo& info);
         void handleSRL(const InstructionInfo& info);
         void handleSRA(const InstructionInfo& info);
+        void handleSLLV(const InstructionInfo& info);
+        void handleSRLV(const InstructionInfo& info);
+        void handleSRAV(const InstructionInfo& info);
         void handleJR(const InstructionInfo& info);
         void handleJALR(const InstructionInfo& info);
         void handleSYSCALL(const InstructionInfo& info);

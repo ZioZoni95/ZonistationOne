@@ -146,6 +146,41 @@ void CPU::dumpState() const {
     ZONI_LOG_INFO(CPU, "  Registers:");
 }
 
+// Cache control operations
+void CPU::invalidateInstructionCache() {
+    ZONI_LOG_INFO(CPU, "Invalidating instruction cache");
+    // R3000A has 4KB instruction cache
+    // For emulation, we don't need to actually implement cache hardware
+    // but we should simulate the timing and behavior effects
+}
+
+void CPU::invalidateDataCache() {
+    ZONI_LOG_INFO(CPU, "Invalidating data cache");
+    // R3000A has 1KB data cache
+    // Similar to instruction cache, simulate without full hardware implementation
+}
+
+void CPU::flushCache() {
+    ZONI_LOG_INFO(CPU, "Flushing all caches");
+    invalidateInstructionCache();
+    invalidateDataCache();
+    // Additional flush operations like write-back if needed
+}
+
+void CPU::configureCacheMode(uint32_t config) {
+    ZONI_LOG_INFO(CPU, "Configuring cache mode: 0x%08x", config);
+    // Handle cache configuration settings
+    // This affects cache behavior but for basic emulation we just log it
+    
+    // Parse configuration bits (based on R3000A documentation)
+    bool icacheEnabled = (config & 0x00000002) == 0;  // Bit 1 inverted
+    bool dcacheEnabled = (config & 0x00000004) == 0;  // Bit 2 inverted
+    
+    ZONI_LOG_INFO(CPU, "Cache configuration - ICache: %s, DCache: %s", 
+                  icacheEnabled ? "enabled" : "disabled",
+                  dcacheEnabled ? "enabled" : "disabled");
+}
+
 // Helper method for unknown instructions
 void CPU::handleUnknownInstruction(uint32_t instruction, uint32_t opcode) {
     static int unknownCount = 0;
@@ -372,6 +407,82 @@ void CPU::handleSW(const InstructionInfo& info) {
         ZONI_LOG_ERROR(CPU, "No memory interface available for SW");
         m_halted = true;
     }
+}
+
+void CPU::handleLWL(const InstructionInfo& info) {
+    // LWL - Load Word Left (unaligned load)
+    // Format: LWL rt, offset(rs)
+    // Operation: Load left portion of word, merge with existing rt value
+    
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t baseAddr = getRegister(info.rs);
+    uint32_t address = baseAddr + static_cast<uint32_t>(info.imm);
+    uint32_t alignedAddr = address & ~0x3; // Word-aligned address
+    uint32_t shift = (address & 0x3) * 8;   // Byte offset * 8
+    
+    // Load aligned word from memory
+    uint32_t memValue = m_memory->read32(alignedAddr);
+    uint32_t currentValue = getRegister(info.rt);
+    
+    // Extract left portion and merge with right portion of current register
+    uint32_t mask = (0xFFFFFFFF << (32 - shift)) & 0xFFFFFFFF;
+    uint32_t result = (memValue << (32 - shift)) | (currentValue & ~mask);
+    
+    ZONI_LOG_CPU_INSTRUCTION("LWL R%d, %d(R%d) [0x%08x] (aligned: 0x%08x, shift: %d)", 
+                             info.rt, info.imm, info.rs, address, alignedAddr, shift);
+    
+    setRegister(info.rt, result);
+}
+
+void CPU::handleLWR(const InstructionInfo& info) {
+    // LWR - Load Word Right (unaligned load)
+    // Format: LWR rt, offset(rs)
+    // Operation: Load right portion of word, merge with existing rt value
+    
+    if (info.rt == 0) return; // Can't write to register 0
+    
+    uint32_t baseAddr = getRegister(info.rs);
+    uint32_t address = baseAddr + static_cast<uint32_t>(info.imm);
+    uint32_t alignedAddr = address & ~0x3; // Word-aligned address
+    uint32_t shift = (address & 0x3) * 8;   // Byte offset * 8
+    
+    // Load aligned word from memory
+    uint32_t memValue = m_memory->read32(alignedAddr);
+    uint32_t currentValue = getRegister(info.rt);
+    
+    // Extract right portion and merge with left portion of current register
+    uint32_t mask = 0xFFFFFFFF >> (24 - shift);
+    uint32_t result = (memValue >> shift) | (currentValue & ~mask);
+    
+    ZONI_LOG_CPU_INSTRUCTION("LWR R%d, %d(R%d) [0x%08x] (aligned: 0x%08x, shift: %d)", 
+                             info.rt, info.imm, info.rs, address, alignedAddr, shift);
+    
+    setRegister(info.rt, result);
+}
+
+void CPU::handleSWL(const InstructionInfo& info) {
+    // SWL - Store Word Left (unaligned store)
+    // Format: SWL rt, offset(rs)
+    // Operation: Store left portion of rt to memory, preserving other bytes
+    
+    uint32_t baseAddr = getRegister(info.rs);
+    uint32_t address = baseAddr + static_cast<uint32_t>(info.imm);
+    uint32_t alignedAddr = address & ~0x3; // Word-aligned address
+    uint32_t shift = (address & 0x3) * 8;   // Byte offset * 8
+    uint32_t value = getRegister(info.rt);
+    
+    // Load current aligned word
+    uint32_t memValue = m_memory->read32(alignedAddr);
+    
+    // Create mask and merge
+    uint32_t mask = 0xFFFFFFFF >> (32 - shift);
+    uint32_t result = (memValue & mask) | (value >> (32 - shift));
+    
+    ZONI_LOG_CPU_INSTRUCTION("SWL R%d, %d(R%d) [0x%08x] (aligned: 0x%08x, shift: %d)", 
+                             info.rt, info.imm, info.rs, address, alignedAddr, shift);
+    
+    m_memory->write32(alignedAddr, result);
 }
 
 void CPU::handleLW(const InstructionInfo& info) {
@@ -704,6 +815,57 @@ void CPU::handleSRL(const InstructionInfo& info) {
     setRegister(info.rd, result);
 }
 
+void CPU::handleSLLV(const InstructionInfo& info) {
+    // SLLV - Shift Left Logical Variable
+    // Format: SLLV rd, rt, rs
+    // Operation: GPR[rd] = GPR[rt] << GPR[rs][4:0]
+    
+    if (info.rd == 0) return; // Can't write to register 0
+    
+    uint32_t value = getRegister(info.rt);
+    uint32_t shamt = getRegister(info.rs) & 0x1F; // Only lower 5 bits used
+    uint32_t result = value << shamt;
+    
+    ZONI_LOG_CPU_INSTRUCTION("SLLV R%d, R%d, R%d (0x%08x << %d = 0x%08x)", 
+                             info.rd, info.rt, info.rs, value, shamt, result);
+    
+    setRegister(info.rd, result);
+}
+
+void CPU::handleSRLV(const InstructionInfo& info) {
+    // SRLV - Shift Right Logical Variable
+    // Format: SRLV rd, rt, rs
+    // Operation: GPR[rd] = GPR[rt] >> GPR[rs][4:0] (logical shift, zero-fill)
+    
+    if (info.rd == 0) return; // Can't write to register 0
+    
+    uint32_t value = getRegister(info.rt);
+    uint32_t shamt = getRegister(info.rs) & 0x1F; // Only lower 5 bits used
+    uint32_t result = value >> shamt;
+    
+    ZONI_LOG_CPU_INSTRUCTION("SRLV R%d, R%d, R%d (0x%08x >> %d = 0x%08x)", 
+                             info.rd, info.rt, info.rs, value, shamt, result);
+    
+    setRegister(info.rd, result);
+}
+
+void CPU::handleSRAV(const InstructionInfo& info) {
+    // SRAV - Shift Right Arithmetic Variable  
+    // Format: SRAV rd, rt, rs
+    // Operation: GPR[rd] = GPR[rt] >> GPR[rs][4:0] (arithmetic shift, sign extend)
+    
+    if (info.rd == 0) return; // Can't write to register 0
+    
+    int32_t value = static_cast<int32_t>(getRegister(info.rt));
+    uint32_t shamt = getRegister(info.rs) & 0x1F; // Only lower 5 bits used
+    int32_t result = value >> shamt; // Arithmetic shift preserves sign
+    
+    ZONI_LOG_CPU_INSTRUCTION("SRAV R%d, R%d, R%d (0x%08x >> %d = 0x%08x)", 
+                             info.rd, info.rt, info.rs, static_cast<uint32_t>(value), shamt, static_cast<uint32_t>(result));
+    
+    setRegister(info.rd, static_cast<uint32_t>(result));
+}
+
 void CPU::handleADD(const InstructionInfo& info) {
     // ADD - Add Word
     // Format: ADD rd, rs, rt  
@@ -923,15 +1085,15 @@ const CPU::InstructionHandler CPU::s_primaryHandlers[64] = {
     nullptr, nullptr, nullptr, nullptr,    // 0x1C-0x1F - Reserved
     &CPU::handleLB,         // 0x20 - LB
     &CPU::handleLH,         // 0x21 - LH
-    nullptr,                // 0x22 - LWL
+    &CPU::handleLWL,        // 0x22 - LWL
     &CPU::handleLW,         // 0x23 - LW
     &CPU::handleLBU,        // 0x24 - LBU
     &CPU::handleLHU,        // 0x25 - LHU
-    nullptr,                // 0x26 - LWR
+    &CPU::handleLWR,        // 0x26 - LWR
     nullptr,                // 0x27 - Reserved
     &CPU::handleSB,         // 0x28 - SB
     &CPU::handleSH,         // 0x29 - SH
-    nullptr,                // 0x2A - SWL
+    &CPU::handleSWL,        // 0x2A - SWL
     &CPU::handleSW,         // 0x2B - SW
     nullptr, nullptr, nullptr, nullptr,    // 0x2C-0x2F - Reserved/SWR
     nullptr, nullptr, nullptr, nullptr,    // 0x30-0x33 - Reserved/LWC2
@@ -945,10 +1107,10 @@ const CPU::InstructionHandler CPU::s_specialHandlers[64] = {
     nullptr,                // 0x01 - Reserved
     &CPU::handleSRL,        // 0x02 - SRL
     &CPU::handleSRA,        // 0x03 - SRA
-    nullptr,                // 0x04 - SLLV
+    &CPU::handleSLLV,       // 0x04 - SLLV
     nullptr,                // 0x05 - Reserved
-    nullptr,                // 0x06 - SRLV
-    nullptr,                // 0x07 - SRAV
+    &CPU::handleSRLV,       // 0x06 - SRLV
+    &CPU::handleSRAV,       // 0x07 - SRAV
     &CPU::handleJR,         // 0x08 - JR
     &CPU::handleJALR,       // 0x09 - JALR
     nullptr, nullptr,       // 0x0A-0x0B - Reserved
