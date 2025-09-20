@@ -47,6 +47,9 @@ namespace ZonistationOne {
         std::array<uint8_t, 512 * 1024> m_bios;          // 512KB BIOS ROM
         std::array<uint8_t, 8 * 1024> m_scratchpad;      // 1KB scratchpad
         
+        // Hardware registers
+        uint32_t m_biuConfig = 0;                         // BIU_CONFIG register at 0xfffe0130
+        
         // Memory map constants
         static constexpr uint32_t RAM_BASE    = 0x00000000;
         static constexpr uint32_t RAM_SIZE    = 0x00200000;  // 2MB
@@ -60,6 +63,9 @@ namespace ZonistationOne {
         // I/O region
         static constexpr uint32_t IO_BASE = 0x1F801000;
         static constexpr uint32_t IO_SIZE = 0x00001000;
+        
+        // Special addresses
+        static constexpr uint32_t BIU_CONFIG = 0xfffe0130;
         
         bool m_biosLoaded = false;
     };

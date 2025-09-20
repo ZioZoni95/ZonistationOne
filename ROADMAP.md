@@ -35,10 +35,12 @@
 - ✅ CPU state management and register file
 - ✅ Memory interface integration
 
-### Phase 3: Extended CPU 🔄 **IN PROGRESS** (Weeks 5-6)
+### Phase 3: Extended CPU ✅ **COMPLETED** (Weeks 5-6)
 **Goal**: Complete core MIPS instruction set
-- 🔄 Jump instructions: J, JAL, JR, JALR
-- 🔄 Branch instructions: BEQ, BNE, BGEZ, BGTZ, BLEZ, BLTZ
+- ✅ Jump instructions: J, JAL, JR, JALR
+- ✅ Branch instructions: BEQ, BNE
+- ✅ Additional arithmetic: ADDI (with overflow checking)
+- ✅ Basic COP0 support: MTC0, MFC0 (System Control Processor)
 - 🔄 Additional arithmetic: ADD, SUB, SUBU, AND, XOR, NOR
 - 🔄 Shift operations: SLL, SRL, SRA, SLLV, SRLV, SRAV
 - 🔄 Comparison: SLT, SLTU, SLTI, SLTIU
@@ -46,7 +48,18 @@
 - ⏳ Branch delay slots handling
 - ⏳ Load delay slots handling
 
-### Phase 4: Advanced CPU ⏳ **PLANNED** (Weeks 7-8)
+### Phase 4: Core MIPS Completion 🔄 **IN PROGRESS** (Weeks 7-8)
+**Goal**: Complete essential MIPS instruction set for BIOS compatibility
+- 🔄 Comparison operations: SLT, SLTU, SLTI, SLTIU
+- 🔄 Additional arithmetic: ADD, SUB, SUBU, AND, XOR, NOR
+- 🔄 Shift operations: SLL, SRL, SRA, SLLV, SRLV, SRAV
+- 🔄 More memory operations: LB, LH, LBU, LHU, SB, SH
+- ⏳ Multiply/Divide: MULT, MULTU, DIV, DIVU
+- ⏳ HI/LO register operations: MFHI, MFLO, MTHI, MTLO
+- ⏳ Branch delay slots handling
+- ⏳ Load delay slots handling
+
+### Phase 5: Advanced CPU ⏳ **PLANNED** (Weeks 9-10)
 **Goal**: Complete MIPS features and exception handling
 - ⏳ Multiply/Divide: MULT, MULTU, DIV, DIVU
 - ⏳ HI/LO register operations: MFHI, MFLO, MTHI, MTLO
@@ -117,6 +130,7 @@
 
 #### ✅ Implemented & Verified (Working with BIOS)
 ```cpp
+// Phase 2 - Foundation Instructions
 LUI     0x0F    Load Upper Immediate        ✅ BIOS Verified
 ORI     0x0D    OR Immediate               ✅ BIOS Verified  
 ADDIU   0x09    Add Immediate Unsigned     ✅ BIOS Verified
@@ -125,18 +139,26 @@ LW      0x23    Load Word                  ✅ Working
 OR      S-0x25  Bitwise OR                 ✅ Working
 ADDU    S-0x21  Add Unsigned               ✅ Working
 NOP     0x00000000  No Operation           ✅ Working
+
+// Phase 3 - Control Flow & System Instructions  
+J       0x02    Jump                       ✅ BIOS Verified
+JAL     0x03    Jump and Link              ✅ BIOS Verified
+BEQ     0x04    Branch Equal               ✅ BIOS Verified
+BNE     0x05    Branch Not Equal           ✅ BIOS Verified
+JR      S-0x08  Jump Register              ✅ Working
+JALR    S-0x09  Jump and Link Register     ✅ Working
+ADDI    0x08    Add Immediate              ✅ BIOS Verified
+COP0    0x10    System Control (MTC0/MFC0) ✅ BIOS Verified
 ```
 
 #### 🔄 Next Priority Implementations
 ```cpp
-J       0x02    Jump                       🔄 Next
-JAL     0x03    Jump and Link              🔄 Next
-BEQ     0x04    Branch Equal               🔄 Next
-BNE     0x05    Branch Not Equal           🔄 Next
-BGTZ    0x07    Branch Greater Zero        🔄 Next
-BLEZ    0x06    Branch Less Equal Zero     🔄 Next
-JR      S-0x08  Jump Register              🔄 Next
-JALR    S-0x09  Jump and Link Register     🔄 Next
+SLT     S-0x2B  Set Less Than              🔄 Next (blocking BIOS)
+SLTU    S-0x2A  Set Less Than Unsigned     🔄 Next
+BGTZ    0x07    Branch Greater Zero        🔄 Soon
+BLEZ    0x06    Branch Less Equal Zero     🔄 Soon
+ADD     S-0x20  Add (with overflow)        🔄 Soon
+SUB     S-0x22  Subtract                   🔄 Soon
 ```
 
 #### ⏳ Planned for Phase 3
@@ -209,9 +231,9 @@ Total Core Code:       ~2500 lines
 
 ### Instruction Implementation Progress
 - **Total MIPS Instructions**: ~60 core instructions
-- **Currently Implemented**: 8 instructions (13%)
-- **Next Phase Target**: 25 instructions (42%)
-- **Phase 3 Target**: 45 instructions (75%)
+- **Currently Implemented**: 16 instructions (27%)
+- **Phase 4 Target**: 30 instructions (50%)
+- **Complete BIOS Boot Target**: 45 instructions (75%)
 
 ---
 

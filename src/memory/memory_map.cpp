@@ -59,7 +59,7 @@ bool Memory::isValidAddress(uint32_t address) {
     address = translateAddress(address);
     
     // Check if address falls within any valid region
-    if (address >= RAM_BASE && address < RAM_BASE + RAM_SIZE) return true;
+    if (address >= RAM_BASE && address < 0x00800000) return true;  // 8MB mirrored RAM
     if (address >= BIOS_BASE && address < BIOS_BASE + BIOS_SIZE) return true;
     if (address >= SCRATCH_BASE && address < SCRATCH_BASE + SCRATCH_SIZE) return true;
     if (address >= IO_BASE && address < IO_BASE + IO_SIZE) return true;
@@ -70,9 +70,10 @@ bool Memory::isValidAddress(uint32_t address) {
 uint8_t Memory::read8(uint32_t address) {
     uint32_t translatedAddr = translateAddress(address);
     
-    // RAM region
-    if (translatedAddr >= RAM_BASE && translatedAddr < RAM_BASE + RAM_SIZE) {
-        return m_ram[translatedAddr - RAM_BASE];
+    // RAM region with mirroring - PS1 2MB RAM is mirrored every 2MB up to 8MB
+    if (translatedAddr >= RAM_BASE && translatedAddr < 0x00800000) {  // 8MB range
+        uint32_t ramOffset = (translatedAddr - RAM_BASE) % RAM_SIZE;  // Mirror every 2MB
+        return m_ram[ramOffset];
     }
     
     // BIOS region
@@ -119,9 +120,10 @@ uint32_t Memory::read32(uint32_t address) {
 void Memory::write8(uint32_t address, uint8_t value) {
     uint32_t translatedAddr = translateAddress(address);
     
-    // RAM region
-    if (translatedAddr >= RAM_BASE && translatedAddr < RAM_BASE + RAM_SIZE) {
-        m_ram[translatedAddr - RAM_BASE] = value;
+    // RAM region with mirroring - PS1 2MB RAM is mirrored every 2MB up to 8MB
+    if (translatedAddr >= RAM_BASE && translatedAddr < 0x00800000) {  // 8MB range
+        uint32_t ramOffset = (translatedAddr - RAM_BASE) % RAM_SIZE;  // Mirror every 2MB
+        m_ram[ramOffset] = value;
         return;
     }
     
@@ -143,17 +145,43 @@ void Memory::write8(uint32_t address, uint8_t value) {
         return;
     }
     
-    ZONI_LOG_ERROR(MEMORY, "Invalid write8 to address 0x%08x", address);
+    // BIU_CONFIG register - handle partial writes
+    if (translatedAddr >= BIU_CONFIG && translatedAddr < BIU_CONFIG + 4) {
+        ZONI_LOG_WARN(MEMORY, "8-bit write to BIU_CONFIG[%d] at 0x%08x = 0x%02x (ignored)", 
+                      translatedAddr - BIU_CONFIG, address, value);
+        return;
+    }
+    
+    // Unknown address - log but don't crash
+    ZONI_LOG_WARN(MEMORY, "8-bit write to unknown address 0x%08x = 0x%02x (ignored)", address, value);
 }
 
 void Memory::write16(uint32_t address, uint16_t value) {
-    // Simple implementation - write two bytes
+    uint32_t translatedAddr = translateAddress(address);
+    
+    // Special handling for BIU_CONFIG register
+    if (translatedAddr == BIU_CONFIG || translatedAddr == BIU_CONFIG + 2) {
+        ZONI_LOG_WARN(MEMORY, "16-bit write to BIU_CONFIG at 0x%08x = 0x%04x (ignored)", address, value);
+        return;
+    }
+    
+    // Default implementation - write two bytes
     write8(address, value & 0xFF);
     write8(address + 1, (value >> 8) & 0xFF);
 }
 
 void Memory::write32(uint32_t address, uint32_t value) {
-    // Simple implementation - write four bytes
+    uint32_t translatedAddr = translateAddress(address);
+    
+    // Special handling for BIU_CONFIG register
+    if (translatedAddr == BIU_CONFIG) {
+        ZONI_LOG_DEBUG(MEMORY, "32-bit write to BIU_CONFIG at 0x%08x = 0x%08x", address, value);
+        m_biuConfig = value;
+        // TODO: Handle cache invalidation and other BIU_CONFIG effects
+        return;
+    }
+    
+    // Default implementation - write four bytes
     write8(address, value & 0xFF);
     write8(address + 1, (value >> 8) & 0xFF);
     write8(address + 2, (value >> 16) & 0xFF);
@@ -168,7 +196,10 @@ bool Memory::loadBIOS(const std::vector<uint8_t>& biosData) {
     }
     
     ZONI_LOG_INFO(MEMORY, "Loading BIOS into memory...");
-    std::memcpy(m_bios.data(), biosData.data(), BIOS_SIZE);
+    // Copy BIOS data
+    for (size_t i = 0; i < BIOS_SIZE; ++i) {
+        m_bios[i] = biosData[i];
+    }
     m_biosLoaded = true;
     
     ZONI_LOG_INFO(MEMORY, "BIOS loaded successfully");

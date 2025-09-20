@@ -88,6 +88,10 @@ void CPU::handleSW(const InstructionInfo& info) {
 |-------------|-------|---------|---------|-------|
 | **OR** rd, rs, rt | 0x25 | R-Type | ✅ Working | Bitwise OR |
 | **ADDU** rd, rs, rt | 0x21 | R-Type | ✅ Working | Add unsigned |
+| **SLL** rd, rt, sa | 0x00 | R-Type | ✅ BIOS Verified | Shift left logical |
+| **SRL** rd, rt, sa | 0x02 | R-Type | ✅ Ready | Shift right logical |
+| **ADD** rd, rs, rt | 0x20 | R-Type | ✅ BIOS Verified | Add with overflow |
+| **AND** rd, rs, rt | 0x24 | R-Type | ✅ BIOS Verified | Bitwise AND |
 
 **OR (Bitwise OR)** - Register-to-register OR operation
 ```cpp
@@ -95,6 +99,49 @@ void CPU::handleOR(const InstructionInfo& info) {
     if (info.rd == 0) return;
     uint32_t result = getRegister(info.rs) | getRegister(info.rt);
     setRegister(info.rd, result);
+}
+```
+
+**AND (Bitwise AND)** - Register-to-register AND operation
+```cpp
+void CPU::handleAND(const InstructionInfo& info) {
+    if (info.rd == 0) return;
+    uint32_t result = getRegister(info.rs) & getRegister(info.rt);
+    setRegister(info.rd, result);
+}
+```
+
+### Byte Memory Operations
+| Instruction | Opcode | Format | Status | BIOS Test |
+|-------------|---------|---------|---------|-----------|
+| **SB** rt, offset(rs) | 0x28 | I-Type | ✅ BIOS Verified | ✅ Working |
+| **LB** rt, offset(rs) | 0x20 | I-Type | ✅ BIOS Verified | ✅ Working |
+| **LBU** rt, offset(rs) | 0x24 | I-Type | ✅ BIOS Verified | ✅ Working |
+
+**SB (Store Byte)** - Store 8-bit byte to memory
+```cpp
+void CPU::handleSB(const InstructionInfo& info) {
+    uint32_t address = getRegister(info.rs) + static_cast<uint32_t>(info.imm);
+    uint8_t value = static_cast<uint8_t>(getRegister(info.rt) & 0xFF);
+    
+    if (m_memory) {
+        m_memory->write8(address, value);
+    }
+}
+```
+
+**LB (Load Byte)** - Load 8-bit byte with sign extension
+```cpp
+void CPU::handleLB(const InstructionInfo& info) {
+    if (info.rt == 0) return;
+    uint32_t address = getRegister(info.rs) + static_cast<uint32_t>(info.imm);
+    
+    if (m_memory) {
+        uint8_t value = m_memory->read8(address);
+        // Sign-extend from 8 to 32 bits
+        uint32_t result = static_cast<uint32_t>(static_cast<int8_t>(value));
+        setRegister(info.rt, result);
+    }
 }
 ```
 

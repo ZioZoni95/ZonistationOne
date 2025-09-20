@@ -60,6 +60,7 @@ class Memory;    class CPU {
         void handleORI(const InstructionInfo& info);
         void handleXORI(const InstructionInfo& info);
         void handleLUI(const InstructionInfo& info);
+        void handleCOP0(const InstructionInfo& info);  // Coprocessor 0 (System Control)
         void handleLB(const InstructionInfo& info);
         void handleLH(const InstructionInfo& info);
         void handleLW(const InstructionInfo& info);
