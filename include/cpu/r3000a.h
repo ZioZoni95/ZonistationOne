@@ -97,6 +97,24 @@ class Memory;    class CPU {
         void handleSLT(const InstructionInfo& info);
         void handleSLTU(const InstructionInfo& info);
         
+        // Exception handling (following PCSX-Redux patterns)
+        enum class Exception : uint32_t {
+            Interrupt = 0,
+            LoadAddressError = 4,
+            StoreAddressError = 5,
+            InstructionBusError = 6,
+            DataBusError = 7,
+            Syscall = 8,
+            Break = 9,
+            ReservedInstruction = 10,
+            CoprocessorUnusable = 11,
+            ArithmeticOverflow = 12,
+        };
+        
+        void exception(Exception e, bool inDelaySlot = false);
+        void exception(uint32_t code, bool inDelaySlot = false);
+        void branchTest(); // Check for interrupts
+        
         // Helper methods
         void handleUnknownInstruction(uint32_t instruction, uint32_t opcode);
         
@@ -118,6 +136,7 @@ class Memory;    class CPU {
         bool m_halted;
         uint64_t m_cycleCount;
         bool m_delaySlot;
+        bool m_inInterruptServiceRoutine;  // Track if we're in ISR
         
         // Constants
         static constexpr uint32_t RESET_VECTOR = 0xBFC00000;

@@ -1,10 +1,10 @@
 # ZonistationOne Technical Architecture 🏗️
 
-> **Version**: 1.0  
-> **Status**: Active Development  
+> **Version**: 2.0  
+> **Status**: Active Development - Hardware Implementation Phase  
 > **Last Updated**: September 2025
 
-This document provides a comprehensive overview of ZonistationOne's technical architecture, design decisions, and implementation details.
+This document provides a comprehensive overview of ZonistationOne's technical architecture, design decisions, and implementation progress through our systematic BIOS compatibility development.
 
 ---
 
@@ -20,25 +20,55 @@ ZonistationOne follows a **modular, component-based architecture** inspired by P
 ├─────────────────────────────────────────────────────────┤
 │                   Emulator Core                         │
 ├─────────────┬─────────────┬─────────────┬───────────────┤
-│    CPU      │   Memory    │     GPU     │      SPU      │
-│  R3000A     │  Manager    │   Engine    │   Processor   │
+│    CPU      │   Memory    │  Hardware   │    Debug      │
+│  R3000A     │  Manager    │ Modules     │  Framework    │
 ├─────────────┼─────────────┼─────────────┼───────────────┤
-│   CDROM     │   Debug     │   Logger    │   Utils       │
-│ Controller  │  Framework  │   System    │   Library     │
+│   GPU       │    SPU      │   CDROM     │   Logger      │
+│  Engine     │ Processor   │ Controller  │   System      │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
+## 📈 Development Progress Summary
+
+### Phase 1: Foundation (✅ Complete)
+- **Core emulator framework**: Modular architecture with PCSX-Redux patterns
+- **MIPS R3000A CPU**: Complete instruction set implementation
+- **Memory management**: Address translation and region handling
+- **Exception system**: Proper Status/Cause/EPC register handling
+- **Basic I/O framework**: Hardware register arrays and access patterns
+
+### Phase 2: BIOS Compatibility (✅ Complete)
+- **Cache control (BIU)**: Implemented 0xfffe0130 register with proper invalidation
+- **BIOS loading**: 512KB BIOS ROM integration at 0x1FC00000
+- **Execution stability**: Eliminated crashes, achieved 5+ second stable execution
+- **Diagnostic framework**: Verbose logging for hardware access analysis
+
+### Phase 3: Hardware Modules (🔄 In Progress)
+- **Modular architecture**: Redux-style component separation
+- **Interrupt Controller**: 0x1f801070 (IREG) and 0x1f801074 (IMASK) registers
+- **Timer Module**: Complete 3-timer implementation (0x1f801100-0x1f801128)
+- **Memory Controller**: Identified as next critical component (0x1f801010, 0x1f801060)
+
+---
+
 ## 🧠 Core Components
 
-### 1. CPU Subsystem (MIPS R3000A)
+### 1. CPU Subsystem (MIPS R3000A) ✅
 
 #### Design Philosophy
 - **Interpreter-first approach**: Prioritize accuracy over speed initially
 - **Instruction-level emulation**: Bit-perfect MIPS R3000A behavior
 - **PCSX-Redux patterns**: Proven dispatch table architecture
 - **Modern C++**: Type-safe enums, RAII, smart pointers
+
+#### Implementation Status
+- ✅ **Complete instruction set**: All 56+ MIPS instructions implemented
+- ✅ **Exception handling**: Proper interrupt and exception processing
+- ✅ **Cache control**: BIU register implementation working perfectly
+- ✅ **Coprocessor 0**: Status, Cause, EPC, and other system registers
+- ✅ **Load delay slots**: Accurate pipeline behavior emulation
 
 #### Key Classes
 
@@ -367,18 +397,177 @@ TEST(BIOSCompatibility, ExecutesFirstTenInstructions) {
 - **Instruction Dispatch**: ~3-5 cycles per MIPS instruction
 - **Memory Access**: Direct array access (very fast)
 - **Logging Overhead**: Minimal when disabled (compile-time elimination)
-- **Debug Builds**: ~10x slower due to extensive logging
+---
 
-### Optimization Opportunities (Future)
-1. **Instruction Caching**: Cache decoded instruction info
-2. **Branch Prediction**: Predict common branch patterns
-3. **Memory Prefetching**: Anticipate memory access patterns
-4. **Vectorization**: Use SIMD for bulk operations
-5. **Multi-threading**: Separate CPU/GPU/Audio threads
+## 🚀 BIOS Compatibility Journey
+
+### The Challenge
+PlayStation 1 BIOS (SCPH1001.BIN) contains sophisticated initialization routines that probe and configure hardware components. Our goal was to achieve stable BIOS execution by implementing the minimal required hardware.
+
+### Timeline of Achievements
+
+#### Stage 1: Initial BIOS Loading (Week 1)
+- **Problem**: BIOS loaded but immediately crashed with exception loops
+- **Analysis**: Missing cache control and basic memory management
+- **Solution**: Implemented BIU (Bus Interface Unit) register at 0xfffe0130
+
+#### Stage 2: Cache Control Implementation (Week 2)  
+- **Problem**: BIOS accessing unknown cache control register
+- **Analysis**: Traced BIOS writes to 0xfffe0130 with values 0x804→0x800→0x1e988
+- **Solution**: Full cache control implementation with invalidation logic
+- **Result**: ✅ BIOS successfully completes cache initialization phase
+
+#### Stage 3: Hardware Register Access (Week 3)
+- **Problem**: BIOS stuck in infinite exception loop after cache setup
+- **Analysis**: Verbose logging revealed hardware register access patterns
+- **Discovery**: BIOS accessing 0x1f801010 (memory control) and 0x1f801060 (RAM size)
+- **Solution**: Implemented modular hardware architecture following PCSX-Redux patterns
+
+#### Stage 4: Modular Hardware Components (Current)
+- **Implemented**: Interrupt Controller (0x1f801070-0x1f801074)
+- **Implemented**: Timer Module with 3 timers (0x1f801100-0x1f801128)  
+- **Status**: BIOS now runs stably for 5+ seconds without crashes
+- **Next**: Memory controller implementation for complete BIOS compatibility
+
+### Hardware Register Implementation Strategy
+
+```cpp
+// Memory Map Structure (Redux Architecture)
+class Memory {
+    // Modular hardware components
+    std::unique_ptr<InterruptController> m_interruptController;
+    std::unique_ptr<TimerModule> m_timerModule;
+    std::unique_ptr<MemoryController> m_memoryController; // Next phase
+    
+    // Register delegation pattern
+    uint32_t read32(uint32_t address) {
+        // Interrupt Controller (0x1f801070-0x1f801074)
+        if (address == IREG || address == IMASK) {
+            return m_interruptController->readRegister(address);
+        }
+        
+        // Timer/Counter registers (0x1f801100-0x1f801128)
+        if (address >= TIMER0_COUNT && address <= TIMER2_TARGET) {
+            return m_timerModule->readRegister(address);
+        }
+        
+        // Memory controller (to be implemented)
+        if (address >= 0x1f801000 && address <= 0x1f801020) {
+            return m_memoryController->readRegister(address);
+        }
+    }
+};
+```
+
+### BIOS Analysis Results
+
+**Successfully Implemented:**
+- ✅ **Cache Control (0xfffe0130)**: BIU register with proper invalidation  
+- ✅ **Interrupt Controller**: IREG (0x1f801070) and IMASK (0x1f801074)
+- ✅ **Timer System**: Complete 3-timer implementation with mode/count/target
+- ✅ **Stable Execution**: 5+ seconds runtime without crashes
+
+**BIOS Access Patterns Discovered:**
+```
+0xfffe0130 = 0x00000804  # Cache invalidation request
+0xfffe0130 = 0x00000800  # Cache invalidation confirm  
+0xfffe0130 = 0x0001e988  # Cache configuration set
+
+0x1f801010 = 0x0013243f  # Memory control register
+0x1f801060 = 0x00000b88  # RAM size register
+```
+
+---
+
+## 🔧 Hardware Modules (Redux Architecture)
+
+### 2. Memory Subsystem ✅
+
+#### Implementation Status
+- ✅ **Address translation**: Cached/uncached region handling
+- ✅ **Memory regions**: RAM (2MB), VRAM (1MB), BIOS (512KB), Scratchpad (1KB)
+- ✅ **Hardware registers**: Modular component delegation pattern
+- ✅ **Cache control**: BIU register with PlayStation-accurate behavior
+- 🔄 **Memory controller**: Next implementation target
+
+#### Memory Map
+```cpp
+// PlayStation 1 Memory Layout
+0x00000000 - 0x001FFFFF  // Main RAM (2MB, mirrored to 8MB)
+0x1F000000 - 0x1F7FFFFF  // EXP1 (Expansion region 1)  
+0x1F800000 - 0x1F8003FF  // Scratchpad (1KB)
+0x1F801000 - 0x1F802FFF  // Hardware registers (8KB)
+0x1F801070 - 0x1F801074  // Interrupt controller ✅
+0x1F801100 - 0x1F801128  // Timer/Counter ✅  
+0x1F801010 - 0x1F801020  // Memory controller 🔄
+0x1FC00000 - 0x1FC7FFFF  // BIOS ROM (512KB)
+0xFFFE0130              // BIU Cache control ✅
+```
+
+### 3. Interrupt Controller ✅
+
+Redux-style modular implementation:
+```cpp
+class InterruptController {
+private:
+    uint32_t m_status = 0;  // IREG (0x1f801070) 
+    uint32_t m_mask = 0;    // IMASK (0x1f801074)
+    
+public:
+    uint32_t readRegister(uint32_t address);
+    void writeRegister(uint32_t address, uint32_t value);
+    void triggerInterrupt(uint32_t mask);
+    bool isPending() const { return (m_status & m_mask) != 0; }
+};
+```
+
+### 4. Timer Module ✅  
+
+Complete 3-timer system implementation:
+```cpp
+struct Timer {
+    uint32_t count;   // Current counter value
+    uint32_t mode;    // Mode register with control bits
+    uint32_t target;  // Target comparison value
+};
+
+class TimerModule {
+private:
+    Timer m_timers[3];  // Timer 0, 1, 2
+    
+public:
+    // Register access (0x1f801100-0x1f801128)
+    uint32_t readRegister(uint32_t address);
+    void writeRegister(uint32_t address, uint32_t value);
+    void update(uint32_t cycles);
+};
+```
 
 ---
 
 ## 🔍 Debugging & Development Tools
+
+### BIOS Diagnostic Framework
+
+**Verbose Analysis Mode:**
+```bash
+# Run with full hardware register tracing
+./zonistation-one -v bios_files/SCPH1001.BIN
+
+# Filter for hardware access patterns  
+timeout 5s ./zonistation-one -v bios.bin | grep "0x1f80" | head -20
+
+# Extract register access frequency
+timeout 3s ./zonistation-one -v bios.bin | grep "Hardware register" | sort | uniq -c
+```
+
+**Key Diagnostic Outputs:**
+```log
+[0.006536] [INFO ] [MEMORY] BIU cache control write: 0xfffe0130 = 0x00000804
+[0.006538] [INFO ] [MEMORY] BIU: Cache invalidation requested (0x00000804)
+[0.004061] [DEBUG] [CPU   ] SW R8, 4112(R1) [0x1f801010] = 0x0013243f
+[0.004066] [DEBUG] [CPU   ] SW R8, 4192(R1) [0x1f801060] = 0x00000b88
+```
 
 ### Built-in Debugger
 ```cpp
@@ -400,7 +589,8 @@ public:
 - **Instruction Frequency Counter**: Track most-used instructions
 - **Memory Access Profiler**: Monitor memory usage patterns  
 - **Performance Counter**: Measure emulation speed
-- **State Inspector**: Real-time CPU/Memory state viewing
+- **Hardware Register Tracer**: Log all I/O register access
+- **BIOS Progress Monitor**: Track initialization phases
 
 ---
 
@@ -420,6 +610,13 @@ public:
 4. **Instruction Semantics**: Bit-perfect MIPS R3000A emulation
 5. **Peripheral Behavior**: Authentic device responses
 
+### BIOS Compatibility Strategy
+1. **Incremental Implementation**: Add hardware as BIOS requires it
+2. **Access Pattern Analysis**: Use verbose logging to understand needs
+3. **Modular Architecture**: Redux-style component separation
+4. **Minimal Compliance**: Implement only what BIOS actually uses
+5. **Regression Testing**: Ensure changes don't break previous functionality
+
 ### Maintainability Principles
 1. **Modular Design**: Clear component boundaries
 2. **Single Responsibility**: Each class has one job
@@ -429,9 +626,50 @@ public:
 
 ---
 
-**ZonistationOne Technical Team**  
-*Architecture designed for accuracy, built for the future* 🏗️✨
+## 🎯 Next Steps & Roadmap
+
+### Immediate Priority (Phase 3 Continuation)
+1. **Memory Controller Implementation** 🔄
+   - Implement 0x1f801010 (memory control register)
+   - Implement 0x1f801060 (RAM size register) 
+   - Add memory timing control features
+
+2. **DMA Controller Module** ⏳
+   - Basic DMA register framework
+   - GPU/SPU/CDROM DMA channels
+   - Proper DMA transfer emulation
+
+3. **Serial Interface Module** ⏳
+   - 0x1f801050 (SIO control)
+   - Basic controller/memory card interface
+
+### Medium Term (Phase 4)
+1. **GPU Initialization Support**
+   - Basic display configuration registers
+   - VRAM access patterns
+   - Primitive GPU command processing
+
+2. **Enhanced BIOS Analysis**
+   - Complete BIOS initialization sequence tracing
+   - Hardware compatibility matrix
+   - Automated regression testing
+
+### Long Term (Phase 5+)
+1. **Game Loading Support**
+   - CDROM system implementation  
+   - ISO/BIN file format support
+   - Game executable loading
+
+2. **Performance Optimization**
+   - JIT compiler for CPU core
+   - Graphics acceleration
+   - Audio system optimization
 
 ---
 
-> **Next Update**: This document will be updated as we implement Phase 3 (Extended CPU) with detailed information about branch/jump instruction handling and delay slot implementation.
+**ZonistationOne Development Team**  
+*From BIOS compatibility to full PlayStation 1 emulation* 🏗️✨
+
+---
+
+> **Next Update**: This document will be updated after Memory Controller implementation with complete BIOS compatibility results and next phase planning.

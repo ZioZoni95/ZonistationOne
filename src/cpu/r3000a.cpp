@@ -15,7 +15,8 @@ CPU::CPU(Memory* memory)
     : m_memory(memory)
     , m_halted(false)
     , m_cycleCount(0)
-    , m_delaySlot(false) {
+    , m_delaySlot(false)
+    , m_inInterruptServiceRoutine(false) {
     
     // Initialize registers to zero
     std::memset(m_registers, 0, sizeof(m_registers));
@@ -51,6 +52,9 @@ void CPU::reset() {
     std::memset(m_registers, 0, sizeof(m_registers));
     std::memset(m_cop0_registers, 0, sizeof(m_cop0_registers));
     
+    // Initialize COP0 registers to proper values following Redux patterns
+    m_cop0_registers[12] = 0x10900000; // Status register initial value
+    
     // Reset PC to BIOS entry point
     m_pc = RESET_VECTOR;
     m_nextPC = m_pc + 4;
@@ -59,6 +63,7 @@ void CPU::reset() {
     m_halted = false;
     m_cycleCount = 0;
     m_delaySlot = false;
+    m_inInterruptServiceRoutine = false;
 }
 
 uint32_t CPU::step() {
@@ -67,6 +72,9 @@ uint32_t CPU::step() {
         ZONI_LOG_TRACE(CPU, "CPU step called while halted");
         return 0; // Don't consume cycles when halted
     }
+    
+    // Check for interrupts (following PCSX-Redux pattern)
+    branchTest();
     
     // Fetch instruction
     uint32_t instruction = fetchInstruction();
@@ -155,6 +163,61 @@ void CPU::handleUnknownInstruction(uint32_t instruction, uint32_t opcode) {
 }
 
 // ========================================
+// Exception Handling (Following PCSX-Redux patterns)
+// ========================================
+
+void CPU::exception(Exception e, bool inDelaySlot) {
+    exception(static_cast<uint32_t>(e) << 2, inDelaySlot);
+}
+
+void CPU::exception(uint32_t code, bool inDelaySlot) {
+    ZONI_LOG_DEBUG(CPU, "Exception 0x%08x at PC 0x%08x (delay slot: %s)", 
+                   code, m_pc, inDelaySlot ? "yes" : "no");
+    
+    m_inInterruptServiceRoutine = true;
+    
+    // Set the EPC & PC
+    if (inDelaySlot) {
+        code |= 0x80000000;  // Set BD (Branch Delay) bit
+        m_cop0_registers[14] = m_pc - 4;  // EPC points to branch instruction
+    } else {
+        m_cop0_registers[14] = m_pc;  // EPC points to current instruction
+    }
+    
+    // Set exception vector based on BEV bit in Status register
+    if (m_cop0_registers[12] & 0x400000) {  // BEV bit set (boot exception vectors)
+        m_pc = 0xbfc00180;
+    } else {
+        m_pc = 0x80000080;  // Normal exception vector
+    }
+    
+    m_nextPC = m_pc + 4;
+    
+    // Set the Cause register
+    m_cop0_registers[13] = code;
+    
+    // Set the Status register - push interrupt mask stack
+    // Following Redux pattern: save old status and disable interrupts
+    m_cop0_registers[12] = (m_cop0_registers[12] & ~0x3f) | ((m_cop0_registers[12] & 0xf) << 2);
+}
+
+void CPU::branchTest() {
+    // Simple interrupt checking - following Redux patterns
+    // For now, we don't have hardware interrupt sources, so this is mostly a stub
+    // In a full implementation, this would check for:
+    // - Timer interrupts
+    // - I/O interrupts 
+    // - DMA interrupts
+    // - etc.
+    
+    // Check if interrupts are enabled in Status register
+    if ((m_cop0_registers[12] & 0x401) == 0x401) {  // IEc and master enable
+        // For now, no interrupt sources to check
+        // This is where we'd check hardware interrupt registers and trigger exception(0x400, false);
+    }
+}
+
+// ========================================
 // Primary instruction handlers
 // ========================================
 
@@ -206,8 +269,46 @@ void CPU::handleCOP0(const InstructionInfo& info) {
             ZONI_LOG_CPU_INSTRUCTION("MTC0 R%d, COP0[%d] (write 0x%08x)", 
                                      info.rt, cop0_reg, value);
             
-            // Basic COP0 register write (no special handling for now)
-            m_cop0_registers[cop0_reg] = value;
+            // Handle special COP0 registers
+            switch (cop0_reg) {
+                case 12: // Status register
+                    m_cop0_registers[12] = value;
+                    branchTest(); // Test for interrupts after Status change
+                    break;
+                case 13: // Cause register  
+                    m_cop0_registers[13] = value & ~(0xfc00); // Clear reserved bits
+                    branchTest(); // Test for interrupts after Cause change
+                    break;
+                default:
+                    m_cop0_registers[cop0_reg] = value;
+                    break;
+            }
+            break;
+        }
+        
+        case 0x10: // RFE - Return From Exception
+        {
+            // RFE restores previous interrupt state by shifting Status register bits
+            // Following PCSX-Redux implementation:
+            // - Clear bottom 4 bits of Status register
+            // - Shift bits [5:2] right by 2 positions
+            // - OR the shifted bits back to restore previous state
+            
+            uint32_t status = m_cop0_registers[12]; // Status register is COP0[12]
+            uint32_t old_status = status;
+            
+            // Clear bottom 4 bits and shift bits [5:2] right by 2
+            status = (status & ~0xF) | ((status & 0x3C) >> 2);
+            m_cop0_registers[12] = status;
+            
+            // Mark that we're no longer in an ISR
+            m_inInterruptServiceRoutine = false;
+            
+            ZONI_LOG_CPU_INSTRUCTION("RFE (Status: 0x%08x -> 0x%08x)", 
+                                     old_status, status);
+                                     
+            // Test for software interrupts after RFE (following Redux pattern)
+            branchTest();
             break;
         }
         
@@ -679,11 +780,18 @@ void CPU::handleJALR(const InstructionInfo& info) {
 }
 
 void CPU::handleSYSCALL(const InstructionInfo& info) {
-    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+    // SYSCALL - System Call
+    // Generates a syscall exception
+    ZONI_LOG_CPU_INSTRUCTION("SYSCALL (code: 0x%05x)", (info.code >> 6) & 0xFFFFF);
+    exception(Exception::Syscall, m_delaySlot);
 }
 
 void CPU::handleBREAK(const InstructionInfo& info) {
-    handleUnknownInstruction(info.code, static_cast<uint32_t>(info.opcode));
+    // BREAK - Breakpoint  
+    // Generates a break exception
+    uint32_t code = (info.code >> 6) & 0xFFFFF;
+    ZONI_LOG_CPU_INSTRUCTION("BREAK (code: 0x%05x)", code);
+    exception(Exception::Break, m_delaySlot);
 }
 
 void CPU::handleMFHI(const InstructionInfo& info) {
