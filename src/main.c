@@ -271,6 +271,9 @@ int main(int argc, char *argv[]) {
     // 6. Initialize CPU (pass it the fully connected interconnect)
     LOG_SYSTEM_INFO("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
+    
+    // 7. Set CPU pointer in interconnect for direct exception triggering
+    interconnect_set_cpu(&interconnect_state, &cpu_state);
 
     // --- Schedule Initial Events (using new event system) ---
     #define VBLANK_CYCLES 564480
@@ -351,8 +354,9 @@ int main(int argc, char *argv[]) {
             
             // Only log progress every 100k instructions to reduce spam
             if (total_instructions % 100000 == 0) {
-                LOG_SYSTEM_INFO("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x, I_MASK=0x%04x, I_STAT=0x%04x", 
-                        total_instructions, cpu_state.pc, interconnect_state.irq_mask, interconnect_state.irq_status);
+                LOG_SYSTEM_INFO("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x, I_MASK=0x%04x, I_STAT=0x%04x, cpu_cycle=%u, evq_next=%u", 
+                        total_instructions, cpu_state.pc, interconnect_state.irq_mask, interconnect_state.irq_status,
+                        interconnect_state.cpu_cycle_counter, interconnect_state.evq_next_cycle);
             }
         }
         // Step timers once per frame with the total cycles executed

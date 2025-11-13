@@ -57,6 +57,7 @@ static EventHandlerTable evq_handlers = {
 void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cycles_from_now) {
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
+    
     if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
         LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
     }
@@ -72,10 +73,20 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
  */
 void eventq_dispatch_due(struct Interconnect* sys) {
     uint32_t now = sys->cpu_cycle_counter;
+    
+    // Debug: Log when dispatch is called and VBlank is pending
+    static uint32_t last_vblank_check_cycle = 0;
+    if ((sys->evq_pending & (1u << EVQ_VBLANK)) && now > 1000000 && now - last_vblank_check_cycle > 500000) {
+        LOG_TIMER_INFO("[EventQ] dispatch_due: now=%u, VBlank target=%u, VBlank pending=%d",
+                      now, sys->evq_target_cycle[EVQ_VBLANK], !!(sys->evq_pending & (1u << EVQ_VBLANK)));
+        last_vblank_check_cycle = now;
+    }
+    
     // Keep dispatching as long as any event is due
     while (1) {
         uint32_t pending = sys->evq_pending;
         int any_fired = 0;
+        
         for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
             if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
                 if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
@@ -120,19 +131,21 @@ uint32_t eventq_next_cycle(const struct Interconnect* sys) {
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed
 
 static void evq_handle_vblank(struct Interconnect* sys) {
-    // FIX: Only reschedule VBlank if it's not already scheduled
-    // This prevents the infinite VBlank loop that was causing the stuck state
-    if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
-        eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
-        LOG_EVENT_DEBUG("[VBlank] Handler called. Next VBlank scheduled at cycle: %u", sys->evq_target_cycle[EVQ_VBLANK]);
-    } else {
-        LOG_EVENT_DEBUG("[VBlank] Handler called but VBlank already scheduled, skipping reschedule");
+    static uint32_t vblank_count = 0;
+    vblank_count++;
+    
+    // Always reschedule the next VBlank
+    eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
+    
+    // Log VBlank count
+    if (vblank_count <= 10 || vblank_count % 10 == 0) {
+        LOG_TIMER_INFO("[VBlank] Handler #%u: cycle=%u, rescheduled for cycle=%u", 
+                      vblank_count, sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_VBLANK]);
     }
     
-    // FIX: Trigger VBlank interrupt (IRQ1) to wake up the BIOS
+    // Trigger VBlank interrupt (IRQ1)
     if (sys->irq_mask & 0x0002) { // Check if IRQ1 (VBlank) is enabled
         sys->irq_status |= 0x0002; // Set IRQ1 bit
-        LOG_EVENT_DEBUG("[VBlank] IRQ1 (VBlank) triggered: I_STAT=0x%04x", sys->irq_status);
     }
     
     timers_on_vblank(&sys->timers_state);

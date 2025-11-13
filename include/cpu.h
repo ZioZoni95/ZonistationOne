@@ -18,6 +18,19 @@ typedef uint32_t RegisterIndex;
 #define REG_ZERO ((RegisterIndex)0)  // $zero GPR, always 0
 #define REG_RA   ((RegisterIndex)31) // $ra GPR, Return Address for JAL/JALR
 
+// --- BIOS Boot Stages ---
+// Tracks what stage the BIOS is in for better debugging visibility
+typedef enum {
+    BOOT_STAGE_POWER_ON = 0,          // Initial power-on, BIOS starting
+    BOOT_STAGE_BIOS_INIT,             // BIOS initializing hardware (RAM, controllers, etc.)
+    BOOT_STAGE_LOGO_ANIMATION,        // PlayStation logo animation playing
+    BOOT_STAGE_PATCH_CHECK,           // BIOS checking for game patches (can loop)
+    BOOT_STAGE_CDROM_CHECK,           // BIOS checking for CD-ROM disc
+    BOOT_STAGE_WAITING_INPUT,         // Waiting for controller input or disc
+    BOOT_STAGE_BIOS_MENU,             // BIOS menu active (memory card management, etc.)
+    BOOT_STAGE_GAME_BOOT,             // Booting game from CD-ROM
+    BOOT_STAGE_GAME_RUNNING           // Game code is running
+} BootStage;
 
 // --- Exception Cause Codes ---
 // MIPS Exception codes used in the Cause register (bits 6:2)
@@ -112,6 +125,9 @@ typedef struct Cpu {
 
     // --- GTE (Geometry Transformation Engine) ---
     Gte gte;                // GTE coprocessor state
+
+    // --- Boot Stage Tracking ---
+    BootStage boot_stage;   // Current BIOS/boot stage for debugging visibility
 
 } Cpu;
 

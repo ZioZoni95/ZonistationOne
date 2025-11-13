@@ -25,17 +25,45 @@ struct Cdrom;
 #define CDREG_IRQ_EN_FLAG 3 // Offset 3: Read IRQ Enable/Flags (Requires Index 1)
 
 // --- CDROM Commands (Partial List) ---
+#define CDC_NOP         0x00 // Nop/Unused command (returns error)
 #define CDC_GETSTAT     0x01 // Get current drive status
 #define CDC_SETLOC      0x02 // Set position (LBA) for read/play
+#define CDC_PLAY        0x03 // Play CD-DA audio starting at SetLoc position
+#define CDC_FORWARD     0x04 // Fast forward audio playback
 #define CDC_READN       0x06 // Read sectors starting at SetLoc position (Normal read)
+#define CDC_STANDBY     0x07 // Activate drive motor (Standby)
 #define CDC_PAUSE       0x09 // Pause playback/reading, sends response
 #define CDC_INIT        0x0A // Initialize controller/drive state
+#define CDC_MUTE        0x0B // Mute CD-DA audio
+#define CDC_DEMUTE      0x0C // Demute CD-DA audio
+#define CDC_SETMODE     0x0E // Set mode bits (speed, size, etc.)
+#define CDC_GETPARAM    0x0F // Get current parameters (mode, file, channel)
+#define CDC_GETLOCL     0x10 // Get current logical position (data track position)
+#define CDC_GETLOCP     0x11 // Get current physical position (any track position)
+#define CDC_GETTN       0x13 // Get total number of tracks
+#define CDC_GETTD       0x14 // Get track start position
+#define CDC_READTOC     0x1E // Read Table of Contents
+#define CDC_SETFILTER   0x0D // Set XA-ADPCM filter (file, channel)
 #define CDC_SEEKL       0x15 // Seek to LBA (Logical - data track only?)
+#define CDC_SEEKP       0x16 // Seek to LBA (Physical - any track type)
 #define CDC_TEST        0x19 // Test commands (various subfunctions, see nocash/PSX-Spex for response sequence)
+#define CDC_RESET       0x1C // Reset drive controller
+#define CDC_READS       0x1B // Read sectors with retry
 #define CDC_GETID       0x1A // Get drive ID (returns SCEx string / No Disc / Licensed status)
 #define CDC_STOP        0x08 // Stop CD-DA playback/Read <<< Add this if missing
 
 #define CD_SECTOR_SIZE 2352 // Common raw sector size for Mode 2
+
+// --- Stat Byte Bits (Command Response Byte, NOT Status Register!) ---
+// These are returned in command responses (different from status register bits)
+#define STAT_BYTE_ERROR         (1 << 0)  // Invalid command/parameters (error flag)
+#define STAT_BYTE_MOTOR         (1 << 1)  // Motor on (spindle motor spinning)
+#define STAT_BYTE_SEEKERROR     (1 << 2)  // Seek error occurred
+#define STAT_BYTE_IDERROR       (1 << 3)  // GetID denied (unlicensed disc)
+#define STAT_BYTE_SHELLOPEN     (1 << 4)  // Shell was opened (sticky until Getstat)
+#define STAT_BYTE_READING       (1 << 5)  // Reading data sectors
+#define STAT_BYTE_SEEKING       (1 << 6)  // Seeking in progress
+#define STAT_BYTE_PLAYING       (1 << 7)  // Playing CD-DA audio
 
 // --- Simple FIFO Placeholder ---
 // Represents Parameter and Response FIFOs (limited size).
@@ -120,6 +148,34 @@ typedef struct Cdrom {
     bool double_speed;
     /** @brief Sector size bit (0=2048 bytes, 1=2340 bytes) */
     bool sector_size_is_2340; // True if mode bit 5 is 1
+    /** @brief XA-ADPCM enable (send to SPU) */
+    bool xa_adpcm_enable;
+    /** @brief XA filter enable (only process sectors matching file/channel) */
+    bool xa_filter_enable;
+    /** @brief Report enable (IRQ for audio play) */
+    bool report_enable;
+    /** @brief Auto-pause enable (pause at end of track) */
+    bool auto_pause_enable;
+    /** @brief CDDA enable (allow reading CD-DA sectors) */
+    bool cdda_enable;
+    /** @brief XA filter file number (0-31) */
+    uint8_t xa_filter_file;
+    /** @brief XA filter channel number (0-31) */
+    uint8_t xa_filter_channel;
+    /** @brief CD-DA audio mute flag */
+    bool audio_muted;
+    /** @brief True while XA-ADPCM playback keeps the ADP FIFO busy */
+    bool xa_adpcm_playing;
+    /** @brief True while the spindle motor is spinning */
+    bool motor_on;
+    /** @brief Shell was opened flag (sticky, cleared only by Getstat) */
+    bool shell_was_open;
+    /** @brief Last GetID resulted in error (unlicensed disc) */
+    bool last_id_error;
+    /** @brief Last seek resulted in error */
+    bool last_seek_error;
+    /** @brief Stat byte (command response byte, different from status register) */
+    uint8_t stat_byte;
 
     /** @brief File handle for the loaded .bin or .iso disc image */
     FILE* disc_file;
@@ -184,6 +240,5 @@ void cdrom_exec_cmd(Cdrom* cdrom, uint8_t cmd);
  * - Status register must reflect RSLRDY and not busy after command
  * - INT3 (response ready) and INT2 (command complete) must be triggered in correct order
  */
-void cmd_test(struct Cdrom* cdrom);
 
 #endif // CDROM_H
