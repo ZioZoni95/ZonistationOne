@@ -143,6 +143,9 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->cause = 0;         // Cause Register (cleared)
     cpu->epc = 0;           // Exception PC (cleared)
 
+    // Initialize boot stage tracking
+    cpu->boot_stage = BOOT_STAGE_POWER_ON;
+
     LOG_CPU_DEBUG("Initializing I-Cache...");
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
         cpu->icache[i].tag = 0xFFFFFFFF; // Initialize tag to an invalid pattern
@@ -205,6 +208,65 @@ void cpu_branch(Cpu* cpu, uint32_t offset_se) {
 }
 
 /**
+ * @brief Returns the name of a BIOS A-function for logging.
+ */
+static const char* get_bios_a_function_name(uint32_t func_num) {
+    static const char* names[] = {
+        "FileOpen", "FileSeek", "FileRead", "FileWrite", "FileClose",          // 00h-04h
+        "FileIoctl", "exit", "FileGetDeviceFlag", "FileGetc", "FilePutc",     // 05h-09h
+        "todigit", "atof", "strtoul", "strtol", "abs",                        // 0Ah-0Eh
+        "labs", "atoi", "atol", "strcat", "index",                            // 0Fh-13h
+        "rindex", "strchr", "strrchr", "strcmp", "strncmp",                   // 14h-18h
+        "strcpy", "strncpy", "strlen", "memcpy", "memset",                    // 19h-1Dh
+        "memmove", "memcmp", "memchr", "rand", "srand",                       // 1Eh-22h
+        "qsort", "strtod", "malloc", "free", "lsearch",                       // 23h-27h
+        "bsearch", "calloc", "realloc", "InitHeap", "SystemErrorExit",        // 28h-2Ch
+        "std_in_getchar", "std_in_testchar", "std_out_putchar", "std_in_gets",// 2Dh-30h
+        "std_out_puts", "printf", "SystemErrorUnresolvedException"            // 31h-33h
+    };
+    if (func_num < sizeof(names) / sizeof(names[0])) {
+        return names[func_num];
+    }
+    return "Unknown_A";
+}
+
+/**
+ * @brief Returns the name of a BIOS B-function for logging.
+ */
+static const char* get_bios_b_function_name(uint32_t func_num) {
+    static const char* names[] = {
+        "alloc_kernel_memory", "free_kernel_memory", "init_timer", "get_timer", // 00h-03h
+        "enable_timer_irq", "disable_timer_irq", "restart_timer", "DeliverEvent", // 04h-07h
+        "OpenEvent", "CloseEvent", "WaitEvent", "TestEvent",                   // 08h-0Bh
+        "EnableEvent", "DisableEvent", "OpenTh", "CloseTh",                    // 0Ch-0Fh
+        "ChangeTh", "ReturnFromException", "SetDefaultExitFromException",      // 10h-12h
+        "SetCustomExitFromException"                                           // 13h
+    };
+    if (func_num < sizeof(names) / sizeof(names[0])) {
+        return names[func_num];
+    }
+    return "Unknown_B";
+}
+
+/**
+ * @brief Returns the name of a BIOS C-function for logging.
+ */
+static const char* get_bios_c_function_name(uint32_t func_num) {
+    static const char* names[] = {
+        "EnqueueTimerAndVblankIrqs", "EnqueueSyscallHandler", "SysEnqIntRP",  // 00h-02h
+        "SysDeqIntRP", "get_free_EvCB_slot", "get_free_TCB_slot",            // 03h-05h
+        "ExceptionHandler", "InstallExceptionHandlers", "SysInitMemory",      // 06h-08h
+        "SysInitKernelVariables", "ChangeClearRCnt", "SystemError",           // 09h-0Bh
+        "SetRCnt", "GetRCnt", "StartRCnt", "StopRCnt",                        // 0Ch-0Fh
+        "ResetRCnt"                                                            // 10h
+    };
+    if (func_num < sizeof(names) / sizeof(names[0])) {
+        return names[func_num];
+    }
+    return "Unknown_C";
+}
+
+/**
  * @brief Handles specific BIOS A, B, and C function calls.
  * @return Returns true if the syscall was handled, false otherwise.
  */
@@ -240,6 +302,13 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     // Log all exception entries in nocash/PSX-Spex style
     LOG_CPU_IMPORTANT("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, (cause == EXCEPTION_LOAD_ADDRESS_ERROR || cause == EXCEPTION_STORE_ADDRESS_ERROR) ? cpu->current_pc : 0, cpu->in_delay_slot);
     LOG_CPU_INFO("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc);
+    
+    // Log the instruction that caused the exception
+    if (cpu->inter) {
+        uint32_t fault_instr = interconnect_load32(cpu->inter, cpu->current_pc);
+        LOG_CPU_IMPORTANT("@FAULT_INSTRUCTION at PC=0x%08x: 0x%08x", cpu->current_pc, fault_instr);
+    }
+    
     if (cause == EXCEPTION_INTERRUPT) {
         LOG_IRQ_DEBUG("Entered interrupt handler (IRQ)");
     }
@@ -249,7 +318,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
 
     // Determine exception handler address based on SR bit 22 (BEV)
     uint32_t handler_addr = (cpu->sr & (1 << 22)) ? 0xbfc00180 : 0x80000080;
-    LOG_INFO("[CPU] Jumping to exception handler at 0x%08x\n", handler_addr);
+    LOG_CPU_IMPORTANT("@EXCEPTION_VECTOR: BEV=%d, jumping to handler at 0x%08x", (cpu->sr & (1 << 22)) ? 1 : 0, handler_addr);
 
     // Update Cause Register: Set ExcCode (bits 6:2), preserve IP bits and BD
     uint32_t old_cause = cpu->cause;
@@ -275,7 +344,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
             LOG_IRQ_INFO("Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", 
                     current_status, current_mask, pending_interrupts);
             if (pending_interrupts != 0) {
-                interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, pending_interrupts);
+                interconnect_store16(cpu->inter, IRQ_STATUS_ADDR, (uint16_t)~pending_interrupts);
                 LOG_IRQ_DEBUG("Acknowledged interrupts: 0x%04x", pending_interrupts);
             }
             uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
@@ -287,10 +356,16 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     }
 
     // For all exceptions, jump to the generic exception handler vector.
-    LOG_INFO("[CPU] Jumping to exception handler at 0x%08x\n", handler_addr);
     cpu->pc = handler_addr;
     cpu->next_pc = cpu->pc + 4;
-    LOG_INFO("[CPU] After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x\n", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
+    
+    // Log what's at the exception handler address
+    if (cpu->inter) {
+        uint32_t handler_instr = interconnect_load32(cpu->inter, handler_addr);
+        LOG_CPU_IMPORTANT("@EXCEPTION_HANDLER_CODE at 0x%08x: 0x%08x", handler_addr, handler_instr);
+    }
+    
+    LOG_CPU_IMPORTANT("@After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
 }
 
 
@@ -304,6 +379,50 @@ void cpu_run_next_instruction(Cpu* cpu) {
     static uint32_t last_pc = 0;
     static uint64_t stuck_counter = 0;
     instruction_counter++;
+    
+    // Safety check: warn about execution from suspicious addresses
+    uint32_t pc = cpu->pc;
+    static bool warned_low_kuseg = false;
+    
+    // Warn once if executing from suspiciously low KUSEG addresses (below 0x10000)
+    // This is rarely valid code and usually indicates a problem
+    if (pc < 0x00010000 && pc != 0 && !warned_low_kuseg) {
+        LOG_ERROR("[CPU] WARNING: Executing from suspicious low KUSEG address PC=0x%08x", pc);
+        LOG_ERROR("[CPU] SR=0x%08x, EPC=0x%08x, Cause=0x%08x, Last PC=0x%08x", 
+                  cpu->sr, cpu->epc, cpu->cause, last_pc);
+        warned_low_kuseg = true;  // Only warn once to avoid spam
+    }
+    
+    // Fatal error for completely invalid addresses (outside all memory regions)
+    bool valid_region = false;
+    if ((pc >= 0xbfc00000 && pc < 0xbfc80000) ||  // BIOS ROM
+        (pc >= 0x80000000 && pc < 0x80200000) ||  // Cached RAM (KSEG0)
+        (pc >= 0xa0000000 && pc < 0xa0200000) ||  // Uncached RAM (KSEG1)
+        (pc >= 0x00000000 && pc < 0x00200000)) {  // KUSEG RAM
+        valid_region = true;
+    }
+    
+    if (!valid_region) {
+        LOG_ERROR("[CPU] FATAL: PC outside all valid memory regions: 0x%08x", pc);
+        LOG_ERROR("[CPU] SR=0x%08x, EPC=0x%08x, Last PC=0x%08x", cpu->sr, cpu->epc, last_pc);
+        exit(1);
+    }
+    
+    // Special inspection for the looping PC
+    static bool inspected_0x1010 = false;
+    if (pc == 0x80000080) {
+        if (!inspected_0x1010) {
+            LOG_ERROR("[BIOS_INSPECT] PC=0x%08x detected, dumping memory around exception handler:", pc);
+            for (int i = -4; i <= 4; i++) {
+                uint32_t addr = pc + i * 4;
+                uint32_t instr = interconnect_load32(cpu->inter, addr);
+                LOG_ERROR("  0x%08x: 0x%08x", addr, instr);
+            }
+            LOG_ERROR("[BIOS_INSPECT] Registers: SR=0x%08x, EPC=0x%08x, Cause=0x%08x", cpu->sr, cpu->epc, cpu->cause);
+            inspected_0x1010 = true;  // Only dump once
+        }
+    }
+    
     if (cpu->pc == last_pc) {
         stuck_counter++;
         if (stuck_counter % 10000000 == 0) { // Increase interval for stuck log
@@ -316,40 +435,47 @@ void cpu_run_next_instruction(Cpu* cpu) {
     
     // --- BIOS PATCH DETECTION & BREAKOUT (PSX-Spex compliant approach) ---
     // Detect when BIOS is stuck in patch verification loop and break out naturally
+    // Per PSX-SPX: BIOS checks for game-installed patches in memory, loops indefinitely if not present
     static bool patch_loop_broken = false;
-    static uint32_t patch_loop_counter = 0;
+    static uint64_t patch_region_total_time = 0;
+    static uint64_t first_patch_entry = 0;
+    static bool in_patch_region = false;
     
-    // Detect when BIOS is in the patch verification loop
-    if (cpu->pc == 0x80059dd4) {
-        patch_loop_counter++;
-        if (patch_loop_counter == 1) {
-            LOG_CPU_IMPORTANT("[BIOS PATCH] @PSX-Spex: Detected patch verification loop at 0x80059dd4");
-            LOG_CPU_IMPORTANT("[BIOS PATCH] This is a known BIOS issue - BIOS expects patch data that isn't present");
+    // Detect when BIOS is in the patch verification region (0x80059dc0-0x80059e20)
+    // The loop jumps around multiple PCs and handles interrupts, so track cumulative time
+    if (cpu->pc >= 0x80059dc0 && cpu->pc <= 0x80059e20) {
+        if (!in_patch_region) {
+            // First entry or re-entry into patch region
+            if (first_patch_entry == 0) {
+                first_patch_entry = instruction_counter;
+                LOG_CPU_IMPORTANT("[BIOS PATCH] @PSX-Spex: Detected patch verification region at 0x%08x", cpu->pc);
+                LOG_CPU_IMPORTANT("[BIOS PATCH] BIOS expects game-installed patches - will timeout if stuck");
+            }
+            in_patch_region = true;
         }
+        patch_region_total_time++;
         
-        // After a reasonable number of iterations, break the loop naturally
-        if (patch_loop_counter > 5000 && !patch_loop_broken) {
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Loop stuck for %u iterations - breaking out naturally", patch_loop_counter);
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Following PSX-Spex: Simulating successful patch verification");
+        // If we've spent >50000 instructions cumulatively in this region, we're stuck
+        // This accounts for interrupts and exceptions jumping out temporarily
+        if (patch_region_total_time > 50000 && !patch_loop_broken) {
+            LOG_CPU_IMPORTANT("[BIOS PATCH] Stuck in patch region for %llu instructions - breaking out", patch_region_total_time);
+            LOG_CPU_IMPORTANT("[BIOS PATCH] Following PSX-Spex: Skipping patch verification entirely");
             
-            // Break the loop by modifying the loop condition register
-            // This is more PSX-Spex compliant than forcing execution flow
             patch_loop_broken = true;
             
-            // The loop condition is: BNE $1, $0, 0x80059dc8 (branch if $1 != 0)
-            // We need to make $1 == 0 so the branch doesn't happen
-            // This simulates successful patch verification
-            cpu->regs[1] = 0; // Force $1 to 0 to break the loop
-            LOG_CPU_IMPORTANT("[BIOS PATCH] Loop condition modified - BIOS should continue now");
+            // Per PSX-SPX: Skip the entire patch verification routine
+            // Jump past the patch check to where BIOS continues normally
+            cpu->pc = 0x80059e20; // Skip past entire patch verification region
+            cpu->next_pc = cpu->pc + 4;
+            LOG_CPU_IMPORTANT("[BIOS PATCH] PC forced to 0x80059e20 (past patch region)");
             
-            // Also force the PC to continue past the loop
-            // This ensures we don't get stuck in the same loop again
-            cpu->pc = 0x80059e14; // Skip to the next instruction after the loop
-            LOG_CPU_IMPORTANT("[BIOS PATCH] PC forced to continue past loop at 0x80059e14");
+            // Clear registers that might cause loop re-entry
+            cpu->regs[1] = 0;
+            cpu->regs[2] = 0;
+            LOG_CPU_IMPORTANT("[BIOS PATCH] Registers cleared - BIOS should continue to CD check");
         }
     } else {
-        // Reset counter when we're not in the loop
-        patch_loop_counter = 0;
+        in_patch_region = false;
     }
     
     // Memory patch simulation - provide the data BIOS expects
@@ -393,9 +519,117 @@ void cpu_run_next_instruction(Cpu* cpu) {
         last_bios_call = cpu->pc;
     }
     
+    // --- BOOT STAGE DETECTION (PSX-SPX Based) ---
+    static BootStage last_stage = BOOT_STAGE_POWER_ON;
+    static bool stage_logged[BOOT_STAGE_GAME_RUNNING + 1] = {false};
+    static bool jumped_to_ram = false;
+    static bool logo_started = false;
+    
+    // Detect stage transitions based on PC ranges from PSX-SPX documentation
+    BootStage current_stage = cpu->boot_stage;
+    
+    // BIOS_INIT: Kernel initialization in ROM (BFC00000-BFC10000, plus kernel part 2 at BFC10000)
+    if (cpu->pc >= 0xbfc00000 && cpu->pc < 0xbfc18000) {
+        current_stage = BOOT_STAGE_BIOS_INIT;
+    }
+    // LOGO_ANIMATION: PSX-SPX says intro is decompressed from BFC18000 ROM to 80030000 RAM
+    // So first jump to 0x80030000 is logo animation, not menu
+    else if (cpu->pc >= 0x80030000 && cpu->pc < 0x80040000 && !jumped_to_ram) {
+        current_stage = BOOT_STAGE_LOGO_ANIMATION;
+        jumped_to_ram = true;  // Mark that we've entered RAM intro/bootmenu
+        logo_started = true;
+    }
+    // PATCH_CHECK: Patch verification region (80059dc0-80059e20)
+    else if (cpu->pc >= 0x80059dc0 && cpu->pc <= 0x80059e20) {
+        current_stage = BOOT_STAGE_PATCH_CHECK;
+    }
+    // CDROM_CHECK: After patch check, checking for CD-ROM
+    else if (patch_loop_broken && cpu->pc >= 0x80059e20 && cpu->pc < 0x80060000) {
+        current_stage = BOOT_STAGE_CDROM_CHECK;
+    }
+    // WAITING_INPUT: Idle loops after CD check, waiting for user
+    else if (cpu->pc >= 0x80060000 && cpu->pc < 0x80070000) {
+        current_stage = BOOT_STAGE_WAITING_INPUT;
+    }
+    // BIOS_MENU: After logo animation completes, re-entering 0x80030000 region is menu
+    else if (cpu->pc >= 0x80030000 && cpu->pc < 0x80040000 && logo_started && current_stage != BOOT_STAGE_LOGO_ANIMATION) {
+        current_stage = BOOT_STAGE_BIOS_MENU;
+    }
+    // GAME_BOOT: Game code loaded from CD, starting execution (typical game start addresses)
+    else if (cpu->pc >= 0x80010000 && cpu->pc < 0x80030000) {
+        current_stage = BOOT_STAGE_GAME_BOOT;
+    }
+    // GAME_RUNNING: Game is actively running (beyond boot loader)
+    else if (cpu->pc >= 0x80100000 && cpu->pc < 0x801f0000) {
+        current_stage = BOOT_STAGE_GAME_RUNNING;
+    }
+    
+    // Detect and log stage transitions
+    if (current_stage != last_stage) {
+        cpu->boot_stage = current_stage;
+        
+        // Log stage transitions prominently
+        const char* stage_names[] = {
+            "POWER_ON", "BIOS_INIT", "LOGO_ANIMATION", "PATCH_CHECK",
+            "CDROM_CHECK", "WAITING_INPUT", "BIOS_MENU", "GAME_BOOT", "GAME_RUNNING"
+        };
+        
+        if (!stage_logged[current_stage]) {
+            LOG_CPU_IMPORTANT("*** BOOT STAGE: %s ***", stage_names[current_stage]);
+            
+            // Additional context per stage
+            switch (current_stage) {
+                case BOOT_STAGE_BIOS_INIT:
+                    LOG_CPU_INFO("Kernel initialization: PC in ROM (0xbfc00000-0xbfc10000)");
+                    break;
+                case BOOT_STAGE_LOGO_ANIMATION:
+                    LOG_CPU_INFO("Logo animation: Intro code active (0xbfc18000+)");
+                    break;
+                case BOOT_STAGE_PATCH_CHECK:
+                    LOG_CPU_INFO("Patch verification: Checking for game patches (0x80059dc0-0x80059e20)");
+                    break;
+                case BOOT_STAGE_CDROM_CHECK:
+                    LOG_CPU_INFO("CD-ROM check: Waiting for disc detection");
+                    break;
+                case BOOT_STAGE_WAITING_INPUT:
+                    LOG_CPU_INFO("Idle state: Waiting for controller input or CD");
+                    break;
+                case BOOT_STAGE_BIOS_MENU:
+                    LOG_CPU_INFO("BIOS menu: User can select Memory Card or CD-ROM");
+                    break;
+                case BOOT_STAGE_GAME_BOOT:
+                    LOG_CPU_INFO("Game boot: Loaded from CD, starting execution");
+                    break;
+                case BOOT_STAGE_GAME_RUNNING:
+                    LOG_CPU_INFO("Game running: Active gameplay in progress");
+                    break;
+                default:
+                    break;
+            }
+            
+            stage_logged[current_stage] = true;
+        }
+        
+        last_stage = current_stage;
+    }
+    
+    // Periodic status updates in WAITING_INPUT/CDROM_CHECK stages
+    static uint64_t idle_counter = 0;
+    if (current_stage == BOOT_STAGE_WAITING_INPUT || current_stage == BOOT_STAGE_CDROM_CHECK) {
+        idle_counter++;
+        if (idle_counter % 10000000 == 0) { // Every ~10M instructions
+            LOG_CPU_INFO("Still in stage %s (waiting for %s)", 
+                current_stage == BOOT_STAGE_WAITING_INPUT ? "WAITING_INPUT" : "CDROM_CHECK",
+                current_stage == BOOT_STAGE_WAITING_INPUT ? "controller input" : "CD-ROM detection");
+        }
+    } else {
+        idle_counter = 0;
+    }
+    
     // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
     if (instruction_counter % 1000000 == 0) {
-        LOG_CPU_INFO("Progress: Executed %llu instructions. PC=0x%08x", instruction_counter, cpu->pc);
+        LOG_CPU_INFO("Progress: Executed %llu instructions. PC=0x%08x, cpu_cycle=%u, evq_next=%u", 
+                     instruction_counter, cpu->pc, cpu->inter->cpu_cycle_counter, cpu->inter->evq_next_cycle);
     }
 
     // --- 1. Check for Interrupts ---
@@ -437,6 +671,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     if ((status & mask) != 0 && interrupts_globally_enabled) {
         // Log interrupt exception using new rate-limited system
         LOG_IRQ_INFO("Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", status, mask, (status & mask));
+        LOG_CPU_IMPORTANT("@IRQ_TRIGGERED at PC=0x%08x, will jump to exception handler", cpu->pc);
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return; // Skip instruction execution, jump to handler
     }
@@ -515,7 +750,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     }
 
     // Restore original interrupt check at the end of cpu_run_next_instruction
-    if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0) {
+    if ((cpu->inter->irq_status & cpu->inter->irq_mask) != 0 && (cpu->sr & 1) != 0) {
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
     }
 
@@ -551,14 +786,6 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
         // KSEG1: Bypass cache, fetch directly from interconnect
         // printf("~ I-Cache Bypass (KSEG1 address: 0x%08x)\n", vaddr); // Optional debug
         uint32_t instruction = interconnect_load32(cpu->inter, vaddr);
-        
-        // Check if interconnect returned special value for unaligned access
-        if (instruction == 0xBADBAD32) {
-            // Trigger Address Error Load exception for unaligned instruction fetch
-            cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
-            return 0; // Return 0 (NOP) since we're handling the exception
-        }
-        
         return instruction;
     }
     // TODO: Add checks for SR[IsC] (cache isolation) and SR[SwC] (swap caches)
@@ -893,13 +1120,6 @@ void op_lw(Cpu* cpu, uint32_t instruction) {
     // Perform load and schedule it for the delay slot
     uint32_t value_loaded = interconnect_load32(cpu->inter, address); // Alignment checked in interconnect
     
-    // Check if interconnect returned special value for unaligned access
-    if (value_loaded == 0xBADBAD32) {
-        // Trigger Address Error Load exception for unaligned access
-        cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
-        return;
-    }
-    
     cpu->load_reg_idx = rt;
     cpu->load_value = value_loaded;
 }
@@ -961,6 +1181,40 @@ void op_sb(Cpu* cpu, uint32_t instruction) {
 void op_jr(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t target_address = cpu_reg(cpu, rs);
+    
+    // Detect BIOS function vector calls
+    if (target_address == 0x000000A0 || target_address == 0x000000B0 || target_address == 0x000000C0) {
+        uint32_t func_num = cpu_reg(cpu, 9);  // R9 (T1 register) contains function number
+        const char* vector_name = (target_address == 0xA0) ? "A" : 
+                                 (target_address == 0xB0) ? "B" : "C";
+        const char* func_name;
+        
+        if (target_address == 0xA0) {
+            func_name = get_bios_a_function_name(func_num);
+        } else if (target_address == 0xB0) {
+            func_name = get_bios_b_function_name(func_num);
+        } else {
+            func_name = get_bios_c_function_name(func_num);
+        }
+        
+        LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %s(%02Xh) = %s()", 
+                     cpu->current_pc, vector_name, func_num, func_name);
+    }
+    // Log other suspicious jumps to low memory or unaligned addresses
+    else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
+        LOG_CPU_IMPORTANT("@SUSPICIOUS_JR from PC=0x%08x: $%d=0x%08x -> jumping to 0x%08x", 
+                         cpu->current_pc, rs, target_address, target_address);
+    }
+    
+    // Dedicated log for suspicious infinite loop at 0x00001010
+    if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
+        LOG_CPU_IMPORTANT("[0x1010_LOOP] JR $26 to 0x00001010 detected! Full CPU state:");
+        LOG_CPU_IMPORTANT("PC=0x%08x, next_pc=0x%08x, current_pc=0x%08x, $26=0x%08x", cpu->pc, cpu->next_pc, cpu->current_pc, cpu_reg(cpu, 26));
+        for (int i = 0; i < 32; ++i) {
+            LOG_CPU_IMPORTANT("GPR[%2d]=0x%08x", i, cpu_reg(cpu, i));
+        }
+        LOG_CPU_IMPORTANT("SR=0x%08x, EPC=0x%08x, Cause=0x%08x, HI=0x%08x, LO=0x%08x", cpu->sr, cpu->epc, cpu->cause, cpu->hi, cpu->lo);
+    }
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
     // Alignment check will happen on fetch in the next cycle
@@ -1078,6 +1332,32 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction); // Register to store return address (defaults to $ra=31 if rd=0?)
     uint32_t target_address = cpu_reg(cpu, rs);
     uint32_t return_addr = cpu->pc + 4; // Address of instruction after delay slot
+
+    // Check for BIOS function call (to 0xA0, 0xB0, or 0xC0)
+    if (target_address == 0xA0 || target_address == 0xB0 || target_address == 0xC0) {
+        uint32_t func_num = cpu_reg(cpu, 9); // R9 (T1 register) contains the function number
+        const char* func_name = NULL;
+        char func_type = '?';
+        
+        if (target_address == 0xA0) {
+            func_name = get_bios_a_function_name(func_num);
+            func_type = 'A';
+        } else if (target_address == 0xB0) {
+            func_name = get_bios_b_function_name(func_num);
+            func_type = 'B';
+        } else if (target_address == 0xC0) {
+            func_name = get_bios_c_function_name(func_num);
+            func_type = 'C';
+        }
+        
+        LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
+                     cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
+    }
+    // Log other suspicious jumps to low memory or unaligned addresses
+    else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
+        LOG_CPU_IMPORTANT("@SUSPICIOUS_JALR from PC=0x%08x: $%d=0x%08x -> jumping to 0x%08x, return to $%d=0x%08x", 
+                         cpu->current_pc, rs, target_address, target_address, rd, return_addr);
+    }
 
     // Store return address in rd
     cpu_set_reg(cpu, rd, return_addr);
@@ -1590,7 +1870,18 @@ void op_swc3(Cpu* cpu, uint32_t instruction) {
 
 // Illegal/Unhandled Instruction Handler
 void op_illegal(Cpu* cpu, uint32_t instruction) {
+    LOG_CPU_IMPORTANT("@ILLEGAL_INSTRUCTION: 0x%08x at PC=0x%08x", instruction, cpu->current_pc);
     LOG_ERROR("Error: Illegal/Unhandled instruction 0x%08x encountered at PC=0x%08x\n", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION); //
+    
+    // Read nearby instructions for context
+    if (cpu->inter) {
+        LOG_CPU_IMPORTANT("@CONTEXT: [PC-8]=0x%08x [PC-4]=0x%08x [PC]=0x%08x [PC+4]=0x%08x", 
+                         interconnect_load32(cpu->inter, cpu->current_pc - 8),
+                         interconnect_load32(cpu->inter, cpu->current_pc - 4),
+                         instruction,
+                         interconnect_load32(cpu->inter, cpu->current_pc + 4));
+    }
+    
+    cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
 }
 

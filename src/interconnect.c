@@ -1,10 +1,12 @@
 #include "interconnect.h" // Includes associated header and headers for components (gpu.h, dma.h etc.)
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 #include "log.h"
 #include "dma.h"
 #include "gpu.h"
 #include "ram.h"
+#include "cpu.h"  // For cpu_exception() and ExceptionCause
 
 // Using new PCSX ReARMed-style logging system
 
@@ -109,10 +111,13 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     LOG_INTERCONNECT_INFO("Interconnect initialized");
     inter->bios = bios;
     inter->ram = ram;
+    inter->cpu = NULL; // Will be set later via interconnect_set_cpu()
     dma_init(&inter->dma, inter); // Initialize DMA controller state
     gpu_init_full(&inter->gpu, inter); // Initialize GPU state (now contains Renderer)
 
-
+    // Initialize Scratchpad (1KB fast RAM)
+    memset(inter->scratchpad, 0, SCRATCHPAD_SIZE);
+    
     cdrom_init(&inter->cdrom,inter);
 
     // Initialize Interrupt Controller state
@@ -122,7 +127,21 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize Timer state <<< ADD THIS CALL
     timers_init(&inter->timers_state, inter);
     
-    LOG_INTERCONNECT_INFO("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, IRQ states set).");
+    // Initialize SIO (Controller and Memory Card)
+    sio_init(&inter->sio);
+    
+    LOG_INTERCONNECT_INFO("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).");
+}
+
+/**
+ * @brief Sets the CPU pointer for direct exception triggering.
+ * Called after CPU initialization to establish bidirectional reference.
+ * @param inter Pointer to the Interconnect instance.
+ * @param cpu Pointer to the CPU instance.
+ */
+void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
+    inter->cpu = cpu;
+    LOG_INTERCONNECT_INFO("Interconnect CPU pointer set (exception triggering enabled).");
 }
 
 
@@ -177,11 +196,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     }
     // Check for 32-bit alignment (Word access)
     if (address % 4 != 0) {
-        // This should trigger an Address Error Load exception in the CPU.
-        LOG_INTERCONNECT_ERROR("Unaligned load32 address: 0x%08x - returning special value for CPU exception", address);
-        // Return a special value that the CPU can detect to trigger the exception
-        // 0xBADBAD32 is our special marker for unaligned access
-        return 0xBADBAD32; // Special value for unaligned access
+        LOG_INTERCONNECT_ERROR("Unaligned load32 address: 0x%08x", address);
+        // Trigger Address Error Load exception directly if CPU pointer is set
+        if (inter->cpu) {
+            cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+        }
+        return 0; // Return 0 (exception already triggered)
     }
 
     // --- Hardware Register Checks (Specific Addresses First) ---
@@ -196,14 +216,52 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return timer_read32(&inter->timers_state, timer_index, register_offset);
     }
     
-    // TEST: Add missing hardware register read handlers for 32-bit access
+    // Memory Control Registers (0x1f801000 - 0x1f801020)
+    // PSX-SPEX: These configure expansion base/size, delays, and BIOS ROM size
+    if (physical_addr == 0x1f801000) {
+        // Expansion 1 Base Address (default: 1F000000h)
+        LOG_INTERCONNECT_TRACE("Read32 from EXP1_BASE_ADDR (0x1f801000)");
+        return 0x1F000000;
+    }
+    if (physical_addr == 0x1f801004) {
+        // Expansion 2 Base Address (default: 1F802000h)
+        LOG_INTERCONNECT_TRACE("Read32 from EXP2_BASE_ADDR (0x1f801004)");
+        return 0x1F802000;
+    }
+    if (physical_addr == 0x1f801008) {
+        // Expansion 1 Delay/Size (default: 0013243Fh)
+        LOG_INTERCONNECT_TRACE("Read32 from EXP1_DELAY_SIZE (0x1f801008)");
+        return 0x0013243F;
+    }
+    if (physical_addr == 0x1f80100C) {
+        // Expansion 3 Delay/Size (default: 00003022h)
+        LOG_INTERCONNECT_TRACE("Read32 from EXP3_DELAY_SIZE (0x1f80100C)");
+        return 0x00003022;
+    }
     if (physical_addr == 0x1f801010) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801010 (unknown register) - returning 0x00");
-        return 0x00; // Return 0 for now to see if BIOS continues
+        // BIOS ROM Delay/Size (default: 0013243Fh)
+        LOG_INTERCONNECT_TRACE("Read32 from BIOS_ROM_DELAY (0x1f801010)");
+        return 0x0013243F;
+    }
+    if (physical_addr == 0x1f801014) {
+        // SPU_DELAY Delay/Size (default: 200931E1h)
+        LOG_INTERCONNECT_TRACE("Read32 from SPU_DELAY (0x1f801014)");
+        return 0x200931E1;
+    }
+    if (physical_addr == 0x1f801018) {
+        // CDROM_DELAY Delay/Size (default: 00020843h or 00020943h)
+        LOG_INTERCONNECT_TRACE("Read32 from CDROM_DELAY (0x1f801018)");
+        return 0x00020843;
+    }
+    if (physical_addr == 0x1f80101C) {
+        // Expansion 2 Delay/Size (default: 00070777h)
+        LOG_INTERCONNECT_TRACE("Read32 from EXP2_DELAY_SIZE (0x1f80101C)");
+        return 0x00070777;
     }
     if (physical_addr == 0x1f801020) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801020 (unknown register) - returning 0x00");
-        return 0x00; // Return 0 for now to see if BIOS continues
+        // COM_DELAY / COMMON_DELAY (default: 00031125h or 0000132Ch)
+        LOG_INTERCONNECT_TRACE("Read32 from COM_DELAY (0x1f801020)");
+        return 0x00031125;
     }
     if (physical_addr == 0x1f801030) {
         LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801030 (unknown register) - returning 0x00");
@@ -257,6 +315,23 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return dma_read(&inter->dma, offset); // Delegate to DMA module
     }
 
+    // Scratchpad Region (0x1f800000 - 0x1f8003ff) - 1KB Fast RAM
+    // PSX-SPX: Scratchpad is mirrored only in KUSEG and KSEG0, NOT in KSEG1
+    // Physical address 0x1f800000-0x1f8003ff maps to scratchpad
+    if (physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) {
+        uint32_t offset = physical_addr - SCRATCHPAD_START;
+        if (offset + 3 < SCRATCHPAD_SIZE) {  // Ensure aligned 32-bit read within bounds
+            // Read 32-bit value from scratchpad (little-endian)
+            uint32_t value = inter->scratchpad[offset] |
+                           (inter->scratchpad[offset + 1] << 8) |
+                           (inter->scratchpad[offset + 2] << 16) |
+                           (inter->scratchpad[offset + 3] << 24);
+            LOG_INTERCONNECT_TRACE("~ Read32 from Scratchpad: Addr=0x%08x Offset=0x%x = 0x%08x", 
+                                  physical_addr, offset, value);
+            return value;
+        }
+    }
+
     // BIOS Region (0x1fc00000 - 0x1fc7ffff)
     static int bios_load32_debug_count = 0;
     if (physical_addr >= BIOS_START && physical_addr <= BIOS_END) {
@@ -270,13 +345,41 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region (0x00000000 - 0x001fffff)
     if (physical_addr <= RAM_END) {
-        // Special handling for address 0x00000000 (known PlayStation BIOS issue)
-        if (physical_addr == 0x00000000) {
-            // Suppress warnings for this common BIOS behavior - only log at TRACE level
-            LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (known PSX issue - returning 0)");
-            return 0x00000000; // Return 0 for null pointer access (per PCSX ReARMed)
-        }
         return ram_load32(inter->ram, physical_addr); // Delegate to RAM module
+    }
+
+        // Expansion 3 Region alias helper: some BIOS routines access both 0x1FAxxxxx (spec) and
+        // 0x0FAxxxxx (after region masking removes bit 28). Treat both as the same empty slot.
+        const bool is_expansion3 =
+            (physical_addr >= 0x1FA00000 && physical_addr < 0x1FC00000) ||
+            (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000);
+
+        // Expansion 3 Region (Physical 0x1FA00000-0x1FBFFFFF) – typically unpopulated.
+        // BIOS polls addresses such as 0xAFA40028/2C during the security check; returning
+        // deterministic zeros keeps the BIOS from turning garbage data into bogus jump targets
+        // (observed crash at PC=0x00000068).
+        if (is_expansion3) {
+        static uint32_t exp3_read_count = 0;
+        exp3_read_count++;
+        if (exp3_read_count <= 5) {
+                LOG_INTERCONNECT_INFO("Expansion 3 read32 at physical 0x%08x (no hardware present)",
+                        physical_addr);
+        }
+            return 0x00000000; // Return 0: matches behaviour of idle POST3 latch on retail units
+        }
+
+        // Unused memory region between RAM and Expansion regions (0x00200000 - 0x1FA00000)
+    // PSX-SPX: This region causes Bus Error exceptions
+    // Returning 0xFFFFFFFF (open bus / unpopulated memory)
+    // NOTE: Expansion 3 (0x1FA00000-0x1FBFFFFF) is handled above
+    if (physical_addr >= 0x00200000 && physical_addr < 0x1FA00000) {
+        static uint32_t unmapped_read_count = 0;
+        unmapped_read_count++;
+        if (unmapped_read_count <= 10 || (unmapped_read_count % 1000 == 0)) {
+            LOG_INTERCONNECT_ERROR("Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)",
+                    physical_addr, address);
+        }
+        return 0xFFFFFFFF; // Return all 1s for open bus / unpopulated memory
     }
 
     // Timer Region (General Check - 0x1f801100 - 0x1f80112F)
@@ -293,8 +396,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
     // Expansion 1 Region (0x1f000000 - 0x1f7fffff)
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-         LOG_INTERCONNECT_INFO("~ Read32 from Expansion 1 region: Address 0x%08x (Returning 0xFFFFFFFF)\n", physical_addr);
-         return 0xFFFFFFFF; // Expansion 1 returns all Fs when empty
+         static uint32_t exp1_read32_count = 0;
+         exp1_read32_count++;
+         if (exp1_read32_count <= 10) {
+             LOG_INTERCONNECT_INFO("~ Read32 from Expansion 1 region: Address 0x%08x (Returning 0x00000000)\n", physical_addr);
+         }
+         return 0x00000000; // Return 0 to prevent BIOS from misinterpreting as jump target
     }
 
     // VRAM Region (0x1F000000 - 0x1F7FFFFF)
@@ -404,9 +511,10 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     }
      // Check for 16-bit alignment (Halfword access)
      if (address % 2 != 0) {
-        // TODO: Trigger Address Error Load exception
-        LOG_INTERCONNECT_ERROR("Unaligned load16 address: 0x%08x\n", address);
-        return 0xBADB; // Placeholder
+        // On PS1, some BIOS code does unaligned loads - handle gracefully by reading from aligned address
+        // This matches behavior seen in other emulators
+        LOG_INTERCONNECT_WARN("Unaligned load16 at 0x%08x, reading from aligned address 0x%08x\n", address, address & ~1);
+        address = address & ~1; // Align to nearest 16-bit boundary
     }
 // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
@@ -459,13 +567,6 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // Special handling for address 0x00000000 (known PlayStation BIOS issue)
-        if (physical_addr == 0x00000000) {
-            // Suppress warnings for this common BIOS behavior - only log at TRACE level
-            LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (16-bit, known PSX issue - returning 0)");
-            return 0x0000; // Return 0 for null pointer access (per PCSX ReARMed)
-        }
-        // (Removed RAM Read/Write logs for performance)
         return ram_load16(inter->ram, physical_addr);
     }
 
@@ -487,10 +588,28 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         return 0;
     }
 
+    const bool is_expansion3 =
+        (physical_addr >= 0x1FA00000 && physical_addr < 0x1FC00000) ||
+        (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000);
+
+    if (is_expansion3) {
+        static uint32_t exp3_read16_count = 0;
+        exp3_read16_count++;
+        if (exp3_read16_count <= 5) {
+            LOG_INTERCONNECT_INFO("Expansion 3 read16 at physical 0x%08x (no hardware present)",
+                    physical_addr);
+        }
+        return 0x0000; // POST3 latch idle value
+    }
+
     // Expansion 1 Region
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-         LOG_INTERCONNECT_INFO("~ Read16 from Expansion 1 region: Address 0x%08x (Returning 0xFFFF)\n", physical_addr);
-         return 0xFFFF; // Expansion 1 returns all Fs when empty
+         static uint32_t exp1_read16_count = 0;
+         exp1_read16_count++;
+         if (exp1_read16_count <= 10) {
+             LOG_INTERCONNECT_INFO("~ Read16 from Expansion 1 region: Address 0x%08x (Returning 0x0000)\n", physical_addr);
+         }
+         return 0x0000; // Return 0 to prevent BIOS from misinterpreting as jump target
     }
 
     // --- Hardware Register Checks (Specific Addresses First) ---
@@ -502,12 +621,11 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
     // --- Fallback ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
-        if (physical_addr == 0x1f801040) return 0xFF; // JOY_DATA: controller present, idle
-        if (physical_addr == 0x1f801044) return 0x00; // JOY_STAT: ready
-        if (physical_addr == 0x1f80104a) return 0x00; // JOY_CTRL: default
-        if (physical_addr == 0x1f801041) return 0xFF; // JOY_DATA2: memory card present, idle
-        if (physical_addr == 0x1f801045) return 0x00; // JOY_STAT2: ready
-        if (physical_addr == 0x1f80104b) return 0x00; // JOY_CTRL2: default
+        // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
+        if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+            uint32_t offset = physical_addr - 0x1f801040;
+            return sio_read16(&inter->sio, offset);
+        }
         return 0;
     }
     
@@ -591,11 +709,29 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         return cdrom_read_register(&inter->cdrom, physical_addr);
     }
 
+    const bool is_expansion3 =
+        (physical_addr >= 0x1FA00000 && physical_addr < 0x1FC00000) ||
+        (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000);
+
+    if (is_expansion3) {
+        static uint32_t exp3_read8_count = 0;
+        exp3_read8_count++;
+        if (exp3_read8_count <= 5) {
+            LOG_INTERCONNECT_INFO("Expansion 3 read8 at physical 0x%08x (no hardware present)",
+                    physical_addr);
+        }
+        return 0x00;
+    }
+
     // Expansion 1 Region
      if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-         // Expansion 1 is used for parallel port devices. Reading when empty returns 0xFF. [cite: 575]
-         // LOG_INFO("~ Read8 from Expansion 1 region: Address 0x%08x (Returning 0xFF)\n", physical_addr); // Noisy
-         return 0xFF;
+         // Expansion 1 is used for parallel port devices. Return 0 when empty to prevent BIOS misinterpreting as jump target.
+         static uint32_t exp1_read8_count = 0;
+         exp1_read8_count++;
+         if (exp1_read8_count <= 10) {
+             LOG_INTERCONNECT_INFO("~ Read8 from Expansion 1 region: Address 0x%08x (Returning 0x00)\n", physical_addr);
+         }
+         return 0x00;
      }
 
     // BIOS Region
@@ -613,13 +749,6 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // Special handling for address 0x00000000 (known PlayStation BIOS issue)
-        if (physical_addr == 0x00000000) {
-            // Suppress warnings for this common BIOS behavior - only log at TRACE level
-            LOG_INTERCONNECT_TRACE("BIOS accessing address 0x00000000 (8-bit, known PSX issue - returning 0)");
-            return 0x00; // Return 0 for null pointer access (per PCSX ReARMed)
-        }
-        // (Removed RAM Read/Write logs for performance)
         return ram_load8(inter->ram, physical_addr);
     }
 
@@ -634,12 +763,11 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // --- Fallback ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
-        if (physical_addr == 0x1f801040) return 0xFF; // JOY_DATA: controller present, idle
-        if (physical_addr == 0x1f801044) return 0x00; // JOY_STAT: ready
-        if (physical_addr == 0x1f80104a) return 0x00; // JOY_CTRL: default
-        if (physical_addr == 0x1f801041) return 0xFF; // JOY_DATA2: memory card present, idle
-        if (physical_addr == 0x1f801045) return 0x00; // JOY_STAT2: ready
-        if (physical_addr == 0x1f80104b) return 0x00; // JOY_CTRL2: default
+        // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
+        if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+            uint32_t offset = physical_addr - 0x1f801040;
+            return sio_read8(&inter->sio, offset);
+        }
         return 0;
     }
     
@@ -703,8 +831,11 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
     // Check alignment
     if (address % 4 != 0) {
-        // TODO: Trigger Address Error Store exception
-        LOG_INTERCONNECT_ERROR("Unaligned store32 address: 0x%08x = 0x%08x\n", address, value);
+        LOG_INTERCONNECT_ERROR("Unaligned store32 address: 0x%08x = 0x%08x", address, value);
+        // Trigger Address Error Store exception directly if CPU pointer is set
+        if (inter->cpu) {
+            cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
+        }
         return;
     }
 
@@ -761,6 +892,16 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         return;
     }
 
+    // Memory Control Registers (0x1f801000 - 0x1f801020)
+    // PSX-SPEX: BIOS writes to these to configure memory timings and sizes
+    // For now, we acknowledge writes but don't implement actual delay/size changes
+    if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801020) {
+        LOG_INTERCONNECT_TRACE("Write32 to Memory Control register (0x%08x) = 0x%08x (Acknowledged)", 
+                               physical_addr, value);
+        // TODO: Implement actual memory configuration changes if needed
+        return;
+    }
+
     // Cache Control (KSEG2)
     if (physical_addr == CACHE_CONTROL_ADDR) {
         LOG_INTERCONNECT_INFO("~ Write32 to CACHE_CONTROL register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
@@ -811,6 +952,21 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         return;
     }
 
+    // Scratchpad Region (0x1f800000 - 0x1f8003ff) - 1KB Fast RAM
+    if (physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) {
+        uint32_t offset = physical_addr - SCRATCHPAD_START;
+        if (offset + 3 < SCRATCHPAD_SIZE) {  // Ensure aligned 32-bit write within bounds
+            // Write 32-bit value to scratchpad (little-endian)
+            inter->scratchpad[offset] = (uint8_t)(value);
+            inter->scratchpad[offset + 1] = (uint8_t)(value >> 8);
+            inter->scratchpad[offset + 2] = (uint8_t)(value >> 16);
+            inter->scratchpad[offset + 3] = (uint8_t)(value >> 24);
+            LOG_INTERCONNECT_TRACE("~ Write32 to Scratchpad: Addr=0x%08x Offset=0x%x = 0x%08x", 
+                                  physical_addr, offset, value);
+        }
+        return;
+    }
+
     // Memory Control Region (Includes IRQ regs handled above, RAM_SIZE reg)
     if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
         // Handle specific MemCtrl writes, ignore others silently for now
@@ -849,13 +1005,10 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // Special handling for address 0x00000000 (known PlayStation BIOS issue)
-        if (physical_addr == 0x00000000) {
-            // Suppress warnings for this common BIOS behavior - only log at TRACE level
-            LOG_INTERCONNECT_TRACE("BIOS writing to address 0x00000000 (32-bit, known PSX issue - ignoring)");
-            return; // Ignore writes to null pointer (per PCSX ReARMed)
+        // DEBUG: Log writes to exception handler region
+        if (physical_addr <= 0x100) {
+            LOG_INFO("[RAM-DEBUG] STORE32: addr=0x%08x value=0x%08x", physical_addr, value);
         }
-        // (Removed RAM Read/Write logs for performance)
         ram_store32(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -942,6 +1095,18 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         }
         return; // Ignore writes to unmapped memory
     }
+
+    // Expansion 3 Region (aliases 0x1FAxxxxx and 0x0FAxxxxx) - usually unpopulated
+    if ((physical_addr >= 0x1FA00000 && physical_addr < 0x1FC00000) ||
+        (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000)) {
+        static uint32_t exp3_write_count = 0;
+        exp3_write_count++;
+        if (exp3_write_count <= 5) {
+            LOG_INTERCONNECT_TRACE("Expansion 3 write32 at address: 0x%08x = 0x%08x (no hardware present)",
+                    physical_addr, value);
+        }
+        return; // Ignore writes to unpopulated expansion slot
+    }
     
     // --- Fallback ---
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write32 at address: 0x%08x = 0x%08x (Mapped from 0x%08x)\n",
@@ -988,8 +1153,11 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
     // Check alignment
     if (address % 2 != 0) {
-        // TODO: Trigger Address Error Store exception
-        LOG_INTERCONNECT_ERROR("Unaligned store16 address: 0x%08x = 0x%04x\n", address, value);
+        LOG_INTERCONNECT_ERROR("Unaligned store16 address: 0x%08x = 0x%04x", address, value);
+        // Trigger Address Error Store exception directly if CPU pointer is set
+        if (inter->cpu) {
+            cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
+        }
         return;
     }
     // --- Check Timer Range --- <<< ADD THIS BLOCK
@@ -1031,32 +1199,31 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
             LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, Count=%u, Last=0x%04x", value, irq_status_write_count, last_irq_status_value);
         }
         last_irq_status_value = value;
-        uint16_t ack_mask = value & 0x7FF;
         uint16_t prev_status = inter->irq_status;
         // Reduce debug logging frequency
         if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
-            LOG_DEBUG("[IRQ] I_STAT before clear: 0x%04x, AckMask: 0x%04x", inter->irq_status, ack_mask);
+            LOG_DEBUG("[IRQ] I_STAT before clear: 0x%04x", inter->irq_status);
         }
-        inter->irq_status &= ~ack_mask; // Clear the bits that were written as 1
+        inter->irq_status &= value; // Clear bits where value has 0
         if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
             LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
         }
         // Also clear timer interrupt_requested flags and mode[10] for Timer0, Timer1, Timer2
-        if (ack_mask & (1 << TIMER0_IRQ)) {
+        if ((value & (1 << TIMER0_IRQ)) == 0) {
             inter->timers_state.timers[0].interrupt_requested = false;
             inter->timers_state.timers[0].mode &= ~(1 << 10);
         }
-        if (ack_mask & (1 << TIMER1_IRQ)) {
+        if ((value & (1 << TIMER1_IRQ)) == 0) {
             inter->timers_state.timers[1].interrupt_requested = false;
             inter->timers_state.timers[1].mode &= ~(1 << 10);
         }
-        if (ack_mask & (1 << TIMER2_IRQ)) {
+        if ((value & (1 << TIMER2_IRQ)) == 0) {
             inter->timers_state.timers[2].interrupt_requested = false;
             inter->timers_state.timers[2].mode &= ~(1 << 10);
         }
         // Keep the existing detailed log for the first write only
         if (irq_status_write_count == 1) {
-            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, AckMask=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, ack_mask, prev_status, inter->irq_status, __func__);
+            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, prev_status, inter->irq_status, __func__);
         }
         return;
     }
@@ -1092,9 +1259,22 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         return; // Handled
     }
 
+    if ((physical_addr >= 0x1FA00000 && physical_addr < 0x1FC00000) ||
+        (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000)) {
+        static uint32_t exp3_store16_count = 0;
+        exp3_store16_count++;
+        if (exp3_store16_count <= 5) {
+            LOG_INTERCONNECT_TRACE("Expansion 3 write16 ignored at 0x%08x = 0x%04x", physical_addr, value);
+        }
+        return;
+    }
+
     // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // (Removed RAM Read/Write logs for performance)
+        // DEBUG: Log writes to exception handler region
+        if (physical_addr <= 0x100) {
+            LOG_INFO("[RAM-DEBUG] STORE16: addr=0x%08x value=0x%04x (virt=0x%08x)", physical_addr, value, address);
+        }
         ram_store16(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -1170,6 +1350,13 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
 
     // --- Fallback ---
+    // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        sio_write16(&inter->sio, offset, value);
+        return;
+    }
+    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write16 at address: 0x%08x = 0x%04x (Mapped from 0x%08x)\n",
             physical_addr, value, address);
 }
@@ -1239,7 +1426,10 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
      // Main RAM Region
     if (physical_addr <= RAM_END) {
-        // (Removed RAM Read/Write logs for performance)
+        // DEBUG: Log writes to exception handler region
+        if (physical_addr <= 0x100) {
+            LOG_INFO("[RAM-DEBUG] STORE8: addr=0x%08x value=0x%02x (virt=0x%08x)", physical_addr, value, address);
+        }
         ram_store8(inter->ram, physical_addr, value); // Delegate
         return;
     }
@@ -1293,6 +1483,13 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     }
 
     // --- Fallback ---
+    // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        sio_write8(&inter->sio, offset, value);
+        return;
+    }
+    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write8 at address: 0x%08x = 0x%02x (Mapped from 0x%08x)\n",
             physical_addr, value, address);
 }

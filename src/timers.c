@@ -119,6 +119,11 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
                 bool irq_flag = (t->reached_target_flag && t->irq_on_target) ||
                                 (t->reached_ffff_flag && t->irq_on_ffff);
                 mode |= (uint16_t)irq_flag << 10;
+                
+                // HIGH PRIORITY FIX: PSX-SPEX mandates clearing flags after read
+                t->reached_target_flag = false;
+                t->reached_ffff_flag = false;
+                
                 return mode;
             }
         case TMR_REG_TARGET: // 0x8: Target Value
@@ -157,6 +162,7 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
     }
     if (offset == TIMER_MODE_OFFSET) {
         t->mode = value;
+        t->counter = 0;  // CRITICAL FIX: PSX-SPEX mandates reset to 0000h on mode write
         t->interrupt_requested = false; // Clear IRQ state on mode write
         t->reached_target_flag = false;
         t->reached_ffff_flag = false;
@@ -371,6 +377,10 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     if (t->reset_on_target && t->reached_target_flag) {
         t->counter = 0;
         t->reached_target_flag = false;
+    } else if (!t->reset_on_target && t->reached_ffff_flag) {
+        // CRITICAL FIX: When reset_on_target=0, counter resets on FFFFh overflow
+        t->counter = 0;
+        t->reached_ffff_flag = false;
     }
     // Schedule next event
     timers_schedule_next_event(timers, timer_index);
@@ -399,8 +409,13 @@ void timers_on_vblank(Timers* timers) {
     }
     // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
     if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
-        LOG_TIMERS_INFO("[VBlank] Requesting IRQ0 (Timer0 event, VBlank logic)");
-        interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
+        LOG_TIMERS_INFO("[VBlank] Requesting IRQ0 (Timer0 event, VBlank logic) - mode=0x%04x, irq_en=%d, irq_on_target=%d", 
+                       t0->mode, (t0->mode & 0x0100) ? 1 : 0, (t0->mode & 0x0010) ? 1 : 0);
+        if (timers->inter) {
+            interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
+        } else {
+            LOG_ERROR("[VBlank] ERROR: timers->inter is NULL! Cannot request IRQ0!");
+        }
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
     } else if (t0->interrupt_requested) {

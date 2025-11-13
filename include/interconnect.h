@@ -5,6 +5,9 @@
 #include <stdint.h>       // For uint32_t, uint16_t etc.
 #include <stdbool.h>      // For bool type
 
+// Forward declaration to avoid circular dependency
+struct Cpu;
+
 // Include headers for components accessed via the interconnect
 #include "bios.h"
 #include "ram.h"
@@ -12,6 +15,7 @@
 #include "gpu.h"
 #include "timers.h"
 #include "cdrom.h"
+#include "sio.h"
 
 
 /* --- Memory Map Definitions (Physical Addresses) ---
@@ -112,15 +116,20 @@
 typedef struct Interconnect {
     Bios* bios; // Pointer to the loaded BIOS data
     Ram* ram;   // Pointer to the main RAM data buffer
+    struct Cpu* cpu; // Pointer to CPU for triggering exceptions
     Gpu gpu;    // GPU state (embedded directly)
     Dma dma;    // DMA controller state (embedded directly)
 
+    // --- Scratchpad (Fast RAM / D-Cache) ---
+    uint8_t scratchpad[SCRATCHPAD_SIZE]; // 1KB fast RAM at 0x1f800000
+    
     // --- Interrupt Controller State ---
     uint16_t irq_status; // I_STAT Register state (reflects pending IRQs)
     uint16_t irq_mask;   // I_MASK Register state (enables/disables IRQs)
     // --------------------------------
     Timers timers_state; // <<< ADD THIS MEMBER
     Cdrom cdrom;
+    Sio sio;  // Serial I/O (Controller and Memory Card)
 
     // --- Event System State (for event_scheduler) ---
     // These fields are used by the central event/timing system to schedule and dispatch hardware events.
@@ -147,6 +156,14 @@ typedef struct Interconnect {
  * @param ram Pointer to the initialized Ram struct.
  */
 void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram);
+
+/**
+ * @brief Sets the CPU pointer for the Interconnect (called after CPU initialization).
+ * Allows interconnect to trigger CPU exceptions directly.
+ * @param inter Pointer to the Interconnect instance.
+ * @param cpu Pointer to the CPU instance.
+ */
+void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu);
 
 /**
  * @brief Maps a CPU virtual address (KUSEG/KSEG0/KSEG1) to a physical address.

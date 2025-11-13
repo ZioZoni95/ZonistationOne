@@ -98,6 +98,12 @@ void log_print(LogCategory category, LogLevel level, const char* format, ...);
 #define LOG_TIMER_INFO(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_INFO, __VA_ARGS__)
 #define LOG_TIMER_DEBUG(...) log_print(LOG_CAT_TIMER, LOG_LEVEL_DEBUG, __VA_ARGS__)
 
+#define LOG_SIO_ERROR(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_SIO_WARN(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_SIO_INFO(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_SIO_DEBUG(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_SIO_TRACE(...) log_print(LOG_CAT_SYSTEM, LOG_LEVEL_TRACE, __VA_ARGS__)
+
 #define LOG_BIOS_ERROR(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_ERROR, __VA_ARGS__)
 #define LOG_BIOS_WARN(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_WARN, __VA_ARGS__)
 #define LOG_BIOS_INFO(...) log_print(LOG_CAT_BIOS, LOG_LEVEL_INFO, __VA_ARGS__)
