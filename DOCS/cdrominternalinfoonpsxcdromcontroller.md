@@ -1,4 +1,4 @@
-#   CDROM Internal Info on PSX CDROM Controller
+ #   CDROM Internal Info on PSX CDROM Controller
 PSX software can access the CDROM via Port 1F801800h..1F801803h (as described
 in the previous chapters). The following chapters describe the inner workings
 of the PSX CDROM controller - this information is here for curiosity only -

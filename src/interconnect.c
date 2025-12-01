@@ -8,6 +8,10 @@
 #include "ram.h"
 #include "cpu.h"  // For cpu_exception() and ExceptionCause
 
+// Instrumentation: BIOS patch-check monitoring range
+#define BIOS_PATCH_START 0x80059DC0U
+#define BIOS_PATCH_END   0x80059E20U
+
 // Using new PCSX ReARMed-style logging system
 
 // Rate limiting for frequent register accesses
@@ -21,6 +25,10 @@ static uint64_t dma_write32_count = 0;
 static uint32_t last_dma_write32_addr = 0;
 static uint32_t last_dma_write32_offset = 0;
 static uint32_t last_dma_write32_value = 0;
+
+// BIOS instrumentation cap: avoid huge log spam during tight loops
+static int bios_instrument_count = 0;
+#define BIOS_INSTRUMENT_MAX 200
 
 // --- Rate-limited log counters for IO accesses ---
 #if LOG_LEVEL >= LOG_LEVEL_INFO
@@ -108,7 +116,7 @@ static void interconnect_force_bios_boot_config(Interconnect* inter);
  * @param ram Pointer to the initialized Ram struct.
  */
 void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
-    LOG_INTERCONNECT_INFO("Interconnect initialized");
+    LOG_INTERCONNECT_DEBUG("Interconnect initialized");
     inter->bios = bios;
     inter->ram = ram;
     inter->cpu = NULL; // Will be set later via interconnect_set_cpu()
@@ -121,8 +129,9 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     cdrom_init(&inter->cdrom,inter);
 
     // Initialize Interrupt Controller state
-    inter->irq_status = 0; // No pending interrupts
-    inter->irq_mask = 0; // Mask all IRQs at startup
+    inter->irq_status = 0;     // No pending interrupts (I_STAT)
+    inter->irq_mask = 0;       // Mask all IRQs at startup (I_MASK)
+    inter->irq_line_state = 0; // No IRQ lines active (for edge detection)
     
     // Initialize Timer state <<< ADD THIS CALL
     timers_init(&inter->timers_state, inter);
@@ -130,7 +139,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
     
-    LOG_INTERCONNECT_INFO("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).");
+    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).");
 }
 
 /**
@@ -141,30 +150,111 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  */
 void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
     inter->cpu = cpu;
-    LOG_INTERCONNECT_INFO("Interconnect CPU pointer set (exception triggering enabled).");
+    LOG_INTERCONNECT_DEBUG("Interconnect CPU pointer set (exception triggering enabled).");
 }
 
 
 // --- Peripheral Interrupt Request ---
 /**
+ * @brief Sets the state of an interrupt line (edge-triggered like real PSX).
+ * Per PSX-SPX: "interrupt request bits in I_STAT are edge-triggered"
+ * Only sets I_STAT bit on 0->1 transition of the line.
+ * @param inter Pointer to the Interconnect instance.
+ * @param irq_line The interrupt line number (0-10).
+ * @param state true = line active, false = line inactive
+ */
+void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool state) {
+    const uint32_t bit = (1u << irq_line);
+    const uint32_t prev_line_state = inter->irq_line_state;
+    
+    // Update line state
+    if (state) {
+        inter->irq_line_state |= bit;
+    } else {
+        inter->irq_line_state &= ~bit;
+    }
+    
+    // Edge detection: only set I_STAT on rising edge (0->1 transition)
+    if (state && !(prev_line_state & bit)) {
+        inter->irq_status |= bit;
+        LOG_IRQ_DEBUG("IRQ%u rising edge: I_STAT=0x%04x, I_MASK=0x%04x", irq_line, inter->irq_status, inter->irq_mask);
+    }
+}
+
+/**
  * @brief Allows peripherals to signal an interrupt request.
  * Sets the corresponding bit in the I_STAT register (irq_status).
- * Used by peripherals (e.g., CDROM) to request IRQ2. Logs the source.
+ * Uses edge-triggered behavior per PSX-SPX.
  * @param inter Pointer to the Interconnect instance.
  * @param irq_line The interrupt line number (0-10).
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    LOG_IRQ_INFO("IRQ%u requested by %s. I_STAT before=0x%04x", irq_line, source, inter->irq_status);
-    inter->irq_status |= (1u << irq_line);
-    LOG_IRQ_INFO("IRQ%u set. I_STAT after=0x%04x", irq_line, inter->irq_status);
+    LOG_IRQ_DEBUG("IRQ%u requested by %s. I_STAT before=0x%04x", irq_line, source, inter->irq_status);
+    // Pulse the line (0->1->0) to trigger edge detection
+    interconnect_set_irq_line(inter, irq_line, true);
+    // Line stays high until acknowledged - don't pulse back to 0 here
+    LOG_IRQ_DEBUG("IRQ%u set. I_STAT after=0x%04x", irq_line, inter->irq_status);
 }
 
-// Helper to clear an IRQ (for explicit logging, though BIOS usually does this via I_STAT write)
+// Helper to clear/deassert an IRQ line
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    // Only clear if BIOS writes to I_STAT, never clear on read or after command/interrupt
+    // Deassert the line state (for edge detection on next request)
+    // Note: I_STAT bit is NOT cleared here - BIOS must write to I_STAT to clear it
     (void)source;
-    // Do nothing here; clearing is handled only in I_STAT write handler below
+    interconnect_set_irq_line(inter, irq_line, false);
+}
+
+// Schedule an event for the CDROM (simple callback-based timer)
+// For now, we store callbacks in a simple list
+typedef struct {
+    void (*callback)(void*, uint32_t);
+    void* context;
+    uint32_t target_cycle;
+    bool active;
+    const char* name;
+} CdromEvent;
+
+#define MAX_CDROM_EVENTS 8
+static CdromEvent cdrom_events[MAX_CDROM_EVENTS];
+
+void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
+                                 void (*callback)(void*, uint32_t), void* context,
+                                 const char* name) {
+    uint32_t target = inter->cpu_cycle_counter + cycles;
+    
+    // Find free slot
+    for (int i = 0; i < MAX_CDROM_EVENTS; i++) {
+        if (!cdrom_events[i].active) {
+            cdrom_events[i].callback = callback;
+            cdrom_events[i].context = context;
+            cdrom_events[i].target_cycle = target;
+            cdrom_events[i].active = true;
+            cdrom_events[i].name = name;
+            LOG_DEBUG("[EVT] Scheduled %s for cycle %u (now=%u, delay=%u)",
+                     name, target, inter->cpu_cycle_counter, cycles);
+            return;
+        }
+    }
+    LOG_ERROR("[EVT] No free event slots for %s!", name);
+}
+
+// Called by main loop to check/fire CDROM events
+void interconnect_check_cdrom_events(Interconnect* inter) {
+    for (int i = 0; i < MAX_CDROM_EVENTS; i++) {
+        if (cdrom_events[i].active) {
+            if (inter->cpu_cycle_counter >= cdrom_events[i].target_cycle) {
+                cdrom_events[i].active = false;
+                uint32_t cycles_late = inter->cpu_cycle_counter - cdrom_events[i].target_cycle;
+                LOG_DEBUG("[EVT] Firing %s (late=%u)", cdrom_events[i].name, cycles_late);
+                cdrom_events[i].callback(cdrom_events[i].context, cycles_late);
+            }
+        }
+    }
+}
+
+void interconnect_trigger_cdrom_irq(Interconnect* inter) {
+    interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
 }
 
 
@@ -178,10 +268,64 @@ void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* 
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
+    // Debug traces removed - BIOS now works correctly
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        /* Low-overhead whitelist instrumentation: only log accesses to
+           the two suspicious physical addresses observed during debugging.
+           These map from virtual 0x801ffd5c -> phys 0x001ffd5c and
+           0x80079d9c -> phys 0x00079d9c. Keep per-address caps. */
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU; // was 0x801ffd5c virtual
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU; // was 0x80079d9c virtual
+        static int phys_a_count = 0;
+        static int phys_b_count = 0;
+        const int PHYS_ADDR_MAX = 500; /* generous cap but still bounded */
+
+        if (physical_addr == PHYS_ADDR_A) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load32(inter->ram, ram_offset);
+            if (phys_a_count < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD32 pc=0x%08x phys=0x%08x val=0x%08x", curpc, physical_addr, val);
+                phys_a_count++;
+                if (phys_a_count == PHYS_ADDR_MAX) LOG_TRACE("[BIOS_WHITELIST] Reached max logs for phys 0x%08x", PHYS_ADDR_A);
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load32(inter->ram, ram_offset);
+            if (phys_b_count < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD32 pc=0x%08x phys=0x%08x val=0x%08x", curpc, physical_addr, val);
+                phys_b_count++;
+                if (phys_b_count == PHYS_ADDR_MAX) LOG_TRACE("[BIOS_WHITELIST] Reached max logs for phys 0x%08x", PHYS_ADDR_B);
+            }
+        }
+
+        /* Capped CPU snapshot: when the CPU fetches instruction at the
+           known branch location 0x80059dcc, log a small register snapshot.
+           This is triggered on instruction fetch (address == curpc). */
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count < CPU_SNAPSHOT_MAX) {
+            /* Log a minimal set of registers that the disassembly indicates are
+               used in the branch/tests (t0, v0, s0, t2, a1). */
+            uint32_t t0 = inter->cpu->regs[8];  /* t0 = $8 */
+            uint32_t v0 = inter->cpu->regs[2];  /* v0 = $2 */
+            uint32_t s0 = inter->cpu->regs[16]; /* s0 = $16 */
+            uint32_t t2 = inter->cpu->regs[10]; /* t2 = $10 */
+            uint32_t a1 = inter->cpu->regs[5];  /* a1 = $5 */
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count++;
+            if (cpu_snapshot_count == CPU_SNAPSHOT_MAX) LOG_INFO("[BIOS_SNAPSHOT] Reached max CPU snapshots (%d)", CPU_SNAPSHOT_MAX);
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO READ32", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("IO READ32 at 0x%08x", physical_addr);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        // Rate-limit to every 500th access
+        static uint32_t io_read32_trace = 0;
+        if (++io_read32_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO READ32 #%u at 0x%08x", io_read32_trace, physical_addr);
+        }
     }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
@@ -199,6 +343,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         LOG_INTERCONNECT_ERROR("Unaligned load32 address: 0x%08x", address);
         // Trigger Address Error Load exception directly if CPU pointer is set
         if (inter->cpu) {
+            inter->cpu->badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         }
         return 0; // Return 0 (exception already triggered)
@@ -264,7 +409,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return 0x00031125;
     }
     if (physical_addr == 0x1f801030) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 32-bit from 0x1f801030 (unknown register) - returning 0x00");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 32-bit from 0x1f801030 (unknown register) - returning 0x00");
         return 0x00; // Return 0 for now to see if BIOS continues
     }
     
@@ -281,7 +426,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     // GPU Registers
     if (physical_addr == GPU_GPUREAD_ADDR) { // 0x1f801810 (Read = GPUREAD)
         // Reading GPUREAD should return data from VRAM transfers or command responses
-        LOG_INTERCONNECT_INFO("~ Read32 from GPUREAD (0x1f801810)\n");
+        LOG_INTERCONNECT_DEBUG("~ Read32 from GPUREAD (0x1f801810)\n");
         return gpu_read_data(&inter->gpu);
     }
     if (physical_addr == GPU_GPUSTAT_ADDR) { // 0x1f801814 (Read = GPUSTAT)
@@ -293,7 +438,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     // Timer Registers (Example: Read Timer 1 Counter)
     if (physical_addr == 0x1f801110) { // Timer 1 Counter Value (T1_COUNT)
          // TODO: Implement actual Timer read logic
-         LOG_INTERCONNECT_INFO("~ Read32 from Timer 1 Counter (0x1f801110): Returning 0 (Placeholder)\n");
+         LOG_INTERCONNECT_DEBUG("~ Read32 from Timer 1 Counter (0x1f801110): Returning 0 (Placeholder)\n");
          return 0;
     }
     // Add reads for other Timer counters/modes/targets if needed
@@ -306,46 +451,48 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         uint32_t offset = physical_addr - DMA_START;
         dma_read32_count++;
         if (log_get_level() >= LOG_LEVEL_TRACE) {
-            if ((dma_read32_count % 1000 == 0) || (physical_addr != last_dma_read32_addr) || (offset != last_dma_read32_offset)) {
-                LOG_DMA_TRACE("~ Read32 from DMA region: Addr=0x%08x Offset=0x%x (count=%llu)", physical_addr, offset, dma_read32_count);
-                last_dma_read32_addr = physical_addr;
-                last_dma_read32_offset = offset;
+            // Rate-limit to every 5000th access
+            if (dma_read32_count % 5000 == 0) {
+                LOG_DMA_TRACE("~ DMA Read32 #%llu at 0x%08x", dma_read32_count, physical_addr);
             }
         }
         return dma_read(&inter->dma, offset); // Delegate to DMA module
     }
 
-    // Scratchpad Region (0x1f800000 - 0x1f8003ff) - 1KB Fast RAM
-    // PSX-SPX: Scratchpad is mirrored only in KUSEG and KSEG0, NOT in KSEG1
-    // Physical address 0x1f800000-0x1f8003ff maps to scratchpad
-    if (physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) {
+    // --- Scratchpad Region (0x1F800000–0x1F8003FF, mirrored in KUSEG/KSEG0 only) ---
+    // DOCS: memorymap.md, "Scratchpad is mirrored only in KUSEG and KSEG0, but not in KSEG1"
+    if ((physical_addr >= SCRATCHPAD_START && physical_addr <= SCRATCHPAD_END) &&
+        ((address < 0xA0000000) || (address < 0x80000000))) {
         uint32_t offset = physical_addr - SCRATCHPAD_START;
-        if (offset + 3 < SCRATCHPAD_SIZE) {  // Ensure aligned 32-bit read within bounds
-            // Read 32-bit value from scratchpad (little-endian)
+        if (offset + 3 < SCRATCHPAD_SIZE) {
             uint32_t value = inter->scratchpad[offset] |
                            (inter->scratchpad[offset + 1] << 8) |
                            (inter->scratchpad[offset + 2] << 16) |
                            (inter->scratchpad[offset + 3] << 24);
-            LOG_INTERCONNECT_TRACE("~ Read32 from Scratchpad: Addr=0x%08x Offset=0x%x = 0x%08x", 
-                                  physical_addr, offset, value);
+            LOG_INTERCONNECT_TRACE("~ Read32 from Scratchpad: Addr=0x%08x Offset=0x%x = 0x%08x", physical_addr, offset, value);
             return value;
         }
     }
 
-    // BIOS Region (0x1fc00000 - 0x1fc7ffff)
+    // --- BIOS Region (0x1FC00000–0x1FC7FFFF, mirrored in last 4MB) ---
+    // DOCS: memorymap.md, "512K BIOS ROM can be mirrored to the last 4MB (disabled by default)"
     static int bios_load32_debug_count = 0;
-    if (physical_addr >= BIOS_START && physical_addr <= BIOS_END) {
-        uint32_t offset = physical_addr - BIOS_START;
+    if ((physical_addr >= BIOS_START && physical_addr <= BIOS_END) ||
+        (physical_addr >= 0x1FC00000 && physical_addr < 0x20000000)) {
+        uint32_t bios_offset = (physical_addr - BIOS_START) % (BIOS_END - BIOS_START + 1);
         if (log_get_level() >= LOG_LEVEL_TRACE && bios_load32_debug_count < 10) {
-            LOG_TRACE("interconnect_load32: vaddr=0x%08X paddr=0x%08X BIOS offset=0x%X\n", address, physical_addr, offset);
+            LOG_TRACE("interconnect_load32: vaddr=0x%08X paddr=0x%08X BIOS offset=0x%X\n", address, physical_addr, bios_offset);
             bios_load32_debug_count++;
         }
-        return bios_load32(inter->bios, offset); // Delegate to BIOS module
+        return bios_load32(inter->bios, bios_offset);
     }
 
-    // Main RAM Region (0x00000000 - 0x001fffff)
-    if (physical_addr <= RAM_END) {
-        return ram_load32(inter->ram, physical_addr); // Delegate to RAM module
+    // --- Main RAM Region (0x00000000 - 0x001FFFFF, mirrored in first 8MB) ---
+    // DOCS: memorymap.md, "2MB RAM can be mirrored to the first 8MB"
+    if (physical_addr <= RAM_END || (physical_addr < 0x00800000)) {
+        // Mirror RAM in first 8MB
+        uint32_t ram_offset = physical_addr % (RAM_END + 1);
+        return ram_load32(inter->ram, ram_offset);
     }
 
         // Expansion 3 Region alias helper: some BIOS routines access both 0x1FAxxxxx (spec) and
@@ -362,7 +509,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         static uint32_t exp3_read_count = 0;
         exp3_read_count++;
         if (exp3_read_count <= 5) {
-                LOG_INTERCONNECT_INFO("Expansion 3 read32 at physical 0x%08x (no hardware present)",
+                LOG_INTERCONNECT_DEBUG("Expansion 3 read32 at physical 0x%08x (no hardware present)",
                         physical_addr);
         }
             return 0x00000000; // Return 0: matches behaviour of idle POST3 latch on retail units
@@ -399,36 +546,83 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
          static uint32_t exp1_read32_count = 0;
          exp1_read32_count++;
          if (exp1_read32_count <= 10) {
-             LOG_INTERCONNECT_INFO("~ Read32 from Expansion 1 region: Address 0x%08x (Returning 0x00000000)\n", physical_addr);
+             LOG_INTERCONNECT_DEBUG("~ Read32 from Expansion 1 region: Address 0x%08x (Returning 0x00000000)\n", physical_addr);
          }
          return 0x00000000; // Return 0 to prevent BIOS from misinterpreting as jump target
     }
 
     // VRAM Region (0x1F000000 - 0x1F7FFFFF)
     if (physical_addr >= 0x1F000000 && physical_addr <= 0x1F7FFFFF) {
-        LOG_INTERCONNECT_INFO("~ Read32 from VRAM region: Address 0x%08x (Returning 0xFFFFFFFF as open bus)\n", physical_addr);
+        LOG_INTERCONNECT_DEBUG("~ Read32 from VRAM region: Address 0x%08x (Returning 0xFFFFFFFF as open bus)\n", physical_addr);
         return 0xFFFFFFFF; // Open bus for unimplemented VRAM
     }
 
-    // --- Hardware Register Checks (Specific Addresses First) ---
+    // --- I/O Ports and Peripheral Registers (0x1F801000–0x1F801FFF) ---
+    // DOCS: iomap.md, map all ports and registers
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
-        
-        // TEST: Add missing hardware registers that BIOS is trying to access
-        if (physical_addr == 0x1f801010) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801010 (unknown register) - returning 0x00");
-            return 0x00; // Return 0 for now to see if BIOS continues
+        // Map all I/O ports as per DOCS/iomap.md
+        // Example: Joypad/Memory Card, SIO, DMA, Timers, CDROM, GPU, SPU, MDEC
+        // Add stubs or delegate to respective modules
+        if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+            // Joypad/Memory Card
+            // DOCS: iomap.md, "JOY_DATA", "JOY_STAT", etc.
+            return sio_read32(&inter->sio, offset);
         }
-        if (physical_addr == 0x1f801020) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801020 (unknown register) - returning 0x00");
-            return 0x00; // Return 0 for now to see if BIOS continues
+        if (physical_addr >= 0x1f801050 && physical_addr <= 0x1f80105f) {
+            // SIO (Serial Port)
+            // DOCS: iomap.md, "SIO_DATA", "SIO_STAT", etc.
+            return sio_read32(&inter->sio, offset);
         }
-        if (physical_addr == 0x1f801030) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS accessing 0x1f801030 (unknown register) - returning 0x00");
-            return 0x00; // Return 0 for now to see if BIOS continues
+        if (physical_addr >= 0x1f801060 && physical_addr <= 0x1f801063) {
+            // RAM_SIZE
+            // DOCS: iomap.md, "RAM_SIZE"
+            return 0x00000B88;
         }
-        
-        // LOG_INTERCONNECT_TRACE("[HWREG] Read32 at 0x%08x", physical_addr); // Uncomment for deep debug
+        if (physical_addr >= 0x1f801070 && physical_addr <= 0x1f801077) {
+            // Interrupt Controller
+            // DOCS: iomap.md, "I_STAT", "I_MASK"
+            if (physical_addr == IRQ_STATUS_ADDR) return inter->irq_status;
+            if (physical_addr == IRQ_MASK_ADDR) return inter->irq_mask;
+        }
+        if (physical_addr >= 0x1f801080 && physical_addr <= 0x1f8010ff) {
+            // DMA
+            // DOCS: iomap.md, "DMA0"–"DMA6", "DPCR", "DICR"
+            return dma_read(&inter->dma, offset);
+        }
+        if (physical_addr >= 0x1f801100 && physical_addr <= 0x1f80112f) {
+            // Timers
+            // DOCS: iomap.md, "Timer 0", "Timer 1", "Timer 2"
+            int timer_index = (physical_addr - 0x1f801100) / 0x10;
+            uint32_t reg_offset = physical_addr & 0xF;
+            return timer_read32(&inter->timers_state, timer_index, reg_offset);
+        }
+        if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
+            // CDROM - 8-bit registers, return combined 32-bit
+            // DOCS: iomap.md, "CD Index/Status", "CD Response Fifo", etc.
+            uint32_t result = 0;
+            for (int i = 0; i < 4; i++) {
+                result |= ((uint32_t)cdrom_read8(&inter->cdrom, physical_addr + i)) << (i * 8);
+            }
+            return result;
+        }
+        if (physical_addr >= 0x1f801810 && physical_addr <= 0x1f801817) {
+            // GPU
+            // DOCS: iomap.md, "GP0", "GP1", "GPUREAD", "GPUSTAT"
+            if (physical_addr == GPU_GPUREAD_ADDR) return gpu_read_data(&inter->gpu);
+            if (physical_addr == GPU_GPUSTAT_ADDR) return gpu_read_status(&inter->gpu);
+        }
+        if (physical_addr >= 0x1f801820 && physical_addr <= 0x1f801827) {
+            // MDEC
+            // DOCS: iomap.md, "MDEC Command", "MDEC Data", etc.
+            return 0; // Stub for now
+        }
+        if (physical_addr >= 0x1f801c00 && physical_addr <= 0x1f801e7f) {
+            // SPU
+            // DOCS: iomap.md, "SPU Voice", "SPU Control", "SPU Reverb"
+            return 0; // Stub for now
+        }
+        // Default: return hardware register value
         return hwregs[offset];
     }
 
@@ -493,28 +687,69 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
  */
 uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
+        static int phys_a_count16 = 0;
+        static int phys_b_count16 = 0;
+        const int PHYS_ADDR_MAX = 500;
+        if (physical_addr == PHYS_ADDR_A) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load16(inter->ram, ram_offset);
+            if (phys_a_count16 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD16 pc=0x%08x phys=0x%08x val=0x%04x", curpc, physical_addr, (uint32_t)val);
+                phys_a_count16++;
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load16(inter->ram, ram_offset);
+            if (phys_b_count16 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD16 pc=0x%08x phys=0x%08x val=0x%04x", curpc, physical_addr, (uint32_t)val);
+                phys_b_count16++;
+            }
+        }
+        /* Snapshot on branch PC as in LOAD32 */
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count16 = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count16 < CPU_SNAPSHOT_MAX) {
+            uint32_t t0 = inter->cpu->regs[8];
+            uint32_t v0 = inter->cpu->regs[2];
+            uint32_t s0 = inter->cpu->regs[16];
+            uint32_t t2 = inter->cpu->regs[10];
+            uint32_t a1 = inter->cpu->regs[5];
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count16++;
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO READ16", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ16 at 0x%08x", physical_addr);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        static uint32_t io_read16_trace = 0;
+        if (++io_read16_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO READ16 #%u at 0x%08x", io_read16_trace, physical_addr);
+        }
     }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read16_count % 10000 == 0) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] IO READ16: %d accesses, last at 0x%08x\n", io_read16_count, physical_addr);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] IO READ16: %d accesses, last at 0x%08x\n", io_read16_count, physical_addr);
         }
     }
 #endif
     // CDROM 16-bit access logging
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] CDROM register READ16 at 0x%08x (UNEXPECTED SIZE)\n", physical_addr);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ16 at 0x%08x (UNEXPECTED SIZE)\n", physical_addr);
     }
      // Check for 16-bit alignment (Halfword access)
      if (address % 2 != 0) {
-        // On PS1, some BIOS code does unaligned loads - handle gracefully by reading from aligned address
-        // This matches behavior seen in other emulators
-        LOG_INTERCONNECT_WARN("Unaligned load16 at 0x%08x, reading from aligned address 0x%08x\n", address, address & ~1);
-        address = address & ~1; // Align to nearest 16-bit boundary
+        LOG_INTERCONNECT_ERROR("Unaligned load16 address: 0x%08x", address);
+        if (inter->cpu) {
+            inter->cpu->badvaddr = address;
+            cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+        }
+        return 0;
     }
 // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
@@ -528,15 +763,15 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     
     // TEST: Add missing hardware register read handlers for 16-bit access
     if (physical_addr == 0x1f801010) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801010 (unknown register) - returning 0x0000");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 16-bit from 0x1f801010 (unknown register) - returning 0x0000");
         return 0x0000; // Return 0 for now to see if BIOS continues
     }
     if (physical_addr == 0x1f801020) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801020 (unknown register) - returning 0x0000");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 16-bit from 0x1f801020 (unknown register) - returning 0x0000");
         return 0x0000; // Return 0 for now to see if BIOS continues
     }
     if (physical_addr == 0x1f801030) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 16-bit from 0x1f801030 (unknown register) - returning 0x0000");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 16-bit from 0x1f801030 (unknown register) - returning 0x0000");
         return 0x0000; // Return 0 for now to see if BIOS continues
     }
     
@@ -596,7 +831,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         static uint32_t exp3_read16_count = 0;
         exp3_read16_count++;
         if (exp3_read16_count <= 5) {
-            LOG_INTERCONNECT_INFO("Expansion 3 read16 at physical 0x%08x (no hardware present)",
+            LOG_INTERCONNECT_DEBUG("Expansion 3 read16 at physical 0x%08x (no hardware present)",
                     physical_addr);
         }
         return 0x0000; // POST3 latch idle value
@@ -607,7 +842,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
          static uint32_t exp1_read16_count = 0;
          exp1_read16_count++;
          if (exp1_read16_count <= 10) {
-             LOG_INTERCONNECT_INFO("~ Read16 from Expansion 1 region: Address 0x%08x (Returning 0x0000)\n", physical_addr);
+             LOG_INTERCONNECT_DEBUG("~ Read16 from Expansion 1 region: Address 0x%08x (Returning 0x0000)\n", physical_addr);
          }
          return 0x0000; // Return 0 to prevent BIOS from misinterpreting as jump target
     }
@@ -665,15 +900,53 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
  */
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
+        static int phys_a_count8 = 0;
+        static int phys_b_count8 = 0;
+        const int PHYS_ADDR_MAX = 500;
+        if (physical_addr == PHYS_ADDR_A) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load8(inter->ram, ram_offset);
+            if (phys_a_count8 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD8 pc=0x%08x phys=0x%08x val=0x%02x", curpc, physical_addr, (uint32_t)val);
+                phys_a_count8++;
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            uint32_t ram_offset = physical_addr % (RAM_END + 1);
+            uint32_t val = ram_load8(inter->ram, ram_offset);
+            if (phys_b_count8 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] LOAD8 pc=0x%08x phys=0x%08x val=0x%02x", curpc, physical_addr, (uint32_t)val);
+                phys_b_count8++;
+            }
+        }
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count8 = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count8 < CPU_SNAPSHOT_MAX) {
+            uint32_t t0 = inter->cpu->regs[8];
+            uint32_t v0 = inter->cpu->regs[2];
+            uint32_t s0 = inter->cpu->regs[16];
+            uint32_t t2 = inter->cpu->regs[10];
+            uint32_t a1 = inter->cpu->regs[5];
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count8++;
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO READ8", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO READ8 at 0x%08x", physical_addr);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        static uint32_t io_read8_trace = 0;
+        if (++io_read8_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO READ8 #%u at 0x%08x", io_read8_trace, physical_addr);
+        }
     }
 #if LOG_LEVEL >= LOG_LEVEL_INFO
     if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
         if (++io_read8_count % 10000 == 0) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] IO READ8: %d accesses, last at 0x%08x\n", io_read8_count, physical_addr);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] IO READ8: %d accesses, last at 0x%08x\n", io_read8_count, physical_addr);
         }
     }
 #endif
@@ -686,15 +959,15 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     
     // TEST: Add missing hardware register read handlers for 8-bit access
     if (physical_addr == 0x1f801010) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801010 (unknown register) - returning 0x00");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 8-bit from 0x1f801010 (unknown register) - returning 0x00");
         return 0x00; // Return 0 for now to see if BIOS continues
     }
     if (physical_addr == 0x1f801020) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801020 (unknown register) - returning 0x00");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 8-bit from 0x1f801020 (unknown register) - returning 0x00");
         return 0x00; // Return 0 for now to see if BIOS continues
     }
     if (physical_addr == 0x1f801030) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS reading 8-bit from 0x1f801030 (unknown register) - returning 0x00");
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS reading 8-bit from 0x1f801030 (unknown register) - returning 0x00");
         return 0x00; // Return 0 for now to see if BIOS continues
     }
     
@@ -703,10 +976,10 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8 at 0x%08x\n", physical_addr);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
         if (++cdrom_read8_count % 10000 == 0) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] CDROM register READ8: %d accesses, last at 0x%08x\n", cdrom_read8_count, physical_addr);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8: %d accesses, last at 0x%08x\n", cdrom_read8_count, physical_addr);
         }
 #endif
-        return cdrom_read_register(&inter->cdrom, physical_addr);
+        return cdrom_read8(&inter->cdrom, physical_addr);
     }
 
     const bool is_expansion3 =
@@ -717,7 +990,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         static uint32_t exp3_read8_count = 0;
         exp3_read8_count++;
         if (exp3_read8_count <= 5) {
-            LOG_INTERCONNECT_INFO("Expansion 3 read8 at physical 0x%08x (no hardware present)",
+            LOG_INTERCONNECT_DEBUG("Expansion 3 read8 at physical 0x%08x (no hardware present)",
                     physical_addr);
         }
         return 0x00;
@@ -729,7 +1002,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
          static uint32_t exp1_read8_count = 0;
          exp1_read8_count++;
          if (exp1_read8_count <= 10) {
-             LOG_INTERCONNECT_INFO("~ Read8 from Expansion 1 region: Address 0x%08x (Returning 0x00)\n", physical_addr);
+             LOG_INTERCONNECT_DEBUG("~ Read8 from Expansion 1 region: Address 0x%08x (Returning 0x00)\n", physical_addr);
          }
          return 0x00;
      }
@@ -810,10 +1083,44 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
+        static int phys_a_count_s32 = 0;
+        static int phys_b_count_s32 = 0;
+        const int PHYS_ADDR_MAX = 500;
+        if (physical_addr == PHYS_ADDR_A) {
+            if (phys_a_count_s32 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE32 pc=0x%08x phys=0x%08x val=0x%08x", curpc, physical_addr, value);
+                phys_a_count_s32++;
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            if (phys_b_count_s32 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE32 pc=0x%08x phys=0x%08x val=0x%08x", curpc, physical_addr, value);
+                phys_b_count_s32++;
+            }
+        }
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count_store32 = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store32 < CPU_SNAPSHOT_MAX) {
+            uint32_t t0 = inter->cpu->regs[8];
+            uint32_t v0 = inter->cpu->regs[2];
+            uint32_t s0 = inter->cpu->regs[16];
+            uint32_t t2 = inter->cpu->regs[10];
+            uint32_t a1 = inter->cpu->regs[5];
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count_store32++;
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO WRITE32", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("IO WRITE32 at 0x%08x = 0x%08x", physical_addr, value);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        static uint32_t io_write32_trace = 0;
+        if (++io_write32_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO WRITE32 #%u at 0x%08x = 0x%08x", io_write32_trace, physical_addr, value);
+        }
     }
     // Remove or comment out noisy IO write logs for general IO region
     // LOG_TRACE("[INTERCONNECT] IO WRITE32 at 0x%08x: value=0x%08x\n", physical_addr, value);
@@ -834,6 +1141,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         LOG_INTERCONNECT_ERROR("Unaligned store32 address: 0x%08x = 0x%08x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
         if (inter->cpu) {
+            inter->cpu->badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         }
         return;
@@ -853,9 +1161,19 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        LOG_IRQ_INFO("Write to I_STAT (IRQ_STATUS_ADDR): Value=0x%04x, Before=0x%04x", value, inter->irq_status);
-        inter->irq_status &= ~(value & 0xFFFF); // Only clear bits written by BIOS
-        LOG_IRQ_INFO("I_STAT after clear: 0x%04x", inter->irq_status);
+        // Trace PC for debugging I_STAT writes
+        uint32_t caller_pc = inter->cpu ? inter->cpu->current_pc : 0;
+        LOG_IRQ_DEBUG("Write to I_STAT: Value=0x%08x, Before=0x%04x, PC=0x%08x", value, inter->irq_status, caller_pc);
+        // PSX-SPX: "Acknowledge: Write I_STAT (0=Clear Bit, 1=No change)"
+        // Writing 0 to a bit clears it, writing 1 has no effect
+        // duckstation: s_interrupt_status_register = s_interrupt_status_register & (value & WRITE_MASK)
+        uint16_t mask_value = (uint16_t)(value & 0x7FF);
+        uint16_t bits_to_clear = inter->irq_status & ~mask_value; // bits that will be cleared
+        inter->irq_status = inter->irq_status & mask_value;
+        // Also clear the line state for cleared IRQs (so they can trigger again on next edge)
+        inter->irq_line_state &= ~bits_to_clear;
+        LOG_IRQ_DEBUG("I_STAT after: 0x%04x, cleared bits: 0x%04x, line_state: 0x%04x", 
+                     inter->irq_status, bits_to_clear, inter->irq_line_state);
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
@@ -883,9 +1201,9 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         
         // Detect when BIOS is disabling IRQ0
         if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_INFO("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
         } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_INFO("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
         }
         
         LOG_DEBUG("[IRQ] Write to I_MASK (IRQ_MASK_ADDR): Value=0x%04x, New I_MASK=0x%04x, IRQ0 enabled=%d", value, inter->irq_mask, (inter->irq_mask & 0x1) ? 1 : 0);
@@ -904,7 +1222,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Cache Control (KSEG2)
     if (physical_addr == CACHE_CONTROL_ADDR) {
-        LOG_INTERCONNECT_INFO("~ Write32 to CACHE_CONTROL register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+        LOG_INTERCONNECT_DEBUG("~ Write32 to CACHE_CONTROL register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
         // Cache not implemented yet
         return;
     }
@@ -933,20 +1251,18 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         uint32_t offset = physical_addr - DMA_START;
         dma_write32_count++;
         if (log_get_level() >= LOG_LEVEL_TRACE) {
-            if ((dma_write32_count % 1000 == 0) || (physical_addr != last_dma_write32_addr) || (offset != last_dma_write32_offset) || (value != last_dma_write32_value)) {
-                LOG_DMA_TRACE("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x (count=%llu)", physical_addr, offset, value, dma_write32_count);
-                last_dma_write32_addr = physical_addr;
-                last_dma_write32_offset = offset;
-                last_dma_write32_value = value;
+            // Rate-limit to every 5000th access
+            if (dma_write32_count % 5000 == 0) {
+                LOG_DMA_TRACE("~ DMA Write32 #%llu at 0x%08x = 0x%08x", dma_write32_count, physical_addr, value);
             }
         }
-        LOG_DMA_INFO("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x\n", physical_addr, offset, value, dma_write32_count);
+        LOG_DMA_DEBUG("~ Write32 to DMA region: Addr=0x%08x Offset=0x%x = 0x%08x", physical_addr, offset, value);
         bool channel_became_active = dma_write(&inter->dma, offset, value); // Delegate
 
         // If the write activated a channel control register, start the DMA transfer
         if (channel_became_active) {
              uint32_t channel_index = (offset >> 4) & 0x7;
-             LOG_DMA_INFO("  DMA Channel %d activated by write to offset 0x%x.\n", channel_index, offset);
+             LOG_DMA_DEBUG("  DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
              interconnect_perform_dma(inter, channel_index);
         }
         return;
@@ -973,18 +1289,18 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         switch (physical_addr) {
             case EXPANSION_1_BASE_ADDR: // 0x1f801000
                 if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
-                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
                 break;
             case EXPANSION_2_BASE_ADDR: // 0x1f801004
                  if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
-                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                 else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
                 break;
             case RAM_SIZE_ADDR: // 0x1f801060
-                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", value);
+                LOG_INTERCONNECT_DEBUG("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", value);
                 break;
             // IRQ regs handled above
             default:
-                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                // LOG_INTERCONNECT_DEBUG("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
         }
         return;
@@ -992,7 +1308,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // Timer Region
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-         LOG_INTERCONNECT_INFO("~ Write32 to TIMERS region: Addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+         LOG_INTERCONNECT_DEBUG("~ Write32 to TIMERS region: Addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
          // TODO: Implement Timer register writes
          return;
     }
@@ -1023,7 +1339,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     // Expansion Regions (Generally ignored)
     if ((physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) ||
         (physical_addr >= EXPANSION_2_START && physical_addr <= EXPANSION_2_END)) {
-        LOG_INTERCONNECT_INFO("~ Write32 to Expansion region: Address 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+        LOG_INTERCONNECT_DEBUG("~ Write32 to Expansion region: Address 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
         return;
     }
 
@@ -1033,15 +1349,15 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         
         // TEST: Add missing hardware register write handlers
         if (physical_addr == 0x1f801010) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801010 (unknown register)", value);
+            LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 0x%08x to 0x1f801010 (unknown register)", value);
             return; // Don't store, just log
         }
         if (physical_addr == 0x1f801020) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801020 (unknown register)", value);
+            LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 0x%08x to 0x1f801020 (unknown register)", value);
             return; // Don't store, just log
         }
         if (physical_addr == 0x1f801030) {
-            LOG_INTERCONNECT_INFO("[TEST] BIOS writing 0x%08x to 0x1f801030 (unknown register)", value);
+            LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 0x%08x to 0x1f801030 (unknown register)", value);
             return; // Don't store, just log
         }
         
@@ -1055,18 +1371,18 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         switch (physical_addr) {
             case EXPANSION_1_BASE_ADDR: // 0x1f801000
                 if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
-                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
                 break;
             case EXPANSION_2_BASE_ADDR: // 0x1f801004
                  if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
-                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                 else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
                 break;
             case RAM_SIZE_ADDR: // 0x1f801060
-                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                LOG_INTERCONNECT_DEBUG("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
             // IRQ regs handled above
             default:
-                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                // LOG_INTERCONNECT_DEBUG("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
         }
         return;
@@ -1127,35 +1443,69 @@ static uint16_t last_write16_da8_value = 0;
  */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
+        static int phys_a_count_s16 = 0;
+        static int phys_b_count_s16 = 0;
+        const int PHYS_ADDR_MAX = 500;
+        if (physical_addr == PHYS_ADDR_A) {
+            if (phys_a_count_s16 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE16 pc=0x%08x phys=0x%08x val=0x%04x", curpc, physical_addr, value);
+                phys_a_count_s16++;
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            if (phys_b_count_s16 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE16 pc=0x%08x phys=0x%08x val=0x%04x", curpc, physical_addr, value);
+                phys_b_count_s16++;
+            }
+        }
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count_store16 = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store16 < CPU_SNAPSHOT_MAX) {
+            uint32_t t0 = inter->cpu->regs[8];
+            uint32_t v0 = inter->cpu->regs[2];
+            uint32_t s0 = inter->cpu->regs[16];
+            uint32_t t2 = inter->cpu->regs[10];
+            uint32_t a1 = inter->cpu->regs[5];
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count_store16++;
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO WRITE16", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x = 0x%04x", physical_addr, value);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        static uint32_t io_write16_trace = 0;
+        if (++io_write16_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO WRITE16 #%u at 0x%08x = 0x%04x", io_write16_trace, physical_addr, value);
+        }
     }
     // Remove or comment out noisy IO write logs for general IO region
     // LOG_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
     if (physical_addr == 0x1f801da8) {
         write16_da8_count++;
         if (log_get_level() >= LOG_LEVEL_TRACE) {
-            // In TRACE mode, print every 1000th access or when value changes
-            if ((write16_da8_count % 1000 == 0) || (value != last_write16_da8_value)) {
-                LOG_DMA_TRACE("[INTERCONNECT] IO WRITE16 at 0x1f801da8: value=0x%04x (count=%llu)", value, write16_da8_count);
-                last_write16_da8_value = value;
+            // Rate-limit SPU FIFO to every 10000th access
+            if (write16_da8_count % 10000 == 0) {
+                LOG_DMA_TRACE("SPU FIFO Write16 #%llu: value=0x%04x", write16_da8_count, value);
             }
         }
         // Suppress at all other log levels
     } else {
-        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
+        // Remove redundant per-access log - already rate-limited above
     }
     // CDROM 16-bit access logging
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] CDROM register WRITE16 at 0x%08x = 0x%04x (UNEXPECTED SIZE)\n", physical_addr, value);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE16 at 0x%08x = 0x%04x (UNEXPECTED SIZE)\n", physical_addr, value);
     }
     // Check alignment
     if (address % 2 != 0) {
         LOG_INTERCONNECT_ERROR("Unaligned store16 address: 0x%08x = 0x%04x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
         if (inter->cpu) {
+            inter->cpu->badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         }
         return;
@@ -1169,7 +1519,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         static uint32_t timer_write_count = 0;
         timer_write_count++;
         if (timer_write_count % 100 == 0) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] Write16 to Timer%d: addr=0x%08x offset=0x%x value=0x%04x", timer_index, physical_addr, register_offset, value);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Write16 to Timer%d: addr=0x%08x offset=0x%x value=0x%04x", timer_index, physical_addr, register_offset, value);
         }
         timer_write16(&inter->timers_state, timer_index, register_offset, value);
         return; // Handled
@@ -1177,15 +1527,15 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
      
      // TEST: Add missing hardware register write handlers for 16-bit access
      if (physical_addr == 0x1f801010) {
-         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801010 (unknown register)", value);
+         LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801010 (unknown register)", value);
          return; // Don't store, just log
      }
      if (physical_addr == 0x1f801020) {
-         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801020 (unknown register)", value);
+         LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801020 (unknown register)", value);
          return; // Don't store, just log
      }
      if (physical_addr == 0x1f801030) {
-         LOG_INTERCONNECT_INFO("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801030 (unknown register)", value);
+         LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 16-bit 0x%04x to 0x1f801030 (unknown register)", value);
          return; // Don't store, just log
      }
      
@@ -1196,7 +1546,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         irq_status_write_count++;
         // Only log every 1000th write or when value changes significantly
         if (irq_status_write_count == 1 || irq_status_write_count % 1000 == 0 || (value != last_irq_status_value && (value ^ last_irq_status_value) > 0xFF)) {
-            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, Count=%u, Last=0x%04x", value, irq_status_write_count, last_irq_status_value);
+            LOG_INTERCONNECT_DEBUG("[IRQ][I_STAT] Write16: Value=0x%04x, Count=%u, Last=0x%04x", value, irq_status_write_count, last_irq_status_value);
         }
         last_irq_status_value = value;
         uint16_t prev_status = inter->irq_status;
@@ -1223,7 +1573,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         }
         // Keep the existing detailed log for the first write only
         if (irq_status_write_count == 1) {
-            LOG_INTERCONNECT_INFO("[IRQ][I_STAT] Write16: Value=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, prev_status, inter->irq_status, __func__);
+            LOG_INTERCONNECT_DEBUG("[IRQ][I_STAT] Write16: Value=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, prev_status, inter->irq_status, __func__);
         }
         return;
     }
@@ -1233,9 +1583,9 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         
         // Detect when BIOS is disabling IRQ0
         if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_INFO("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
         } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_INFO("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
         }
         
         LOG_INTERCONNECT_TRACE("Write16 to IRQ_MASK: Value=0x%04x -> I_MASK=0x%04x", value, inter->irq_mask);
@@ -1281,7 +1631,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 
     // Memory Control Region (General - unlikely 16-bit writes)
      if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
-         LOG_INTERCONNECT_INFO("~ Write16 to MEM_CONTROL region: Addr 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
+         LOG_INTERCONNECT_DEBUG("~ Write16 to MEM_CONTROL region: Addr 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
          return;
      }
 
@@ -1307,15 +1657,15 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     // Expansion Regions
     if ((physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) ||
         (physical_addr >= EXPANSION_2_START && physical_addr <= EXPANSION_2_END)) {
-        LOG_INTERCONNECT_INFO("~ Write16 to Expansion region: Address 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
+        LOG_INTERCONNECT_TRACE("~ Write16 to Expansion region: Address 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
         return;
     }
 
-    // Logging: Suppress IO WRITE16 logs for polled SPU/controller addresses unless LOG_LEVEL_DEBUG is enabled.
+    // Logging: Suppress IO WRITE16 logs for polled SPU/controller addresses unless LOG_LEVEL_TRACE is enabled.
     // This prevents log flooding from BIOS polling loops.
     if ((physical_addr >= 0x1f801d80 && physical_addr <= 0x1f801dbf) ||
         physical_addr == 0x1f801da8 || physical_addr == 0x1f801daa || physical_addr == 0x1f801dac || physical_addr == 0x1f801dae) {
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE16 at 0x%08x: value=0x%04x", physical_addr, value);
         return;
     }
 
@@ -1332,18 +1682,18 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         switch (physical_addr) {
             case EXPANSION_1_BASE_ADDR: // 0x1f801000
                 if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
-                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
                 break;
             case EXPANSION_2_BASE_ADDR: // 0x1f801004
                  if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
-                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                 else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
                 break;
             case RAM_SIZE_ADDR: // 0x1f801060
-                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                LOG_INTERCONNECT_DEBUG("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
             // IRQ regs handled above
             default:
-                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                // LOG_INTERCONNECT_DEBUG("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
         }
         return;
@@ -1369,10 +1719,44 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
  */
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     uint32_t physical_addr = mask_region(address);
+    if (inter->cpu) {
+        uint32_t curpc = inter->cpu->pc;
+        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
+        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
+        static int phys_a_count_s8 = 0;
+        static int phys_b_count_s8 = 0;
+        const int PHYS_ADDR_MAX = 500;
+        if (physical_addr == PHYS_ADDR_A) {
+            if (phys_a_count_s8 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE8 pc=0x%08x phys=0x%08x val=0x%02x", curpc, physical_addr, value);
+                phys_a_count_s8++;
+            }
+        } else if (physical_addr == PHYS_ADDR_B) {
+            if (phys_b_count_s8 < PHYS_ADDR_MAX) {
+                LOG_TRACE("[BIOS_WHITELIST] STORE8 pc=0x%08x phys=0x%08x val=0x%02x", curpc, physical_addr, value);
+                phys_b_count_s8++;
+            }
+        }
+        const uint32_t BRANCH_PC = 0x80059DCCU;
+        static int cpu_snapshot_count_store8 = 0;
+        const int CPU_SNAPSHOT_MAX = 64;
+        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store8 < CPU_SNAPSHOT_MAX) {
+            uint32_t t0 = inter->cpu->regs[8];
+            uint32_t v0 = inter->cpu->regs[2];
+            uint32_t s0 = inter->cpu->regs[16];
+            uint32_t t2 = inter->cpu->regs[10];
+            uint32_t a1 = inter->cpu->regs[5];
+            LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
+            cpu_snapshot_count_store8++;
+        }
+    }
     if (IS_KEY_HW_REG(physical_addr)) {
         log_hot_reg("IO WRITE8", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_DEBUG) {
-        LOG_INTERCONNECT_TRACE("[INTERCONNECT] IO WRITE8 at 0x%08x = 0x%02x", physical_addr, value);
+    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
+        static uint32_t io_write8_trace = 0;
+        if (++io_write8_trace % 500 == 0) {
+            LOG_INTERCONNECT_TRACE("IO WRITE8 #%u at 0x%08x = 0x%02x", io_write8_trace, physical_addr, value);
+        }
     }
     // Remove or comment out noisy IO write logs for general IO region
     // if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
@@ -1388,15 +1772,15 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     
     // TEST: Add missing hardware register write handlers for 8-bit access
     if (physical_addr == 0x1f801010) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801010 (unknown register)", value);
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801010 (unknown register)", value);
         return; // Don't store, just log
     }
     if (physical_addr == 0x1f801020) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801020 (unknown register)", value);
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801020 (unknown register)", value);
         return; // Don't store, just log
     }
     if (physical_addr == 0x1f801030) {
-        LOG_INTERCONNECT_INFO("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801030 (unknown register)", value);
+        LOG_INTERCONNECT_DEBUG("[TEST] BIOS writing 8-bit 0x%02x to 0x1f801030 (unknown register)", value);
         return; // Don't store, just log
     }
     
@@ -1405,10 +1789,10 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8 at 0x%08x = 0x%02x\n", physical_addr, value);
 #if LOG_LEVEL >= LOG_LEVEL_INFO
         if (++cdrom_write8_count % 10000 == 0) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] CDROM register WRITE8: %d accesses, last at 0x%08x = 0x%02x\n", cdrom_write8_count, physical_addr, value);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8: %d accesses, last at 0x%08x = 0x%02x\n", cdrom_write8_count, physical_addr, value);
         }
 #endif
-        cdrom_write_register(&inter->cdrom, physical_addr, value);
+        cdrom_write8(&inter->cdrom, physical_addr, value);
         return;
     }
 
@@ -1436,7 +1820,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
     // Memory Control Region
     if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
-         LOG_INTERCONNECT_INFO("~ Write8 to MEM_CONTROL region: 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value);
+         LOG_INTERCONNECT_DEBUG("~ Write8 to MEM_CONTROL region: 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value);
          return; // Unlikely target for 8-bit writes
     }
 
@@ -1448,7 +1832,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
     // Expansion 1 Region
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-        LOG_INTERCONNECT_INFO("~ Write8 to Expansion 1 region: Address 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value);
+        LOG_INTERCONNECT_DEBUG("~ Write8 to Expansion 1 region: Address 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value);
         return;
     }
 
@@ -1465,18 +1849,18 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         switch (physical_addr) {
             case EXPANSION_1_BASE_ADDR: // 0x1f801000
                 if ((uint32_t)value != 0x1f000000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 1 base address write: 0x%08x\n", value);
-                else LOG_INTERCONNECT_INFO("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
+                else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP1_BASE_ADDR = 0x%08x\n", value);
                 break;
             case EXPANSION_2_BASE_ADDR: // 0x1f801004
                  if (value != 0x1f802000) LOG_INTERCONNECT_WARN("Warning: Bad Expansion 2 base address write: 0x%08x\n", value);
-                 else LOG_INTERCONNECT_INFO("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
+                 else LOG_INTERCONNECT_DEBUG("~ Write32 to EXP2_BASE_ADDR = 0x%08x\n", value);
                 break;
             case RAM_SIZE_ADDR: // 0x1f801060
-                LOG_INTERCONNECT_INFO("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
+                LOG_INTERCONNECT_DEBUG("~ Write32 to RAM_SIZE register (0x%08x) = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
             // IRQ regs handled above
             default:
-                // LOG_INTERCONNECT_INFO("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
+                // LOG_INTERCONNECT_DEBUG("~ Write32 to Unknown MEM_CONTROL addr 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value);
                 break;
         }
         return;
@@ -1641,7 +2025,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break;
                             // Add cases for other peripherals reading TO RAM (CDROM, SPU, MDEC)
                             default:
-                                LOG_DMA_WARN("Warning: Unhandled DMA Block TO_RAM transfer for channel %d, Addr=0x%08x\n",
+                                LOG_DMA_INFO("Unhandled DMA TO_RAM for channel %d, Addr=0x%08x (needs implementation)\n",
                                        channel_index, current_addr_masked);
                                 break;
                         }
@@ -1662,7 +2046,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
-    LOG_DMA_INFO("--- Finished DMA Transfer Processing for Channel %d ---\n", channel_index);
+    LOG_DMA_DEBUG("--- Finished DMA Transfer for Channel %d ---", channel_index);
 }
 
 // --- BIOS Boot Helper: Force Interrupt Configuration ---
@@ -1673,17 +2057,17 @@ static void interconnect_force_bios_boot_config(Interconnect* inter) {
     
     // Only force configuration if I_MASK is not already configured for IRQ0
     if ((inter->irq_mask & 0x0001) == 0) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing I_MASK configuration for IRQ0");
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing I_MASK configuration for IRQ0");
         
         // Enable IRQ0 (VBlank) in I_MASK
         inter->irq_mask |= 0x0001;  // Bit 0: IRQ0 enable
         
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] Forced I_MASK=0x%04x [PSX-Spex: IRQ0 enabled]", inter->irq_mask);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Forced I_MASK=0x%04x [PSX-Spex: IRQ0 enabled]", inter->irq_mask);
     }
     
     // Also force enable GPU display if it's disabled to fix black screen
     if (inter->gpu.display_disabled) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing GPU display enable to fix black screen");
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing GPU display enable to fix black screen");
         inter->gpu.display_disabled = false;
         
         // Set reasonable display ranges (NTSC 320x240)
@@ -1692,11 +2076,11 @@ static void interconnect_force_bios_boot_config(Interconnect* inter) {
         inter->gpu.display_line_start = 0x10;    // 16
         inter->gpu.display_line_end = 0x100;     // 256
         
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] Forced GPU display enable with NTSC 320x240 ranges");
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Forced GPU display enable with NTSC 320x240 ranges");
         
         // Only draw test pattern once to avoid overriding BIOS display
         if (!test_pattern_drawn) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] Drawing test pattern to verify GPU functionality");
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Drawing test pattern to verify GPU functionality");
             
             // Draw a simple test pattern to verify GPU is working
             // Clear screen with dark blue background
@@ -1710,7 +2094,7 @@ static void interconnect_force_bios_boot_config(Interconnect* inter) {
             gpu_gp0(&inter->gpu, 0x00640064); // Width=100, Height=100
             
             test_pattern_drawn = true;
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] Test pattern drawn successfully");
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Test pattern drawn successfully");
         }
     }
 }
@@ -1729,14 +2113,14 @@ void interconnect_check_bios_boot(Interconnect* inter) {
     
     // Only force interrupt config once after 100 calls (about 1.6 seconds)
     if (!interrupt_forced) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing interrupt configuration after %d frames", boot_helper_counter);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing interrupt configuration after %d frames", boot_helper_counter);
         interconnect_force_bios_boot_config(inter);
         interrupt_forced = true;
     }
     
     // Only force display config once if needed
     if (!display_forced && inter->gpu.display_disabled) {
-        LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing display enable after %d frames", boot_helper_counter);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing display enable after %d frames", boot_helper_counter);
         interconnect_force_bios_boot_config(inter);
         display_forced = true;
     }
@@ -1746,7 +2130,7 @@ void interconnect_check_bios_boot(Interconnect* inter) {
         // Only log this once to avoid spam
         static bool ram_interrupt_logged = false;
         if (!ram_interrupt_logged) {
-            LOG_INTERCONNECT_INFO("[INTERCONNECT] BIOS Boot Helper: Forcing IRQ0 enable after %u cycles (PC likely in RAM)", inter->cpu_cycle_counter);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing IRQ0 enable after %u cycles (PC likely in RAM)", inter->cpu_cycle_counter);
             ram_interrupt_logged = true;
         }
         interconnect_force_bios_boot_config(inter);

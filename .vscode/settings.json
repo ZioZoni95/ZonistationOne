@@ -59,5 +59,6 @@
   "files.associations": {
     "stdio.h": "c",
     "debugger.h": "c"
-  }
+  },
+  "cmake.sourceDirectory": "/home/antoninoc/gemini_PS1emulator/duckstation_ref"
 }

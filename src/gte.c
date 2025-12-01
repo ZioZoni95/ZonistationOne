@@ -65,9 +65,8 @@ void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
 // --- GTE Instruction Execution ---
 
 uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
-    if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_GTE_INFO("[GTE] Executing instruction: 0x%08x", instruction);
-    }
+    // Per-instruction logging is TRACE level (too spammy for DEBUG)
+    LOG_GTE_TRACE("[GTE] Executing instruction: 0x%08x", instruction);
     uint32_t opcode = (instruction >> 20) & 0x3F; // Bits 25-20
     uint32_t cycles = 1; // Default cycle count
     
@@ -122,9 +121,14 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             cycles = 4;
             break;
             
-        default:
-            LOG_GTE_WARN("GTE: Unhandled instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
+        default: {
+            static int unhandled_gte_count = 0;
+            if (unhandled_gte_count < 10) {
+                LOG_GTE_WARN("GTE: Unhandled instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
+                unhandled_gte_count++;
+            }
             break;
+        }
     }
     
     return cycles;

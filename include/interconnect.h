@@ -124,8 +124,9 @@ typedef struct Interconnect {
     uint8_t scratchpad[SCRATCHPAD_SIZE]; // 1KB fast RAM at 0x1f800000
     
     // --- Interrupt Controller State ---
-    uint16_t irq_status; // I_STAT Register state (reflects pending IRQs)
-    uint16_t irq_mask;   // I_MASK Register state (enables/disables IRQs)
+    uint16_t irq_status;     // I_STAT Register state (reflects pending IRQs)
+    uint16_t irq_mask;       // I_MASK Register state (enables/disables IRQs)
+    uint16_t irq_line_state; // Current state of each IRQ line (for edge detection)
     // --------------------------------
     Timers timers_state; // <<< ADD THIS MEMBER
     Cdrom cdrom;
@@ -228,8 +229,17 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value);
 
 /**
+ * @brief Sets the state of an IRQ line (edge-triggered).
+ * Per PSX-SPX: I_STAT bits are edge-triggered, set on 0->1 transition.
+ * @param inter Pointer to the Interconnect instance.
+ * @param irq_line The interrupt line number (0-10).
+ * @param state true = line active, false = line inactive.
+ */
+void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool state);
+
+/**
  * @brief Called by peripherals to signal an interrupt request.
- * Sets the corresponding bit in the I_STAT register.
+ * Sets the corresponding bit in the I_STAT register (edge-triggered).
  * Used by peripherals (e.g., CDROM) to request IRQ2. Logs the source.
  * @param inter Pointer to the Interconnect instance.
  * @param irq_line The interrupt line number (0-10) to request.
@@ -237,14 +247,45 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value);
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source);
 
+// Debug: Check for accidental clearing of irq_status
+void interconnect_debug_check_irq_status(const Interconnect* inter, const char* context);
+
 /**
- * @brief Called by peripherals to clear an interrupt request.
- * Clears the corresponding bit in the I_STAT register.
+ * @brief Called by peripherals to clear/deassert an interrupt line.
+ * Sets the line state to inactive (for edge detection purposes).
+ * Note: I_STAT clearing is done by BIOS writing to I_STAT register.
  * @param inter Pointer to the Interconnect instance.
  * @param irq_line The interrupt line number (0-10) to clear.
  * @param source The source of the interrupt request.
  */
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source);
+
+/**
+ * @brief Schedule an event to be executed after a number of cycles.
+ * Used by CDROM for async command execution.
+ * @param inter Pointer to the Interconnect instance.
+ * @param cycles Number of cycles until the event fires.
+ * @param callback Function to call when event fires.
+ * @param context Context pointer passed to callback.
+ * @param name Name of the event (for debugging).
+ */
+void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
+                                 void (*callback)(void*, uint32_t), void* context,
+                                 const char* name);
+
+/**
+ * @brief Trigger CDROM IRQ (IRQ2).
+ * Called by CDROM when it needs to raise an interrupt.
+ * @param inter Pointer to the Interconnect instance.
+ */
+void interconnect_trigger_cdrom_irq(Interconnect* inter);
+
+/**
+ * @brief Check and fire pending CDROM events.
+ * Called by main emulation loop every frame/step.
+ * @param inter Pointer to the Interconnect instance.
+ */
+void interconnect_check_cdrom_events(Interconnect* inter);
 
 
 #endif // INTERCONNECT_H

@@ -41,7 +41,9 @@ uint32_t ram_load32(Ram* ram, uint32_t offset) {
     uint32_t b1 = ram->data[offset + 1];
     uint32_t b2 = ram->data[offset + 2];
     uint32_t b3 = ram->data[offset + 3];
-    return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    // Zero reads are normal, don't log them
+    return value;
 }
 
 // Writes a 32-bit value to RAM (Little-Endian)
@@ -60,13 +62,15 @@ void ram_store32(Ram* ram, uint32_t offset, uint32_t value) {
 // Reads a 16-bit value from RAM (Little-Endian)
 // Based on Guide Section 2.80 store16 (adapted for load) / 2.82 LHU [cite: 1011, 1045]
 uint16_t ram_load16(Ram* ram, uint32_t offset) {
-     if (is_out_of_bounds(offset, 2)) {
+    if (is_out_of_bounds(offset, 2)) {
         LOG_WARN("RAM Load16 out of bounds: offset 0x%x", offset);
         return 0;
     }
     uint16_t b0 = ram->data[offset + 0];
     uint16_t b1 = ram->data[offset + 1];
-    return b0 | (b1 << 8);
+    uint16_t value = b0 | (b1 << 8);
+    // Zero reads are normal, don't log them
+    return value;
 }
 
 // Writes a 16-bit value to RAM (Little-Endian)
@@ -87,7 +91,9 @@ uint8_t ram_load8(Ram* ram, uint32_t offset) {
         LOG_WARN("RAM Load8 out of bounds: offset 0x%x", offset);
         return 0;
     }
-    return ram->data[offset];
+    uint8_t value = ram->data[offset];
+    // Zero reads are normal, don't log them
+    return value;
 }
 
 // Writes an 8-bit value to RAM

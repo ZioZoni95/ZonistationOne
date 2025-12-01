@@ -186,7 +186,7 @@ static void sio_handle_transfer(Sio* sio, uint8_t tx_byte) {
         sio->stat |= STAT_ACK;
     }
     
-    LOG_SIO_TRACE("SIO transfer: TX=0x%02x, RX=0x%02x, step=%d, device=%d", 
+    LOG_SYSTEM_TRACE("SIO transfer: TX=0x%02x, RX=0x%02x, step=%d, device=%d", 
                   tx_byte, response, sio->transfer_step, sio->selected_device);
 }
 
@@ -326,7 +326,7 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
     switch (offset) {
         case 0x08:  // JOY_MODE (1F801048h)
             sio->mode = value;
-            LOG_SIO_DEBUG("SIO MODE = 0x%04x", value);
+            LOG_SYSTEM_DEBUG("SIO MODE = 0x%04x", value);
             break;
             
         case 0x0A:  // JOY_CTRL (1F80104Ah)
@@ -345,13 +345,13 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
                 sio->transfer_step = 0;
             }
             
-            LOG_SIO_DEBUG("SIO CTRL = 0x%04x (select=%d, reset=%d)", 
+            LOG_SYSTEM_DEBUG("SIO CTRL = 0x%04x (select=%d, reset=%d)", 
                          value, !!(value & CTRL_SELECT), !!(value & CTRL_RESET));
             break;
             
         case 0x0E:  // JOY_BAUD (1F80104Eh)
             sio->baud = value;
-            LOG_SIO_DEBUG("SIO BAUD = 0x%04x", value);
+            LOG_SYSTEM_DEBUG("SIO BAUD = 0x%04x", value);
             break;
             
         default:
