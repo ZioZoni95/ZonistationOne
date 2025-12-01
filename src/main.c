@@ -257,11 +257,11 @@ int main(int argc, char *argv[]) {
     // NOTE: The emulator can run BIOS-only without a game disc
     // If no disc is loaded, the emulator will just run the BIOS to its menu.
     LOG_SYSTEM_INFO("Attempting to load game disc (optional)...");
-    if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crassh Bandicoot.bin")) {
+    if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crash Bandicoot.cue")) {
         LOG_SYSTEM_INFO("No game disc loaded. Running BIOS-only mode.");
         // Initialize CD-ROM in "no disc" state for BIOS menu
         interconnect_state.cdrom.disc_present = false;
-        interconnect_state.cdrom.current_state = CD_STATE_IDLE;
+        interconnect_state.cdrom.drive_state = DRIVE_IDLE;
         LOG_SYSTEM_INFO("CD-ROM initialized in no-disc state for BIOS menu.");
     } else {
         LOG_SYSTEM_INFO("Game disc loaded successfully.");
@@ -342,8 +342,9 @@ int main(int argc, char *argv[]) {
                 if (stuck_counter > 500000) { // Reduced from 1M to 500K for faster recovery
                     LOG_SYSTEM_WARN("BIOS-BOOT: STUCK for %u instructions at PC=0x%08x. Forcing interrupt enable.", stuck_counter, cpu_state.pc);
                     // Force enable interrupts to wake up BIOS
-                    interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
-                    interconnect_state.irq_status |= 0x0002; // Trigger VBlank interrupt
+                    interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (VBlank) and IRQ1 (GPU)
+                    // Use edge-triggered API for VBlank (IRQ0, not IRQ1!)
+                    interconnect_request_irq(&interconnect_state, 0, "ForcedVBlank");
                     stuck_counter = 0;
                     LOG_SYSTEM_INFO("BIOS-BOOT: Forced interrupts enabled. BIOS should continue now.");
                 }
@@ -352,17 +353,16 @@ int main(int argc, char *argv[]) {
                 last_progress_pc = cpu_state.pc;
             }
             
-            // Only log progress every 100k instructions to reduce spam
-            if (total_instructions % 100000 == 0) {
-                LOG_SYSTEM_INFO("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x, I_MASK=0x%04x, I_STAT=0x%04x, cpu_cycle=%u, evq_next=%u", 
-                        total_instructions, cpu_state.pc, interconnect_state.irq_mask, interconnect_state.irq_status,
-                        interconnect_state.cpu_cycle_counter, interconnect_state.evq_next_cycle);
+            // Only log progress every 10M instructions to reduce spam
+            if (total_instructions % 10000000 == 0) {
+                LOG_SYSTEM_DEBUG("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x", 
+                        total_instructions, cpu_state.pc);
             }
         }
         // Step timers once per frame with the total cycles executed
         timers_step(&interconnect_state.timers_state, cycles_per_frame);
-        // Step the CD-ROM scheduler
-        cdrom_step(&interconnect_state.cdrom, cycles_per_frame);
+        // Check and fire pending CDROM events
+        interconnect_check_cdrom_events(&interconnect_state);
         // Check if BIOS needs boot helper for interrupt configuration
         interconnect_check_bios_boot(&interconnect_state);
         // --- Render and Display Frame ---

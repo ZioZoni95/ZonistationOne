@@ -343,7 +343,7 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
         }
      }
 
-    LOG_RENDERER_INFO("Renderer: Buffering Quad (Start Index: %u)\n", renderer->vertex_count);
+    LOG_RENDERER_DEBUG("Renderer: Buffering Quad (Start Index: %u)\n", renderer->vertex_count);
     // Decompose quad into two triangles (using the order that seemed correct for the logo)
     // Triangle 1: V0, V1, V2
     renderer->positions_data[renderer->vertex_count + 0] = pos[0];
@@ -408,7 +408,7 @@ void renderer_draw(Renderer* renderer) {
 
     // Reset the CPU buffer count for the next batch
     renderer->vertex_count = 0;
-    LOG_RENDERER_INFO("Renderer: Draw finished, vertex count reset.\n");
+    LOG_RENDERER_DEBUG("Renderer: Draw finished, vertex count reset.\n");
 }
 
 // Draws buffered primitives and requests buffer swap (swap happens in main loop)

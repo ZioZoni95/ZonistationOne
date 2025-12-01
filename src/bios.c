@@ -64,14 +64,10 @@ uint32_t bios_load32(Bios* bios, uint32_t offset) {
     uint32_t b3 = bios->data[offset + 3]; // Most significant byte
 
     uint32_t value = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-    static int bios_debug_count = 0;
-    if (bios_debug_count < 1000) {
-        // For frequent bios_load32/16/8, only log at TRACE level:
-        #if LOG_BIOS_TRACE_ENABLED
-            LOG_BIOS_TRACE("bios_load32: offset=0x%X value=0x%08X", offset, value);
-        #endif
-        LOG_BIOS_DEBUG("bios_load32: offset=0x%X value=0x%08X\n", offset, value);
-        bios_debug_count++;
+    // Per-access logging is TRACE level - rate limited to every 1000th access
+    static uint32_t bios_trace_count = 0;
+    if (++bios_trace_count % 1000 == 0) {
+        LOG_BIOS_TRACE("bios_load32: #%u offset=0x%X value=0x%08X", bios_trace_count, offset, value);
     }
     return value;
 }

@@ -168,7 +168,7 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 channel_set_control(ch, value);
                 channel_became_active = dma_channel_is_active(ch);
                 if (channel_became_active && log_get_level() >= LOG_LEVEL_INFO) {
-                    LOG_DMA_INFO("DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
+                    LOG_DMA_DEBUG("DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
                 }
                 break;
             default:
@@ -187,7 +187,7 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 dma->force_irq = (value >> 15) & 1;
                 dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
                 dma->master_irq_enable = (value >> 23) & 1;
-                LOG_DMA_INFO("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
+                LOG_DMA_DEBUG("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
                 // --- PCSX ReARMed-style immediate IRQ3 assertion after DICR write ---
                 // If the DMA transfer for channel 2 (GPU) is already done, and the BIOS enables IRQ3 after the fact,
                 // we must immediately assert IRQ3 if the condition is true (see nocash/PCSX ReARMed behavior)

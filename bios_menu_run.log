@@ -1,0 +1,594 @@
+[11:24:34][INFO][SYSTEM] Emulator started
+[11:24:34][INFO][SYSTEM] --- ZoniStation One Emulator ---
+[11:24:34][INFO][SYSTEM] Attempting to load BIOS from: roms/SCPH1001.BIN
+[11:24:34][INFO][SYSTEM] Initializing SDL Video...
+[11:24:34][INFO][SYSTEM] Creating SDL Window (1024x512, OpenGL)...
+[11:24:34][INFO][SYSTEM] Creating OpenGL Context...
+[11:24:34][INFO][SYSTEM] Initializing GLEW...
+[11:24:34][INFO][SYSTEM] GLEW Initialized. OpenGL Version: 4.5 (Core Profile) Mesa 25.0.7-0ubuntu0.24.04.2
+[11:24:34][INFO][SYSTEM] Initializing Emulator Components...
+[11:24:34][INFO][SYSTEM]   Initializing RAM...
+[11:24:34][INFO][RAM] RAM initialized
+[11:24:34][INFO][BIOS] BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
+[11:24:34][INFO][INTERCONNECT] Interconnect initialized
+[11:24:34][INFO][DMA] DMA initialized
+[11:24:34][INFO][GPU] GPU full initialization (with VRAM)
+[11:24:34][INFO][GPU] GPU Initializing (full)...
+[11:24:34][INFO][VRAM] VRAM initialized
+[11:24:34][INFO][VRAM] VRAM Initialized (1048576 bytes, filled with 0x00).
+[11:24:34][INFO][GPU] GPU Initialized (State reset, VRAM initialized).
+[11:24:34][INFO][TIMER] Timers initialized
+[11:24:34][INFO][INTERCONNECT] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).
+[11:24:34][INFO][RENDERER] [RENDERER] Initializing renderer
+[11:24:34][INFO][RENDERER] Initializing Renderer...
+[11:24:34][INFO][RENDERER] Compiling vertex shader...
+[11:24:34][INFO][RENDERER] Shader compiled successfully (Type: Vertex)
+[11:24:34][INFO][RENDERER] Compiling fragment shader...
+[11:24:34][INFO][RENDERER] Shader compiled successfully (Type: Fragment)
+[11:24:34][INFO][RENDERER] Linking shader program...
+[11:24:34][INFO][RENDERER] Shader program linked successfully (ID: 3)
+[11:24:34][INFO][RENDERER] Found uniform 'offset' at location: 0
+[11:24:34][INFO][RENDERER] Creating VAO...
+[11:24:34][ERROR][CDROM] [CDROM] Failed to open BIN file: games/Crash Bandicoot.bin
+[11:24:34][INFO][CPU] CPU initialization started
+[11:24:34][INFO][GTE] GTE initialized
+[11:24:34][INFO][CPU] CPU initialized, PC=0xbfc00000
+[11:24:34][INFO][INTERCONNECT] Interconnect CPU pointer set (exception triggering enabled).
+[11:24:34][INFO][CPU] *** BOOT STAGE: BIOS_INIT ***
+[11:24:34][INFO][CPU] Kernel initialization: PC in ROM (0xbfc00000-0xbfc10000)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x10 returned ZERO! (count=1)
+[11:24:34][INFO][INTERCONNECT] ~ Write32 to RAM_SIZE register (0x00000b88) = 0xac281060 (Ignoring)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x20 returned ZERO! (count=2)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x24 returned ZERO! (count=3)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x28 returned ZERO! (count=4)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x2C returned ZERO! (count=5)
+[11:24:34][INFO][INTERCONNECT] ~ Write32 to CACHE_CONTROL register (0xfffe0130) = 0x00000804 (Ignoring)
+[11:24:34][INFO][TIMER] [TIMER] timer_event_handler called for Timer0 (count=1)
+[11:24:34][INFO][TIMER] [TIMER] Timer0 event triggered (counter=0x0000, mode=0x0000, target=0x0000)
+[11:24:34][INFO][TIMER] [TIMER] timers_schedule_next_event for Timer0 (count=1)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read32 offset=0x0 returned ZERO! (count=1)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read32 offset=0x0 returned ZERO! (count=2)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read32 offset=0x0 returned ZERO! (count=3)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read32 offset=0x0 returned ZERO! (count=4)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read32 offset=0x0 returned ZERO! (count=5)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x3C8 returned ZERO! (count=1000)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x3C8 returned ZERO! (count=2000)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x3C8 returned ZERO! (count=3000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFE9E returned ZERO! (count=1)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFE4E returned ZERO! (count=2)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x13EB4 returned ZERO! (count=4000)
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0x1798C returned ZERO! (count=5000)
+[11:24:34][INFO][CPU] @SUSPICIOUS_JR from PC=0xa0000508: $8=0x00000598 -> jumping to 0x00000598
+[11:24:34][ERROR][SYSTEM] [CPU] WARNING: Executing from suspicious low KUSEG address PC=0x00000598
+[11:24:34][ERROR][SYSTEM] [CPU] SR=0x00000000, EPC=0x00000000, Cause=0x00000000, Last PC=0xa000050c
+[11:24:34][INFO][CPU] @BIOS_CALL from PC=0xbfc0db14: C(1F801C00h) = Unknown_C()
+[11:24:34][INFO][CPU] @SUSPICIOUS_JR from PC=0x000000c8: $8=0x00000600 -> jumping to 0x00000600
+[11:24:34][INFO][CPU] @SUSPICIOUS_JR from PC=0x00000618: $8=0x00000540 -> jumping to 0x00000540
+[11:24:34][INFO][CPU] @BIOS_CALL from PC=0xbfc0db24: C(70h) = Unknown_C()
+[11:24:34][INFO][CPU] @SUSPICIOUS_JR from PC=0x000000c8: $8=0x00000600 -> jumping to 0x00000600
+[11:24:34][INFO][IRQ] Write to I_STAT: Value=0x00000000, Before=0x0000, PC=0xbfc06898
+[11:24:34][INFO][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0000
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFD51 returned ZERO! (count=3)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFD4F returned ZERO! (count=4)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFD51 returned ZERO! (count=5)
+[11:24:34][INFO][TIMER] [Timer0] Write16: offset=0x4 value=0x0000
+[11:24:34][INFO][TIMER] [Timer0] Write16: offset=0x8 value=0x0000
+[11:24:34][INFO][TIMER] [Timer0] Target set: 0x0000
+[11:24:34][INFO][TIMER] [Timer0] Write16: offset=0x0 value=0x0000
+[11:24:34][INFO][TIMER] [VBlank] Handler #1: cycle=564480, rescheduled for cycle=1128960
+[11:24:34][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[11:24:34][INFO][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0000
+[11:24:34][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[11:24:34][INFO][TIMER] [VBlank] timers_on_vblank called. Timer0 counter reset. IRQ0 request logic follows.
+[11:24:34][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=6000)
+[11:24:34][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010f0 Offset=0x70 = 0x076f4321
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa10 paddr=0x0005aa10
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa18 access: vaddr=0x8005aa14 paddr=0x0005aa14
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa18 access: vaddr=0x8005aa14 paddr=0x0005aa14
+[11:24:34][ERROR][SYSTEM] [BIOS_INSPECT] PC=0x80000080 detected, dumping memory around exception handler:
+[11:24:34][ERROR][SYSTEM]   0x80000070: 0x00000000
+[11:24:34][ERROR][SYSTEM]   0x80000074: 0x00000000
+[11:24:34][ERROR][SYSTEM]   0x80000078: 0x00000000
+[11:24:34][ERROR][SYSTEM]   0x8000007c: 0x00000000
+[11:24:34][ERROR][SYSTEM]   0x80000080: 0x3c1a0000
+[11:24:34][ERROR][SYSTEM]   0x80000084: 0x275a0c80
+[11:24:34][ERROR][SYSTEM]   0x80000088: 0x03400008
+[11:24:34][ERROR][SYSTEM]   0x8000008c: 0x00000000
+[11:24:34][ERROR][SYSTEM]   0x80000090: 0x00000000
+[11:24:34][ERROR][SYSTEM] [BIOS_INSPECT] Registers: SR=0x00000006, EPC=0x8005aa14, Cause=0x00000400
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa14 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][EXACT] PC=0x8005aa14 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa14 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][EXACT] PC=0x8005aa14 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa14 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:34][ERROR][SYSTEM] [MEM_TRACE][EXACT] PC=0x8005aa14 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FED68 returned ZERO! (count=1)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FED68 returned ZERO! (count=2)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FEDA8 returned ZERO! (count=3)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FEDAA returned ZERO! (count=4)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FEDAC returned ZERO! (count=5)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF572 returned ZERO! (count=1000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFD42 returned ZERO! (count=2000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF50C returned ZERO! (count=3000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFCDC returned ZERO! (count=4000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF4A6 returned ZERO! (count=5000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC76 returned ZERO! (count=6000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF440 returned ZERO! (count=7000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC10 returned ZERO! (count=8000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF3DA returned ZERO! (count=9000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFBAA returned ZERO! (count=10000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF374 returned ZERO! (count=11000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB44 returned ZERO! (count=12000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF30E returned ZERO! (count=13000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFADE returned ZERO! (count=14000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF2A8 returned ZERO! (count=15000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFA78 returned ZERO! (count=16000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF242 returned ZERO! (count=17000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFA12 returned ZERO! (count=18000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF1DC returned ZERO! (count=19000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF9AC returned ZERO! (count=20000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF176 returned ZERO! (count=21000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF946 returned ZERO! (count=22000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF110 returned ZERO! (count=23000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF8E0 returned ZERO! (count=24000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF0AA returned ZERO! (count=25000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF87A returned ZERO! (count=26000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF044 returned ZERO! (count=27000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF814 returned ZERO! (count=28000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FEFDE returned ZERO! (count=29000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF7AE returned ZERO! (count=30000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FEF78 returned ZERO! (count=31000)
+[11:24:34][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FF748 returned ZERO! (count=32000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x74242 returned ZERO! (count=33000)
+[11:24:35][INFO][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[11:24:35][INFO][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[11:24:35][INFO][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[11:24:35][INFO][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[11:24:35][INFO][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[11:24:35][INFO][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[11:24:35][INFO][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[11:24:35][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x00000000
+[11:24:35][INFO][DMA] [DMA] DICR write: value=0x00000000, channel_irq_enable=0x00, master_irq_enable=0
+[11:24:35][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa10 paddr=0x0005aa10
+[11:24:35][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:35][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:35][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:35][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x04840000
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0xDDE10 returned ZERO! (count=34000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=35000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=36000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=37000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=38000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=39000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=40000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=41000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=42000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=43000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=44000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=45000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=46000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=47000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=48000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=49000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=50000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=51000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=52000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=53000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=54000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=55000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=56000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=57000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=58000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=59000)
+[11:24:35][INFO][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=60000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=61000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=62000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=63000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=64000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=65000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=66000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=67000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=68000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=69000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=70000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=71000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=72000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=73000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=74000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=75000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=76000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=77000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=78000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=79000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=80000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=81000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=82000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=83000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=84000)
+[11:24:35][INFO][GPU] [GP0] Command: 0x85555000 (Opcode: 0x85)
+[11:24:35][INFO][GPU] [GP0] Command: 0x85555555 (Opcode: 0x85)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=85000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=86000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=87000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=88000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=89000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=90000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=91000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=92000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=93000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=94000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=95000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=96000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=97000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=98000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=99000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=100000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=101000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=102000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=103000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=104000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=105000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=106000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=107000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=108000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=109000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC32 returned ZERO! (count=110000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=111000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=112000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=113000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=114000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=115000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=116000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=117000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=118000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=119000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=120000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=121000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=122000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=123000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=124000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=125000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=126000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=127000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=128000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=129000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=130000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=131000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=132000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=133000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=134000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=135000)
+[11:24:35][INFO][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[11:24:35][INFO][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=136000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=137000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=138000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=139000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=140000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=141000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=142000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=143000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=144000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=145000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=146000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=147000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=148000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=149000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=150000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=151000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=152000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=153000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=154000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=155000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=156000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=157000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=158000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=159000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=160000)
+[11:24:35][INFO][GPU] [GP0] Command: 0x56000000 (Opcode: 0x56)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=161000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=162000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=163000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=164000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=165000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=166000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=167000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=168000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=169000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=170000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=171000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=172000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=173000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=174000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC30 returned ZERO! (count=175000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=176000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC82 returned ZERO! (count=177000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=178000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=179000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=180000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=181000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=182000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=183000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=184000)
+[11:24:35][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFC80 returned ZERO! (count=185000)
+[11:24:35][INFO][GPU] GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138DC9 returned ZERO! (count=1000)
+[11:24:36][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=7000)
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA8A1 returned ZERO! (count=2000)
+[11:24:36][INFO][DMA] --- Starting DMA Transfer for Channel 6 ---
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCC0 returned ZERO! (count=3000)
+[11:24:36][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=8000)
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read16 offset=0xEA870 returned ZERO! (count=186000)
+[11:24:36][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc018e0: Kernel Part 1 (ROM)
+[11:24:36][INFO][GPU] [GPUSTAT] Read: 0x1c43220a (VBlank=0)
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA89E returned ZERO! (count=4000)
+[11:24:36][ERROR][BIOS] [BIOS_READ] Read32 offset=0x12C8 returned ZERO! (count=9000)
+[11:24:36][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCBD returned ZERO! (count=5000)
+[11:24:37][INFO][DMA] --- Starting DMA Transfer for Channel 2 ---
+[11:24:37][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=10000)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA89C returned ZERO! (count=6000)
+[11:24:37][INFO][GPU] [GP1] Command: 0x08000027 (Opcode: 0x08)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138D25 returned ZERO! (count=7000)
+[11:24:37][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=11000)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCEF returned ZERO! (count=8000)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x79F0E returned ZERO! (count=187000)
+[11:24:37][INFO][GPU] [GP0] Command: 0x01e00280 (Opcode: 0x01)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA868 returned ZERO! (count=9000)
+[11:24:37][ERROR][BIOS] [BIOS_READ] Read32 offset=0x1608 returned ZERO! (count=12000)
+[11:24:37][INFO][DMA]   DMA Channel 2 activated by write to offset 0x28.
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x69DE0 returned ZERO! (count=10000)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBC96 returned ZERO! (count=11000)
+[11:24:37][INFO][GPU] [GP0] Command: 0x01080196 (Opcode: 0x01)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x138E54 returned ZERO! (count=188000)
+[11:24:37][ERROR][BIOS] [BIOS_READ] Read32 offset=0x1390 returned ZERO! (count=13000)
+[11:24:37][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCF0 returned ZERO! (count=12000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA888 returned ZERO! (count=13000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138CD1 returned ZERO! (count=14000)
+[11:24:38][INFO][GPU] [GP0] Command: 0x010f0148 (Opcode: 0x01)
+[11:24:38][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=14000)
+[11:24:38][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010e8 Offset=0x68 = 0x11000002
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x138E54 returned ZERO! (count=189000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBC97 returned ZERO! (count=15000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x83E9D returned ZERO! (count=16000)
+[11:24:38][INFO][SYSTEM] [BIOS_WHITELIST] LOAD32 pc=0x80050d08 phys=0x001ffd5c val=0x800eb8d4
+[11:24:38][INFO][GPU] [GP0] Command: 0x01ba01b8 (Opcode: 0x01)
+[11:24:38][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=15000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCCF returned ZERO! (count=17000)
+[11:24:38][INFO][GPU] [GP0] Command: 0x00010010 (Opcode: 0x00)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138D29 returned ZERO! (count=18000)
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read16 offset=0xEA872 returned ZERO! (count=190000)
+[11:24:38][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=16000)
+[11:24:38][INFO][GPU] [GP0] Command: 0x00003b00 (Opcode: 0x00)
+[11:24:38][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010a8 Offset=0x28 = 0x01000401
+[11:24:38][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA8D6 returned ZERO! (count=19000)
+[11:24:39][INFO][GPU] [GPUSTAT] Read: 0x1c43220a (VBlank=0)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xDEDEA returned ZERO! (count=20000)
+[11:24:39][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=17000)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138D26 returned ZERO! (count=21000)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x79F10 returned ZERO! (count=191000)
+[11:24:39][INFO][GPU] GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138D36 returned ZERO! (count=22000)
+[11:24:39][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=18000)
+[11:24:39][INFO][RENDERER] Renderer: Draw finished, vertex count reset.
+[11:24:39][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010a4 Offset=0x24 = 0x00000000
+[11:24:39][INFO][GPU] [GP0] Command: 0x00f000c0 (Opcode: 0x00)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCA0 returned ZERO! (count=23000)
+[11:24:39][INFO][TIMER] [VBlank] timers_on_vblank called. Timer0 counter reset. IRQ0 request logic follows.
+[11:24:39][ERROR][BIOS] [BIOS_READ] Read32 offset=0x1390 returned ZERO! (count=19000)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBC92 returned ZERO! (count=24000)
+[11:24:39][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x138CB0 returned ZERO! (count=192000)
+[11:24:39][INFO][GPU] [GP0] Command: 0x0086014a (Opcode: 0x00)
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBC99 returned ZERO! (count=25000)
+[11:24:40][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc018e0: Kernel Part 1 (ROM)
+[11:24:40][ERROR][BIOS] [BIOS_READ] Read32 offset=0x12C8 returned ZERO! (count=20000)
+[11:24:40][INFO][GPU] [GP0] Command: 0x000e00ef (Opcode: 0x00)
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCC8 returned ZERO! (count=26000)
+[11:24:40][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010e8 Offset=0x68 = 0x00000000
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCCF returned ZERO! (count=27000)
+[11:24:40][INFO][GPU] GPU: DMA Direction = 0 (GP1 Cmd 0x04)
+[11:24:40][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=21000)
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x79F16 returned ZERO! (count=193000)
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCD8 returned ZERO! (count=28000)
+[11:24:40][INFO][GPU] GPU: Display VRAM Start X=0 Y=2 (GP1 Cmd 0x05)
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x138CCD returned ZERO! (count=29000)
+[11:24:40][ERROR][BIOS] [BIOS_READ] Read32 offset=0xE20 returned ZERO! (count=22000)
+[11:24:40][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010f0 Offset=0x70 = 0x0f6f4b21
+[11:24:40][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEA868 returned ZERO! (count=30000)
+[11:24:40][INFO][GPU] [GP0] Command: 0x01e00280 (Opcode: 0x01)
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa10 paddr=0x0005aa10
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa00 access: vaddr=0x0005aa00 paddr=0x0005aa00
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa00 access: vaddr=0x0005aa04 paddr=0x0005aa04
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa00 access: vaddr=0x0005aa08 paddr=0x0005aa08
+[11:24:40][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa00 access: vaddr=0x0005aa0c paddr=0x0005aa0c
+[11:24:41][ERROR][BIOS] [BIOS_READ] Read32 offset=0x103C returned ZERO! (count=23000)
+[11:24:41][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa10 paddr=0x0005aa10
+[11:24:41][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:41][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:41][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:41][INFO][GTE] [GTE] Executing instruction: 0x48c8e800
+[11:24:41][WARN][GTE] GTE: Unhandled instruction 0x48c8e800 (opcode 0x0c)
+[11:24:41][INFO][GTE] [GTE] Executing instruction: 0x48c8f000
+[11:24:41][WARN][GTE] GTE: Unhandled instruction 0x48c8f000 (opcode 0x0c)
+[11:24:41][INFO][GTE] [GTE] Executing instruction: 0x48c8d000
+[11:24:41][WARN][GTE] GTE: Unhandled instruction 0x48c8d000 (opcode 0x0c)
+[11:24:41][INFO][GTE] [GTE] Executing instruction: 0x48c8d800
+[11:24:41][WARN][GTE] GTE: Unhandled instruction 0x48c8d800 (opcode 0x0c)
+[11:24:41][INFO][GTE] [GTE] Executing instruction: 0x48c8e000
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0xDDE12 returned ZERO! (count=194000)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read8 offset=0xEBCED returned ZERO! (count=31000)
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001a9290
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001aa230
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB7C returned ZERO! (count=195000)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB36 returned ZERO! (count=196000)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ab3fc
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ac39c
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB7E returned ZERO! (count=197000)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB36 returned ZERO! (count=198000)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ad568
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ae508
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB7E returned ZERO! (count=199000)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001af6d4
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][CPU] @SUSPICIOUS_JR from PC=0x000000a8: $8=0x000005c4 -> jumping to 0x000005c4
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB34 returned ZERO! (count=200000)
+[11:24:41][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB7E returned ZERO! (count=201000)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b08a0
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b1840
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x8A052 returned ZERO! (count=202000)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b2a0c
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b39ac
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][INFO][SYSTEM] BIOS-BOOT: Progress: 76900000 instructions, PC=0xbfc02218, I_MASK=0x000f, I_STAT=0x0000, cpu_cycle=153800000, evq_next=154103040
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x8005a8f0: CDROM Check (RAM)
+[11:24:42][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB34 returned ZERO! (count=203000)
+[11:24:42][ERROR][SYSTEM] [RAM_READ] Read16 offset=0x1FFB36 returned ZERO! (count=204000)
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0xbfc02200: Kernel Part 1 (ROM)
+[11:24:42][INFO][GPU] [GP0] Command: 0x007202a5 (Opcode: 0x00)
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b6b70
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b7b10
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b8ab0
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001b9a50
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ba9f0
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001bb990
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001bc930
+[11:24:42][INFO][DMA] ~ Write32 to DMA region: Addr=0x1f8010a4 Offset=0x24 = 0x00620010
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001bf79c
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c0e68
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c1e08
+[11:24:42][ERROR][SYSTEM] [RAM_READ] Read8 offset=0x1FFCD2 returned ZERO! (count=32000)
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c34d4
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c4ba0
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c5b40
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c720c
+[11:24:42][INFO][GPU] [GP0] Command: 0x00000280 (Opcode: 0x00)
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c88d8
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001c9878
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ca818
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001cb7b8
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001ccca4
+[11:24:42][WARN][DMA] Warning: Unhandled DMA Block TO_RAM transfer for channel 2, Addr=0x001cdc44
+[11:24:42][INFO][SYSTEM] [BIOS_REGION] PC=0x80059df4: Patch/CD Check (RAM)
+[11:24:42][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa10 paddr=0x0005aa10
+[11:24:42][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa14 paddr=0x0005aa14
+[11:24:42][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa18 paddr=0x0005aa18
+[11:24:42][ERROR][SYSTEM] [MEM_TRACE][0x8005aa14] PC=0x8005aa10 access: vaddr=0x0005aa1c paddr=0x0005aa1c
+[11:24:44][INFO][TIMER] [VBlank] Requesting IRQ0 (Timer0 event, VBlank logic) - mode=0x0110, irq_en=1, irq_on_target=1
+[11:24:49][INFO][TIMER] [TIMER] Timer0 event triggered (counter=0x66ff, mode=0x0110, target=0xffff)
+[11:24:50][INFO][SYSTEM] BIOS-BOOT: Progress: 177300000 instructions, PC=0x8003d710, I_MASK=0x004f, I_STAT=0x0000, cpu_cycle=354600000, evq_next=355057920
+[11:24:53][INFO][TIMER] [TIMER] Timer0 event triggered (counter=0x6700, mode=0x0110, target=0xffff)
+[11:24:57][INFO][TIMER] [VBlank] timers_on_vblank called. Timer0 counter reset. IRQ0 request logic follows.
+[11:24:58][INFO][SYSTEM] BIOS-BOOT: Progress: 277300000 instructions, PC=0x8003d700, I_MASK=0x004f, I_STAT=0x0000, cpu_cycle=554600000, evq_next=554883840
+DMA Initialized. DPCR=0x07654321, Channels initialized.

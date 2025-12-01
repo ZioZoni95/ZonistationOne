@@ -48,7 +48,7 @@ typedef enum {
 
 
 // ============================================================= //
-// ==========>>> ADD INSTRUCTION CACHE PARTS BELOW <<<========== //
+// ==========>>>  INSTRUCTION CACHE PARTS  <<<========== //
 // ============================================================= //
 
 /**
@@ -84,6 +84,7 @@ typedef struct {
 // ============================================================= //
 // ============================================================= //
 
+
 // --- CPU State Structure ---
 // Defines the internal state of the emulated MIPS R3000A-compatible CPU.
 typedef struct Cpu {
@@ -115,7 +116,8 @@ typedef struct Cpu {
     uint32_t sr;            // COP0 Reg 12: Status Register (Interrupt enables, Cache isolation, etc.).
     uint32_t cause;         // COP0 Reg 13: Cause Register (Exception code, pending interrupts, branch delay flag).
     uint32_t epc;           // COP0 Reg 14: Exception Program Counter (Address of instruction causing exception).
-    // Note: Other COP0 registers (Breakpoint, DCIC, etc.) are not fully modeled yet.
+    uint32_t badvaddr;      // COP0 Reg 8: Bad Virtual Address (Address that caused address error exception).
+    uint32_t prid;          // COP0 Reg 15: Processor Revision Identifier (Read-only, 0x00000002 for PSX).
 
     // --- Connection to Memory System ---
     Interconnect* inter;    // Pointer to the interconnect module for memory accesses.

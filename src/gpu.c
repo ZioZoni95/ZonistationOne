@@ -81,7 +81,7 @@ static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
 
 /** GP1(0x00): Soft Reset */
 static void gp1_reset(Gpu* gpu, uint32_t value) {
-    LOG_GPU_INFO("GPU: Soft Reset (GP1 Cmd 0x00)\n");
+    LOG_GPU_DEBUG("GPU: Soft Reset (GP1 Cmd 0x00)\n");
     (void)value; // value is unused for this command
     // Only reset GPU state, do NOT clear VRAM
     gpu_soft_reset(gpu);
@@ -122,7 +122,7 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
         case 2: gpu->dma_setting = GPU_DMA_CpuToGp0; break;
         case 3: gpu->dma_setting = GPU_DMA_VRamToCpu; break;
     }
-    LOG_GPU_INFO("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
+    LOG_GPU_DEBUG("GPU: DMA Direction = %d (GP1 Cmd 0x04)\n", gpu->dma_setting);
 }
 
 /** GP1(0x05): Start of Display area in VRAM */
@@ -173,7 +173,7 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     if ((value >> 7) & 1) {
         LOG_GPU_WARN("Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
     }
-    LOG_GPU_INFO("GPU: Display Mode set (GP1 Cmd 0x08)\n");
+    LOG_GPU_DEBUG("GPU: Display Mode set (GP1 Cmd 0x08)\n");
 }
 
 
@@ -409,8 +409,8 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
  * Used for GP1(0x00) Soft Reset command.
  */
 void gpu_soft_reset(Gpu* gpu) {
-    LOG_GPU_INFO("GPU soft reset (no VRAM)");
-    LOG_GPU_INFO("GPU Soft Reset (no VRAM clear)...\n");
+    LOG_GPU_DEBUG("GPU soft reset (no VRAM)");
+    LOG_GPU_DEBUG("GPU Soft Reset (no VRAM clear)...\n");
     // All state reset EXCEPT VRAM
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
     gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
@@ -435,14 +435,12 @@ void gpu_soft_reset(Gpu* gpu) {
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     // gpu->inter remains unchanged
-    LOG_GPU_INFO("GPU Soft Reset complete (VRAM preserved).\n");
+    LOG_GPU_DEBUG("GPU Soft Reset complete (VRAM preserved).\n");
 }
 
 /** Processes commands/data sent to GP0 port */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
-    if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_GPU_INFO("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
-    }
+    LOG_GPU_DEBUG("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     // Handle IMAGE_LOAD state first
     if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD) {
         uint16_t pixel1 = (uint16_t)(command & 0xFFFF);
@@ -536,9 +534,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
 
 /** Processes commands sent to GP1 port */
 void gpu_gp1(Gpu* gpu, uint32_t command) {
-    if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_GPU_INFO("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
-    }
+    LOG_GPU_DEBUG("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
     uint32_t opcode = (command >> 24) & 0xFF;
     switch (opcode) {
         case 0x00: gp1_reset(gpu, command); break;
@@ -595,7 +591,7 @@ uint32_t gpu_read_status(Gpu* gpu) {
     r |= ((uint32_t)gpu->dma_setting << 29);
     // Bit 31: Odd/Even line signal (needs timing) - Placeholder 0
     bool vblank = (r & (1 << 23)) != 0;
-    LOG_GPU_INFO("[GPUSTAT] Read: 0x%08x (VBlank=%d)", r, vblank);
+    LOG_GPU_DEBUG("[GPUSTAT] Read: 0x%08x (VBlank=%d)", r, vblank);
     return r;
 }
 
@@ -603,7 +599,7 @@ uint32_t gpu_read_status(Gpu* gpu) {
 uint32_t gpu_read_data(Gpu* gpu) {
     static uint32_t dummy_gpu_read = 0xDEADBEEF;
     dummy_gpu_read++;
-    LOG_GPU_INFO("[GPUREAD] Read: 0x%08x", dummy_gpu_read);
+    LOG_GPU_DEBUG("[GPUREAD] Read: 0x%08x", dummy_gpu_read);
     (void)gpu;
     return dummy_gpu_read;
 }
@@ -615,5 +611,5 @@ void gpu_trigger_vblank_irq(Gpu* gpu) {
     // (You may want to set a vblank flag or call a callback here if needed for rendering.)
     // Example: gpu->in_vblank = true;
     // (No call to interconnect_request_irq here)
-    LOG_GPU_INFO("[GPU] VBlank event (no IRQ0 requested, handled by Timer0)");
+    LOG_GPU_DEBUG("[GPU] VBlank event (no IRQ0 requested, handled by Timer0)");
 }

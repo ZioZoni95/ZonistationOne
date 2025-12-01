@@ -58,8 +58,13 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
     
-    if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
+    // Timer0 scheduling logs - rate limited to first 5
+    if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_DEBUG) {
+        static int timer0_sched_count = 0;
+        if (timer0_sched_count < 5) {
+            LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
+            timer0_sched_count++;
+        }
     }
     // Update the next event cycle if this event is sooner
     if (sys->evq_next_cycle > sys->evq_target_cycle[event] || sys->evq_next_cycle <= sys->cpu_cycle_counter) {
@@ -77,8 +82,8 @@ void eventq_dispatch_due(struct Interconnect* sys) {
     // Debug: Log when dispatch is called and VBlank is pending
     static uint32_t last_vblank_check_cycle = 0;
     if ((sys->evq_pending & (1u << EVQ_VBLANK)) && now > 1000000 && now - last_vblank_check_cycle > 500000) {
-        LOG_TIMER_INFO("[EventQ] dispatch_due: now=%u, VBlank target=%u, VBlank pending=%d",
-                      now, sys->evq_target_cycle[EVQ_VBLANK], !!(sys->evq_pending & (1u << EVQ_VBLANK)));
+        LOG_TIMER_DEBUG("[EventQ] dispatch_due: now=%u, VBlank target=%u",
+                      now, sys->evq_target_cycle[EVQ_VBLANK]);
         last_vblank_check_cycle = now;
     }
     
@@ -89,8 +94,13 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         
         for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
             if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
-                if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_INFO) {
-                    LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
+                // Timer0 firing logs - rate limited to first 5
+                if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_DEBUG) {
+                    static int timer0_fire_count = 0;
+                    if (timer0_fire_count < 5) {
+                        LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
+                        timer0_fire_count++;
+                    }
                 }
                 sys->evq_pending &= ~(1u << event);
                 if (evq_handlers[event]) {
@@ -138,15 +148,12 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
     
     // Log VBlank count
-    if (vblank_count <= 10 || vblank_count % 10 == 0) {
-        LOG_TIMER_INFO("[VBlank] Handler #%u: cycle=%u, rescheduled for cycle=%u", 
-                      vblank_count, sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_VBLANK]);
-    }
+    LOG_TIMER_DEBUG("[VBlank] Handler #%u: cycle=%u", 
+                  vblank_count, sys->cpu_cycle_counter);
     
-    // Trigger VBlank interrupt (IRQ1)
-    if (sys->irq_mask & 0x0002) { // Check if IRQ1 (VBlank) is enabled
-        sys->irq_status |= 0x0002; // Set IRQ1 bit
-    }
+    // Trigger VBlank interrupt (IRQ0 per PSX-SPX, NOT IRQ1!)
+    // Use proper edge-triggered API instead of direct irq_status manipulation
+    interconnect_request_irq(sys, 0, "VBlank");
     
     timers_on_vblank(&sys->timers_state);
 }
@@ -185,21 +192,19 @@ static void evq_handle_dma_gpu(struct Interconnect* sys) {
     // If master IRQ flag is set, set IRQ3 (DMA IRQ) in irq_status
     if (dma->master_irq_flag) {
         LOG_EVENT_DEBUG("[DMA] GPU DMA IRQ3 triggered (master IRQ flag set)");
-        sys->irq_status |= (1u << 3); // IRQ3 is DMA
+        interconnect_request_irq(sys, 3, "DMA_GPU"); // Use edge-triggered API
     }
     LOG_EVENT_DEBUG("[DMA] Handler exit: channel_irq_enable=0x%02x, master_irq_enable=%d, master_irq_flag=%d, irq_status=0x%04x", dma->channel_irq_enable, dma->master_irq_enable, dma->master_irq_flag, sys->irq_status);
 }
 
 static void evq_handle_dma_cdrom(struct Interconnect* sys) {
     LOG_EVENT_DEBUG("[DMA] CDROM DMA event handler called (stub)");
+    (void)sys;
     // TODO: Complete the CDROM DMA transfer and set IRQ when ready
 }
 
 static void evq_handle_cdrom(struct Interconnect* sys) {
-    LOG_CDROM_INFO("[CDROM] Event handler fired\n");
-    if (sys->cdrom.pending_completion_handler) {
-        void (*handler)(struct Cdrom*) = sys->cdrom.pending_completion_handler;
-        sys->cdrom.pending_completion_handler = NULL;
-        handler(&sys->cdrom);
-    }
+    // CDROM events are now handled via interconnect_check_cdrom_events()
+    // This handler is kept for legacy event system compatibility
+    (void)sys;
 } 
