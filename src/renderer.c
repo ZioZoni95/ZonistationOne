@@ -37,12 +37,16 @@ const char* vertex_shader_source =
     // Input attributes from VBOs (locations match glVertexAttribIPointer setup)
     "layout (location = 0) in ivec2 vertex_position; // PSX VRAM coords (int16)\n"
     "layout (location = 1) in uvec3 vertex_color;    // PSX BGR color (uint8)\n"
+    "layout (location = 2) in ivec2 vertex_texcoord; // PSX VRAM TexCoords (int16)\n"
+    "layout (location = 3) in uvec2 vertex_tpage;    // CLUT (x) and TPage (y) (uint16)\n"
     "\n"
     // Uniform: A single value passed to the shader for a batch of vertices
     "uniform ivec2 offset; // Drawing offset (applied to vertex_position)\n"
     "\n"
     // Output: Color passed to the fragment shader (interpolated)
     "out vec3 color;\n"
+    "out vec2 tex_coord;\n"
+    "flat out uvec2 tpage_info; // Pass TPage info to fragment shader (no interpolation)\n"
     "\n"
     "void main() {\n"
     // Apply the drawing offset
@@ -58,9 +62,13 @@ const char* vertex_shader_source =
     "    gl_Position = vec4(xpos, ypos, 0.0, 1.0);\n"
     "\n"
     // Convert color from 8-bit BGR to 32-bit float RGB [0.0..1.0]
-    "    color = vec3(float(vertex_color.r) / 255.0,\n" // PSX BGR maps to vertex_color.r=B, .g=G, .b=R? No, use BGR struct. Corrected color mapping.
+    "    color = vec3(float(vertex_color.r) / 255.0,\n"
     "                   float(vertex_color.g) / 255.0,\n"
     "                   float(vertex_color.b) / 255.0);\n"
+    "\n"
+    // Pass texture coordinates directly (0..255)
+    "    tex_coord = vec2(float(vertex_texcoord.x), float(vertex_texcoord.y));\n"
+    "    tpage_info = vertex_tpage;\n"
     "}\n";
 
 // Fragment Shader: Determines the final color of each pixel fragment.
@@ -68,13 +76,86 @@ const char* fragment_shader_source =
     "#version 330 core\n"
     // Input: Color interpolated from the vertex shader outputs
     "in vec3 color;\n"
+    "in vec2 tex_coord;\n"
+    "flat in uvec2 tpage_info; // x=CLUT, y=TPage\n"
+    "\n"
+    "uniform sampler2D vram_texture;\n"
+    "uniform int use_texture;\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
     "\n"
     "void main() {\n"
-    // Set fragment color using the interpolated vertex color, alpha = 1.0 (opaque)
-    "    frag_color = vec4(color, 1.0);\n"
+    "    vec4 final_color = vec4(color, 1.0);\n"
+    "    if (use_texture == 1) {\n"
+    "        uint clut = tpage_info.x;\n"
+    "        uint tpage = tpage_info.y;\n"
+    "        uint depth = (tpage >> 7) & 3u;\n"
+    "        uint page_x = (tpage & 0xFu) * 64u;\n"
+    "        uint page_y = ((tpage >> 4) & 1u) * 256u;\n"
+    "        uint clut_x = (clut & 0x3Fu) * 16u;\n"
+    "        uint clut_y = (clut >> 6) & 0x1FFu;\n"
+    "\n"
+    "        vec4 tex_col = vec4(0.0);\n"
+    "\n"
+    "        if (depth == 0u) { // 4-bit\n"
+    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
+    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "            uint tex_x = page_x + (u / 4u);\n"
+    "            uint tex_y = page_y + v;\n"
+    "            \n"
+    "            vec4 word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
+    "            // Reconstruct raw 16-bit value from RGBA (1555 format)\n"
+    "            uint raw_val = 0u;\n"
+    "            raw_val |= uint(round(word.r * 31.0));\n"
+    "            raw_val |= uint(round(word.g * 31.0)) << 5;\n"
+    "            raw_val |= uint(round(word.b * 31.0)) << 10;\n"
+    "            if (word.a > 0.5) raw_val |= 0x8000u;\n"
+    "\n"
+    "            uint shift = (u & 3u) * 4u;\n"
+    "            uint index = (raw_val >> shift) & 0xFu;\n"
+    "\n"
+    "            uint clut_pos_x = clut_x + index;\n"
+    "            uint clut_pos_y = clut_y;\n"
+    "            tex_col = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0);\n"
+    "\n"
+    "            // For paletted textures, if the color is fully black (0x0000), it's transparent\n"
+    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "\n"
+    "        } else if (depth == 1u) { // 8-bit\n"
+    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
+    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "            uint tex_x = page_x + (u / 2u);\n"
+    "            uint tex_y = page_y + v;\n"
+    "            \n"
+    "            vec4 word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
+    "            uint raw_val = 0u;\n"
+    "            raw_val |= uint(round(word.r * 31.0));\n"
+    "            raw_val |= uint(round(word.g * 31.0)) << 5;\n"
+    "            raw_val |= uint(round(word.b * 31.0)) << 10;\n"
+    "            if (word.a > 0.5) raw_val |= 0x8000u;\n"
+    "\n"
+    "            uint shift = (u & 1u) * 8u;\n"
+    "            uint index = (raw_val >> shift) & 0xFFu;\n"
+    "\n"
+    "            uint clut_pos_x = clut_x + index;\n"
+    "            uint clut_pos_y = clut_y;\n"
+    "            tex_col = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0);\n"
+    "\n"
+    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "\n"
+    "        } else { // 15-bit direct\n"
+    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
+    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "            uint tex_x = page_x + u;\n"
+    "            uint tex_y = page_y + v;\n"
+    "            tex_col = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
+    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "        }\n"
+    "\n"
+    "        final_color = vec4(tex_col.rgb * color * 2.0, 1.0);\n"
+    "    }\n"
+    "    frag_color = final_color;\n"
     "}\n";
 
 
@@ -283,6 +364,50 @@ bool renderer_init(Renderer* renderer) {
     LOG_RENDERER_INFO("Color VBO linked to vertex shader attribute location %d.\n", col_attrib_loc);
     check_gl_error("After setting color attribute pointer");
 
+    // --- Create and Configure Texture Coordinate VBO ---
+    LOG_RENDERER_INFO("Creating TexCoord VBO...\n");
+    glGenBuffers(1, &renderer->texcoord_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer);
+    glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererTexCoord), NULL, GL_DYNAMIC_DRAW);
+    LOG_RENDERER_INFO("TexCoord VBO created (ID: %u) and bound.\n", renderer->texcoord_buffer);
+
+    GLint tex_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_texcoord");
+    if (tex_attrib_loc >= 0) {
+        glEnableVertexAttribArray(tex_attrib_loc);
+        glVertexAttribIPointer(tex_attrib_loc, 2, GL_SHORT, 0, (void*)0);
+        LOG_RENDERER_INFO("Attribute 'vertex_texcoord' found at location %d.\n", tex_attrib_loc);
+    } else {
+        LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_texcoord'.\n");
+    }
+
+    // --- Create and Configure TPage/CLUT VBO ---
+    LOG_RENDERER_INFO("Creating TPage VBO...\n");
+    glGenBuffers(1, &renderer->tpage_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer);
+    glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererTPage), NULL, GL_DYNAMIC_DRAW);
+    LOG_RENDERER_INFO("TPage VBO created (ID: %u) and bound.\n", renderer->tpage_buffer);
+
+    GLint tpage_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_tpage");
+    if (tpage_attrib_loc >= 0) {
+        glEnableVertexAttribArray(tpage_attrib_loc);
+        glVertexAttribIPointer(tpage_attrib_loc, 2, GL_UNSIGNED_SHORT, 0, (void*)0);
+        LOG_RENDERER_INFO("Attribute 'vertex_tpage' found at location %d.\n", tpage_attrib_loc);
+    } else {
+        LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_tpage'.\n");
+    }
+
+    // --- Create VRAM Texture ---
+    glGenTextures(1, &renderer->vram_texture);
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    // Allocate texture storage (1024x512, 16-bit RGBA)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, NULL);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    LOG_RENDERER_INFO("VRAM Texture created (ID: %u).\n", renderer->vram_texture);
+
+    renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
+    renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
 
     // --- Unbind ---
     glBindVertexArray(0); // Unbind the VAO
@@ -299,12 +424,13 @@ bool renderer_init(Renderer* renderer) {
     // glEnable(GL_DEPTH_TEST);
 
     renderer->initialized = true;
+    renderer->texture_enabled = false;
     LOG_RENDERER_INFO("Renderer Initialized Successfully.\n");
     return true;
 }
 
 // Buffers a triangle's vertex data
-void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], RendererColor col[3]) {
+void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], RendererColor col[3], RendererTexCoord tex[3], uint16_t clut, uint16_t tpage) {
     if (!renderer->initialized) {
         LOG_RENDERER_ERROR("Renderer Error: push_triangle called before initialization.\n");
         return;
@@ -323,12 +449,22 @@ void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], Rendere
     LOG_TRACE("Renderer: Buffering Triangle (Start Index: %u)", renderer->vertex_count);
     memcpy(&renderer->positions_data[renderer->vertex_count], pos, 3 * sizeof(RendererPosition));
     memcpy(&renderer->colors_data[renderer->vertex_count], col, 3 * sizeof(RendererColor));
+    if (tex) {
+        memcpy(&renderer->texcoords_data[renderer->vertex_count], tex, 3 * sizeof(RendererTexCoord));
+        for(int i=0; i<3; ++i) {
+            renderer->tpage_data[renderer->vertex_count + i].clut = clut;
+            renderer->tpage_data[renderer->vertex_count + i].tpage = tpage;
+        }
+    } else {
+        memset(&renderer->texcoords_data[renderer->vertex_count], 0, 3 * sizeof(RendererTexCoord));
+        memset(&renderer->tpage_data[renderer->vertex_count], 0, 3 * sizeof(RendererTPage));
+    }
 
     renderer->vertex_count += 3;
 }
 
 // Buffers a quad's vertex data (as two triangles)
-void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererColor col[4]) {
+void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererColor col[4], RendererTexCoord tex[4], uint16_t clut, uint16_t tpage) {
      if (!renderer->initialized) {
         LOG_RENDERER_ERROR("Renderer Error: push_quad called before initialization.\n");
         return;
@@ -344,7 +480,10 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
      }
 
     LOG_RENDERER_DEBUG("Renderer: Buffering Quad (Start Index: %u)\n", renderer->vertex_count);
-    // Decompose quad into two triangles (using the order that seemed correct for the logo)
+    // Decompose quad into two triangles
+    // PSX Quad vertex order: 0--1
+    //                        |  |
+    //                        2--3
     // Triangle 1: V0, V1, V2
     renderer->positions_data[renderer->vertex_count + 0] = pos[0];
     renderer->colors_data[renderer->vertex_count + 0]    = col[0];
@@ -353,16 +492,55 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
     renderer->positions_data[renderer->vertex_count + 2] = pos[2];
     renderer->colors_data[renderer->vertex_count + 2]    = col[2];
 
-    // Triangle 2: V2, V1, V3 (or V0, V2, V3? Let's stick to guide's visual implication: 2,1,3 or 0,2,3)
-    // Using 0, 2, 3 for simplicity unless visual bugs appear.
-    renderer->positions_data[renderer->vertex_count + 3] = pos[0]; // V0
-    renderer->colors_data[renderer->vertex_count + 3]    = col[0]; // C0
+    if (tex) {
+        renderer->texcoords_data[renderer->vertex_count + 0] = tex[0];
+        renderer->texcoords_data[renderer->vertex_count + 1] = tex[1];
+        renderer->texcoords_data[renderer->vertex_count + 2] = tex[2];
+        for(int i=0; i<3; ++i) {
+            renderer->tpage_data[renderer->vertex_count + i].clut = clut;
+            renderer->tpage_data[renderer->vertex_count + i].tpage = tpage;
+        }
+    } else {
+        memset(&renderer->texcoords_data[renderer->vertex_count], 0, 3 * sizeof(RendererTexCoord));
+        memset(&renderer->tpage_data[renderer->vertex_count], 0, 3 * sizeof(RendererTPage));
+    }
+
+    // Triangle 2: V1, V2, V3
+    renderer->positions_data[renderer->vertex_count + 3] = pos[1]; // V1
+    renderer->colors_data[renderer->vertex_count + 3]    = col[1]; // C1
     renderer->positions_data[renderer->vertex_count + 4] = pos[2]; // V2
     renderer->colors_data[renderer->vertex_count + 4]    = col[2]; // C2
     renderer->positions_data[renderer->vertex_count + 5] = pos[3]; // V3
     renderer->colors_data[renderer->vertex_count + 5]    = col[3]; // C3
 
+    if (tex) {
+        renderer->texcoords_data[renderer->vertex_count + 3] = tex[1];
+        renderer->texcoords_data[renderer->vertex_count + 4] = tex[2];
+        renderer->texcoords_data[renderer->vertex_count + 5] = tex[3];
+        for(int i=3; i<6; ++i) {
+            renderer->tpage_data[renderer->vertex_count + i].clut = clut;
+            renderer->tpage_data[renderer->vertex_count + i].tpage = tpage;
+        }
+    } else {
+        memset(&renderer->texcoords_data[renderer->vertex_count + 3], 0, 3 * sizeof(RendererTexCoord));
+        memset(&renderer->tpage_data[renderer->vertex_count + 3], 0, 3 * sizeof(RendererTPage));
+    }
+
     renderer->vertex_count += 6;
+}
+
+void renderer_set_texture_mode(Renderer* renderer, bool enabled) {
+    if (renderer->texture_enabled != enabled) {
+        renderer_draw(renderer); // Flush current batch
+        renderer->texture_enabled = enabled;
+    }
+}
+
+void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
+    if (!renderer->initialized) return;
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, vram_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 // Uploads buffered data and performs the OpenGL draw call.
@@ -381,6 +559,15 @@ void renderer_draw(Renderer* renderer) {
     glUseProgram(renderer->shader_program); check_gl_error("draw - glUseProgram");
     glBindVertexArray(renderer->vao); check_gl_error("draw - glBindVertexArray");
 
+    // Set texture uniforms
+    glUniform1i(renderer->uniform_use_texture_loc, renderer->texture_enabled ? 1 : 0);
+    glUniform1i(renderer->uniform_vram_texture_loc, 0); // Texture unit 0
+
+    if (renderer->texture_enabled) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+    }
+
     // --- Upload Buffered Vertex Data via glBufferSubData ---
     LOG_TRACE("  Uploading position data (%lu bytes)...", renderer->vertex_count * sizeof(RendererPosition));
     glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer); check_gl_error("draw - glBindBuffer pos");
@@ -391,6 +578,16 @@ void renderer_draw(Renderer* renderer) {
     glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer); check_gl_error("draw - glBindBuffer col");
     glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererColor), renderer->colors_data);
     check_gl_error("draw - glBufferSubData col");
+
+    LOG_TRACE("  Uploading texcoord data (%lu bytes)...", renderer->vertex_count * sizeof(RendererTexCoord));
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer); check_gl_error("draw - glBindBuffer tex");
+    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererTexCoord), renderer->texcoords_data);
+    check_gl_error("draw - glBufferSubData tex");
+
+    LOG_TRACE("  Uploading tpage data (%lu bytes)...", renderer->vertex_count * sizeof(RendererTPage));
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer); check_gl_error("draw - glBindBuffer tpage");
+    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererTPage), renderer->tpage_data);
+    check_gl_error("draw - glBufferSubData tpage");
 
     glBindBuffer(GL_ARRAY_BUFFER, 0); // Unbind GL_ARRAY_BUFFER target
     // ------------------------------------------------------
@@ -405,6 +602,7 @@ void renderer_draw(Renderer* renderer) {
     // --- Unbind ---
     glBindVertexArray(0);
     glUseProgram(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
 
     // Reset the CPU buffer count for the next batch
     renderer->vertex_count = 0;

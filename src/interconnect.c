@@ -190,11 +190,11 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    LOG_IRQ_DEBUG("IRQ%u requested by %s. I_STAT before=0x%04x", irq_line, source, inter->irq_status);
+    LOG_IRQ_INFO("IRQ%u requested by %s. I_STAT=0x%04x, line_state=0x%04x", irq_line, source, inter->irq_status, inter->irq_line_state);
     // Pulse the line (0->1->0) to trigger edge detection
     interconnect_set_irq_line(inter, irq_line, true);
     // Line stays high until acknowledged - don't pulse back to 0 here
-    LOG_IRQ_DEBUG("IRQ%u set. I_STAT after=0x%04x", irq_line, inter->irq_status);
+    LOG_IRQ_INFO("IRQ%u after set. I_STAT=0x%04x, line_state=0x%04x", irq_line, inter->irq_status, inter->irq_line_state);
 }
 
 // Helper to clear/deassert an IRQ line
@@ -231,12 +231,12 @@ void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
             cdrom_events[i].target_cycle = target;
             cdrom_events[i].active = true;
             cdrom_events[i].name = name;
-            LOG_DEBUG("[EVT] Scheduled %s for cycle %u (now=%u, delay=%u)",
+            LOG_CDROM_DEBUG("[EVT] Scheduled %s for cycle %u (now=%u, delay=%u)\n",
                      name, target, inter->cpu_cycle_counter, cycles);
             return;
         }
     }
-    LOG_ERROR("[EVT] No free event slots for %s!", name);
+    LOG_CDROM_ERROR("[EVT] No free event slots for %s!\n", name);
 }
 
 // Called by main loop to check/fire CDROM events
@@ -254,7 +254,14 @@ void interconnect_check_cdrom_events(Interconnect* inter) {
 }
 
 void interconnect_trigger_cdrom_irq(Interconnect* inter) {
+    LOG_CDROM_INFO("[CDROM] trigger_cdrom_irq called, inter=%p\n", (void*)inter);
+    if (!inter) {
+        LOG_CDROM_ERROR("[CDROM] trigger_cdrom_irq: inter is NULL!\n");
+        return;
+    }
+    LOG_CDROM_INFO("[CDROM] About to call interconnect_request_irq for IRQ_CDROM=%d\n", IRQ_CDROM);
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
+    LOG_CDROM_INFO("[CDROM] After interconnect_request_irq\n");
 }
 
 
@@ -1919,6 +1926,9 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     DmaChannel* ch = &inter->dma.channels[channel_index];
     DmaSync sync_mode = ch->sync;
 
+    LOG_DMA_DEBUG("DMA Channel %d: sync_mode=%d, direction=%d, base_addr=0x%08x", 
+                  channel_index, sync_mode, ch->direction, ch->base_addr);
+
     switch (sync_mode) {
         case LINKED_LIST:
             // Primarily used for GPU Channel 2
@@ -2022,6 +2032,9 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 data_word = (i == (words_to_transfer - 1)) // Is it the last word?
                                             ? 0x00FFFFFF                  // Yes: End marker
                                             : ((addr - 4) & 0x00FFFFFC); // No: Pointer to previous entry
+                                break;
+                            case 2: // GPU (GPUREAD)
+                                data_word = gpu_read_data(&inter->gpu);
                                 break;
                             // Add cases for other peripherals reading TO RAM (CDROM, SPU, MDEC)
                             default:

@@ -64,7 +64,8 @@ typedef enum {
 // GP0 Port Mode (internal state)
 typedef enum {
     GP0_MODE_COMMAND,   // Expecting GP0 command words
-    GP0_MODE_IMAGE_LOAD // Expecting pixel data words for VRAM transfer
+    GP0_MODE_IMAGE_LOAD, // Expecting pixel data words for VRAM transfer
+    GP0_MODE_IMAGE_STORE // Sending pixel data words from VRAM to CPU
 } Gp0Mode;
 
 // GP0 Command Buffer

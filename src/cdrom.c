@@ -336,6 +336,9 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
 static void command_event_callback(void *context, uint32_t cycles_late) {
     Cdrom *cdrom = (Cdrom *)context;
     
+    LOG_CDROM_DEBUG("[CDROM] command_event_callback: pending_cmd=0x%02X, int_flag=%d\n",
+                    cdrom->pending_command, cdrom->interrupt_flag);
+    
     // If interrupt still pending, reschedule
     if (cdrom->interrupt_flag != 0) {
         LOG_CDROM_DEBUG("[CDROM] Command blocked by INT, rescheduling\n");
@@ -805,6 +808,8 @@ static void send_ack(Cdrom *cdrom) {
     
     if (cdrom->inter) {
         interconnect_trigger_cdrom_irq(cdrom->inter);
+    } else {
+        LOG_CDROM_ERROR("[CDROM] send_ack: inter is NULL!\n");
     }
 }
 

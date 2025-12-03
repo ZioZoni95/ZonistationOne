@@ -35,6 +35,15 @@ static void gp0_quad_mono_opaque(Gpu* gpu);
 static void gp0_quad_texture_blend_opaque(Gpu* gpu);
 static void gp0_quad_shaded_opaque(Gpu* gpu);
 static void gp0_triangle_shaded_opaque(Gpu* gpu);
+static void gp0_rect_variable_opaque(Gpu* gpu);
+static void gp0_rect_variable_semi_trans(Gpu* gpu);
+static void gp0_rect_tex_variable_opaque(Gpu* gpu);
+static void gp0_rect_1x1_opaque(Gpu* gpu);
+static void gp0_rect_8x8_opaque(Gpu* gpu);
+static void gp0_rect_16x16_opaque(Gpu* gpu);
+static void gp0_rect_tex_1x1_opaque(Gpu* gpu);
+static void gp0_rect_tex_8x8_opaque(Gpu* gpu);
+static void gp0_rect_tex_16x16_opaque(Gpu* gpu);
 static void gp0_image_load(Gpu* gpu);
 static void gp0_image_store(Gpu* gpu);
 
@@ -278,24 +287,42 @@ static void gp0_quad_mono_opaque(Gpu* gpu) {
     RendererPosition positions[4];
     for(int i=0; i<4; ++i){ uint32_t v=gpu->gp0_command_buffer.buffer[i+1]; positions[i].x=(GLshort)(int16_t)(v&0xFFFF); positions[i].y=(GLshort)(int16_t)(v>>16); }
     // printf("GP0(0x28): Mono Quad ...\n");
-    renderer_push_quad(&gpu->renderer, positions, colors);
+    renderer_set_texture_mode(&gpu->renderer, false);
+    renderer_push_quad(&gpu->renderer, positions, colors, NULL, 0, 0);
 }
 
 /** GP0(0x2C): Textured Opaque Quadrilateral with Blend */
 static void gp0_quad_texture_blend_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 9) {
          LOG_ERROR("GP0(0x2C) Error: Expected 9 words, got %u\n", gpu->gp0_command_buffer.count); return; }
-    RendererPosition p[4]; uint32_t uv[4]; uint16_t clut, texpage;
-    p[0] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]>>16) }; uv[0]=gpu->gp0_command_buffer.buffer[2];
-    p[1] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]>>16) }; uv[1]=gpu->gp0_command_buffer.buffer[4];
-    p[2] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5]>>16) }; uv[2]=gpu->gp0_command_buffer.buffer[6];
-    p[3] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7]>>16) }; uv[3]=gpu->gp0_command_buffer.buffer[8];
-    clut = (uint16_t)(uv[0] >> 16); texpage = (uint16_t)(uv[1] >> 16);
-    (void)clut; (void)texpage; (void)uv; // Suppress unused warnings for now
-    RendererColor placeholder = { .r = 0x80, .g = 0x00, .b = 0x00 }; // Placeholder color
-    RendererColor c[4] = {placeholder, placeholder, placeholder, placeholder};
-    // printf("GP0(0x2C): Tex Quad Blend ... (Using Placeholder Color)\n");
-    renderer_push_quad(&gpu->renderer, p, c); // Pass p and c (positions, colors)
+    RendererPosition p[4]; RendererTexCoord t[4]; uint16_t clut, texpage;
+    
+    // Vertex 0
+    p[0] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1]>>16) };
+    t[0] = (RendererTexCoord){ .u=(GLshort)(gpu->gp0_command_buffer.buffer[2]&0xFF), .v=(GLshort)((gpu->gp0_command_buffer.buffer[2]>>8)&0xFF) };
+    clut = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
+
+    // Vertex 1
+    p[1] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3]>>16) };
+    t[1] = (RendererTexCoord){ .u=(GLshort)(gpu->gp0_command_buffer.buffer[4]&0xFF), .v=(GLshort)((gpu->gp0_command_buffer.buffer[4]>>8)&0xFF) };
+    texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
+
+    // Vertex 2
+    p[2] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5]>>16) };
+    t[2] = (RendererTexCoord){ .u=(GLshort)(gpu->gp0_command_buffer.buffer[6]&0xFF), .v=(GLshort)((gpu->gp0_command_buffer.buffer[6]>>8)&0xFF) };
+
+    // Vertex 3
+    p[3] = (RendererPosition){ .x=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7]&0xFFFF), .y=(GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7]>>16) };
+    t[3] = (RendererTexCoord){ .u=(GLshort)(gpu->gp0_command_buffer.buffer[8]&0xFF), .v=(GLshort)((gpu->gp0_command_buffer.buffer[8]>>8)&0xFF) };
+
+    // Note: We pass raw UVs (0-255) and let the shader handle the page offset and CLUT lookup.
+    // We do NOT add tpx/tpy here anymore.
+
+    RendererColor c0 = { .r=(GLubyte)(gpu->gp0_command_buffer.buffer[0]&0xFF), .g=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>8)&0xFF), .b=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>16)&0xFF) };
+    RendererColor c[4] = {c0, c0, c0, c0};
+
+    renderer_set_texture_mode(&gpu->renderer, true);
+    renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
 
 /** GP0(0x38): Shaded Opaque Quad */
@@ -308,7 +335,8 @@ static void gp0_quad_shaded_opaque(Gpu* gpu) {
         c[i].r=(GLubyte)(cw&0xFF); c[i].g=(GLubyte)((cw>>8)&0xFF); c[i].b=(GLubyte)((cw>>16)&0xFF);
         p[i].x=(GLshort)(int16_t)(vw&0xFFFF); p[i].y=(GLshort)(int16_t)(vw>>16); }
     // printf("GP0(0x38): Shaded Quad ...\n");
-    renderer_push_quad(&gpu->renderer, p, c);
+    renderer_set_texture_mode(&gpu->renderer, false);
+    renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
 }
 
 /** GP0(0x30): Shaded Opaque Triangle */
@@ -321,7 +349,168 @@ static void gp0_triangle_shaded_opaque(Gpu* gpu) {
         c[i].r=(GLubyte)(cw&0xFF); c[i].g=(GLubyte)((cw>>8)&0xFF); c[i].b=(GLubyte)((cw>>16)&0xFF);
         p[i].x=(GLshort)(int16_t)(vw&0xFFFF); p[i].y=(GLshort)(int16_t)(vw>>16); }
     // printf("GP0(0x30): Shaded Triangle ...\n");
-    renderer_push_triangle(&gpu->renderer, p, c);
+    renderer_set_texture_mode(&gpu->renderer, false);
+    renderer_push_triangle(&gpu->renderer, p, c, NULL, 0, 0);
+}
+
+/** Helper: Draw a rectangle as a quad */
+static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h, RendererColor col, bool textured, RendererTexCoord* tex, uint16_t clut, uint16_t tpage) {
+    RendererPosition p[4];
+    RendererColor c[4] = {col, col, col, col};
+    RendererTexCoord t[4];
+    
+    // Rectangle vertices: top-left, top-right, bottom-left, bottom-right
+    p[0].x = x;       p[0].y = y;
+    p[1].x = x + w;   p[1].y = y;
+    p[2].x = x;       p[2].y = y + h;
+    p[3].x = x + w;   p[3].y = y + h;
+    
+    if (textured && tex) {
+        t[0].u = tex->u;       t[0].v = tex->v;
+        t[1].u = tex->u + w;   t[1].v = tex->v;
+        t[2].u = tex->u;       t[2].v = tex->v + h;
+        t[3].u = tex->u + w;   t[3].v = tex->v + h;
+        renderer_set_texture_mode(&gpu->renderer, true);
+        renderer_push_quad(&gpu->renderer, p, c, t, clut, tpage);
+    } else {
+        renderer_set_texture_mode(&gpu->renderer, false);
+        renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
+    }
+}
+
+/** GP0(0x60): Monochrome Rectangle (variable size) */
+static void gp0_rect_variable_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 3) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    uint32_t dim = gpu->gp0_command_buffer.buffer[2];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    uint16_t w = (uint16_t)(dim & 0xFFFF);
+    uint16_t h = (uint16_t)(dim >> 16);
+    if (w == 0) w = 1; if (h == 0) h = 1;
+    
+    draw_rectangle(gpu, x, y, w, h, col, false, NULL, 0, 0);
+}
+
+/** GP0(0x62): Semi-Transparent Monochrome Rectangle (variable size) */
+static void gp0_rect_variable_semi_trans(Gpu* gpu) {
+    // For now, treat same as opaque
+    gp0_rect_variable_opaque(gpu);
+}
+
+/** GP0(0x64): Textured Rectangle (variable size, blending) */
+static void gp0_rect_tex_variable_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 4) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
+    uint32_t dim = gpu->gp0_command_buffer.buffer[3];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    RendererTexCoord tex = { .u = (GLshort)(uv_clut & 0xFF), .v = (GLshort)((uv_clut >> 8) & 0xFF) };
+    uint16_t clut = (uint16_t)(uv_clut >> 16);
+    uint16_t w = (uint16_t)(dim & 0xFFFF);
+    uint16_t h = (uint16_t)(dim >> 16);
+    if (w == 0) w = 1; if (h == 0) h = 1;
+    
+    // Use current texpage from GPU state
+    uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
+    draw_rectangle(gpu, x, y, w, h, col, true, &tex, clut, tpage);
+}
+
+/** GP0(0x68): Monochrome Rectangle 1x1 (single pixel) */
+static void gp0_rect_1x1_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 2) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    
+    draw_rectangle(gpu, x, y, 1, 1, col, false, NULL, 0, 0);
+}
+
+/** GP0(0x70): Monochrome Rectangle 8x8 */
+static void gp0_rect_8x8_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 2) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    
+    draw_rectangle(gpu, x, y, 8, 8, col, false, NULL, 0, 0);
+}
+
+/** GP0(0x78): Monochrome Rectangle 16x16 */
+static void gp0_rect_16x16_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 2) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    
+    draw_rectangle(gpu, x, y, 16, 16, col, false, NULL, 0, 0);
+}
+
+/** GP0(0x6C): Textured Rectangle 1x1 */
+static void gp0_rect_tex_1x1_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 3) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    RendererTexCoord tex = { .u = (GLshort)(uv_clut & 0xFF), .v = (GLshort)((uv_clut >> 8) & 0xFF) };
+    uint16_t clut = (uint16_t)(uv_clut >> 16);
+    uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
+    
+    draw_rectangle(gpu, x, y, 1, 1, col, true, &tex, clut, tpage);
+}
+
+/** GP0(0x74): Textured Rectangle 8x8 */
+static void gp0_rect_tex_8x8_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 3) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    RendererTexCoord tex = { .u = (GLshort)(uv_clut & 0xFF), .v = (GLshort)((uv_clut >> 8) & 0xFF) };
+    uint16_t clut = (uint16_t)(uv_clut >> 16);
+    uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
+    
+    draw_rectangle(gpu, x, y, 8, 8, col, true, &tex, clut, tpage);
+}
+
+/** GP0(0x7C): Textured Rectangle 16x16 */
+static void gp0_rect_tex_16x16_opaque(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 3) return;
+    uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
+    uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
+    uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
+    
+    RendererColor col = { .r = (GLubyte)(cmd & 0xFF), .g = (GLubyte)((cmd >> 8) & 0xFF), .b = (GLubyte)((cmd >> 16) & 0xFF) };
+    int16_t x = (int16_t)(vtx & 0xFFFF);
+    int16_t y = (int16_t)(vtx >> 16);
+    RendererTexCoord tex = { .u = (GLshort)(uv_clut & 0xFF), .v = (GLshort)((uv_clut >> 8) & 0xFF) };
+    uint16_t clut = (uint16_t)(uv_clut >> 16);
+    uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
+    
+    draw_rectangle(gpu, x, y, 16, 16, col, true, &tex, clut, tpage);
 }
 
 /** GP0(0xA0): Copy Rectangle (CPU/DMA to VRAM) - Setup Phase */
@@ -361,9 +550,35 @@ static void gp0_image_load(Gpu* gpu) {
 
 /** GP0(0xC0): Copy Rectangle (VRAM to CPU/DMA) */
 static void gp0_image_store(Gpu* gpu) {
-    // Minimal stub: Pretend to start a VRAM-to-CPU transfer
-    LOG_GPU_INFO("GP0(0xC0): Image Store (Stubbed, no VRAM read)\n");
-    (void)gpu;
+    if (gpu->gp0_command_buffer.count < 3) {
+        LOG_GPU_ERROR("GP0(0xC0) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count);
+        return;
+    }
+
+    uint32_t val1 = gpu->gp0_command_buffer.buffer[1];
+    uint32_t val2 = gpu->gp0_command_buffer.buffer[2];
+
+    gpu->vram_load_x = (uint16_t)(val1 & 0x3FF);
+    gpu->vram_load_y = (uint16_t)((val1 >> 16) & 0x1FF);
+    gpu->vram_load_w = (uint16_t)(val2 & 0xFFFF);
+    gpu->vram_load_h = (uint16_t)(val2 >> 16);
+
+    // Width and Height must be non-zero
+    if (gpu->vram_load_w == 0) gpu->vram_load_w = 1;
+    if (gpu->vram_load_h == 0) gpu->vram_load_h = 1;
+
+    // Calculate total number of 32-bit words to transfer
+    // Each word contains 2 pixels (16-bit each)
+    // Total pixels = w * h
+    // Total words = (total pixels + 1) / 2  (Round up if odd number of pixels)
+    uint32_t total_pixels = (uint32_t)gpu->vram_load_w * gpu->vram_load_h;
+    gpu->gp0_words_remaining = (total_pixels + 1) / 2;
+
+    gpu->vram_load_count = 0; // Reset pixel counter
+    gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
+
+    LOG_GPU_INFO("GP0(0xC0): Image Store Started. Rect=(%u,%u) Size=(%ux%u), Words=%u\n",
+                 gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, gpu->gp0_words_remaining);
 }
 
 
@@ -472,6 +687,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
         if (gpu->gp0_words_remaining == 0) { // Check if transfer complete
             gpu->gp0_mode = GP0_MODE_COMMAND; // Switch back to command mode
             // printf("GPU Img Load Finished.\n"); // Optional debug
+            renderer_upload_vram(&gpu->renderer, gpu->vram.data);
         }
         return; // Done processing this data word
     }
@@ -492,6 +708,31 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
             case 0x2C: expected_len = 9; handler = gp0_quad_texture_blend_opaque; break;
             case 0x30: expected_len = 6; handler = gp0_triangle_shaded_opaque; break;
             case 0x38: expected_len = 8; handler = gp0_quad_shaded_opaque; break;
+            // Rectangle commands (0x60-0x7F)
+            case 0x60: expected_len = 3; handler = gp0_rect_variable_opaque; break;
+            case 0x62: expected_len = 3; handler = gp0_rect_variable_semi_trans; break;
+            case 0x64: expected_len = 4; handler = gp0_rect_tex_variable_opaque; break;
+            case 0x65: expected_len = 4; handler = gp0_rect_tex_variable_opaque; break; // Raw texture
+            case 0x66: expected_len = 4; handler = gp0_rect_tex_variable_opaque; break; // Semi-trans
+            case 0x67: expected_len = 4; handler = gp0_rect_tex_variable_opaque; break; // Semi-trans raw
+            case 0x68: expected_len = 2; handler = gp0_rect_1x1_opaque; break;
+            case 0x6A: expected_len = 2; handler = gp0_rect_1x1_opaque; break; // Semi-trans
+            case 0x6C: expected_len = 3; handler = gp0_rect_tex_1x1_opaque; break;
+            case 0x6D: expected_len = 3; handler = gp0_rect_tex_1x1_opaque; break; // Raw
+            case 0x6E: expected_len = 3; handler = gp0_rect_tex_1x1_opaque; break; // Semi-trans
+            case 0x6F: expected_len = 3; handler = gp0_rect_tex_1x1_opaque; break; // Semi-trans raw
+            case 0x70: expected_len = 2; handler = gp0_rect_8x8_opaque; break;
+            case 0x72: expected_len = 2; handler = gp0_rect_8x8_opaque; break; // Semi-trans
+            case 0x74: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break;
+            case 0x75: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Raw
+            case 0x76: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Semi-trans
+            case 0x77: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Semi-trans raw
+            case 0x78: expected_len = 2; handler = gp0_rect_16x16_opaque; break;
+            case 0x7A: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // Semi-trans
+            case 0x7C: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break;
+            case 0x7D: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Raw
+            case 0x7E: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans
+            case 0x7F: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans raw
             case 0xA0: expected_len = 3; handler = gp0_image_load; break; // Sets up IMAGE_LOAD mode
             case 0xC0: expected_len = 3; handler = gp0_image_store; break;
             case 0xE1: expected_len = 1; handler = gp0_draw_mode; break;
@@ -597,10 +838,63 @@ uint32_t gpu_read_status(Gpu* gpu) {
 
 /** Reads data from the GPUREAD port (e.g., after Image Store command) */
 uint32_t gpu_read_data(Gpu* gpu) {
+    if (gpu->gp0_mode == GP0_MODE_IMAGE_STORE) {
+        if (gpu->gp0_words_remaining == 0) {
+            LOG_GPU_WARN("GPUREAD: Read attempted but no words remaining in Image Store transfer.\n");
+            return 0xFFFFFFFF; // Or 0, undefined behavior
+        }
+
+        uint32_t word = 0;
+        uint16_t pixel1 = 0;
+        uint16_t pixel2 = 0;
+
+        // Read Pixel 1
+        uint32_t idx = gpu->vram_load_count;
+        uint16_t x = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
+        uint16_t y = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
+        
+        // Handle VRAM wrapping (1024x512)
+        x &= 0x3FF;
+        y &= 0x1FF;
+
+        uint32_t offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
+        pixel1 = vram_load16(&gpu->vram, offset);
+        gpu->vram_load_count++;
+
+        // Read Pixel 2 (if available)
+        if (gpu->vram_load_count < ((uint32_t)gpu->vram_load_w * gpu->vram_load_h)) {
+            idx = gpu->vram_load_count;
+            x = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
+            y = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
+            
+            x &= 0x3FF;
+            y &= 0x1FF;
+
+            offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
+            pixel2 = vram_load16(&gpu->vram, offset);
+            gpu->vram_load_count++;
+        } else {
+            pixel2 = 0; // Padding if odd number of pixels
+        }
+
+        word = (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
+        gpu->gp0_words_remaining--;
+
+        LOG_GPU_DEBUG("[GPUREAD] Image Store Read: 0x%08x (Rem: %u)\n", word, gpu->gp0_words_remaining);
+
+        if (gpu->gp0_words_remaining == 0) {
+            LOG_GPU_INFO("GP0(0xC0): Image Store Finished.\n");
+            gpu->gp0_mode = GP0_MODE_COMMAND;
+        }
+
+        return word;
+    }
+
+    // Fallback for non-transfer reads (usually returns 0 or last status)
+    // For now, keep the dummy behavior or return 0
     static uint32_t dummy_gpu_read = 0xDEADBEEF;
     dummy_gpu_read++;
-    LOG_GPU_DEBUG("[GPUREAD] Read: 0x%08x", dummy_gpu_read);
-    (void)gpu;
+    LOG_GPU_DEBUG("[GPUREAD] Read (No Transfer): 0x%08x\n", dummy_gpu_read);
     return dummy_gpu_read;
 }
 
