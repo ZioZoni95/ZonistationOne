@@ -1,0 +1,2274 @@
+[16:46:55][INFO][SYSTEM] Emulator started
+[16:46:55][INFO][SYSTEM] --- ZoniStation One Emulator ---
+[16:46:55][INFO][SYSTEM] Attempting to load BIOS from: roms/SCPH1001.BIN
+[16:46:55][INFO][SYSTEM] Initializing SDL Video...
+[16:46:55][INFO][SYSTEM] Creating SDL Window (1024x512, OpenGL)...
+[16:46:55][INFO][SYSTEM] Creating OpenGL Context...
+[16:46:55][INFO][SYSTEM] Initializing GLEW...
+[16:46:55][INFO][SYSTEM] GLEW Initialized. OpenGL Version: 4.5 (Core Profile) Mesa 25.0.7-0ubuntu0.24.04.2
+[16:46:55][INFO][SYSTEM] Initializing Emulator Components...
+[16:46:55][INFO][SYSTEM]   Initializing RAM...
+[16:46:55][INFO][RAM] RAM initialized
+[16:46:55][INFO][BIOS] BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
+[16:46:55][DEBUG][INTERCONNECT] Interconnect initialized
+[16:46:55][INFO][DMA] DMA initialized
+[16:46:55][INFO][GPU] GPU full initialization (with VRAM)
+[16:46:55][INFO][GPU] GPU Initializing (full)...
+[16:46:55][INFO][VRAM] VRAM initialized
+[16:46:55][INFO][VRAM] VRAM Initialized (1048576 bytes, filled with 0x00).
+[16:46:55][INFO][GPU] GPU Initialized (State reset, VRAM initialized).
+[16:46:55][INFO][TIMER] Timers initialized
+[16:46:55][DEBUG][INTERCONNECT] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).
+[16:46:55][INFO][RENDERER] [RENDERER] Initializing renderer
+[16:46:55][INFO][RENDERER] Initializing Renderer...
+[16:46:55][INFO][RENDERER] Compiling vertex shader...
+[16:46:55][INFO][RENDERER] Shader compiled successfully (Type: Vertex)
+[16:46:55][INFO][RENDERER] Compiling fragment shader...
+[16:46:55][INFO][RENDERER] Shader compiled successfully (Type: Fragment)
+[16:46:55][INFO][RENDERER] Linking shader program...
+[16:46:55][INFO][RENDERER] Shader program linked successfully (ID: 3)
+[16:46:55][INFO][RENDERER] Found uniform 'offset' at location: 0
+[16:46:55][INFO][RENDERER] Creating VAO...
+[16:46:55][ERROR][CDROM] [CDROM] Failed to open BIN file: games/Crash Bandicoot.bin
+[16:46:55][INFO][CPU] CPU initialization started
+[16:46:55][DEBUG][CPU] Initializing I-Cache...
+[16:46:55][DEBUG][CPU] Initializing GTE...
+[16:46:55][INFO][GTE] GTE initialized
+[16:46:55][DEBUG][GTE] Initializing GTE...
+[16:46:55][DEBUG][GTE] GTE Initialized
+[16:46:55][INFO][CPU] CPU initialized, PC=0xbfc00000
+[16:46:55][DEBUG][INTERCONNECT] Interconnect CPU pointer set (exception triggering enabled).
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=32601, target=33625, pending=0x477F9AA3
+[16:46:55][INFO][CPU] *** BOOT STAGE: BIOS_INIT ***
+[16:46:55][INFO][CPU] Kernel initialization: PC in ROM (0xbfc00000-0xbfc10000)
+[16:46:55][DEBUG][EVENT] [DMA] CDROM DMA event handler called (stub)
+[16:46:55][DEBUG][INTERCONNECT] ~ Write32 to RAM_SIZE register (0x00000b88) = 0x00008359 (Ignoring)
+[16:46:55][DEBUG][INTERCONNECT] ~ Write32 to CACHE_CONTROL register (0xfffe0130) = 0x00000804 (Ignoring)
+[16:46:55][DEBUG][CPU] MTC0 write to SR: 0x00010000 (PC=0xbfc0023c)
+[16:46:55][DEBUG][CPU] MTC0 write to SR: 0x00000000 (PC=0xbfc00278)
+[16:46:55][DEBUG][CPU] MTC0 write to SR: 0x00010000 (PC=0xbfc0028c)
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=33625, target=33625, pending=0x477F8803
+[16:46:55][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=1)
+[16:46:55][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[16:46:55][DEBUG][TIMER] [TIMER] Timer0 event triggered (counter=0x0000, mode=0x0000, target=0x0000)
+[16:46:55][DEBUG][TIMER] [TIMER] timers_schedule_next_event for Timer0
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=33625, target=598105, pending=0x477F8803
+[16:46:55][DEBUG][CPU] MTC0 write to SR: 0x00000000 (PC=0xbfc00328)
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0x00000000, Before=0x0000, PC=0xbfc06898
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0000
+[16:46:55][DEBUG][TIMER] [Timer0] Write16: offset=0x4 value=0x0000
+[16:46:55][DEBUG][TIMER] [Timer0] Write16: offset=0x8 value=0x0000
+[16:46:55][DEBUG][TIMER] [Timer0] Target set: 0x0000
+[16:46:55][DEBUG][TIMER] [Timer0] Write16: offset=0x0 value=0x0000
+[16:46:55][DEBUG][TIMER] [Timer1] Write16: offset=0x4 value=0x0000
+[16:46:55][DEBUG][TIMER] [Timer1] Write16: offset=0x8 value=0x0000
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:55][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0000
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=598105, target=598105, pending=0x477F8803
+[16:46:55][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=2)
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=598105, target=1162585, pending=0x477F8803
+[16:46:55][DEBUG][IRQ] After instr: I_STAT=0x0001, I_MASK=0x0000, SR=0x00000000, IEC=0, IRQ_PENDING=0
+[16:46:55][INFO][IRQ] Periodic: I_STAT=0x0001, I_MASK=0x0000
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=1162585, target=1162585, pending=0x477F8803
+[16:46:55][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=3)
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][IRQ] After instr: I_STAT=0x0001, I_MASK=0x0000, SR=0x00000000, IEC=0, IRQ_PENDING=0
+[16:46:55][INFO][IRQ] Periodic: I_STAT=0x0001, I_MASK=0x0000
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f0 Offset=0x70 = 0x076f4321
+[16:46:55][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:55][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:55][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:55][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:55][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:55][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:55][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:55][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:55][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:55][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:55][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:55][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:55][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:55][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:55][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:55][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:55][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:55][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:55][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:55][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x0003, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0003
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0001, PC=0x000019ec
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0001, line_state: 0x0000
+[16:46:56][DEBUG][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[16:46:56][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[16:46:56][DEBUG][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[16:46:56][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[16:46:56][DEBUG][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[16:46:56][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[16:46:56][DEBUG][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[16:46:56][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x00000000
+[16:46:56][DEBUG][DMA] [DMA] DICR write: value=0x00000000, channel_irq_enable=0x00, master_irq_enable=0
+[16:46:56][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x04840000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x000b
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0001
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0001
+[16:46:56][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:46:56][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x000b, Pending=0x0001
+[16:46:56][DEBUG][IRQ] Write to I_STAT: Value=0xffffffff, Before=0x0001, PC=0x00002710
+[16:46:56][DEBUG][IRQ] I_STAT after: 0x0001, cleared bits: 0x0000, line_state: 0x0001
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:56][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:56][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:56][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x85555000 (Opcode: 0x85)
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x85555555 (Opcode: 0x85)
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][DEBUG][GPU] [GP0] Command: 0x56000000 (Opcode: 0x56)
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][GPU] GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010a0 Offset=0x20 = 0x800eccf4
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:57][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:57][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:57][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:57][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][GPU] [GPUSTAT] Read: 0x1c43220a (VBlank=0)
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][DEBUG][DMA]   DMA Channel 2 activated by write to offset 0x28.
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][DEBUG][GPU] [GP1] Command: 0x08000027 (Opcode: 0x08)
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:58][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:58][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:58][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][DMA] DMA Block/Request: Chan=6, Dir=TO_RAM, Sync=MANUAL, Step=-4, Addr=0x000eccf4, Size=1024 words
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[16:46:59][DEBUG][GPU] [GP0] Command: 0x000000b2 (Opcode: 0x00)
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010e8 Offset=0x68 = 0x00000000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][GPU] [GP0] Command: 0x00008cb2 (Opcode: 0x00)
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:46:59][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:46:59][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:46:59][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:46:59][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][GPU] [GP0] Command: 0x000e00ef (Opcode: 0x00)
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][DMA]   DMA Channel 2 activated by write to offset 0x28.
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][GPU] GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][GPU] [GP0] Command: 0x017e01b8 (Opcode: 0x01)
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][RENDERER] Renderer: Draw finished, vertex count reset.
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][GPU] [GP1] Command: 0x04000000 (Opcode: 0x04)
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][DMA] DMA GPU Linked List: End marker (0x800000) found in header 0x06ffffff.
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:00][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:00][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:00][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:00][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][DEBUG][GPU] [GP1] Command: 0x05000800 (Opcode: 0x05)
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][SYSTEM] [BIOS_REGION] PC=0x8005a910: CDROM Check (RAM)
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][DEBUG][GPU] [GP0] Command: 0x01e00000 (Opcode: 0x01)
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010a0 Offset=0x20 = 0x800ea884
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][GPU] [GP0] Command: 0x300000b2 (Opcode: 0x30)
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][GPU] [GP0] Command: 0x017e00c8 (Opcode: 0x01)
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:01][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:01][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:01][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][DEBUG][DMA] DMA Channel 6 activated by write to offset 0x68.
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][GPU] [GP0] Command: 0x00002fef (Opcode: 0x00)
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][GPU] [GP0] Command: 0xe2000000 (Opcode: 0xe2)
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][RENDERER] Renderer: Drawing 18 vertices...
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][DMA] DMA GPU Linked List: End marker (0x800000) found in header 0x00ffffff.
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000b, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000b
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffb, Before=0x0000, PC=0x800570e0
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0001
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffff7, Before=0x0000, PC=0x800570e8
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0001
+[16:47:02][DEBUG][CDROM] [CDROM] INT ACK: 0x1F, remaining: 0
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffb, Before=0x0000, PC=0x8005715c
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0001
+[16:47:02][DEBUG][CDROM] [CDROM] INT ACK: 0x00, remaining: 0
+[16:47:02][INFO][CDROM] [CDROM] Command: 0x19
+[16:47:02][DEBUG][CDROM] [EVT] Scheduled CDROM_CMD for cycle 129278206 (now=129253206, delay=25000)
+[16:47:02][DEBUG][CDROM] [CDROM] command_event_callback: pending_cmd=0x19, int_flag=0
+[16:47:02][INFO][CDROM] [CDROM] Executing command: 0x19
+[16:47:02][DEBUG][CDROM] [CDROM] Test subfunction: 0x20
+[16:47:02][INFO][CDROM] [CDROM] INT3 (ACK)
+[16:47:02][INFO][CDROM] [CDROM] trigger_cdrom_irq called, inter=0x7fff475c8450
+[16:47:02][INFO][CDROM] [CDROM] About to call interconnect_request_irq for IRQ_CDROM=2
+[16:47:02][INFO][IRQ] IRQ2 requested by CDROM. I_STAT before=0x0000
+[16:47:02][DEBUG][IRQ] IRQ2 rising edge: I_STAT=0x0004, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ2 set. I_STAT after=0x0004
+[16:47:02][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:47:02][INFO][IRQ] Interrupt Exception: I_STAT=0x0004, I_MASK=0x000f, Pending=0x0004
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffb, Before=0x0004, PC=0x800584f8
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0004, line_state: 0x0001
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ2 requested by CDROM. I_STAT before=0x0000
+[16:47:02][DEBUG][IRQ] IRQ2 rising edge: I_STAT=0x0004, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ2 set. I_STAT after=0x0004
+[16:47:02][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:47:02][INFO][IRQ] Interrupt Exception: I_STAT=0x0004, I_MASK=0x000f, Pending=0x0004
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffb, Before=0x0004, PC=0x800584f8
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0004, line_state: 0x0001
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ2 requested by CDROM. I_STAT before=0x0000
+[16:47:02][DEBUG][IRQ] IRQ2 rising edge: I_STAT=0x0004, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ2 set. I_STAT after=0x0004
+[16:47:02][DEBUG][IRQ] Entered interrupt handler (IRQ)
+[16:47:02][INFO][IRQ] Interrupt Exception: I_STAT=0x0004, I_MASK=0x000f, Pending=0x0004
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffb, Before=0x0004, PC=0x800584f8
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0004, line_state: 0x0001
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x00000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] Write to I_STAT: Value=0xfffffffe, Before=0x0000, PC=0x00004bd4
+[16:47:02][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0001
+[16:47:02][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=0, lm=0)
+[16:47:02][DEBUG][GTE] GTE: OP (sf=0, lm=0)
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1319)
+[16:47:02][DEBUG][GPU] [GPUREAD] Image Store Read: 0x555555a4 (Rem: 319)
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:02][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:02][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:02][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:02][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55555555 (Rem: 1279)
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00855530 (Rem: 279)
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1239)
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 239)
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1199)
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00555555 (Rem: 199)
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][CPU] @SUSPICIOUS_JR from PC=0x000000a8: $8=0x000005c4 -> jumping to 0x000005c4
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00355555 (Rem: 1159)
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 159)
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:03][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:03][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:03][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1119)
+[16:47:03][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 119)
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55552000 (Rem: 6640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00008555 (Rem: 5640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00055500 (Rem: 4640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 3640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 2640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 640)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x40000000 (Rem: 1385)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 385)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55555555 (Rem: 1130)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 130)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55554000 (Rem: 875)
+[16:47:04][DEBUG][GPU] [GP0] Command: 0x00011e2d (Opcode: 0x00)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 620)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1365)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x44444444 (Rem: 365)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x02555555 (Rem: 3558)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x59955555 (Rem: 2558)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1558)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 558)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x50000555 (Rem: 1551)
+[16:47:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x08555555 (Rem: 551)
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x000f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x000f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:04][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:04][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:04][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:05][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:05][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:05][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:05][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][TIMER] [VBlank] Handler #366: cycle=206632281
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][DEBUG][IRQ] After instr: I_STAT=0x0000, I_MASK=0x004f, SR=0x40000001, IEC=1, IRQ_PENDING=0
+[16:47:06][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x004f
+[16:47:06][INFO][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+[16:47:06][INFO][IRQ] IRQ0 requested by Timer0 event (VBlank logic). I_STAT before=0x0000
+[16:47:06][INFO][IRQ] IRQ0 set. I_STAT after=0x0000
+DMA Initialized. DPCR=0x07654321, Channels initialized.

@@ -1,0 +1,171 @@
+[15:13:58][INFO][SYSTEM] Emulator started
+[15:13:58][INFO][SYSTEM] --- ZoniStation One Emulator ---
+[15:13:58][INFO][SYSTEM] Attempting to load BIOS from: roms/SCPH1001.BIN
+[15:13:58][INFO][SYSTEM] Initializing SDL Video...
+[15:13:58][INFO][SYSTEM] Creating SDL Window (1024x512, OpenGL)...
+[15:13:58][INFO][SYSTEM] Creating OpenGL Context...
+[15:13:58][INFO][SYSTEM] Initializing GLEW...
+[15:13:58][INFO][SYSTEM] GLEW Initialized. OpenGL Version: 4.5 (Core Profile) Mesa 25.0.7-0ubuntu0.24.04.2
+[15:13:58][INFO][SYSTEM] Initializing Emulator Components...
+[15:13:58][INFO][SYSTEM]   Initializing RAM...
+[15:13:58][INFO][RAM] RAM initialized
+[15:13:58][INFO][BIOS] BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
+[15:13:58][DEBUG][INTERCONNECT] Interconnect initialized
+[15:13:58][INFO][DMA] DMA initialized
+[15:13:58][INFO][GPU] GPU full initialization (with VRAM)
+[15:13:58][INFO][GPU] GPU Initializing (full)...
+[15:13:58][INFO][VRAM] VRAM initialized
+[15:13:58][INFO][VRAM] VRAM Initialized (1048576 bytes, filled with 0x00).
+[15:13:58][INFO][GPU] GPU Initialized (State reset, VRAM initialized).
+[15:13:58][INFO][TIMER] Timers initialized
+[15:13:58][DEBUG][INTERCONNECT] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).
+[15:13:58][INFO][RENDERER] [RENDERER] Initializing renderer
+[15:13:58][INFO][RENDERER] Initializing Renderer...
+[15:13:58][INFO][RENDERER] Compiling vertex shader...
+[15:13:58][INFO][RENDERER] Shader compiled successfully (Type: Vertex)
+[15:13:58][INFO][RENDERER] Compiling fragment shader...
+[15:13:58][INFO][RENDERER] Shader compiled successfully (Type: Fragment)
+[15:13:58][INFO][RENDERER] Linking shader program...
+[15:13:58][INFO][RENDERER] Shader program linked successfully (ID: 3)
+[15:13:58][INFO][RENDERER] Found uniform 'offset' at location: 0
+[15:13:58][INFO][RENDERER] Creating VAO...
+[15:13:58][ERROR][CDROM] [CDROM] Failed to open BIN file: games/Crash Bandicoot.bin
+[15:13:58][INFO][CPU] CPU initialization started
+[15:13:58][DEBUG][CPU] Initializing I-Cache...
+[15:13:58][DEBUG][CPU] Initializing GTE...
+[15:13:58][INFO][GTE] GTE initialized
+[15:13:58][DEBUG][GTE] Initializing GTE...
+[15:13:58][DEBUG][GTE] GTE Initialized
+[15:13:58][INFO][CPU] CPU initialized, PC=0xbfc00000
+[15:13:58][DEBUG][INTERCONNECT] Interconnect CPU pointer set (exception triggering enabled).
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=0, target=1024, pending=0x3
+[15:13:58][INFO][CPU] *** BOOT STAGE: BIOS_INIT ***
+[15:13:58][INFO][CPU] Kernel initialization: PC in ROM (0xbfc00000-0xbfc10000)
+[15:13:58][DEBUG][INTERCONNECT] ~ Write32 to RAM_SIZE register (0x00000b88) = 0x00000400 (Ignoring)
+[15:13:58][DEBUG][INTERCONNECT] ~ Write32 to CACHE_CONTROL register (0xfffe0130) = 0x00000804 (Ignoring)
+[15:13:58][DEBUG][CPU] MTC0 write to SR: 0x00010000 (PC=0xbfc0023c)
+[15:13:58][DEBUG][CPU] MTC0 write to SR: 0x00000000 (PC=0xbfc00278)
+[15:13:58][DEBUG][CPU] MTC0 write to SR: 0x00010000 (PC=0xbfc0028c)
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=1024, target=1024, pending=0x3
+[15:13:58][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=1)
+[15:13:58][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[15:13:58][DEBUG][TIMER] [TIMER] Timer0 event triggered (counter=0x0000, mode=0x0000, target=0x0000)
+[15:13:58][DEBUG][TIMER] [TIMER] timers_schedule_next_event for Timer0
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=1024, target=565504, pending=0x3
+[15:13:58][DEBUG][CPU] MTC0 write to SR: 0x00000000 (PC=0xbfc00328)
+[15:13:58][DEBUG][IRQ] Write to I_STAT: Value=0x00000000, Before=0x0000, PC=0xbfc06898
+[15:13:58][DEBUG][IRQ] I_STAT after: 0x0000, cleared bits: 0x0000, line_state: 0x0000
+[15:13:58][DEBUG][TIMER] [Timer0] Write16: offset=0x4 value=0x0000
+[15:13:58][DEBUG][TIMER] [Timer0] Write16: offset=0x8 value=0x0000
+[15:13:58][DEBUG][TIMER] [Timer0] Target set: 0x0000
+[15:13:58][DEBUG][TIMER] [Timer0] Write16: offset=0x0 value=0x0000
+[15:13:58][DEBUG][TIMER] [Timer1] Write16: offset=0x4 value=0x0000
+[15:13:58][DEBUG][TIMER] [Timer1] Write16: offset=0x8 value=0x0000
+[15:13:58][DEBUG][IRQ] IRQ0 requested by VBlank. I_STAT before=0x0000
+[15:13:58][DEBUG][IRQ] IRQ0 rising edge: I_STAT=0x0001, I_MASK=0x0000
+[15:13:58][DEBUG][IRQ] IRQ0 set. I_STAT after=0x0001
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=565504, target=565504, pending=0x3
+[15:13:58][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=2)
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=565504, target=1129984, pending=0x3
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Firing Timer0 event: now=1129984, target=1129984, pending=0x3
+[15:13:58][DEBUG][EVENT] [EventQ] DISPATCH Timer0 event handler called (count=3)
+[15:13:58][DEBUG][EVENT] [EventQ][DEF] Scheduled Timer0 event: now=1129984, target=1694464, pending=0x3
+[15:13:58][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f0 Offset=0x70 = 0x076f4321
+[15:13:59][DEBUG][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[15:13:59][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[15:13:59][DEBUG][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[15:13:59][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[15:13:59][DEBUG][GPU] [GPUSTAT] Read: 0x1cc02000 (VBlank=1)
+[15:13:59][DEBUG][GPU] [GP0] Command: 0xe1003000 (Opcode: 0xe1)
+[15:13:59][DEBUG][GPU] [GPUSTAT] Read: 0x1dc02000 (VBlank=1)
+[15:13:59][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x00000000
+[15:13:59][DEBUG][DMA] [DMA] DICR write: value=0x00000000, channel_irq_enable=0x00, master_irq_enable=0
+[15:13:59][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f4 Offset=0x74 = 0x04840000
+[15:13:59][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[15:13:59][DEBUG][GPU] [GP0] Command: 0x85555000 (Opcode: 0x85)
+[15:13:59][DEBUG][GPU] [GP0] Command: 0x85555555 (Opcode: 0x85)
+[15:14:00][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[15:14:00][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[15:14:00][DEBUG][GPU] [GP0] Command: 0x56000000 (Opcode: 0x56)
+[15:14:00][DEBUG][GPU] GPU: DMA Direction = 2 (GP1 Cmd 0x04)
+[15:14:00][INFO][DMA] --- Starting DMA Transfer for Channel 6 ---
+[15:14:00][DEBUG][GPU] [GPUSTAT] Read: 0x1c43220a (VBlank=0)
+[15:14:01][INFO][DMA] --- Starting DMA Transfer for Channel 2 ---
+[15:14:01][DEBUG][GPU] [GP1] Command: 0x08000027 (Opcode: 0x08)
+[15:14:01][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[15:14:01][DEBUG][DMA]   DMA Channel 2 activated by write to offset 0x28.
+[15:14:01][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[15:14:01][DEBUG][GPU] [GP0] Command: 0x000000b2 (Opcode: 0x00)
+[15:14:02][DEBUG][GPU] [GP0] Command: 0x00008cb2 (Opcode: 0x00)
+[15:14:02][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010e8 Offset=0x68 = 0x11000002
+[15:14:02][DEBUG][GPU] [GP0] Command: 0x000e00ef (Opcode: 0x00)
+[15:14:02][INFO][GPU] GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)
+[15:14:02][DEBUG][GPU] [GP0] Command: 0x017e01b8 (Opcode: 0x01)
+[15:14:02][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010a8 Offset=0x28 = 0x01000401
+[15:14:03][INFO][RENDERER] Renderer: Display requested.
+[15:14:03][DEBUG][GPU] [GP1] Command: 0x04000000 (Opcode: 0x04)
+[15:14:03][DEBUG][GPU] [GP1] Command: 0x05000800 (Opcode: 0x05)
+[15:14:03][DEBUG][SYSTEM] [BIOS_REGION] PC=0x8005a910: CDROM Check (RAM)
+[15:14:03][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010a4 Offset=0x24 = 0x00000000
+[15:14:03][DEBUG][GPU] [GP0] Command: 0x01e00000 (Opcode: 0x01)
+[15:14:03][DEBUG][GPU] [GP0] Command: 0x300000b2 (Opcode: 0x30)
+[15:14:03][DEBUG][GPU] [GP0] Command: 0x017e00c8 (Opcode: 0x01)
+[15:14:03][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010e8 Offset=0x68 = 0x00000000
+[15:14:04][DEBUG][GPU] [GP0] Command: 0x00002fef (Opcode: 0x00)
+[15:14:04][DEBUG][GPU] [GP0] Command: 0xe2000000 (Opcode: 0xe2)
+[15:14:04][DEBUG][DMA] ~ Write32 to DMA region: Addr=0x1f8010f0 Offset=0x70 = 0x0f6f4b21
+[15:14:04][DEBUG][GPU] [GP0] Command: 0x00000000 (Opcode: 0x00)
+[15:14:04][DEBUG][CDROM] [CDROM] INT ACK: 0x1F, remaining: 0
+[15:14:04][DEBUG][CDROM] [CDROM] INT ACK: 0x00, remaining: 0
+[15:14:04][INFO][CDROM] [CDROM] Command: 0x19
+[15:14:04][INFO][CDROM] [CDROM] Executing command: 0x19
+[15:14:04][DEBUG][CDROM] [CDROM] Test subfunction: 0x20
+[15:14:04][INFO][CDROM] [CDROM] INT3 (ACK)
+[15:14:04][DEBUG][CDROM] [CDROM] INT ACK: 0x07, remaining: 0
+[15:14:04][DEBUG][CDROM] [CDROM] INT ACK: 0x00, remaining: 0
+[15:14:04][INFO][CDROM] [CDROM] Command: 0x01
+[15:14:04][INFO][CDROM] [CDROM] Executing command: 0x01
+[15:14:04][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=1, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=0, lm=0)
+[15:14:04][DEBUG][GTE] GTE: OP (sf=0, lm=0)
+[15:14:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1319)
+[15:14:04][DEBUG][GPU] [GPUREAD] Image Store Read: 0x555555a4 (Rem: 319)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55555555 (Rem: 1279)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00855530 (Rem: 279)
+[15:14:05][DEBUG][TIMER] [TIMER] timer_event_handler called for Timer0
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1239)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 239)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1199)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00555555 (Rem: 199)
+[15:14:05][DEBUG][CPU] @SUSPICIOUS_JR from PC=0x000000a8: $8=0x000005c4 -> jumping to 0x000005c4
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00355555 (Rem: 1159)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 159)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1119)
+[15:14:05][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 119)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55552000 (Rem: 6640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00008555 (Rem: 5640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00055500 (Rem: 4640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 3640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 2640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 640)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x40000000 (Rem: 1385)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 385)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55555555 (Rem: 1130)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 130)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x55554000 (Rem: 875)
+[15:14:06][DEBUG][GPU] [GP0] Command: 0x00011e2d (Opcode: 0x00)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 620)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1365)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x44444444 (Rem: 365)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x02555555 (Rem: 3558)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x59955555 (Rem: 2558)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 1558)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x00000000 (Rem: 558)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x50000555 (Rem: 1551)
+[15:14:06][DEBUG][GPU] [GPUREAD] Image Store Read: 0x08555555 (Rem: 551)
+DMA Initialized. DPCR=0x07654321, Channels initialized.

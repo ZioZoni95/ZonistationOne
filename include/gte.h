@@ -101,10 +101,10 @@ void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value);
 // --- Common GTE Operations ---
 
 // RTPS - Perspective Transformation (Single Point)
-void gte_rtps(Gte* gte);
+void gte_rtps(Gte* gte, uint32_t instruction);
 
 // RTPT - Perspective Transformation (Triangle)
-void gte_rtpt(Gte* gte);
+void gte_rtpt(Gte* gte, uint32_t instruction);
 
 // NCLIP - Normal Clipping
 void gte_nclip(Gte* gte);
@@ -113,10 +113,10 @@ void gte_nclip(Gte* gte);
 void gte_mvmva(Gte* gte, uint32_t instruction);
 
 // SQR - Square Root
-void gte_sqr(Gte* gte);
+void gte_sqr(Gte* gte, uint32_t instruction);
 
 // OP - Outer Product
-void gte_op(Gte* gte);
+void gte_op(Gte* gte, uint32_t instruction);
 
 // DCPL - Depth Cueing
 void gte_dcpl(Gte* gte);

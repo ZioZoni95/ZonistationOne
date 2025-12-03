@@ -53,8 +53,9 @@ void log_init(void) {
     }
     
     // Set stricter limits for noisy categories
-    category_states[LOG_CAT_IRQ].limit_first = 5;
-    category_states[LOG_CAT_IRQ].limit_every = 10000;
+    // Temporarily increased for debugging CDROM IRQ
+    category_states[LOG_CAT_IRQ].limit_first = 100;
+    category_states[LOG_CAT_IRQ].limit_every = 1;
     
     category_states[LOG_CAT_INTERCONNECT].limit_first = 5;
     category_states[LOG_CAT_INTERCONNECT].limit_every = 5000;

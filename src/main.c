@@ -316,6 +316,8 @@ int main(int argc, char *argv[]) {
         while (cycles_run < cycles_per_frame) {
             cpu_run_next_instruction(&cpu_state);
             eventq_dispatch_due(&interconnect_state);
+            // Check CDROM events during CPU loop (not just per-frame)
+            interconnect_check_cdrom_events(&interconnect_state);
             // --- PCSX ReARMed-style: Immediately run another CPU instruction after event dispatch to process IRQs ---
             cpu_run_next_instruction(&cpu_state);
             cycles_run += 2; // FIX: Increment by 2 since we run 2 instructions per iteration

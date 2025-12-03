@@ -21,8 +21,16 @@ typedef struct {
     GLubyte r, g, b; // OpenGL types (GLubyte is uint8_t)
 } RendererColor;
 
-// Add RendererTexCoord struct later if needed:
-// typedef struct { GLubyte u, v; } RendererTexCoord;
+// Represents texture coordinates (absolute VRAM coordinates)
+typedef struct {
+    GLshort u, v;
+} RendererTexCoord;
+
+// Represents CLUT and Texture Page information
+typedef struct {
+    GLushort clut;    // CLUT ID (contains X,Y of palette)
+    GLushort tpage;   // Texture Page ID (contains BaseX, BaseY, Depth)
+} RendererTPage;
 
 // --- Renderer State ---
 
@@ -36,20 +44,27 @@ typedef struct {
     GLuint vao;             // Vertex Array Object: Groups VBO bindings and attribute pointers
     GLuint position_buffer; // Vertex Buffer Object (VBO) storing vertex positions
     GLuint color_buffer;    // Vertex Buffer Object (VBO) storing vertex colors
-    // GLuint texcoord_buffer; // VBO for texture coordinates (future implementation)
+    GLuint texcoord_buffer; // VBO for texture coordinates
+    GLuint tpage_buffer;    // VBO for CLUT/TPage info
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
+    GLuint vram_texture;    // Texture object for VRAM
 
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
+    GLint uniform_use_texture_loc;
+    GLint uniform_vram_texture_loc;
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
     RendererPosition positions_data[VERTEX_BUFFER_LEN]; // CPU buffer for vertex positions
     RendererColor colors_data[VERTEX_BUFFER_LEN];       // CPU buffer for vertex colors
+    RendererTexCoord texcoords_data[VERTEX_BUFFER_LEN]; // CPU buffer for texture coordinates
+    RendererTPage tpage_data[VERTEX_BUFFER_LEN];        // CPU buffer for TPage/CLUT
 
     // State Tracking
     uint32_t vertex_count;      // Number of vertices currently buffered in the CPU-side arrays
     bool initialized;           // Flag indicating if the renderer has been successfully initialized
+    bool texture_enabled;       // Current texture mode
 } Renderer;
 
 // --- Function Prototypes ---
@@ -70,8 +85,11 @@ bool renderer_init(Renderer* renderer);
  * @param renderer Pointer to the Renderer instance.
  * @param pos Array of 3 vertex positions.
  * @param col Array of 3 vertex colors.
+ * @param tex Array of 3 texture coordinates (can be NULL if untextured).
+ * @param clut CLUT ID (only used if tex is not NULL).
+ * @param tpage Texture Page ID (only used if tex is not NULL).
  */
-void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], RendererColor col[3]);
+void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], RendererColor col[3], RendererTexCoord tex[3], uint16_t clut, uint16_t tpage);
 
 /**
  * @brief Buffers a quadrilateral's vertex data (as two triangles) for later drawing.
@@ -80,8 +98,25 @@ void renderer_push_triangle(Renderer* renderer, RendererPosition pos[3], Rendere
  * @param renderer Pointer to the Renderer instance.
  * @param pos Array of 4 vertex positions (in PSX order).
  * @param col Array of 4 vertex colors (corresponding to positions).
+ * @param tex Array of 4 texture coordinates (can be NULL if untextured).
+ * @param clut CLUT ID (only used if tex is not NULL).
+ * @param tpage Texture Page ID (only used if tex is not NULL).
  */
-void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererColor col[4]);
+void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererColor col[4], RendererTexCoord tex[4], uint16_t clut, uint16_t tpage);
+
+/**
+ * @brief Sets the texture mode. Flushes the renderer if the mode changes.
+ * @param renderer Pointer to the Renderer instance.
+ * @param enabled True to enable texturing, false to disable.
+ */
+void renderer_set_texture_mode(Renderer* renderer, bool enabled);
+
+/**
+ * @brief Uploads VRAM data to the GPU texture.
+ * @param renderer Pointer to the Renderer instance.
+ * @param vram_data Pointer to the VRAM data (1024x512 uint16_t).
+ */
+void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data);
 
 /**
  * @brief Uploads buffered vertex data to the GPU and performs the OpenGL draw call.

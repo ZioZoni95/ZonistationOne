@@ -1,0 +1,71 @@
+[15:44:09][INFO][SYSTEM] Emulator started
+[15:44:09][INFO][SYSTEM] --- ZoniStation One Emulator ---
+[15:44:09][INFO][SYSTEM] Attempting to load BIOS from: roms/SCPH1001.BIN
+[15:44:09][INFO][SYSTEM] Initializing SDL Video...
+[15:44:09][INFO][SYSTEM] Creating SDL Window (1024x512, OpenGL)...
+[15:44:09][INFO][SYSTEM] Creating OpenGL Context...
+[15:44:09][INFO][SYSTEM] Initializing GLEW...
+[15:44:09][INFO][SYSTEM] GLEW Initialized. OpenGL Version: 4.5 (Core Profile) Mesa 25.0.7-0ubuntu0.24.04.2
+[15:44:09][INFO][SYSTEM] Initializing Emulator Components...
+[15:44:09][INFO][SYSTEM]   Initializing RAM...
+[15:44:09][INFO][RAM] RAM initialized
+[15:44:09][INFO][BIOS] BIOS loaded successfully from roms/SCPH1001.BIN (524288 bytes)
+[15:44:09][INFO][DMA] DMA initialized
+[15:44:09][INFO][GPU] GPU full initialization (with VRAM)
+[15:44:09][INFO][GPU] GPU Initializing (full)...
+[15:44:09][INFO][VRAM] VRAM initialized
+[15:44:09][INFO][VRAM] VRAM Initialized (1048576 bytes, filled with 0x00).
+[15:44:09][INFO][GPU] GPU Initialized (State reset, VRAM initialized).
+[15:44:09][INFO][TIMER] Timers initialized
+[15:44:09][INFO][RENDERER] [RENDERER] Initializing renderer
+[15:44:09][INFO][RENDERER] Initializing Renderer...
+[15:44:09][INFO][RENDERER] Compiling vertex shader...
+[15:44:09][INFO][RENDERER] Shader compiled successfully (Type: Vertex)
+[15:44:09][INFO][RENDERER] Compiling fragment shader...
+[15:44:09][INFO][RENDERER] Shader compiled successfully (Type: Fragment)
+[15:44:09][INFO][RENDERER] Linking shader program...
+[15:44:09][INFO][RENDERER] Shader program linked successfully (ID: 3)
+[15:44:09][INFO][RENDERER] Found uniform 'offset' at location: 0
+[15:44:09][INFO][RENDERER] Creating VAO...
+[15:44:09][ERROR][CDROM] [CDROM] Failed to open BIN file: games/Crash Bandicoot.bin
+[15:44:09][INFO][CPU] CPU initialization started
+[15:44:09][INFO][GTE] GTE initialized
+[15:44:09][INFO][CPU] CPU initialized, PC=0xbfc00000
+[15:44:09][INFO][CPU] *** BOOT STAGE: BIOS_INIT ***
+[15:44:09][INFO][CPU] Kernel initialization: PC in ROM (0xbfc00000-0xbfc10000)
+[15:44:09][INFO][CPU] Progress: Executed 1000000 instructions. PC=0xbfc02b6c, cpu_cycle=1032668, evq_next=1161629
+[15:44:09][INFO][IRQ] Periodic: I_STAT=0x0001, I_MASK=0x0000
+[15:44:09][INFO][TIMER] [Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0
+[15:44:09][INFO][TIMER] [Timer0] Forced config: mode=0x0110, target=0xffff [PSX-Spex: VBlank IRQ0 enabled]
+[15:44:09][INFO][CPU] Progress: Executed 2000000 instructions. PC=0xbfc02b7c, cpu_cycle=2032668, evq_next=2290589
+[15:44:09][INFO][IRQ] Periodic: I_STAT=0x0001, I_MASK=0x0000
+[15:44:09][INFO][CPU] *** BOOT STAGE: LOGO_ANIMATION ***
+[15:44:09][INFO][CPU] Logo animation: Intro code active (0xbfc18000+)
+[15:44:09][INFO][CPU] *** BOOT STAGE: BIOS_MENU ***
+[15:44:09][INFO][CPU] BIOS menu: User can select Memory Card or CD-ROM
+[15:44:09][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[15:44:09][INFO][IRQ] Interrupt Exception: I_STAT=0x0001, I_MASK=0x0003, Pending=0x0001
+[15:44:09][INFO][IRQ] Periodic: I_STAT=0x0000, I_MASK=0x0003
+[15:44:10][INFO][DMA] --- Starting DMA Transfer for Channel 6 ---
+[15:44:10][INFO][DMA] DMA Block/Request: Chan=6, Dir=TO_RAM, Sync=MANUAL, Step=-4, Addr=0x000eb8d4, Size=1024 words
+[15:44:10][INFO][DMA] DMA Block/Request: Finished transfer for channel 6.
+[15:44:10][INFO][DMA] --- Starting DMA Transfer for Channel 2 ---
+[15:44:10][INFO][GPU] GPU: Display VRAM Start X=0 Y=241 (GP1 Cmd 0x05)
+[15:44:10][INFO][GPU] GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+[15:44:10][INFO][GPU] GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+[15:44:10][INFO][GPU] GPU: Display VRAM Start X=0 Y=1 (GP1 Cmd 0x05)
+[15:44:10][INFO][GPU] GPU: Display H-Range Start=608 End=3168 (GP1 Cmd 0x06)
+[15:44:10][INFO][GPU] GPU: Display V-Range Start=16 End=255 (GP1 Cmd 0x07)
+[15:44:10][INFO][GPU] GPU: Display VRAM Start X=0 Y=241 (GP1 Cmd 0x05)
+[15:44:12][INFO][DMA] DMA Block/Request: Chan=6, Dir=TO_RAM, Sync=MANUAL, Step=-4, Addr=0x000eccf4, Size=1024 words
+[15:44:14][INFO][DMA] --- Starting DMA Transfer for Channel 6 ---
+[15:44:15][INFO][CDROM] [CDROM] Command: 0x19
+[15:44:15][INFO][CDROM] [CDROM] Executing command: 0x19
+[15:44:15][INFO][CDROM] [CDROM] INT3 (ACK)
+[15:44:15][INFO][CDROM] [CDROM] Command: 0x01
+[15:44:15][INFO][CDROM] [CDROM] Executing command: 0x01
+[15:44:15][INFO][CDROM] [CDROM] INT3 (ACK)
+[15:44:15][INFO][CDROM] [CDROM] Command: 0x01
+[15:44:15][INFO][CDROM] [CDROM] Executing command: 0x01
+[15:44:15][INFO][CDROM] [CDROM] INT3 (ACK)
+DMA Initialized. DPCR=0x07654321, Channels initialized.
