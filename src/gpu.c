@@ -687,7 +687,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
         if (gpu->gp0_words_remaining == 0) { // Check if transfer complete
             gpu->gp0_mode = GP0_MODE_COMMAND; // Switch back to command mode
             // printf("GPU Img Load Finished.\n"); // Optional debug
-            renderer_upload_vram(&gpu->renderer, gpu->vram.data);
+            renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
         }
         return; // Done processing this data word
     }
