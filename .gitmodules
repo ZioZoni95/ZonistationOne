@@ -1,0 +1,3 @@
+[submodule "duckstation_ref"]
+	path = duckstation_ref
+	url = https://github.com/stenzek/duckstation.git
