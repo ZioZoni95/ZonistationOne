@@ -312,7 +312,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
 
 // --- Event scheduling for timers ---
 void timers_schedule_next_event(Timers* timers, int timer_index) {
-    LOG_TIMER_DEBUG("[TIMER] timers_schedule_next_event for Timer%d", timer_index);
+    LOG_TIMER_TRACE("[TIMER] timers_schedule_next_event for Timer%d", timer_index);
     Timer* t = &timers->timers[timer_index];
     
     // Special handling for Timer0 (VBlank) - schedule every frame, not every cycle
@@ -394,8 +394,16 @@ int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
-    LOG_TIMER_DEBUG("[TIMER] timer_event_handler called for Timer%d", timer_index);
-    LOG_TIMER_DEBUG("[TIMER] Timer%d event triggered (counter=0x%04x, mode=0x%04x, target=0x%04x)", timer_index, timers->timers[timer_index].counter, timers->timers[timer_index].mode, timers->timers[timer_index].target);
+    static uint32_t timer_event_count[3] = {0, 0, 0};
+    timer_event_count[timer_index]++;
+    
+    // Only log every 100 timer events to reduce spam
+    if (timer_event_count[timer_index] % 100 == 1) {
+        LOG_TIMER_DEBUG("[Timer%d] Event #%u (counter=0x%04x, target=0x%04x)", 
+                       timer_index, timer_event_count[timer_index],
+                       timers->timers[timer_index].counter, 
+                       timers->timers[timer_index].target);
+    }
     Timer* t = &timers->timers[timer_index];
     // Set sticky flag for target or overflow
     if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
@@ -433,26 +441,31 @@ void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->
 
 // VBlank event handler for event_scheduler.c
 void timers_on_vblank(Timers* timers) {
-    LOG_TIMER_DEBUG("[VBlank] timers_on_vblank called. Timer0 counter reset.");
+    static uint32_t vblank_count = 0;
+    vblank_count++;
+    
+    // Only log every 300 frames (~5 seconds at 60fps)
+    if (vblank_count % 300 == 1) {
+        LOG_TIMER_DEBUG("[VBlank] Frame %u - VBlank running normally", vblank_count);
+    }
+    
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
     t0->reached_target_flag = false;
-    // Only clear interrupt_requested if the IRQ was acknowledged (handled in interconnect)
+    
+    // Only clear interrupt_requested if the IRQ was acknowledged
     if (t0->interrupt_requested) {
-        LOG_TIMER_DEBUG("[Timer0] IRQ0 acknowledged, clearing interrupt_requested flag.");
         t0->interrupt_requested = false;
     }
-    // If Timer0 IRQ is enabled (IRQ enable and IRQ on target), request IRQ0 only if not already requested
+    
+    // If Timer0 IRQ is enabled, request IRQ0 only if not already requested
     if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
-        LOG_TIMER_DEBUG("[VBlank] Requesting IRQ0 (Timer0 event, VBlank logic) - mode=0x%04x", t0->mode);
         if (timers->inter) {
-            interconnect_request_irq(timers->inter, 0, "Timer0 event (VBlank logic)");
+            interconnect_request_irq(timers->inter, 0, "VBlank");
         } else {
-            LOG_ERROR("[VBlank] ERROR: timers->inter is NULL! Cannot request IRQ0!");
+            LOG_ERROR("[VBlank] ERROR: timers->inter is NULL!");
         }
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;
-    } else if (t0->interrupt_requested) {
-        LOG_TIMER_DEBUG("[VBlank] IRQ0 already pending, skipping request");
     }
 }

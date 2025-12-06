@@ -42,6 +42,7 @@ const char* vertex_shader_source =
     "\n"
     // Uniform: A single value passed to the shader for a batch of vertices
     "uniform ivec2 offset; // Drawing offset (applied to vertex_position)\n"
+    "uniform vec2 screen_scale; // Half-width/height used for coordinate conversion\n"
     "\n"
     // Output: Color passed to the fragment shader (interpolated)
     "out vec3 color;\n"
@@ -53,10 +54,15 @@ const char* vertex_shader_source =
     "    ivec2 p = vertex_position + offset;\n"
     "\n"
     // Convert X coordinate from PSX VRAM (0..1023) to OpenGL NDC (-1.0..+1.0)
-    "    float xpos = (float(p.x) / 512.0) - 1.0;\n"
+    // screen_scale is (width/2, height/2)
+    // xpos = (p.x / (width/2)) - 1.0 = (2*p.x / width) - 1.0
+    // If p.x = 0, xpos = -1.0. If p.x = width, xpos = 1.0.
+    "    float xpos = (float(p.x) / screen_scale.x) - 1.0;\n"
     "\n"
     // Convert Y coordinate from PSX VRAM (0..511, top-to-bottom) to OpenGL NDC (-1.0..+1.0, bottom-to-top)
-    "    float ypos = 1.0 - (float(p.y) / 256.0); // Flip Y axis\n"
+    // ypos = 1.0 - (p.y / (height/2)) = 1.0 - (2*p.y / height)
+    // If p.y = 0, ypos = 1.0. If p.y = height, ypos = -1.0.
+    "    float ypos = 1.0 - (float(p.y) / screen_scale.y); // Flip Y axis\n"
     "\n"
     // Set the final position for this vertex. Z=0 (2D), W=1 (position).
     "    gl_Position = vec4(xpos, ypos, 0.0, 1.0);\n"
@@ -72,6 +78,7 @@ const char* vertex_shader_source =
     "}\n";
 
 // Fragment Shader: Determines the final color of each pixel fragment.
+// Uses usampler2D for R16UI integer texture - preserves exact 16-bit PSX pixel values
 const char* fragment_shader_source =
     "#version 330 core\n"
     // Input: Color interpolated from the vertex shader outputs
@@ -79,15 +86,27 @@ const char* fragment_shader_source =
     "in vec2 tex_coord;\n"
     "flat in uvec2 tpage_info; // x=CLUT, y=TPage\n"
     "\n"
-    "uniform sampler2D vram_texture;\n"
+    "uniform usampler2D vram_texture;\n"  // Integer sampler for R16UI
     "uniform int use_texture;\n"
+    "uniform uvec2 tex_window_and;\n"
+    "uniform uvec2 tex_window_or;\n"
+    "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
     "\n"
+    // Helper: Convert PSX 1555 color to vec3
+    "vec3 psx_to_rgb(uint raw) {\n"
+    "    float r = float(raw & 0x1Fu) / 31.0;\n"
+    "    float g = float((raw >> 5) & 0x1Fu) / 31.0;\n"
+    "    float b = float((raw >> 10) & 0x1Fu) / 31.0;\n"
+    "    return vec3(r, g, b);\n"
+    "}\n"
+    "\n"
     "void main() {\n"
     "    vec4 final_color = vec4(color, 1.0);\n"
     "    if (use_texture == 1) {\n"
+    // "        frag_color = vec4(1.0, 0.0, 0.0, 1.0); return;\n" // DEBUG: Uncomment to verify geometry
     "        uint clut = tpage_info.x;\n"
     "        uint tpage = tpage_info.y;\n"
     "        uint depth = (tpage >> 7) & 3u;\n"
@@ -96,64 +115,58 @@ const char* fragment_shader_source =
     "        uint clut_x = (clut & 0x3Fu) * 16u;\n"
     "        uint clut_y = (clut >> 6) & 0x1FFu;\n"
     "\n"
-    "        vec4 tex_col = vec4(0.0);\n"
+    "        // Apply Texture Window to UV coordinates (0-255)\n"
+    "        uint u_raw = uint(tex_coord.x) & 0xFFu;\n"
+    "        uint v_raw = uint(tex_coord.y) & 0xFFu;\n"
+    "        uint u = (u_raw & tex_window_and.x) | tex_window_or.x;\n"
+    "        uint v = (v_raw & tex_window_and.y) | tex_window_or.y;\n"
     "\n"
-    "        if (depth == 0u) { // 4-bit\n"
-    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
-    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "        vec3 tex_rgb = vec3(0.0);\n"
+    "        uint raw_color = 0u;\n"
+    "\n"
+    "        if (depth == 0u) { // 4-bit paletted\n"
     "            uint tex_x = page_x + (u / 4u);\n"
     "            uint tex_y = page_y + v;\n"
     "            \n"
-    "            vec4 word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
-    "            // Reconstruct raw 16-bit value from RGBA (1555 format)\n"
-    "            uint raw_val = 0u;\n"
-    "            raw_val |= uint(round(word.r * 31.0));\n"
-    "            raw_val |= uint(round(word.g * 31.0)) << 5;\n"
-    "            raw_val |= uint(round(word.b * 31.0)) << 10;\n"
-    "            if (word.a > 0.5) raw_val |= 0x8000u;\n"
-    "\n"
+    "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
     "            uint shift = (u & 3u) * 4u;\n"
-    "            uint index = (raw_val >> shift) & 0xFu;\n"
+    "            uint index = (raw_word >> shift) & 0xFu;\n"
     "\n"
     "            uint clut_pos_x = clut_x + index;\n"
     "            uint clut_pos_y = clut_y;\n"
-    "            tex_col = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0);\n"
+    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0).r;\n"
     "\n"
-    "            // For paletted textures, if the color is fully black (0x0000), it's transparent\n"
-    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "            if (raw_color == 0u) discard;\n"
+    "            tex_rgb = psx_to_rgb(raw_color);\n"
     "\n"
-    "        } else if (depth == 1u) { // 8-bit\n"
-    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
-    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "        } else if (depth == 1u) { // 8-bit paletted\n"
     "            uint tex_x = page_x + (u / 2u);\n"
     "            uint tex_y = page_y + v;\n"
     "            \n"
-    "            vec4 word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
-    "            uint raw_val = 0u;\n"
-    "            raw_val |= uint(round(word.r * 31.0));\n"
-    "            raw_val |= uint(round(word.g * 31.0)) << 5;\n"
-    "            raw_val |= uint(round(word.b * 31.0)) << 10;\n"
-    "            if (word.a > 0.5) raw_val |= 0x8000u;\n"
-    "\n"
+    "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
     "            uint shift = (u & 1u) * 8u;\n"
-    "            uint index = (raw_val >> shift) & 0xFFu;\n"
+    "            uint index = (raw_word >> shift) & 0xFFu;\n"
     "\n"
     "            uint clut_pos_x = clut_x + index;\n"
     "            uint clut_pos_y = clut_y;\n"
-    "            tex_col = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0);\n"
+    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0).r;\n"
     "\n"
-    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "            if (raw_color == 0u) discard;\n"
+    "            tex_rgb = psx_to_rgb(raw_color);\n"
     "\n"
-    "        } else { // 15-bit direct\n"
-    "            uint u = uint(tex_coord.x) & 0xFFu;\n"
-    "            uint v = uint(tex_coord.y) & 0xFFu;\n"
+    "        } else { // 15-bit direct color (depth == 2 or 3)\n"
     "            uint tex_x = page_x + u;\n"
     "            uint tex_y = page_y + v;\n"
-    "            tex_col = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0);\n"
-    "            if (tex_col.r == 0.0 && tex_col.g == 0.0 && tex_col.b == 0.0 && tex_col.a < 0.5) discard;\n"
+    "            raw_color = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
+    "            if (raw_color == 0u) discard;\n"
+    "            tex_rgb = psx_to_rgb(raw_color);\n"
     "        }\n"
     "\n"
-    "        final_color = vec4(tex_col.rgb * color * 2.0, 1.0);\n"
+    "        if (raw_texture == 1) {\n"
+    "            final_color = vec4(tex_rgb, 1.0);\n"
+    "        } else {\n"
+    "            final_color = vec4(tex_rgb * color * 2.0, 1.0);\n"
+    "        }\n"
     "    }\n"
     "    frag_color = final_color;\n"
     "}\n";
@@ -250,6 +263,12 @@ bool renderer_init(Renderer* renderer) {
     // Clear CPU-side buffers initially (optional but good practice)
     memset(renderer->positions_data, 0, sizeof(renderer->positions_data));
     memset(renderer->colors_data, 0, sizeof(renderer->colors_data));
+    if (renderer->screen_width <= 0.0f) {
+        renderer->screen_width = 1024.0f;
+    }
+    if (renderer->screen_height <= 0.0f) {
+        renderer->screen_height = 512.0f;
+    }
 
 
     // Compile Shaders
@@ -291,6 +310,18 @@ bool renderer_init(Renderer* renderer) {
         glUseProgram(0); // Unbind program
     }
     check_gl_error("After getting/setting offset uniform");
+
+    renderer->uniform_screen_scale_loc = glGetUniformLocation(renderer->shader_program, "screen_scale");
+    if (renderer->uniform_screen_scale_loc < 0) {
+        LOG_RENDERER_WARN("Warning: Could not find uniform 'screen_scale'. Display scaling will be incorrect.\n");
+    } else {
+        LOG_RENDERER_INFO("Found uniform 'screen_scale' at location: %d\n", renderer->uniform_screen_scale_loc);
+        glUseProgram(renderer->shader_program);
+        glUniform2f(renderer->uniform_screen_scale_loc,
+                    renderer->screen_width * 0.5f,
+                    renderer->screen_height * 0.5f);
+        glUseProgram(0);
+    }
 
 
     // --- Create Vertex Array Object (VAO) ---
@@ -397,17 +428,34 @@ bool renderer_init(Renderer* renderer) {
     }
 
     // --- Create VRAM Texture ---
+    // Use R16UI (16-bit unsigned integer) to preserve raw PSX pixel values exactly
     glGenTextures(1, &renderer->vram_texture);
     glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    // Allocate texture storage (1024x512, 16-bit RGBA)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, NULL);
+    // Allocate texture storage (1024x512, 16-bit unsigned integer)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, NULL);
     glBindTexture(GL_TEXTURE_2D, 0);
-    LOG_RENDERER_INFO("VRAM Texture created (ID: %u).\n", renderer->vram_texture);
+    LOG_RENDERER_INFO("VRAM Texture created (ID: %u) as R16UI.\n", renderer->vram_texture);
 
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
+    renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
     renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
+    renderer->uniform_tex_window_and_loc = glGetUniformLocation(renderer->shader_program, "tex_window_and");
+    renderer->uniform_tex_window_or_loc = glGetUniformLocation(renderer->shader_program, "tex_window_or");
+
+    LOG_RENDERER_INFO("Found uniform 'use_texture' at location: %d\n", renderer->uniform_use_texture_loc);
+    LOG_RENDERER_INFO("Found uniform 'raw_texture' at location: %d\n", renderer->uniform_raw_texture_loc);
+    LOG_RENDERER_INFO("Found uniform 'vram_texture' at location: %d\n", renderer->uniform_vram_texture_loc);
+    LOG_RENDERER_INFO("Found uniform 'tex_window_and' at location: %d\n", renderer->uniform_tex_window_and_loc);
+    LOG_RENDERER_INFO("Found uniform 'tex_window_or' at location: %d\n", renderer->uniform_tex_window_or_loc);
+
+    // Set default texture window (no masking)
+    glUseProgram(renderer->shader_program);
+    if (renderer->uniform_tex_window_and_loc >= 0) glUniform2ui(renderer->uniform_tex_window_and_loc, 0xFF, 0xFF);
+    if (renderer->uniform_tex_window_or_loc >= 0) glUniform2ui(renderer->uniform_tex_window_or_loc, 0, 0);
+    if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
+    glUseProgram(0);
 
     // --- Unbind ---
     glBindVertexArray(0); // Unbind the VAO
@@ -425,6 +473,7 @@ bool renderer_init(Renderer* renderer) {
 
     renderer->initialized = true;
     renderer->texture_enabled = false;
+    renderer->raw_texture_enabled = false;
     LOG_RENDERER_INFO("Renderer Initialized Successfully.\n");
     return true;
 }
@@ -536,10 +585,82 @@ void renderer_set_texture_mode(Renderer* renderer, bool enabled) {
     }
 }
 
+void renderer_set_raw_texture_mode(Renderer* renderer, bool enabled) {
+    if (!renderer->initialized) return;
+    if (renderer->raw_texture_enabled == enabled) return;
+    renderer_draw(renderer); // Flush before changing modulation behavior
+    renderer->raw_texture_enabled = enabled;
+    if (renderer->uniform_raw_texture_loc >= 0) {
+        glUseProgram(renderer->shader_program);
+        glUniform1i(renderer->uniform_raw_texture_loc, enabled ? 1 : 0);
+        glUseProgram(0);
+    }
+}
+
+void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t height) {
+    if (!renderer->initialized) {
+        return;
+    }
+    if (renderer->uniform_screen_scale_loc < 0) {
+        return;
+    }
+
+    if (width == 0) {
+        width = 1024;
+    }
+    if (height == 0) {
+        height = 512;
+    }
+
+    if (renderer->screen_width == (float)width && renderer->screen_height == (float)height) {
+        return; // Nothing to update
+    }
+
+    renderer_draw(renderer); // Keep batches consistent when scale changes
+
+    renderer->screen_width = (float)width;
+    renderer->screen_height = (float)height;
+
+    glUseProgram(renderer->shader_program);
+    glUniform2f(renderer->uniform_screen_scale_loc,
+                renderer->screen_width * 0.5f,
+                renderer->screen_height * 0.5f);
+    glUseProgram(0);
+}
+
+void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y) {
+    if (!renderer->initialized) return;
+
+    // Calculate AND/OR masks based on DuckStation/Nocash logic
+    // Mask: 0=Don't mask, 1-31=Mask (size = 8, 16, 32... 256 pixels)
+    // Offset: Base address of the window (in 8 pixel steps)
+    
+    // Formula:
+    // AND = ~(mask * 8)
+    // OR = (offset & mask) * 8
+    
+    uint32_t and_x = ~(mask_x * 8u) & 0xFF;
+    uint32_t and_y = ~(mask_y * 8u) & 0xFF;
+    uint32_t or_x = (offset_x & mask_x) * 8u;
+    uint32_t or_y = (offset_y & mask_y) * 8u;
+
+    // Flush current batch before changing uniforms
+    renderer_draw(renderer);
+
+    glUseProgram(renderer->shader_program);
+    if (renderer->uniform_tex_window_and_loc >= 0) {
+        glUniform2ui(renderer->uniform_tex_window_and_loc, and_x, and_y);
+    }
+    if (renderer->uniform_tex_window_or_loc >= 0) {
+        glUniform2ui(renderer->uniform_tex_window_or_loc, or_x, or_y);
+    }
+    glUseProgram(0);
+}
+
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     if (!renderer->initialized) return;
     glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RGBA, GL_UNSIGNED_SHORT_1_5_5_5_REV, vram_data);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, vram_data);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -561,6 +682,9 @@ void renderer_draw(Renderer* renderer) {
 
     // Set texture uniforms
     glUniform1i(renderer->uniform_use_texture_loc, renderer->texture_enabled ? 1 : 0);
+    if (renderer->uniform_raw_texture_loc >= 0) {
+        glUniform1i(renderer->uniform_raw_texture_loc, renderer->raw_texture_enabled ? 1 : 0);
+    }
     glUniform1i(renderer->uniform_vram_texture_loc, 0); // Texture unit 0
 
     if (renderer->texture_enabled) {
@@ -609,6 +733,67 @@ void renderer_draw(Renderer* renderer) {
     LOG_RENDERER_DEBUG("Renderer: Draw finished, vertex count reset.\n");
 }
 
+// Blits a portion of the VRAM texture to the screen as a full-screen quad
+// Uses the existing shader infrastructure - draws VRAM content directly
+void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, uint16_t width, uint16_t height) {
+    if (!renderer->initialized) return;
+    
+    // First, flush any pending primitives
+    renderer_draw(renderer);
+    
+    // Create positions for a screen-filling quad using VRAM coordinates
+    // The vertex shader will convert these to NDC
+    RendererPosition positions[4];
+    RendererColor colors[4];
+    RendererTexCoord texcoords[4];
+    
+    // Full screen in VRAM coordinates (0-1023, 0-511 maps to -1..1, 1..-1)
+    // Top-left
+    positions[0].x = 0;
+    positions[0].y = 0;
+    // Top-right  
+    positions[1].x = 1024;
+    positions[1].y = 0;
+    // Bottom-left
+    positions[2].x = 0;
+    positions[2].y = 512;
+    // Bottom-right
+    positions[3].x = 1024;
+    positions[3].y = 512;
+    
+    // Neutral color (the shader multiplies by 2, so 128 = 1.0)
+    for (int i = 0; i < 4; i++) {
+        colors[i].r = 128;
+        colors[i].g = 128;
+        colors[i].b = 128;
+    }
+    
+    // Texture coordinates map to the display region in VRAM
+    texcoords[0].u = vram_x;
+    texcoords[0].v = vram_y;
+    texcoords[1].u = vram_x + width;
+    texcoords[1].v = vram_y;
+    texcoords[2].u = vram_x;
+    texcoords[2].v = vram_y + height;
+    texcoords[3].u = vram_x + width;
+    texcoords[3].v = vram_y + height;
+    
+    // Build TPage for 15-bit direct texture mode (depth = 2)
+    // Page base X = vram_x / 64, Page base Y = vram_y / 256, Depth = 2 (15-bit)
+    uint16_t tpage = (vram_x / 64) | ((vram_y / 256) << 4) | (2 << 7);
+    uint16_t clut = 0; // Not used for 15-bit mode
+    
+    // Temporarily disable offset for screen blit
+    glUseProgram(renderer->shader_program);
+    glUniform2i(renderer->uniform_offset_loc, 0, 0);
+    glUseProgram(0);
+    
+    // Push as textured quad
+    renderer_set_texture_mode(renderer, true);
+    renderer_push_quad(renderer, positions, colors, texcoords, clut, tpage);
+    renderer_draw(renderer);
+}
+
 // Draws buffered primitives and requests buffer swap (swap happens in main loop)
 void renderer_display(Renderer* renderer) {
     if (!renderer->initialized) return;
@@ -625,7 +810,7 @@ void renderer_set_draw_offset(Renderer* renderer, int16_t x, int16_t y) {
      if (!renderer->initialized) return;
 
      // Draw primitives with the *old* offset before changing it
-     LOG_RENDERER_INFO("Renderer: Setting Draw Offset (%d, %d), forcing draw first.\n", x, y);
+     LOG_RENDERER_DEBUG("Renderer: Setting Draw Offset (%d, %d), forcing draw first.\n", x, y);
      renderer_draw(renderer);
 
      // Bind the shader program to set the uniform

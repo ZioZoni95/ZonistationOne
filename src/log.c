@@ -27,7 +27,8 @@ static const char* category_names[LOG_CAT_COUNT] = {
     "GTE",
     "VRAM",
     "RAM",
-    "DEBUG"
+    "DEBUG",
+    "MDEC"
 };
 
 // --- Level Names ---
@@ -53,9 +54,8 @@ void log_init(void) {
     }
     
     // Set stricter limits for noisy categories
-    // Temporarily increased for debugging CDROM IRQ
-    category_states[LOG_CAT_IRQ].limit_first = 100;
-    category_states[LOG_CAT_IRQ].limit_every = 1;
+    category_states[LOG_CAT_IRQ].limit_first = 5;
+    category_states[LOG_CAT_IRQ].limit_every = 10000;
     
     category_states[LOG_CAT_INTERCONNECT].limit_first = 5;
     category_states[LOG_CAT_INTERCONNECT].limit_every = 5000;
@@ -63,8 +63,16 @@ void log_init(void) {
     category_states[LOG_CAT_CPU].limit_first = 10;
     category_states[LOG_CAT_CPU].limit_every = 100000;
     
-    category_states[LOG_CAT_DMA].limit_first = 5;
-    category_states[LOG_CAT_DMA].limit_every = 1000;
+    category_states[LOG_CAT_DMA].limit_first = 100000;
+    category_states[LOG_CAT_DMA].limit_every = 100000;
+    
+    // GPU rate limit - increased to capture all rendering details
+    category_states[LOG_CAT_GPU].limit_first = 100000;
+    category_states[LOG_CAT_GPU].limit_every = 100000;
+    
+    // Renderer rate limit - increased to capture all draws
+    category_states[LOG_CAT_RENDERER].limit_first = 100000;
+    category_states[LOG_CAT_RENDERER].limit_every = 100000;
     
     log_output_file = stderr; // Default output
     log_initialized = true;
@@ -131,12 +139,18 @@ bool log_should_print(LogCategory category, LogLevel level) {
         return false;
     }
     
-    // Always allow critical messages
-    if (level <= LOG_LEVEL_ERROR) {
+    // Always allow critical messages (ERROR and WARN)
+    if (level <= LOG_LEVEL_WARN) {
         return true;
     }
     
-    // Apply rate limiting for non-critical messages
+    // If current log level is DEBUG or higher, don't rate-limit INFO messages
+    // This ensures important state changes are visible when debugging
+    if (current_log_level >= LOG_LEVEL_DEBUG && level == LOG_LEVEL_INFO) {
+        return true;
+    }
+    
+    // Apply rate limiting for DEBUG and TRACE messages
     LogCategoryState* state = &category_states[category];
     state->count++;
     

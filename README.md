@@ -4,6 +4,15 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 
 ---
 
+## 📸 Screenshots
+
+| Boot Animation | Sony Logo | BIOS Menu |
+|:--------------:|:---------:|:---------:|
+| ![Boot Animation](screenshots/boot_animation.png) | ![Sony Logo](screenshots/sony_logo.png) | ![BIOS Menu](screenshots/bios_menu.png) |
+| PlayStation diamond logo animation | Full Sony Computer Entertainment splash | BIOS menu with animated purple orb |
+
+---
+
 ## 🏁 Current Status (December 2025)
 
 ### 🎉 MAJOR MILESTONE: BIOS Menu Reached!

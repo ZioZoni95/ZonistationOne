@@ -167,8 +167,13 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
             case 0x8: // CHCR
                 channel_set_control(ch, value);
                 channel_became_active = dma_channel_is_active(ch);
-                if (channel_became_active && log_get_level() >= LOG_LEVEL_INFO) {
-                    LOG_DMA_DEBUG("DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
+                if (channel_became_active) {
+                    // Rate-limit DMA activation logs
+                    static uint32_t dma_activate_count = 0;
+                    dma_activate_count++;
+                    if (dma_activate_count <= 10 || dma_activate_count % 100 == 0) {
+                        LOG_DMA_DEBUG("[DMA] Channel %d activated #%u", channel_index, dma_activate_count);
+                    }
                 }
                 break;
             default:

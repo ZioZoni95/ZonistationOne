@@ -31,6 +31,7 @@ static void gp0_drawing_area_top_left(Gpu* gpu);
 static void gp0_drawing_area_bottom_right(Gpu* gpu);
 static void gp0_drawing_offset(Gpu* gpu);
 static void gp0_mask_bit_setting(Gpu* gpu);
+static void gpu_update_display_mapping(Gpu* gpu);
 static void gp0_quad_mono_opaque(Gpu* gpu);
 static void gp0_quad_texture_blend_opaque(Gpu* gpu);
 static void gp0_quad_shaded_opaque(Gpu* gpu);
@@ -44,6 +45,7 @@ static void gp0_rect_16x16_opaque(Gpu* gpu);
 static void gp0_rect_tex_1x1_opaque(Gpu* gpu);
 static void gp0_rect_tex_8x8_opaque(Gpu* gpu);
 static void gp0_rect_tex_16x16_opaque(Gpu* gpu);
+static void gp0_copy_rectangle(Gpu* gpu);
 static void gp0_image_load(Gpu* gpu);
 static void gp0_image_store(Gpu* gpu);
 
@@ -57,6 +59,10 @@ static void gp1_display_vram_start(Gpu* gpu, uint32_t value);
 static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value);
 static void gp1_display_vertical_range(Gpu* gpu, uint32_t value);
 static void gp1_display_mode(Gpu* gpu, uint32_t value);
+
+// --- Forward Declarations for Helpers ---
+static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h, RendererColor col, bool textured, bool raw_texture, RendererTexCoord* tex, uint16_t clut, uint16_t tpage);
+static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel);
 
 
 // --- Helper Functions ---
@@ -98,7 +104,7 @@ static void gp1_reset(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x01): Reset Command Buffer */
 static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
-    LOG_GPU_INFO("GPU: Reset Command Buffer (GP1 Cmd 0x01)\n");
+    LOG_GPU_DEBUG("GPU: Reset Command Buffer (GP1 Cmd 0x01)");
     (void)value; // value is unused for this command
     clear_gp0_command_buffer(gpu);
     gpu->gp0_words_remaining = 0;
@@ -110,7 +116,7 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
 
 /** GP1(0x02): Acknowledge GPU Interrupt */
 static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
-    LOG_GPU_INFO("GPU: Acknowledge IRQ (GP1 Cmd 0x02)\n");
+    LOG_GPU_DEBUG("GPU: Acknowledge IRQ (GP1 Cmd 0x02)");
      (void)value; // value is unused for this command
      gpu->interrupt = false; // Clear the interrupt flag (STAT[24])
 }
@@ -119,7 +125,7 @@ static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
 static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     // Bit 0: 0 = Enable Display, 1 = Disable Display
     gpu->display_disabled = (value & 1);
-    LOG_GPU_INFO("GPU: Display Enable = %s (GP1 Cmd 0x03)\n", gpu->display_disabled ? "Disabled" : "Enabled");
+    LOG_GPU_DEBUG("GPU: Display Enable = %s (GP1 Cmd 0x03)", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
 /** GP1(0x04): DMA Direction / Request settings */
@@ -140,8 +146,9 @@ static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
     // Bits 10-18: Y start coordinate in VRAM (512 height)
     gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
-    LOG_GPU_INFO("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)\n",
+    LOG_GPU_DEBUG("GPU: Display VRAM Start X=%u Y=%u (GP1 Cmd 0x05)",
         gpu->display_vram_x_start, gpu->display_vram_y_start);
+    gpu_update_display_mapping(gpu);
 }
 
 /** GP1(0x06): Display Horizontal sync and display range */
@@ -150,8 +157,9 @@ static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
     // Bits 12-23: Hsync End coordinate (dotclock units)
     gpu->display_horiz_start = (uint16_t)(value & 0xFFF);
     gpu->display_horiz_end = (uint16_t)((value >> 12) & 0xFFF);
-    LOG_GPU_INFO("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)\n",
+    LOG_GPU_DEBUG("GPU: Display H-Range Start=%u End=%u (GP1 Cmd 0x06)",
         gpu->display_horiz_start, gpu->display_horiz_end);
+    gpu_update_display_mapping(gpu);
 }
 
 /** GP1(0x07): Display Vertical sync and display range */
@@ -160,8 +168,9 @@ static void gp1_display_vertical_range(Gpu* gpu, uint32_t value) {
     // Bits 10-19: Vsync End coordinate (scanline units)
     gpu->display_line_start = (uint16_t)(value & 0x3FF);
     gpu->display_line_end = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_GPU_INFO("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)\n",
+    LOG_GPU_DEBUG("GPU: Display V-Range Start=%u End=%u (GP1 Cmd 0x07)",
         gpu->display_line_start, gpu->display_line_end);
+    gpu_update_display_mapping(gpu);
 }
 
 /** GP1(0x08): Display Mode */
@@ -182,7 +191,38 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     if ((value >> 7) & 1) {
         LOG_GPU_WARN("Warning: GPU GP1(0x08) set unsupported Reverseflag bit\n");
     }
-    LOG_GPU_DEBUG("GPU: Display Mode set (GP1 Cmd 0x08)\n");
+    
+    // Calculate effective width/height based on resolution settings
+    // This is a simplified calculation. Real hardware is more complex.
+    uint16_t width = 256;
+    switch (gpu->hres_raw.hr1 | (gpu->hres_raw.hr2 << 2)) {
+        case 0: width = 256; break;
+        case 1: width = 320; break; // Most common
+        case 2: width = 512; break;
+        case 3: width = 640; break;
+        case 4: width = 368; break; // Rare
+        default: width = 256; break; // Should not happen
+    }
+    
+    // If interlaced is enabled, treat the display height as 480 lines even when vres bit is 0 (240p mode).
+    uint16_t height = (gpu->interlaced || gpu->vres == Y480Lines) ? 480 : 240;
+    
+    // Update renderer screen scale
+    // Note: This affects how coordinates are mapped to NDC.
+    // If the game draws to a 320x240 area, but we set scale to 1024x512,
+    // the drawing will be small. We should probably set scale to the *drawing area* size
+    // or keep it at VRAM size and let the viewport handle scaling?
+    // The guide suggests mapping VRAM coordinates directly.
+    // If we map 0..1024 to -1..1, then a 320-wide drawing will be small.
+    // BUT, the vertex shader expects VRAM coordinates.
+    // If we want 0..320 to map to -1..1, we should pass 320 as width.
+    
+    // Store the base width/height and refresh mapping.
+        gpu->display_width_hint = width;
+        gpu->display_height_hint = height;
+    gpu_update_display_mapping(gpu);
+
+    LOG_GPU_DEBUG("GPU: Display Mode set (GP1 Cmd 0x08) -> Res: %ux%u\n", width, height);
 }
 
 
@@ -195,15 +235,61 @@ static void gp0_nop(Gpu* gpu) {
 
 /** GP0(0x01): Clear Cache (Texture Cache Invalidation) */
 static void gp0_clear_cache(Gpu* gpu) {
-    LOG_GPU_INFO("GP0(0x01): Clear Cache (Ignoring - No texture cache implemented)\n");
+    LOG_GPU_DEBUG("GP0(0x01): Clear Cache (no-op)");
     (void)gpu;
 }
 
 /** GP0(0x02): Fill Rectangle in VRAM */
 static void gp0_fill_rectangle(Gpu* gpu) {
-    // Minimal stub: Pretend to fill, do nothing, but don't hang
-    LOG_GPU_INFO("GP0(0x02): Fill Rectangle (Stubbed, no-op)\n");
-    (void)gpu;
+    if (gpu->gp0_command_buffer.count < 3) {
+        LOG_GPU_ERROR("GP0(0x02) Error: Expected 3 words, got %u\n", gpu->gp0_command_buffer.count);
+        return;
+    }
+
+    uint32_t color_val = gpu->gp0_command_buffer.buffer[0];
+    uint32_t pos_val = gpu->gp0_command_buffer.buffer[1];
+    uint32_t dim_val = gpu->gp0_command_buffer.buffer[2];
+
+    RendererColor col = {
+        .r = (GLubyte)(color_val & 0xFF),
+        .g = (GLubyte)((color_val >> 8) & 0xFF),
+        .b = (GLubyte)((color_val >> 16) & 0xFF)
+    };
+
+    int16_t x = (int16_t)(pos_val & 0xFFFF);
+    int16_t y = (int16_t)(pos_val >> 16);
+    uint16_t w = (uint16_t)(dim_val & 0xFFFF);
+    uint16_t h = (uint16_t)(dim_val >> 16);
+
+    // Align to 16 pixels as per hardware behavior (lower 4 bits ignored)
+    x = x & ~0xF;
+    w = (w + 0xF) & ~0xF;
+
+    // GP0(0x02) ignores the drawing offset.
+    // The renderer adds the offset, so we must subtract it to get the correct absolute position.
+    int16_t adj_x = x - gpu->drawing_x_offset;
+    int16_t adj_y = y - gpu->drawing_y_offset;
+
+    LOG_GPU_DEBUG("GP0(0x02): Fill Rect (%d,%d) %dx%d Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
+
+    draw_rectangle(gpu, adj_x, adj_y, w, h, col, false, false, NULL, 0, 0);
+
+    // Update VRAM (CPU-side) to ensure textures are correct and mask bits are cleared
+    // Convert 24-bit RGB to 15-bit BGR (Bit 15 = 0)
+    uint16_t r5 = (col.r >> 3) & 0x1F;
+    uint16_t g5 = (col.g >> 3) & 0x1F;
+    uint16_t b5 = (col.b >> 3) & 0x1F;
+    uint16_t pixel = r5 | (g5 << 5) | (b5 << 10); 
+    // Bit 15 is 0 (Mask cleared)
+
+    for (int iy = 0; iy < h; iy++) {
+        int vram_y = (y + iy) & 0x1FF;
+        for (int ix = 0; ix < w; ix++) {
+            int vram_x = (x + ix) & 0x3FF;
+            uint32_t offset = (uint32_t)vram_y * VRAM_WIDTH * VRAM_BPP + (uint32_t)vram_x * VRAM_BPP;
+            vram_write_masked(gpu, offset, pixel);
+        }
+    }
 }
 
 /** GP0(0xE1): Set Draw Mode */
@@ -233,7 +319,14 @@ static void gp0_texture_window(Gpu* gpu) {
      gpu->texture_window_y_mask    = (uint8_t)((value >> 5) & 0x1F);
      gpu->texture_window_x_offset  = (uint8_t)((value >> 10) & 0x1F);
      gpu->texture_window_y_offset  = (uint8_t)((value >> 15) & 0x1F);
-     // printf("GP0(0xE2): Texture Window set\n"); // Optional debug
+     
+     renderer_set_texture_window(&gpu->renderer, 
+        gpu->texture_window_x_mask, gpu->texture_window_y_mask,
+        gpu->texture_window_x_offset, gpu->texture_window_y_offset);
+        
+     LOG_GPU_DEBUG("GP0(0xE2): Texture Window -> Mask(%u,%u) Offset(%u,%u)", 
+        gpu->texture_window_x_mask, gpu->texture_window_y_mask,
+        gpu->texture_window_x_offset, gpu->texture_window_y_offset);
 }
 
 /** GP0(0xE3): Set Drawing Area Top Left */
@@ -263,11 +356,7 @@ static void gp0_drawing_offset(Gpu* gpu) {
     gpu->drawing_x_offset = offset_x;
     gpu->drawing_y_offset = offset_y;
     // printf("GP0(0xE5): Draw Offset set = (%d,%d)\n", offset_x, offset_y);
-    renderer_set_draw_offset(&gpu->renderer, offset_x, offset_y); // Update renderer uniform
-    // --- TEMPORARY HACK from guide ---
-    // printf("GP0(0xE5): Triggering display (temporary hack)\n");
-    renderer_display(&gpu->renderer); // Force draw & display swap
-    // -----------------------------------------
+    gpu_update_display_mapping(gpu);
 }
 
 /** GP0(0xE6): Set Mask Bit Setting */
@@ -275,7 +364,28 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
      uint32_t value = gpu->gp0_command_buffer.buffer[0];
      gpu->force_set_mask_bit = (value & 1);        // Affects drawing
      gpu->preserve_masked_pixels = ((value >> 1) & 1); // Affects drawing
-     // printf("GP0(0xE6): Mask Bit Setting = Force:%d Preserve:%d\n", gpu->force_set_mask_bit, gpu->preserve_masked_pixels);
+     LOG_GPU_DEBUG("GP0(0xE6): Mask Bit Setting = Force:%d Preserve:%d", gpu->force_set_mask_bit, gpu->preserve_masked_pixels);
+}
+
+/** Recompute renderer screen scale and draw offset based on display area and drawing offset. */
+static void gpu_update_display_mapping(Gpu* gpu) {
+    // Use resolution hints directly as screen scale (these come from GP1 0x08 mode bits).
+    // This is more reliable than deriving from GP1 0x06/0x07 ranges which can vary per game.
+    uint16_t horiz = gpu->display_width_hint;
+    uint16_t vert = gpu->display_height_hint;
+    
+    if (horiz <= 0) horiz = 320;
+    if (horiz > 1024) horiz = 1024;
+    if (vert <= 0) vert = 240;
+    if (vert > 512) vert = 512;
+
+    // Apply to renderer
+    renderer_set_screen_scale(&gpu->renderer, horiz, vert);
+
+    // Draw offset maps VRAM coordinates to screen coordinates.
+    // The offset is applied as-is from GP0(0xE5), without subtracting display VRAM start.
+    // The display area (defined by GP1 0x05) is handled by the drawing area bounds.
+    renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
 }
 
 /** GP0(0x28): Monochrome Opaque Quad */
@@ -321,11 +431,38 @@ static void gp0_quad_texture_blend_opaque(Gpu* gpu) {
     RendererColor c0 = { .r=(GLubyte)(gpu->gp0_command_buffer.buffer[0]&0xFF), .g=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>8)&0xFF), .b=(GLubyte)((gpu->gp0_command_buffer.buffer[0]>>16)&0xFF) };
     RendererColor c[4] = {c0, c0, c0, c0};
 
-    renderer_set_texture_mode(&gpu->renderer, true);
-    renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
-}
+    static int log_limiter = 0;
+    if (log_limiter < 20) {
+        // Debug VRAM content for this draw call
+        uint16_t clut_x = (clut & 0x3F) * 16;
+        uint16_t clut_y = (clut >> 6) & 0x1FF;
+        uint16_t clut_val = vram_load16(&gpu->vram, (uint32_t)clut_y * VRAM_WIDTH * VRAM_BPP + clut_x * VRAM_BPP);
 
-/** GP0(0x38): Shaded Opaque Quad */
+        uint16_t page_x = (texpage & 0xF) * 64;
+        uint16_t page_y = ((texpage >> 4) & 1) * 256;
+        uint16_t tex_u = t[0].u;
+        uint16_t tex_v = t[0].v;
+        // Assuming 4-bit for BIOS font
+        uint16_t tex_addr_x = page_x + (tex_u / 4);
+        uint16_t tex_addr_y = page_y + tex_v;
+        uint16_t tex_val = vram_load16(&gpu->vram, (uint32_t)tex_addr_y * VRAM_WIDTH * VRAM_BPP + tex_addr_x * VRAM_BPP);
+
+        LOG_GPU_DEBUG("GP0(0x2C): V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x Color=%02x%02x%02x | VRAM Peek: CLUT[%d,%d]=%04x Tex[%d,%d]=%04x", 
+               p[0].x, p[0].y, t[0].u, t[0].v, clut, texpage, c0.r, c0.g, c0.b,
+               clut_x, clut_y, clut_val, tex_addr_x, tex_addr_y, tex_val);
+        log_limiter++;
+    }
+
+    // Sync VRAM to GPU texture before textured draw
+        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
+
+        bool raw_texture = ((gpu->gp0_command_buffer.buffer[0] & 0x01000000) != 0) || ((gpu->gp0_command_buffer.buffer[0] >> 24) & 1);
+        renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
+        renderer_set_texture_mode(&gpu->renderer, true);
+        renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
+    }
+
+    /** GP0(0x38): Shaded Opaque Quad */
 static void gp0_quad_shaded_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 8) {
          LOG_ERROR("GP0(0x38) Error: Expected 8 words, got %u\n", gpu->gp0_command_buffer.count); return; }
@@ -354,7 +491,7 @@ static void gp0_triangle_shaded_opaque(Gpu* gpu) {
 }
 
 /** Helper: Draw a rectangle as a quad */
-static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h, RendererColor col, bool textured, RendererTexCoord* tex, uint16_t clut, uint16_t tpage) {
+static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h, RendererColor col, bool textured, bool raw_texture, RendererTexCoord* tex, uint16_t clut, uint16_t tpage) {
     RendererPosition p[4];
     RendererColor c[4] = {col, col, col, col};
     RendererTexCoord t[4];
@@ -365,14 +502,20 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
     p[2].x = x;       p[2].y = y + h;
     p[3].x = x + w;   p[3].y = y + h;
     
-    if (textured && tex) {
+    bool use_texture = textured && tex;
+
+    if (use_texture) {
+        // Ensure VRAM texture is up to date before textured draws.
+        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
         t[0].u = tex->u;       t[0].v = tex->v;
         t[1].u = tex->u + w;   t[1].v = tex->v;
         t[2].u = tex->u;       t[2].v = tex->v + h;
         t[3].u = tex->u + w;   t[3].v = tex->v + h;
+        renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
         renderer_set_texture_mode(&gpu->renderer, true);
         renderer_push_quad(&gpu->renderer, p, c, t, clut, tpage);
     } else {
+        renderer_set_raw_texture_mode(&gpu->renderer, false);
         renderer_set_texture_mode(&gpu->renderer, false);
         renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
     }
@@ -392,7 +535,7 @@ static void gp0_rect_variable_opaque(Gpu* gpu) {
     uint16_t h = (uint16_t)(dim >> 16);
     if (w == 0) w = 1; if (h == 0) h = 1;
     
-    draw_rectangle(gpu, x, y, w, h, col, false, NULL, 0, 0);
+    draw_rectangle(gpu, x, y, w, h, col, false, false, NULL, 0, 0);
 }
 
 /** GP0(0x62): Semi-Transparent Monochrome Rectangle (variable size) */
@@ -420,7 +563,17 @@ static void gp0_rect_tex_variable_opaque(Gpu* gpu) {
     
     // Use current texpage from GPU state
     uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
-    draw_rectangle(gpu, x, y, w, h, col, true, &tex, clut, tpage);
+    
+    static int log_limiter_rect = 0;
+    if (log_limiter_rect < 20) {
+        LOG_GPU_DEBUG("GP0(0x64): RectTex at (%d,%d) %dx%d UV(%d,%d) CLUT=%04x TPage=%04x", 
+           x, y, w, h, tex.u, tex.v, clut, tpage);
+        log_limiter_rect++;
+    }
+
+    uint8_t opcode = (uint8_t)(cmd >> 24);
+    bool raw_texture = ((cmd & 0x01000000) != 0) || (opcode & 1); // Raw variants (0x65/67) set LSB
+    draw_rectangle(gpu, x, y, w, h, col, true, raw_texture, &tex, clut, tpage);
 }
 
 /** GP0(0x68): Monochrome Rectangle 1x1 (single pixel) */
@@ -433,7 +586,7 @@ static void gp0_rect_1x1_opaque(Gpu* gpu) {
     int16_t x = (int16_t)(vtx & 0xFFFF);
     int16_t y = (int16_t)(vtx >> 16);
     
-    draw_rectangle(gpu, x, y, 1, 1, col, false, NULL, 0, 0);
+    draw_rectangle(gpu, x, y, 1, 1, col, false, false, NULL, 0, 0);
 }
 
 /** GP0(0x70): Monochrome Rectangle 8x8 */
@@ -446,7 +599,7 @@ static void gp0_rect_8x8_opaque(Gpu* gpu) {
     int16_t x = (int16_t)(vtx & 0xFFFF);
     int16_t y = (int16_t)(vtx >> 16);
     
-    draw_rectangle(gpu, x, y, 8, 8, col, false, NULL, 0, 0);
+    draw_rectangle(gpu, x, y, 8, 8, col, false, false, NULL, 0, 0);
 }
 
 /** GP0(0x78): Monochrome Rectangle 16x16 */
@@ -459,7 +612,7 @@ static void gp0_rect_16x16_opaque(Gpu* gpu) {
     int16_t x = (int16_t)(vtx & 0xFFFF);
     int16_t y = (int16_t)(vtx >> 16);
     
-    draw_rectangle(gpu, x, y, 16, 16, col, false, NULL, 0, 0);
+    draw_rectangle(gpu, x, y, 16, 16, col, false, false, NULL, 0, 0);
 }
 
 /** GP0(0x6C): Textured Rectangle 1x1 */
@@ -476,7 +629,9 @@ static void gp0_rect_tex_1x1_opaque(Gpu* gpu) {
     uint16_t clut = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
     
-    draw_rectangle(gpu, x, y, 1, 1, col, true, &tex, clut, tpage);
+    uint8_t opcode = (uint8_t)(cmd >> 24);
+    bool raw_texture = ((cmd & 0x01000000) != 0) || (opcode & 1);
+    draw_rectangle(gpu, x, y, 1, 1, col, true, raw_texture, &tex, clut, tpage);
 }
 
 /** GP0(0x74): Textured Rectangle 8x8 */
@@ -493,7 +648,9 @@ static void gp0_rect_tex_8x8_opaque(Gpu* gpu) {
     uint16_t clut = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
     
-    draw_rectangle(gpu, x, y, 8, 8, col, true, &tex, clut, tpage);
+    uint8_t opcode = (uint8_t)(cmd >> 24);
+    bool raw_texture = ((cmd & 0x01000000) != 0) || (opcode & 1);
+    draw_rectangle(gpu, x, y, 8, 8, col, true, raw_texture, &tex, clut, tpage);
 }
 
 /** GP0(0x7C): Textured Rectangle 16x16 */
@@ -510,7 +667,74 @@ static void gp0_rect_tex_16x16_opaque(Gpu* gpu) {
     uint16_t clut = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = (uint16_t)((gpu->page_base_x) | (gpu->page_base_y << 4) | (gpu->texture_depth << 7));
     
-    draw_rectangle(gpu, x, y, 16, 16, col, true, &tex, clut, tpage);
+    uint8_t opcode = (uint8_t)(cmd >> 24);
+    bool raw_texture = ((cmd & 0x01000000) != 0) || (opcode & 1);
+    draw_rectangle(gpu, x, y, 16, 16, col, true, raw_texture, &tex, clut, tpage);
+}
+
+/** GP0(0x80): Copy Rectangle (VRAM to VRAM) */
+static void gp0_copy_rectangle(Gpu* gpu) {
+    if (gpu->gp0_command_buffer.count < 4) {
+        LOG_GPU_ERROR("GP0(0x80) Error: Expected 4 words, got %u\n", gpu->gp0_command_buffer.count);
+        return;
+    }
+
+    uint32_t src_val = gpu->gp0_command_buffer.buffer[1];
+    uint32_t dst_val = gpu->gp0_command_buffer.buffer[2];
+    uint32_t dim_val = gpu->gp0_command_buffer.buffer[3];
+
+    uint16_t src_x = (uint16_t)(src_val & 0x3FF);
+    uint16_t src_y = (uint16_t)((src_val >> 16) & 0x1FF);
+    uint16_t dst_x = (uint16_t)(dst_val & 0x3FF);
+    uint16_t dst_y = (uint16_t)((dst_val >> 16) & 0x1FF);
+    uint16_t w = (uint16_t)(dim_val & 0x3FF);
+    uint16_t h = (uint16_t)((dim_val >> 16) & 0x1FF);
+
+    // Handle 0 size as max size (common PS1 behavior for some commands)
+    if (w == 0) w = 1024;
+    if (h == 0) h = 512;
+
+    LOG_GPU_DEBUG("GP0(0x80): Copy Rect (%u,%u) -> (%u,%u) Size=(%ux%u)", src_x, src_y, dst_x, dst_y, w, h);
+
+    // Determine copy direction to handle overlaps
+    int16_t step_x = 1, step_y = 1;
+    int16_t start_x = 0, start_y = 0;
+    int16_t end_x = w, end_y = h;
+
+    if (dst_y > src_y) { step_y = -1; start_y = h - 1; end_y = -1; }
+    if (dst_x > src_x) { step_x = -1; start_x = w - 1; end_x = -1; }
+
+    for (int16_t y = start_y; y != end_y; y += step_y) {
+        for (int16_t x = start_x; x != end_x; x += step_x) {
+            uint16_t sx = (src_x + x) & 0x3FF; // Wrap mask 1024
+            uint16_t sy = (src_y + y) & 0x1FF; // Wrap mask 512
+            uint16_t dx = (dst_x + x) & 0x3FF;
+            uint16_t dy = (dst_y + y) & 0x1FF;
+
+            uint32_t src_offset = (uint32_t)sy * VRAM_WIDTH * VRAM_BPP + (uint32_t)sx * VRAM_BPP;
+            uint32_t dst_offset = (uint32_t)dy * VRAM_WIDTH * VRAM_BPP + (uint32_t)dx * VRAM_BPP;
+
+            uint16_t pixel = vram_load16(&gpu->vram, src_offset);
+            
+            // Apply Mask Bit Setting (Force Set)
+            if (gpu->force_set_mask_bit) {
+                pixel |= 0x8000;
+            }
+            
+            // Apply Mask Bit Setting (Check Mask)
+            if (gpu->preserve_masked_pixels) {
+                uint16_t dst_pixel = vram_load16(&gpu->vram, dst_offset);
+                if (dst_pixel & 0x8000) {
+                    continue; // Skip writing this pixel
+                }
+            }
+
+            vram_store16(&gpu->vram, dst_offset, pixel);
+        }
+    }
+
+    // Update the OpenGL texture to reflect the changes
+    renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
 }
 
 /** GP0(0xA0): Copy Rectangle (CPU/DMA to VRAM) - Setup Phase */
@@ -536,7 +760,7 @@ static void gp0_image_load(Gpu* gpu) {
     uint32_t image_size_pixels_rounded = (image_size_pixels + 1) & ~1; // Round up for pairs
     uint32_t words_to_load = image_size_pixels_rounded / 2;            // Each word contains 2 pixels
 
-    LOG_GPU_INFO("GP0(0xA0): Setup Image Load to VRAM (%u,%u) Size=(%ux%u) -> Expecting %u words\n",
+    LOG_GPU_INFO("*** GP0(0xA0): VRAM UPLOAD START -> Dest(%u,%u) Size(%ux%u) = %u words [FONT/TEXTURE DATA?] ***",
            gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, words_to_load);
 
     if (words_to_load == 0 || ((uint64_t)words_to_load * 4) > VRAM_SIZE) { // Basic sanity check
@@ -546,7 +770,11 @@ static void gp0_image_load(Gpu* gpu) {
     gpu->gp0_words_remaining = words_to_load;
     gpu->gp0_mode = GP0_MODE_IMAGE_LOAD;
     gpu->vram_load_count = 0; // Reset pixel counter for this transfer
+    
+    LOG_GPU_INFO("GP0(0xA0): Switched to IMAGE_LOAD mode, words_remaining=%u", gpu->gp0_words_remaining);
 }
+
+// Add completion logging at the end of VRAM uploads
 
 /** GP0(0xC0): Copy Rectangle (VRAM to CPU/DMA) */
 static void gp0_image_store(Gpu* gpu) {
@@ -577,7 +805,7 @@ static void gp0_image_store(Gpu* gpu) {
     gpu->vram_load_count = 0; // Reset pixel counter
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
 
-    LOG_GPU_INFO("GP0(0xC0): Image Store Started. Rect=(%u,%u) Size=(%ux%u), Words=%u\n",
+    LOG_GPU_DEBUG("GP0(0xC0): Image Store (%u,%u) Size=(%ux%u), Words=%u",
                  gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, gpu->gp0_words_remaining);
 }
 
@@ -610,12 +838,14 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     gpu->display_depth = D15Bits; gpu->display_horiz_start = 0x200;
     gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
     gpu->display_line_end = 0x100; gpu->field = Top;
+    gpu->display_width_hint = 320; gpu->display_height_hint = 240;
     clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
     gpu->gp0_mode = GP0_MODE_COMMAND;
     gpu->gp0_command_method = NULL;
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     gpu->inter = inter;
+    renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0); // Reset texture window
     LOG_GPU_INFO("GPU Initialized (State reset, VRAM initialized).\n");
 }
 
@@ -631,6 +861,7 @@ void gpu_soft_reset(Gpu* gpu) {
     gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
     gpu->texture_window_x_mask = 0; gpu->texture_window_y_mask = 0;
     gpu->texture_window_x_offset = 0; gpu->texture_window_y_offset = 0;
+    renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0); // Reset texture window
     gpu->dithering = false; gpu->draw_to_display = false;
     gpu->texture_disable = false; gpu->rectangle_texture_x_flip = false;
     gpu->rectangle_texture_y_flip = false; gpu->drawing_area_left = 0;
@@ -644,6 +875,7 @@ void gpu_soft_reset(Gpu* gpu) {
     gpu->display_depth = D15Bits; gpu->display_horiz_start = 0x200;
     gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
     gpu->display_line_end = 0x100; gpu->field = Top;
+    gpu->display_width_hint = 320; gpu->display_height_hint = 240;
     clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
     gpu->gp0_mode = GP0_MODE_COMMAND;
     gpu->gp0_command_method = NULL;
@@ -653,11 +885,48 @@ void gpu_soft_reset(Gpu* gpu) {
     LOG_GPU_DEBUG("GPU Soft Reset complete (VRAM preserved).\n");
 }
 
+/** Helper to write to VRAM with mask bit handling */
+static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
+    if (gpu->force_set_mask_bit) {
+        pixel |= 0x8000;
+    }
+    
+    // TEMPORARY FIX: Disable mask check to see if it fixes font upload
+    /*
+    if (gpu->preserve_masked_pixels) {
+        uint16_t dst_pixel = vram_load16(&gpu->vram, offset);
+        if (dst_pixel & 0x8000) {
+            return; // Skip writing this pixel
+        }
+    }
+    */
+    
+    vram_store16(&gpu->vram, offset, pixel);
+    
+    // Debug: Verify write
+    uint16_t verify = vram_load16(&gpu->vram, offset);
+    if (pixel != verify) {
+        LOG_GPU_WARN("VRAM Write verification failed at offset 0x%x: wrote 0x%04x, read back 0x%04x", 
+            offset, pixel, verify);
+    }
+}
+
 /** Processes commands/data sent to GP0 port */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
-    LOG_GPU_DEBUG("[GP0] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
+    // Rate-limit GP0 command logging
+    static uint32_t gp0_cmd_count = 0;
+    gp0_cmd_count++;
+    if (gp0_cmd_count <= 20 || gp0_cmd_count % 1000 == 0) {
+        LOG_GPU_DEBUG("[GP0] Command: 0x%08x (Opcode: 0x%02x) Mode=%d #%u", command, (command >> 24) & 0xFF, gpu->gp0_mode, gp0_cmd_count);
+    }
     // Handle IMAGE_LOAD state first
     if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD) {
+        // Log first few data words
+        static int imgload_data_count = 0;
+        if (imgload_data_count < 5) {
+            LOG_GPU_DEBUG("[IMAGE_LOAD] Receiving data word: 0x%08x (remaining=%u)", command, gpu->gp0_words_remaining);
+            imgload_data_count++;
+        }
         uint16_t pixel1 = (uint16_t)(command & 0xFFFF);
         uint16_t pixel2 = (uint16_t)(command >> 16);
         uint32_t idx = gpu->vram_load_count; // Base index for pixel 1
@@ -668,7 +937,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
              // Check against physical VRAM boundaries
              if (y < VRAM_HEIGHT && x < VRAM_WIDTH) {
                  uint32_t offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
-                 vram_store16(&gpu->vram, offset, pixel1);
+                 vram_write_masked(gpu, offset, pixel1);
              } // Else: Pixel write out of VRAM bounds (optional warning)
         }
         idx++; // Index for pixel 2
@@ -679,14 +948,17 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
             // Check against physical VRAM boundaries
              if (y < VRAM_HEIGHT && x < VRAM_WIDTH) {
                  uint32_t offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
-                 vram_store16(&gpu->vram, offset, pixel2);
+                 vram_write_masked(gpu, offset, pixel2);
              } // Else: Pixel write out of VRAM bounds (optional warning)
         }
         gpu->vram_load_count += 2; // Increment count by 2 pixels
         gpu->gp0_words_remaining--; // Decrement remaining data words
         if (gpu->gp0_words_remaining == 0) { // Check if transfer complete
             gpu->gp0_mode = GP0_MODE_COMMAND; // Switch back to command mode
-            // printf("GPU Img Load Finished.\n"); // Optional debug
+            // Sample VRAM to verify upload worked
+            uint16_t sample_val = vram_load16(&gpu->vram, (uint32_t)gpu->vram_load_y * VRAM_WIDTH * VRAM_BPP + (uint32_t)gpu->vram_load_x * VRAM_BPP);
+            LOG_GPU_INFO("*** GP0(0xA0): VRAM UPLOAD COMPLETE -> Region(%u,%u) Size(%ux%u) | Sample[0,0]=0x%04x ***", 
+                gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, sample_val);
             renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
         }
         return; // Done processing this data word
@@ -733,6 +1005,7 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
             case 0x7D: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Raw
             case 0x7E: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans
             case 0x7F: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans raw
+            case 0x80: expected_len = 4; handler = gp0_copy_rectangle; break;
             case 0xA0: expected_len = 3; handler = gp0_image_load; break; // Sets up IMAGE_LOAD mode
             case 0xC0: expected_len = 3; handler = gp0_image_store; break;
             case 0xE1: expected_len = 1; handler = gp0_draw_mode; break;
@@ -880,10 +1153,15 @@ uint32_t gpu_read_data(Gpu* gpu) {
         word = (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
         gpu->gp0_words_remaining--;
 
-        LOG_GPU_DEBUG("[GPUREAD] Image Store Read: 0x%08x (Rem: %u)\n", word, gpu->gp0_words_remaining);
+        // Rate-limit GPUREAD logging - only log first 10 and last
+        static uint32_t gpuread_count = 0;
+        gpuread_count++;
+        if (gpuread_count <= 10 || gpu->gp0_words_remaining == 0) {
+            LOG_GPU_DEBUG("[GPUREAD] Image Store: 0x%08x (Rem: %u)", word, gpu->gp0_words_remaining);
+        }
 
         if (gpu->gp0_words_remaining == 0) {
-            LOG_GPU_INFO("GP0(0xC0): Image Store Finished.\n");
+            LOG_GPU_DEBUG("GP0(0xC0): Image Store Finished");
             gpu->gp0_mode = GP0_MODE_COMMAND;
         }
 
