@@ -130,6 +130,8 @@ typedef struct Gpu { // Define struct Gpu
     uint16_t display_horiz_end;      // Bits 12-23  - Horizontal end timing relative to HSYNC
     uint16_t display_line_start;     // Bits 0-9    - Vertical start timing relative to VSYNC
     uint16_t display_line_end;       // Bits 10-19  - Vertical end timing relative to VSYNC
+    uint16_t display_width_hint;     // Derived width from GP1(08) resolution (fallback)
+    uint16_t display_height_hint;    // Derived height from GP1(08) resolution (fallback)
 
     // --- GP0 Port State ---
     CommandBuffer gp0_command_buffer; // Buffer for current command parameters

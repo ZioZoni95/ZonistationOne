@@ -377,14 +377,17 @@ bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
  */
 // --- Exception Handling Helpers ---
 static void log_exception_details(Cpu* cpu, ExceptionCause cause) {
-    LOG_CPU_INFO("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, cpu->badvaddr, cpu->in_delay_slot);
-    LOG_CPU_INFO("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x, BadVaddr=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc, cpu->badvaddr);
+    LOG_CPU_DEBUG("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, cpu->badvaddr, cpu->in_delay_slot);
+    LOG_CPU_DEBUG("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x, BadVaddr=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc, cpu->badvaddr);
     if (cpu->inter) {
         uint32_t fault_instr = interconnect_load32(cpu->inter, cpu->current_pc);
-        LOG_CPU_INFO("@FAULT_INSTRUCTION at PC=0x%08x: 0x%08x", cpu->current_pc, fault_instr);
+        LOG_CPU_DEBUG("@FAULT_INSTRUCTION at PC=0x%08x: 0x%08x", cpu->current_pc, fault_instr);
     }
     if (cause == EXCEPTION_INTERRUPT) {
-        LOG_IRQ_DEBUG("Entered interrupt handler (IRQ)");
+        static uint32_t irq_entry_count = 0;
+        if (++irq_entry_count % 100 == 0) {
+            LOG_IRQ_DEBUG("[IRQ] Handler entered #%u", irq_entry_count);
+        }
     }
 }
 
@@ -435,7 +438,10 @@ static void acknowledge_interrupts(Cpu* cpu) {
         uint16_t current_status = cpu->inter->irq_status;
         uint16_t current_mask = cpu->inter->irq_mask;
         uint16_t pending_interrupts = current_status & current_mask;
-        LOG_IRQ_INFO("Interrupt Exception: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", current_status, current_mask, pending_interrupts);
+        static uint32_t irq_exc_count = 0;
+        if (++irq_exc_count % 100 == 0) {
+            LOG_IRQ_DEBUG("[IRQ] Exception #%u: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", irq_exc_count, current_status, current_mask, pending_interrupts);
+        }
         // DO NOT auto-clear! The BIOS exception handler will do this.
         
         // GTE interrupt quirk: if EPC points to a GTE instruction, advance past it
@@ -460,14 +466,14 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         acknowledge_interrupts(cpu);
     }
     uint32_t handler_addr = get_exception_vector(cpu);
-    LOG_CPU_INFO("@EXCEPTION_VECTOR: BEV=%d, jumping to handler at 0x%08x", (cpu->sr & (1 << 22)) ? 1 : 0, handler_addr);
+    LOG_CPU_DEBUG("@EXCEPTION_VECTOR: BEV=%d, jumping to handler at 0x%08x", (cpu->sr & (1 << 22)) ? 1 : 0, handler_addr);
     cpu->pc = handler_addr;
     cpu->next_pc = cpu->pc + 4;
     if (cpu->inter) {
         uint32_t handler_instr = interconnect_load32(cpu->inter, handler_addr);
-        LOG_CPU_INFO("@EXCEPTION_HANDLER_CODE at 0x%08x: 0x%08x", handler_addr, handler_instr);
+        LOG_CPU_DEBUG("@EXCEPTION_HANDLER_CODE at 0x%08x: 0x%08x", handler_addr, handler_instr);
     }
-    LOG_CPU_INFO("@After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
+    LOG_CPU_DEBUG("@After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
 }
 
 
@@ -769,10 +775,19 @@ void cpu_run_next_instruction(Cpu* cpu) {
         idle_counter = 0;
     }
     
-    // Only log progress every 1,000,000 instructions to avoid log spam in BIOS loops
-    if (instruction_counter % 1000000 == 0) {
-        LOG_CPU_INFO("Progress: Executed %llu instructions. PC=0x%08x, cpu_cycle=%u, evq_next=%u", 
-                     instruction_counter, cpu->pc, cpu->inter->cpu_cycle_counter, cpu->inter->evq_next_cycle);
+    // Progress logging: Every 50M for INFO, every 10M for DEBUG, every 1M for TRACE
+    if (instruction_counter % 50000000 == 0) {
+        // INFO: Log every 50M instructions
+        LOG_CPU_INFO("Progress: %lluM instructions | PC=0x%08x | Cycles=%u", 
+                     instruction_counter / 1000000, cpu->pc, cpu->inter->cpu_cycle_counter);
+    } else if (instruction_counter % 10000000 == 0) {
+        // DEBUG: Log every 10M instructions
+        LOG_CPU_DEBUG("Progress: %lluM instructions | PC=0x%08x | Cycles=%u", 
+                     instruction_counter / 1000000, cpu->pc, cpu->inter->cpu_cycle_counter);
+    } else if (instruction_counter % 1000000 == 0) {
+        // TRACE: Log every 1M instructions with full details
+        LOG_CPU_TRACE("Progress: %lluM | PC=0x%08x | Cycles=%u | NextEvent=%u", 
+                     instruction_counter / 1000000, cpu->pc, cpu->inter->cpu_cycle_counter, cpu->inter->evq_next_cycle);
     }
 
     // --- 1. Check for Interrupts (PSX-SPX / duckstation compliant) ---
@@ -865,7 +880,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
         static int bios_fetch_count = 0;
         if (cpu->current_pc >= BIOS_FETCH_START && cpu->current_pc <= BIOS_FETCH_END && bios_fetch_count < BIOS_FETCH_MAX) {
             bios_fetch_count++;
-            LOG_INFO("[BIOS_FETCH] PC=0x%08x INSTR=0x%08x %s", cpu->current_pc, instruction, disassemble_mips(instruction, cpu->current_pc));
+            LOG_DEBUG("[BIOS_FETCH] PC=0x%08x INSTR=0x%08x %s", cpu->current_pc, instruction, disassemble_mips(instruction, cpu->current_pc));
         }
     }
 
@@ -939,7 +954,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
 
     // Periodic IRQ status logging every 1M instructions
     if (instruction_counter % 1000000 == 0) {
-        LOG_IRQ_INFO("Periodic: I_STAT=0x%04x, I_MASK=0x%04x", cpu->inter->irq_status, cpu->inter->irq_mask);
+        LOG_IRQ_DEBUG("Periodic: I_STAT=0x%04x, I_MASK=0x%04x", cpu->inter->irq_status, cpu->inter->irq_mask);
     }
 }
 
@@ -1557,7 +1572,7 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
             func_type = 'C';
         }
         
-        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
+        LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
                      cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
     }
     // Log other suspicious jumps to low memory or unaligned addresses

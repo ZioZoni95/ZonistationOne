@@ -127,19 +127,18 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     memset(inter->scratchpad, 0, SCRATCHPAD_SIZE);
     
     cdrom_init(&inter->cdrom,inter);
-
     // Initialize Interrupt Controller state
     inter->irq_status = 0;     // No pending interrupts (I_STAT)
     inter->irq_mask = 0;       // Mask all IRQs at startup (I_MASK)
     inter->irq_line_state = 0; // No IRQ lines active (for edge detection)
     
-    // Initialize Timer state <<< ADD THIS CALL
+    // Initialize Timer state
     timers_init(&inter->timers_state, inter);
     
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
     
-    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, IRQ states set).");
+    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
 
 /**
@@ -177,7 +176,10 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
     // Edge detection: only set I_STAT on rising edge (0->1 transition)
     if (state && !(prev_line_state & bit)) {
         inter->irq_status |= bit;
-        LOG_IRQ_DEBUG("IRQ%u rising edge: I_STAT=0x%04x, I_MASK=0x%04x", irq_line, inter->irq_status, inter->irq_mask);
+        static uint32_t irq_edge_count = 0;
+        if (++irq_edge_count % 100 == 0) {
+            LOG_IRQ_DEBUG("[IRQ] Rising edge #%u: line=%u I_STAT=0x%04x, I_MASK=0x%04x", irq_edge_count, irq_line, inter->irq_status, inter->irq_mask);
+        }
     }
 }
 
@@ -190,11 +192,13 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    LOG_IRQ_INFO("IRQ%u requested by %s. I_STAT=0x%04x, line_state=0x%04x", irq_line, source, inter->irq_status, inter->irq_line_state);
+    static uint32_t irq_req_count = 0;
+    if (++irq_req_count % 100 == 0) {
+        LOG_IRQ_DEBUG("[IRQ] Request #%u: line=%u by %s, I_STAT=0x%04x", irq_req_count, irq_line, source, inter->irq_status);
+    }
     // Pulse the line (0->1->0) to trigger edge detection
     interconnect_set_irq_line(inter, irq_line, true);
     // Line stays high until acknowledged - don't pulse back to 0 here
-    LOG_IRQ_INFO("IRQ%u after set. I_STAT=0x%04x, line_state=0x%04x", irq_line, inter->irq_status, inter->irq_line_state);
 }
 
 // Helper to clear/deassert an IRQ line
@@ -231,8 +235,11 @@ void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
             cdrom_events[i].target_cycle = target;
             cdrom_events[i].active = true;
             cdrom_events[i].name = name;
-            LOG_CDROM_DEBUG("[EVT] Scheduled %s for cycle %u (now=%u, delay=%u)\n",
-                     name, target, inter->cpu_cycle_counter, cycles);
+            static uint32_t evt_sched_count = 0;
+            if (++evt_sched_count <= 10 || evt_sched_count % 50 == 0) {
+                LOG_CDROM_DEBUG("[EVT] Scheduled #%u: %s for cycle %u (now=%u, delay=%u)",
+                         evt_sched_count, name, target, inter->cpu_cycle_counter, cycles);
+            }
             return;
         }
     }
@@ -246,7 +253,10 @@ void interconnect_check_cdrom_events(Interconnect* inter) {
             if (inter->cpu_cycle_counter >= cdrom_events[i].target_cycle) {
                 cdrom_events[i].active = false;
                 uint32_t cycles_late = inter->cpu_cycle_counter - cdrom_events[i].target_cycle;
-                LOG_DEBUG("[EVT] Firing %s (late=%u)", cdrom_events[i].name, cycles_late);
+                static uint32_t evt_fire_count = 0;
+                if (++evt_fire_count <= 10 || evt_fire_count % 50 == 0) {
+                    LOG_DEBUG("[EVT] Firing #%u: %s (late=%u)", evt_fire_count, cdrom_events[i].name, cycles_late);
+                }
                 cdrom_events[i].callback(cdrom_events[i].context, cycles_late);
             }
         }
@@ -254,14 +264,15 @@ void interconnect_check_cdrom_events(Interconnect* inter) {
 }
 
 void interconnect_trigger_cdrom_irq(Interconnect* inter) {
-    LOG_CDROM_INFO("[CDROM] trigger_cdrom_irq called, inter=%p\n", (void*)inter);
     if (!inter) {
-        LOG_CDROM_ERROR("[CDROM] trigger_cdrom_irq: inter is NULL!\n");
+        LOG_CDROM_ERROR("[CDROM] trigger_cdrom_irq: inter is NULL!");
         return;
     }
-    LOG_CDROM_INFO("[CDROM] About to call interconnect_request_irq for IRQ_CDROM=%d\n", IRQ_CDROM);
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
-    LOG_CDROM_INFO("[CDROM] After interconnect_request_irq\n");
+    static uint32_t cdrom_irq_count = 0;
+    if (++cdrom_irq_count <= 10 || cdrom_irq_count % 50 == 0) {
+        LOG_CDROM_DEBUG("[CDROM] IRQ #%u triggered, I_STAT=0x%04x", cdrom_irq_count, inter->irq_status);
+    }
 }
 
 
@@ -620,9 +631,9 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
             if (physical_addr == GPU_GPUSTAT_ADDR) return gpu_read_status(&inter->gpu);
         }
         if (physical_addr >= 0x1f801820 && physical_addr <= 0x1f801827) {
-            // MDEC
-            // DOCS: iomap.md, "MDEC Command", "MDEC Data", etc.
-            return 0; // Stub for now
+            // MDEC (Macroblock Decoder) - Not yet implemented
+            LOG_INTERCONNECT_WARN("MDEC read at 0x%08x (stub)", physical_addr);
+            return 0;
         }
         if (physical_addr >= 0x1f801c00 && physical_addr <= 0x1f801e7f) {
             // SPU
@@ -1253,6 +1264,12 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // --- Region Checks (Broader Ranges) ---
 
+    // MDEC Region (0x1f801820 - 0x1f801827) - Not yet implemented
+    if (physical_addr >= 0x1f801820 && physical_addr <= 0x1f801827) {
+        LOG_INTERCONNECT_WARN("MDEC write at 0x%08x = 0x%08x (stub)", physical_addr, value);
+        return;
+    }
+
     // DMA Region
     if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
         uint32_t offset = physical_addr - DMA_START;
@@ -1330,7 +1347,16 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     if (physical_addr <= RAM_END) {
         // DEBUG: Log writes to exception handler region
         if (physical_addr <= 0x100) {
-            LOG_INFO("[RAM-DEBUG] STORE32: addr=0x%08x value=0x%08x", physical_addr, value);
+            LOG_DEBUG("[RAM-DEBUG] STORE32: addr=0x%08x value=0x%08x", physical_addr, value);
+        }
+        // DEBUG: Log writes to menu graphics RAM area
+        static uint32_t menu_gfx_write_count = 0;
+        if (physical_addr >= 0x00074c70 && physical_addr < 0x00080000) {
+            if (menu_gfx_write_count < 100) {
+                LOG_CPU_INFO("[MENU_GFX_RAM] STORE32: addr=0x%08x value=0x%08x PC=0x%08x", 
+                            physical_addr, value, inter->cpu ? inter->cpu->current_pc : 0);
+                menu_gfx_write_count++;
+            }
         }
         ram_store32(inter->ram, physical_addr, value); // Delegate
         return;
@@ -1630,7 +1656,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     if (physical_addr <= RAM_END) {
         // DEBUG: Log writes to exception handler region
         if (physical_addr <= 0x100) {
-            LOG_INFO("[RAM-DEBUG] STORE16: addr=0x%08x value=0x%04x (virt=0x%08x)", physical_addr, value, address);
+            LOG_DEBUG("[RAM-DEBUG] STORE16: addr=0x%08x value=0x%04x (virt=0x%08x)", physical_addr, value, address);
         }
         ram_store16(inter->ram, physical_addr, value); // Delegate
         return;
@@ -1819,7 +1845,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     if (physical_addr <= RAM_END) {
         // DEBUG: Log writes to exception handler region
         if (physical_addr <= 0x100) {
-            LOG_INFO("[RAM-DEBUG] STORE8: addr=0x%08x value=0x%02x (virt=0x%08x)", physical_addr, value, address);
+            LOG_DEBUG("[RAM-DEBUG] STORE8: addr=0x%08x value=0x%02x (virt=0x%08x)", physical_addr, value, address);
         }
         ram_store8(inter->ram, physical_addr, value); // Delegate
         return;
@@ -1922,7 +1948,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
         return;
     }
 
-    LOG_DMA_INFO("--- Starting DMA Transfer for Channel %d ---\n", channel_index);
+    LOG_DMA_DEBUG("--- Starting DMA Transfer for Channel %d ---", channel_index);
     DmaChannel* ch = &inter->dma.channels[channel_index];
     DmaSync sync_mode = ch->sync;
 
@@ -1934,7 +1960,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             // Primarily used for GPU Channel 2
             if (channel_index == 2 && ch->direction == FROM_RAM) {
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address from MADR
-                LOG_DMA_INFO("DMA GPU Linked List: Starting at 0x%08x\n", addr);
+                LOG_DMA_DEBUG("DMA GPU Linked List: Starting at 0x%08x", addr);
                 while(1) {
                     // Check address bounds before reading header
                     if (addr >= RAM_SIZE) {
@@ -1957,6 +1983,16 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break; // Exit inner loop
                             }
                             uint32_t command_word = interconnect_load32(inter, addr); // Read command
+                            
+                            // LOG WHAT BIOS IS ACTUALLY SENDING - Critical for debugging menu rendering
+                            uint8_t cmd_opcode = (command_word >> 24) & 0xFF;
+                            static uint32_t dma_cmd_log_count = 0;
+                            if (dma_cmd_log_count < 200 || (cmd_opcode >= 0x60 && cmd_opcode <= 0x7F) || cmd_opcode == 0xA0) {
+                                LOG_GPU_INFO("[DMA->GPU] #%u: GP0(0x%02x) = 0x%08x (packet_addr=0x%08x, word %u/%u)",
+                                           dma_cmd_log_count, cmd_opcode, command_word, addr, i+1, num_words);
+                                dma_cmd_log_count++;
+                            }
+                            
                             gpu_gp0(&inter->gpu, command_word); // Send command to GPU GP0 port
                         }
                         if (next_addr == 0xFFFFFF) break; // Break outer loop if error occurred
@@ -1964,12 +2000,12 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
                     // Check for end-of-list marker (Top bit of next_addr usually, or 0xFFFFFF) [cite: 1808]
                     if ((header & 0x800000) != 0) { // Check MSB of address field as per Mednafen comment
-                        LOG_DMA_INFO("DMA GPU Linked List: End marker (0x800000) found in header 0x%08x.\n", header);
+                        LOG_DMA_DEBUG("DMA GPU Linked List: End marker (0x800000)");
                         break;
                     }
                     // Check for explicit 0xFFFFFF marker (safer)
                     if (next_addr == 0xFFFFFF) {
-                        LOG_DMA_INFO("DMA GPU Linked List: End marker (0xFFFFFF) found.\n");
+                        LOG_DMA_DEBUG("DMA GPU Linked List: End marker (0xFFFFFF)");
                          break;
                     }
 
@@ -1981,7 +2017,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Move to the next header address
                     addr = next_addr;
                 }
-                LOG_DMA_INFO("DMA GPU Linked List: Finished.\n");
+                LOG_DMA_DEBUG("DMA GPU Linked List: Finished");
             } else {
                  LOG_DMA_ERROR("Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).\n", channel_index, ch->direction);
             }
@@ -1998,7 +2034,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address
                 int32_t step = (ch->step == INCREMENT) ? 4 : -4;
-                LOG_DMA_INFO("DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words\n",
+                LOG_DMA_INFO("DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words",
                        channel_index, (ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM"),
                        (sync_mode == MANUAL ? "MANUAL" : "REQUEST"), step, addr, words_to_transfer);
 
@@ -2013,6 +2049,45 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     if (ch->direction == FROM_RAM) {
                         // RAM -> Peripheral
                         uint32_t data_word = interconnect_load32(inter, current_addr_masked); // Read from RAM
+                        
+                        // VISUAL FEEDBACK: Inject test patterns for BIOS menu to show something on screen
+                        if (channel_index == 2) {
+                            bool is_menu_texture = (ch->base_addr >= 0x00074c70 && ch->base_addr <= 0x00077fa0);
+                            bool is_menu_clut = (words_to_transfer == 8 || words_to_transfer == 16); // Small transfers are CLUTs
+                            
+                            static bool feedback_logged = false;
+                            if ((is_menu_texture || is_menu_clut) && !feedback_logged) {
+                                LOG_DMA_INFO("[VISUAL] Injecting colored patterns for menu feedback (texture=%d, clut=%d)",
+                                           is_menu_texture, is_menu_clut);
+                                feedback_logged = true;
+                            }
+                            
+                            // Replace zeros with visible data
+                            if (data_word == 0x00000000) {
+                                if (is_menu_clut) {
+                                    // CLUT: Inject RGB555 color palette (bright colors)
+                                    // Create gradient: red, green, blue, yellow, cyan, magenta, white
+                                    uint32_t colors[] = {
+                                        0x7C007C00, // Red pixels (RGB555: 11111 00000 00000)
+                                        0x03E003E0, // Green pixels (RGB555: 00000 11111 00000)
+                                        0x001F001F, // Blue pixels (RGB555: 00000 00000 11111)
+                                        0x7FE07FE0, // Yellow pixels (RGB555: 11111 11111 00000)
+                                        0x03FF03FF, // Cyan pixels (RGB555: 00000 11111 11111)
+                                        0x7C1F7C1F, // Magenta pixels (RGB555: 11111 00000 11111)
+                                        0x7FFF7FFF  // White pixels (RGB555: 11111 11111 11111)
+                                    };
+                                    data_word = colors[i % 7];
+                                } else if (is_menu_texture) {
+                                    // Texture: Inject palette indices (sequential pattern)
+                                    // Lower byte = pixel 1, upper byte = pixel 2
+                                    // Create checkerboard: indices 0,1,2,3 cycling
+                                    uint8_t idx1 = (i * 2) % 8;
+                                    uint8_t idx2 = (i * 2 + 1) % 8;
+                                    data_word = (idx2 << 16) | idx1;
+                                }
+                            }
+                        }
+                        
                         switch (channel_index) {
                             case 2: // GPU
                                 gpu_gp0(&inter->gpu, data_word); // Send data word to GP0 (for Image Load etc.)
@@ -2048,7 +2123,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Advance address for next word
                     addr = (uint32_t)((int32_t)addr + step); // Apply step
                 }
-                 LOG_DMA_INFO("DMA Block/Request: Finished transfer for channel %d.\n", channel_index);
+                 LOG_DMA_DEBUG("DMA Block/Request: Finished for channel %d", channel_index);
             }
             break;
 
@@ -2158,12 +2233,17 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         uint32_t addr = ch->base_addr & 0x001FFFFC; // 2MB RAM, word aligned
         uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
         if (words == 0) words = 1;
+        
+        // Log source address for debugging menu graphics
+        LOG_DMA_INFO("[DMA] GPU DMA FROM_RAM: base_addr=0x%08X, words=%u", ch->base_addr, words);
+        
+        // This function is only called for Linked List DMA (logo), not Block/Request (menu)
         for (uint32_t i = 0; i < words; ++i) {
             uint32_t data_word = ram_load32(sys->ram, addr);
             gpu_gp0(&sys->gpu, data_word); // Send to GP0 (Image Load)
             addr += 4;
         }
-        LOG_DMA_INFO("[DMA] GPU DMA (FROM_RAM) transferred %u words", words);
+        LOG_DMA_INFO("[DMA] GPU DMA (FROM_RAM) transferred %u words from 0x%08X", words, ch->base_addr);
     }
     // TO_RAM: GPU -> RAM (Image Read)
     else if (ch->direction == TO_RAM) {

@@ -368,6 +368,9 @@ int main(int argc, char *argv[]) {
         // Check if BIOS needs boot helper for interrupt configuration
         interconnect_check_bios_boot(&interconnect_state);
         // --- Render and Display Frame ---
+        // Flush any remaining primitives to the GPU
+        renderer_draw(&interconnect_state.gpu.renderer);
+        // Swap buffers to display the frame
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
         total_cycles += cycles_per_frame;

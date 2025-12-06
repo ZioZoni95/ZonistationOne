@@ -52,7 +52,11 @@ typedef struct {
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
     GLint uniform_use_texture_loc;
+    GLint uniform_raw_texture_loc; // 1 = use raw texture color (no modulation)
     GLint uniform_vram_texture_loc;
+    GLint uniform_screen_scale_loc; // Location for screen scaling uniform
+    GLint uniform_tex_window_and_loc; // Location for texture window AND mask
+    GLint uniform_tex_window_or_loc;  // Location for texture window OR mask
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -65,6 +69,9 @@ typedef struct {
     uint32_t vertex_count;      // Number of vertices currently buffered in the CPU-side arrays
     bool initialized;           // Flag indicating if the renderer has been successfully initialized
     bool texture_enabled;       // Current texture mode
+    bool raw_texture_enabled;   // Current raw-texture mode (skip modulation)
+    float screen_width;         // Target display width (in PSX pixels)
+    float screen_height;        // Target display height (in PSX pixels)
 } Renderer;
 
 // --- Function Prototypes ---
@@ -112,6 +119,30 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
 void renderer_set_texture_mode(Renderer* renderer, bool enabled);
 
 /**
+ * @brief Toggles raw-texture mode. When enabled, textures are used without color modulation.
+ */
+void renderer_set_raw_texture_mode(Renderer* renderer, bool enabled);
+
+/**
+ * @brief Adjusts how PSX coordinates map to the OpenGL screen by setting the
+ *        effective display width/height (in PSX pixels).
+ * @param renderer Pointer to the Renderer.
+ * @param width Horizontal resolution in PSX pixels (e.g., 320, 512, 640).
+ * @param height Vertical resolution in PSX pixels (e.g., 240, 480).
+ */
+void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t height);
+
+/**
+ * @brief Sets the texture window mask and offset.
+ * @param renderer Pointer to the Renderer.
+ * @param mask_x Texture window X mask (5 bits).
+ * @param mask_y Texture window Y mask (5 bits).
+ * @param offset_x Texture window X offset (5 bits).
+ * @param offset_y Texture window Y offset (5 bits).
+ */
+void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
+
+/**
  * @brief Uploads VRAM data to the GPU texture.
  * @param renderer Pointer to the Renderer instance.
  * @param vram_data Pointer to the VRAM data (1024x512 uint16_t).
@@ -150,6 +181,17 @@ void renderer_set_draw_offset(Renderer* renderer, int16_t x, int16_t y);
  * @param renderer Pointer to the Renderer instance to destroy.
  */
 void renderer_destroy(Renderer* renderer);
+
+/**
+ * @brief Blits the VRAM texture to the screen as a full-screen quad.
+ * This displays the actual VRAM contents (used for BIOS logo, etc.).
+ * @param renderer Pointer to the Renderer instance.
+ * @param vram_x X start coordinate in VRAM.
+ * @param vram_y Y start coordinate in VRAM.
+ * @param width Display width.
+ * @param height Display height.
+ */
+void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, uint16_t width, uint16_t height);
 
 /**
  * @brief Checks for OpenGL errors using glGetError() and prints them.

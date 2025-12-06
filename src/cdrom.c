@@ -244,7 +244,7 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
                         return;
                     }
                     
-                    LOG_CDROM_INFO("[CDROM] Command: 0x%02X\n", value);
+                    LOG_CDROM_DEBUG("[CDROM] Cmd 0x%02X", value);
                     
                     // Save parameters for command execution
                     cdrom->pending_command = (CdromCommand)value;
@@ -360,7 +360,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         fifo_push(&cdrom->param_fifo, cdrom->pending_params[i]);
     }
     
-    LOG_CDROM_INFO("[CDROM] Executing command: 0x%02X\n", cmd);
+    LOG_CDROM_DEBUG("[CDROM] Exec cmd 0x%02X", cmd);
     fifo_clear(&cdrom->response_fifo);
     
     switch (cmd) {
@@ -520,37 +520,47 @@ void cdrom_execute_command(Cdrom *cdrom) {
         
         case CDC_TEST: {
             uint8_t subfunction = pop_param(cdrom);
-            LOG_CDROM_DEBUG("[CDROM] Test subfunction: 0x%02X\n", subfunction);
+            LOG_CDROM_DEBUG("[CDROM] Test(0x%02X)", subfunction);
             
             switch (subfunction) {
                 case 0x20:
-                    // CDROM BIOS date/version
-                    push_response(cdrom, 0x94);  // Year
-                    push_response(cdrom, 0x09);  // Month
-                    push_response(cdrom, 0x19);  // Day
+                    // CDROM BIOS date/version (yy,mm,dd,ver)
+                    // SCPH1001 uses: 94/09/19, version C0
+                    LOG_CDROM_DEBUG("[CDROM] Test(0x20): Version 94/09/19 vC0");
+                    push_response(cdrom, 0x94);  // Year (BCD)
+                    push_response(cdrom, 0x09);  // Month (BCD)
+                    push_response(cdrom, 0x19);  // Day (BCD)
                     push_response(cdrom, 0xC0);  // Version
                     send_ack(cdrom);
                     break;
                 
                 case 0x04:
                     // Reset SCEx counters
+                    LOG_CDROM_DEBUG("[CDROM] Test(0x04): Reset SCEx");
+                    cdrom->motor_on = true;  // Force motor on per duckstation
                     push_response(cdrom, get_stat_byte(cdrom));
                     send_ack(cdrom);
                     break;
                 
                 case 0x05:
-                    // Get SCEx counters
-                    push_response(cdrom, 0x00);
-                    push_response(cdrom, 0x00);
+                    // Get SCEx counters - returns stat, total_reads, success_count
+                    LOG_CDROM_DEBUG("[CDROM] Test(0x05): SCEx counters");
+                    push_response(cdrom, get_stat_byte(cdrom));  // stat byte first!
+                    push_response(cdrom, 0x00);  // TOC reads
+                    push_response(cdrom, 0x00);  // SCEx strings received
                     send_ack(cdrom);
                     break;
                 
                 case 0x22:
-                    // Get region string
+                    // Get region string - "for U/C" for US region
+                    LOG_CDROM_DEBUG("[CDROM] Test(0x22): Region U/C");
                     push_response(cdrom, 'f');
                     push_response(cdrom, 'o');
                     push_response(cdrom, 'r');
                     push_response(cdrom, ' ');
+                    push_response(cdrom, 'U');
+                    push_response(cdrom, '/');
+                    push_response(cdrom, 'C');
                     send_ack(cdrom);
                     break;
                 
@@ -804,7 +814,7 @@ static uint8_t get_stat_byte(Cdrom *cdrom) {
 
 static void send_ack(Cdrom *cdrom) {
     cdrom->interrupt_flag = CDROM_INT_ACK;
-    LOG_CDROM_INFO("[CDROM] INT3 (ACK)\n");
+    LOG_CDROM_DEBUG("[CDROM] INT3 (ACK)");
     
     if (cdrom->inter) {
         interconnect_trigger_cdrom_irq(cdrom->inter);
@@ -815,7 +825,7 @@ static void send_ack(Cdrom *cdrom) {
 
 static void send_complete(Cdrom *cdrom) {
     cdrom->interrupt_flag = CDROM_INT_COMPLETE;
-    LOG_CDROM_INFO("[CDROM] INT2 (Complete)\n");
+    LOG_CDROM_DEBUG("[CDROM] INT2 (Complete)");
     
     if (cdrom->inter) {
         interconnect_trigger_cdrom_irq(cdrom->inter);

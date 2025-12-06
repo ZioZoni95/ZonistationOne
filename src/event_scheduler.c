@@ -58,14 +58,6 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
     
-    // Timer0 scheduling logs - rate limited to first 5
-    if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_DEBUG) {
-        static int timer0_sched_count = 0;
-        if (timer0_sched_count < 5) {
-            LOG_EVENT_DEBUG("[EventQ][DEF] Scheduled Timer0 event: now=%u, target=%u, pending=0x%X", sys->cpu_cycle_counter, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
-            timer0_sched_count++;
-        }
-    }
     // Update the next event cycle if this event is sooner
     if (sys->evq_next_cycle > sys->evq_target_cycle[event] || sys->evq_next_cycle <= sys->cpu_cycle_counter) {
         sys->evq_next_cycle = sys->evq_target_cycle[event];
@@ -79,14 +71,6 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
 void eventq_dispatch_due(struct Interconnect* sys) {
     uint32_t now = sys->cpu_cycle_counter;
     
-    // Debug: Log when dispatch is called and VBlank is pending
-    static uint32_t last_vblank_check_cycle = 0;
-    if ((sys->evq_pending & (1u << EVQ_VBLANK)) && now > 1000000 && now - last_vblank_check_cycle > 500000) {
-        LOG_TIMER_DEBUG("[EventQ] dispatch_due: now=%u, VBlank target=%u",
-                      now, sys->evq_target_cycle[EVQ_VBLANK]);
-        last_vblank_check_cycle = now;
-    }
-    
     // Keep dispatching as long as any event is due
     while (1) {
         uint32_t pending = sys->evq_pending;
@@ -94,14 +78,6 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         
         for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
             if ((pending & (1u << event)) && (int32_t)(now - sys->evq_target_cycle[event]) >= 0) {
-                // Timer0 firing logs - rate limited to first 5
-                if (event == EVQ_TIMER0 && log_get_level() >= LOG_LEVEL_DEBUG) {
-                    static int timer0_fire_count = 0;
-                    if (timer0_fire_count < 5) {
-                        LOG_EVENT_DEBUG("[EventQ][DEF] Firing Timer0 event: now=%u, target=%u, pending=0x%X", now, sys->evq_target_cycle[EVQ_TIMER0], sys->evq_pending);
-                        timer0_fire_count++;
-                    }
-                }
                 sys->evq_pending &= ~(1u << event);
                 if (evq_handlers[event]) {
                     evq_handlers[event](sys);
@@ -144,15 +120,22 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     static uint32_t vblank_count = 0;
     vblank_count++;
     
+    // Log VBlank with SYSTEM category to bypass timer rate limiting
+    if (vblank_count <= 5 || vblank_count % 60 == 0) {
+        LOG_DEBUG("[VBlank] Frame #%u at cycle %u, I_STAT=0x%04x, I_MASK=0x%04x", 
+                 vblank_count, sys->cpu_cycle_counter,
+                 sys->irq_status, sys->irq_mask);
+    }
+    
     // Always reschedule the next VBlank
     eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
     
-    // Log VBlank count
-    LOG_TIMER_DEBUG("[VBlank] Handler #%u: cycle=%u", 
-                  vblank_count, sys->cpu_cycle_counter);
+    // Verify it was scheduled
+    if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
+        LOG_ERROR("[VBlank] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);
+    }
     
-    // Trigger VBlank interrupt (IRQ0 per PSX-SPX, NOT IRQ1!)
-    // Use proper edge-triggered API instead of direct irq_status manipulation
+    // Trigger VBlank interrupt (IRQ0 per PSX-SPX)
     interconnect_request_irq(sys, 0, "VBlank");
     
     timers_on_vblank(&sys->timers_state);
@@ -169,12 +152,16 @@ static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(s
 static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
 
 static void evq_handle_dma_gpu(struct Interconnect* sys) {
-    LOG_EVENT_DEBUG("[DMA] Entered GPU DMA event handler");
-    LOG_EVENT_DEBUG("[DMA] GPU DMA event handler called");
+    static uint32_t gpu_dma_count = 0;
+    gpu_dma_count++;
+    
     Dma* dma = &sys->dma;
     DmaChannel* ch = &dma->channels[2]; // Channel 2: GPU
     if (!ch->enable) {
-        LOG_EVENT_DEBUG("[DMA] GPU DMA event fired, but channel not enabled (already done?)");
+        // Only log first few times
+        if (gpu_dma_count <= 3) {
+            LOG_EVENT_DEBUG("[DMA] GPU DMA event but channel not enabled");
+        }
         return;
     }
     extern void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch);
