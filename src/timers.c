@@ -19,6 +19,15 @@
 
 // Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
+// BIOS syscall handler for SetRCnt (0xBC)
+#include "cpu.h"
+void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
+    // TODO: Implement SetRCnt logic based on BIOS arguments in cpu registers
+    // Example: uint32_t timer_id = cpu_reg(cpu, 4); uint32_t mode = cpu_reg(cpu, 5);
+    LOG_DEBUG("[TIMER] SetRCnt handler entered: timer_id=%u, mode=%u", cpu_reg(cpu, 4), cpu_reg(cpu, 5));
+    // For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
+}
+
 // Add this prototype at the top of the file
 static void timer_force_bios_boot_config(Timers* timers);
 

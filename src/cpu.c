@@ -349,6 +349,7 @@ static const char* get_bios_c_function_name(uint32_t func_num) {
  * @return Returns true if the syscall was handled, false otherwise.
  */
 bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
+    LOG_DEBUG("[BIOS_SYSCALL] Received syscall_num=0x%X", syscall_num);
     switch (syscall_num) {
         case 0x01: // EnterCriticalSection
             cpu->sr &= ~1; // Disable interrupts
@@ -362,7 +363,17 @@ bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
             // Stub - does nothing, but we acknowledge it as handled.
             return true;   // Syscall was handled
         
-        // Add more handled syscalls here as they appear in the logs.
+
+        case 0x0C: // SetRCnt (C-function table index)
+            // Call timers_handle_setrcnt (to be implemented in timers.c)
+            if (cpu->inter && cpu->inter->timers_state.inter) {
+                timers_handle_setrcnt(&cpu->inter->timers_state, cpu);
+                LOG_INFO("[BIOS] SetRCnt syscall handled");
+                return true;
+            } else {
+                LOG_ERROR("[BIOS] SetRCnt syscall: timers/interconnect not initialized!");
+                return false;
+            }
 
         default:
             // We encountered a syscall we don't know how to handle.

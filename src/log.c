@@ -48,33 +48,13 @@ void log_init(void) {
     // Initialize all categories with default settings
     for (int i = 0; i < LOG_CAT_COUNT; i++) {
         category_states[i].count = 0;
-        category_states[i].limit_first = 10;    // Log first 10 messages
-        category_states[i].limit_every = 1000;  // Then every 1000th message
-        category_states[i].enabled = true;      // All categories enabled by default
+        category_states[i].limit_first = UINT32_MAX; // No rate limiting
+        category_states[i].limit_every = 1;          // Log every message
+        category_states[i].enabled = true;           // All categories enabled by default
     }
     
-    // Set stricter limits for noisy categories
-    category_states[LOG_CAT_IRQ].limit_first = 5;
-    category_states[LOG_CAT_IRQ].limit_every = 10000;
-    
-    category_states[LOG_CAT_INTERCONNECT].limit_first = 5;
-    category_states[LOG_CAT_INTERCONNECT].limit_every = 5000;
-    
-    category_states[LOG_CAT_CPU].limit_first = 10;
-    category_states[LOG_CAT_CPU].limit_every = 100000;
-    
-    category_states[LOG_CAT_DMA].limit_first = 100000;
-    category_states[LOG_CAT_DMA].limit_every = 100000;
-    
-    // GPU rate limit - increased to capture all rendering details
-    category_states[LOG_CAT_GPU].limit_first = 100000;
-    category_states[LOG_CAT_GPU].limit_every = 100000;
-    
-    // Renderer rate limit - increased to capture all draws
-    category_states[LOG_CAT_RENDERER].limit_first = 100000;
-    category_states[LOG_CAT_RENDERER].limit_every = 100000;
-    
     log_output_file = stderr; // Default output
+    setvbuf(stderr, NULL, _IONBF, 0); // Unbuffered output to avoid overhead
     log_initialized = true;
 }
 
@@ -114,6 +94,8 @@ void log_set_output_file(const char* filename) {
         if (!log_output_file) {
             log_output_file = stderr;
             fprintf(stderr, "[LOG] Failed to open log file '%s', using stderr\n", filename);
+        } else {
+            setvbuf(log_output_file, NULL, _IONBF, 0); // Unbuffered for files too
         }
     } else {
         log_output_file = stderr;
@@ -139,32 +121,7 @@ bool log_should_print(LogCategory category, LogLevel level) {
         return false;
     }
     
-    // Always allow critical messages (ERROR and WARN)
-    if (level <= LOG_LEVEL_WARN) {
-        return true;
-    }
-    
-    // If current log level is DEBUG or higher, don't rate-limit INFO messages
-    // This ensures important state changes are visible when debugging
-    if (current_log_level >= LOG_LEVEL_DEBUG && level == LOG_LEVEL_INFO) {
-        return true;
-    }
-    
-    // Apply rate limiting for DEBUG and TRACE messages
-    LogCategoryState* state = &category_states[category];
-    state->count++;
-    
-    // Allow first N messages
-    if (state->count <= state->limit_first) {
-        return true;
-    }
-    
-    // Then only every Nth message
-    if (state->limit_every > 0 && (state->count % state->limit_every == 0)) {
-        return true;
-    }
-    
-    return false;
+    return true;
 }
 
 // --- Core Logging Function ---
@@ -194,10 +151,8 @@ void log_print(LogCategory category, LogLevel level, const char* format, ...) {
         fprintf(log_output_file, "\n");
     }
     
-    // Flush immediately for critical messages
-    if (level <= LOG_LEVEL_WARN) {
-        fflush(log_output_file);
-    }
+    // Flush immediately to avoid buffering overhead
+    fflush(log_output_file);
 }
 
 // --- Helper Functions ---
