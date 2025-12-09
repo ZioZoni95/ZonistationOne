@@ -63,6 +63,7 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value);
 // --- Forward Declarations for Helpers ---
 static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h, RendererColor col, bool textured, bool raw_texture, RendererTexCoord* tex, uint16_t clut, uint16_t tpage);
 static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel);
+static void gpu_debug_dump_region(Gpu* gpu);
 
 
 // --- Helper Functions ---
@@ -783,30 +784,38 @@ static void gp0_image_store(Gpu* gpu) {
         return;
     }
 
+    // Extract parameters
     uint32_t val1 = gpu->gp0_command_buffer.buffer[1];
     uint32_t val2 = gpu->gp0_command_buffer.buffer[2];
 
-    gpu->vram_load_x = (uint16_t)(val1 & 0x3FF);
-    gpu->vram_load_y = (uint16_t)((val1 >> 16) & 0x1FF);
-    gpu->vram_load_w = (uint16_t)(val2 & 0xFFFF);
-    gpu->vram_load_h = (uint16_t)(val2 >> 16);
+    uint16_t x = (uint16_t)(val1 & 0x3FF);
+    uint16_t y = (uint16_t)((val1 >> 16) & 0x1FF);
+    uint16_t w = (uint16_t)(val2 & 0xFFFF);
+    uint16_t h = (uint16_t)(val2 >> 16);
 
-    // Width and Height must be non-zero
-    if (gpu->vram_load_w == 0) gpu->vram_load_w = 1;
-    if (gpu->vram_load_h == 0) gpu->vram_load_h = 1;
+    // Clamp to VRAM bounds
+    if (x >= VRAM_WIDTH) x = VRAM_WIDTH - 1;
+    if (y >= VRAM_HEIGHT) y = VRAM_HEIGHT - 1;
+    if (w == 0 || w > VRAM_WIDTH) w = VRAM_WIDTH;
+    if (h == 0 || h > VRAM_HEIGHT) h = VRAM_HEIGHT;
 
-    // Calculate total number of 32-bit words to transfer
-    // Each word contains 2 pixels (16-bit each)
-    // Total pixels = w * h
-    // Total words = (total pixels + 1) / 2  (Round up if odd number of pixels)
-    uint32_t total_pixels = (uint32_t)gpu->vram_load_w * gpu->vram_load_h;
-    gpu->gp0_words_remaining = (total_pixels + 1) / 2;
+    // Store region in GPU struct
+    gpu->vram_load_x = x;
+    gpu->vram_load_y = y;
+    gpu->vram_load_w = w;
+    gpu->vram_load_h = h;
 
+    // Compute total pixels and words
+    uint32_t total_pixels = (uint32_t)w * h;
+    uint32_t words_to_transfer = (total_pixels + 1) / 2;
+
+    // Set up transfer state
+    gpu->gp0_words_remaining = words_to_transfer;
     gpu->vram_load_count = 0; // Reset pixel counter
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
 
-    LOG_GPU_DEBUG("GP0(0xC0): Image Store (%u,%u) Size=(%ux%u), Words=%u",
-                 gpu->vram_load_x, gpu->vram_load_y, gpu->vram_load_w, gpu->vram_load_h, gpu->gp0_words_remaining);
+    LOG_GPU_INFO("GP0(0xC0): VRAM-to-CPU transfer START (%u,%u) Size=(%ux%u) = %u words", x, y, w, h, words_to_transfer);
+    LOG_GPU_DEBUG("GP0(0xC0): Image Store region set (%u,%u) Size=(%ux%u), Words=%u", x, y, w, h, words_to_transfer);
 }
 
 
@@ -1114,62 +1123,53 @@ uint32_t gpu_read_data(Gpu* gpu) {
     if (gpu->gp0_mode == GP0_MODE_IMAGE_STORE) {
         if (gpu->gp0_words_remaining == 0) {
             LOG_GPU_WARN("GPUREAD: Read attempted but no words remaining in Image Store transfer.\n");
-            return 0xFFFFFFFF; // Or 0, undefined behavior
+            return 0xFFFFFFFF;
         }
 
         uint32_t word = 0;
-        uint16_t pixel1 = 0;
-        uint16_t pixel2 = 0;
-
-        // Read Pixel 1
+        uint16_t pixel1 = 0, pixel2 = 0;
         uint32_t idx = gpu->vram_load_count;
-        uint16_t x = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
-        uint16_t y = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
-        
-        // Handle VRAM wrapping (1024x512)
-        x &= 0x3FF;
-        y &= 0x1FF;
-
-        uint32_t offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
-        pixel1 = vram_load16(&gpu->vram, offset);
+        uint16_t x1 = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
+        uint16_t y1 = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
+        x1 &= 0x3FF; y1 &= 0x1FF;
+        uint32_t offset1 = (uint32_t)y1 * VRAM_WIDTH * VRAM_BPP + (uint32_t)x1 * VRAM_BPP;
+        pixel1 = vram_load16(&gpu->vram, offset1);
         gpu->vram_load_count++;
 
-        // Read Pixel 2 (if available)
+        // Pixel 2
         if (gpu->vram_load_count < ((uint32_t)gpu->vram_load_w * gpu->vram_load_h)) {
             idx = gpu->vram_load_count;
-            x = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
-            y = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
-            
-            x &= 0x3FF;
-            y &= 0x1FF;
-
-            offset = (uint32_t)y * VRAM_WIDTH * VRAM_BPP + (uint32_t)x * VRAM_BPP;
-            pixel2 = vram_load16(&gpu->vram, offset);
+            uint16_t x2 = gpu->vram_load_x + (uint16_t)(idx % gpu->vram_load_w);
+            uint16_t y2 = gpu->vram_load_y + (uint16_t)(idx / gpu->vram_load_w);
+            x2 &= 0x3FF; y2 &= 0x1FF;
+            uint32_t offset2 = (uint32_t)y2 * VRAM_WIDTH * VRAM_BPP + (uint32_t)x2 * VRAM_BPP;
+            pixel2 = vram_load16(&gpu->vram, offset2);
             gpu->vram_load_count++;
         } else {
-            pixel2 = 0; // Padding if odd number of pixels
+            pixel2 = 0; // Pad if odd
         }
 
         word = (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
         gpu->gp0_words_remaining--;
 
-        // Rate-limit GPUREAD logging - only log first 10 and last
+        // Log progress
         static uint32_t gpuread_count = 0;
         gpuread_count++;
         if (gpuread_count <= 10 || gpu->gp0_words_remaining == 0) {
-            LOG_GPU_DEBUG("[GPUREAD] Image Store: 0x%08x (Rem: %u)", word, gpu->gp0_words_remaining);
+            LOG_GPU_DEBUG("[GPUREAD] VRAM-to-CPU: 0x%08x (Rem: %u)", word, gpu->gp0_words_remaining);
         }
 
         if (gpu->gp0_words_remaining == 0) {
-            LOG_GPU_DEBUG("GP0(0xC0): Image Store Finished");
+            LOG_GPU_INFO("GP0(0xC0): VRAM-to-CPU transfer COMPLETE");
+            /* Dump a small region around the transferred area for debug */
+            gpu_debug_dump_region(gpu);
             gpu->gp0_mode = GP0_MODE_COMMAND;
         }
 
         return word;
     }
 
-    // Fallback for non-transfer reads (usually returns 0 or last status)
-    // For now, keep the dummy behavior or return 0
+    // Fallback for non-transfer reads
     static uint32_t dummy_gpu_read = 0xDEADBEEF;
     dummy_gpu_read++;
     LOG_GPU_DEBUG("[GPUREAD] Read (No Transfer): 0x%08x\n", dummy_gpu_read);
@@ -1184,4 +1184,39 @@ void gpu_trigger_vblank_irq(Gpu* gpu) {
     // Example: gpu->in_vblank = true;
     // (No call to interconnect_request_irq here)
     LOG_GPU_DEBUG("[GPU] VBlank event (no IRQ0 requested, handled by Timer0)");
+}
+
+/**
+ * Debug helper: dump a small region of VRAM around the last load/store area.
+ * Limits output to a few rows/columns to avoid huge logs.
+ */
+static void gpu_debug_dump_region(Gpu* gpu) {
+    uint16_t x = gpu->vram_load_x;
+    uint16_t y = gpu->vram_load_y;
+    uint16_t w = gpu->vram_load_w;
+    uint16_t h = gpu->vram_load_h;
+    if (w == 0 || h == 0) {
+        LOG_GPU_DEBUG("gpu_debug_dump_region: empty region (w=0/h=0)");
+        return;
+    }
+
+    uint16_t dump_w = (w > 16) ? 16 : w;
+    uint16_t dump_h = (h > 4) ? 4 : h;
+
+    LOG_GPU_INFO("GPU VRAM DUMP Region (%u,%u) Size=(%ux%u) - showing %ux%u", x, y, w, h, dump_w, dump_h);
+
+    for (uint16_t row = 0; row < dump_h; ++row) {
+        char line[512];
+        int pos = 0;
+        pos += snprintf(line + pos, sizeof(line) - pos, "VRAM[%u,%u]:", x, (uint16_t)(y + row));
+        for (uint16_t col = 0; col < dump_w; ++col) {
+            uint16_t xx = (x + col) & 0x3FF;
+            uint16_t yy = (y + row) & 0x1FF;
+            uint32_t offset = (uint32_t)yy * VRAM_WIDTH * VRAM_BPP + (uint32_t)xx * VRAM_BPP;
+            uint16_t val = vram_load16(&gpu->vram, offset);
+            pos += snprintf(line + pos, sizeof(line) - pos, " %04x", val);
+            if (pos > (int)sizeof(line) - 64) break; // safety
+        }
+        LOG_GPU_INFO("%s", line);
+    }
 }

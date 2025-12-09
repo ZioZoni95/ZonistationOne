@@ -1,12 +1,12 @@
 # Makefile for PS1 Emulator and log splitter
 
 # Source files for the emulator
-EMU_SRCS = src/main.c src/cpu.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/gte.c src/log.c src/event_scheduler.c src/sio.c 
+EMU_SRCS = src/main.c src/cpu.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/gte.c src/log.c src/event_scheduler.c src/sio.c src/spu.c
 EMU_OBJS = $(EMU_SRCS:.c=.o)
 EMU_BIN = myps1_emu
 
 # Test files
-TEST_SRCS = tests/cpu_minimal_test.c src/cpu.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/timers.c src/cdrom.c src/bios.c src/gte.c src/log.c src/event_scheduler.c src/renderer.c src/vram.c
+TEST_SRCS = tests/cpu_minimal_test.c src/cpu.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/timers.c src/cdrom.c src/bios.c src/gte.c src/log.c src/event_scheduler.c src/renderer.c src/vram.c src/spu.c
 TEST_BIN = cpu_test
 
 # Compiler and flags

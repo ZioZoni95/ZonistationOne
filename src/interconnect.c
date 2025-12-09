@@ -137,6 +137,8 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
+    // Initialize SPU
+    spu_init(&inter->spu);
     
     LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
@@ -553,11 +555,10 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         return 0; // Return 0 for unhandled timer reads
     }
 
-    // SPU Region (0x1f801C00 - 0x1f801E7F)
-    if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Read32 from SPU region: Address 0x%08x (Ignoring, returning 0)\n", physical_addr); // Often noisy
-         return 0; // SPU not implemented yet
-    }
+        // SPU Region (0x1f801C00 - 0x1f801E7F)
+        if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
+            return spu_read32(inter, physical_addr);
+        }
 
     // Expansion 1 Region (0x1f000000 - 0x1f7fffff)
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
@@ -805,8 +806,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
     // SPU Region (Reads usually return 0 or specific status)
     if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Read16 from SPU region: Address 0x%08x (Ignoring, returning 0)\n", physical_addr); // Often noisy
-         return 0; // SPU reads often ignored initially
+            return spu_read16(inter, physical_addr);
     }
 
     // Timer Region (Check specific registers if needed)
@@ -1338,10 +1338,10 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
 
     // SPU Region
-    if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Write32 to SPU region: Address 0x%08x = 0x%08x (Ignoring)\n", physical_addr, value); // Noisy
-         return; // SPU not implemented
-    }
+        if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
+            spu_write32(inter, physical_addr, value);
+            return;
+        }
 
     // Main RAM Region
     if (physical_addr <= RAM_END) {
@@ -1626,10 +1626,10 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
      }
 
     // SPU Region
-    if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Write16 to SPU region: Address 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value); // Noisy
-         return; // SPU not implemented
-    }
+        if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
+            spu_write16(inter, physical_addr, value);
+            return;
+        }
 
     // Timer Region
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
@@ -1836,10 +1836,10 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     }
 
     // SPU Region
-    if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
-         // LOG_INFO("~ Write8 to SPU region: Address 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value); // Noisy
-         return; // SPU not implemented
-    }
+        if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
+            spu_write8(inter, physical_addr, value);
+            return;
+        }
 
      // Main RAM Region
     if (physical_addr <= RAM_END) {
