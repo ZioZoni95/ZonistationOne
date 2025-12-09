@@ -1415,7 +1415,13 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     
     // Detect BIOS function vector calls
     if (target_address == 0x000000A0 || target_address == 0x000000B0 || target_address == 0x000000C0) {
-        uint32_t func_num = cpu_reg(cpu, 9);  // R9 (T1 register) contains function number
+        // Prefer a small function index in R9; if R9 looks like an address, fall back to R10.
+        uint32_t func_num = cpu_reg(cpu, 9);
+        if (func_num >= 0x100 || func_num == 0) {
+            uint32_t alt = cpu_reg(cpu, 10);
+            if (alt < 0x100 && alt != 0) func_num = alt;
+            else func_num = cpu_reg(cpu, 9); // keep original if no small alt found
+        }
         const char* vector_name = (target_address == 0xA0) ? "A" : 
                                  (target_address == 0xB0) ? "B" : "C";
         const char* func_name;
@@ -1428,8 +1434,42 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
             func_name = get_bios_c_function_name(func_num);
         }
         
-        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh) = %s()", 
-                     cpu->current_pc, vector_name, func_num, func_name);
+        if (func_num > 0xFF) {
+            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(0x%08X) = %s() [note: func_num looks like an address]", 
+                         cpu->current_pc, vector_name, func_num, func_name);
+
+            // If the func_num looks like an MMIO address (SPU range), dump CPU regs
+            if (func_num >= SPU_START && func_num <= SPU_END) {
+                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
+                for (int r = 0; r < 32; ++r) {
+                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
+                }
+                // Dump a few instructions around current PC for context
+                for (int i = 0; i < 4; ++i) {
+                    uint32_t addr = cpu->current_pc + i * 4;
+                    uint32_t insn = 0;
+                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
+                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
+                }
+            }
+
+        } else {
+            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh) = %s()", 
+                         cpu->current_pc, vector_name, func_num, func_name);
+
+            if (func_num == 0xC0) {
+                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
+                for (int r = 0; r < 32; ++r) {
+                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
+                }
+                for (int i = 0; i < 4; ++i) {
+                    uint32_t addr = cpu->current_pc + i * 4;
+                    uint32_t insn = 0;
+                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
+                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
+                }
+            }
+        }
     }
     // Log other suspicious jumps to low memory or unaligned addresses
     else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
@@ -1568,7 +1608,13 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
 
     // Check for BIOS function call (to 0xA0, 0xB0, or 0xC0)
     if (target_address == 0xA0 || target_address == 0xB0 || target_address == 0xC0) {
-        uint32_t func_num = cpu_reg(cpu, 9); // R9 (T1 register) contains the function number
+        // Prefer a small function index in R9; if R9 looks like an address, fall back to R10.
+        uint32_t func_num = cpu_reg(cpu, 9);
+        if (func_num >= 0x100 || func_num == 0) {
+            uint32_t alt = cpu_reg(cpu, 10);
+            if (alt < 0x100 && alt != 0) func_num = alt;
+            else func_num = cpu_reg(cpu, 9);
+        }
         const char* func_name = NULL;
         char func_type = '?';
         
@@ -1583,8 +1629,37 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
             func_type = 'C';
         }
         
-        LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
-                     cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
+        if (func_num > 0xFF) {
+            LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(0x%08X) = %s() [note: func_num looks like an address]", 
+                         cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
+            if (func_type == 'C' && func_num >= SPU_START && func_num <= SPU_END) {
+                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
+                for (int r = 0; r < 32; ++r) {
+                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
+                }
+                for (int i = 0; i < 4; ++i) {
+                    uint32_t addr = cpu->current_pc + i * 4;
+                    uint32_t insn = 0;
+                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
+                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
+                }
+            }
+        } else {
+            LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
+                         cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
+            if (func_num == 0xC0) {
+                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
+                for (int r = 0; r < 32; ++r) {
+                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
+                }
+                for (int i = 0; i < 4; ++i) {
+                    uint32_t addr = cpu->current_pc + i * 4;
+                    uint32_t insn = 0;
+                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
+                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
+                }
+            }
+        }
     }
     // Log other suspicious jumps to low memory or unaligned addresses
     else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
