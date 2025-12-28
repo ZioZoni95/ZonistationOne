@@ -74,7 +74,7 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
  * @param inter Pointer to the Interconnect (needed for requesting interrupts).
  */
 void timers_init(Timers* timers, struct Interconnect* inter) {
-    LOG_TIMER_INFO("Timers initialized");
+    LOG_TIMER_DEBUG("Timers initialized");
     timers->inter = inter; // Store interconnect pointer
 
     // Initialize all three timers

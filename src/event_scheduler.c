@@ -2,6 +2,8 @@
 #include "interconnect.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "log.h"
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
@@ -139,6 +141,99 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     interconnect_request_irq(sys, 0, "VBlank");
     
     timers_on_vblank(&sys->timers_state);
+
+    // --- Diagnostic VRAM + GPU register dump at VBlank ---
+    // Dump a few frames early and every 60th frame to help diagnose display issues.
+    if (vblank_count <= 3 || (vblank_count % 60) == 0) {
+        Gpu* gpu = &sys->gpu;
+        // Log key GPU register state
+        LOG_GPU_INFO("[VBlank Dump] Frame=%u page_base=(%u,%u) tex_depth=%d draw_display=%d display_start=(%u,%u) disp_hint=(%u,%u) draw_area=(%u,%u,%u,%u)",
+                     vblank_count,
+                     gpu->page_base_x, gpu->page_base_y, (int)gpu->texture_depth,
+                     (int)gpu->draw_to_display,
+                     gpu->display_vram_x_start, gpu->display_vram_y_start,
+                     gpu->display_width_hint, gpu->display_height_hint,
+                     gpu->drawing_area_left, gpu->drawing_area_top, gpu->drawing_area_right, gpu->drawing_area_bottom);
+
+        // Determine dump region: prefer display_hint if non-zero, otherwise use 320x240
+        uint32_t dump_x = gpu->display_vram_x_start;
+        uint32_t dump_y = gpu->display_vram_y_start;
+        uint32_t dump_w = gpu->display_width_hint ? gpu->display_width_hint : 320;
+        uint32_t dump_h = gpu->display_height_hint ? gpu->display_height_hint : 240;
+        // Clamp to VRAM dimensions
+        if (dump_x + dump_w > VRAM_WIDTH) dump_w = VRAM_WIDTH - dump_x;
+        if (dump_y + dump_h > VRAM_HEIGHT) dump_h = VRAM_HEIGHT - dump_y;
+
+        // Create filename and write PPM (binary) in the current working directory
+        char fname[256];
+        snprintf(fname, sizeof(fname), "vram_vblank_%05u.ppm", vblank_count);
+        FILE* f = fopen(fname, "wb");
+        if (f) {
+            // PPM header
+            fprintf(f, "P6\n%u %u\n255\n", dump_w, dump_h);
+            // For each pixel convert 15-bit BGR -> 24-bit RGB
+            for (uint32_t yy = 0; yy < dump_h; ++yy) {
+                for (uint32_t xx = 0; xx < dump_w; ++xx) {
+                    uint32_t vx = dump_x + xx;
+                    uint32_t vy = dump_y + yy;
+                    uint32_t off = (vy * VRAM_WIDTH + vx) * 2; // bytes
+                    uint8_t lo = gpu->vram.data[off];
+                    uint8_t hi = gpu->vram.data[off + 1];
+                    uint16_t raw = (uint16_t)(lo | (hi << 8));
+                    // PSX VRAM is 15-bit BGR (bits: 0-4 B, 5-9 G, 10-14 R)
+                    uint8_t b5 = raw & 0x1F;
+                    uint8_t g5 = (raw >> 5) & 0x1F;
+                    uint8_t r5 = (raw >> 10) & 0x1F;
+                    // Expand 5-bit to 8-bit
+                    uint8_t r8 = (r5 << 3) | (r5 >> 2);
+                    uint8_t g8 = (g5 << 3) | (g5 >> 2);
+                    uint8_t b8 = (b5 << 3) | (b5 >> 2);
+                    fputc(r8, f);
+                    fputc(g8, f);
+                    fputc(b8, f);
+                }
+            }
+            fclose(f);
+            LOG_GPU_INFO("[VBlank Dump] Wrote %s (%ux%u) from VRAM (%u,%u)", fname, dump_w, dump_h, dump_x, dump_y);
+        } else {
+            LOG_GPU_INFO("[VBlank Dump] Failed to open %s for writing", fname);
+        }
+        // Force the renderer to blit the display-area from VRAM to the screen
+        if (gpu->renderer.initialized && gpu->display_width_hint > 0 && gpu->display_height_hint > 0) {
+            LOG_GPU_INFO("[VBlank Dump] Forcing renderer blit of display-area (%u,%u %ux%u)", dump_x, dump_y, dump_w, dump_h);
+            renderer_blit_vram(&gpu->renderer, (uint16_t)dump_x, (uint16_t)dump_y, (uint16_t)dump_w, (uint16_t)dump_h);
+        }
+        // Additional diagnostic: sample specific VRAM locations useful for BIOS menu
+        // Sample display origin area
+        for (int ry = 0; ry < 4; ++ry) {
+            char line[256]; int pos = 0;
+            pos += snprintf(line + pos, sizeof(line) - pos, "VRAM-SAMP DisplayRow %d:", ry + (int)gpu->display_vram_y_start);
+            for (int rx = 0; rx < 16; ++rx) {
+                uint32_t vx = (gpu->display_vram_x_start + rx) & 0x3FF;
+                uint32_t vy = (gpu->display_vram_y_start + ry) & 0x1FF;
+                uint32_t off = (vy * VRAM_WIDTH + vx) * 2;
+                uint16_t val = (uint16_t)(gpu->vram.data[off] | (gpu->vram.data[off + 1] << 8));
+                pos += snprintf(line + pos, sizeof(line) - pos, " %04x", val);
+                if (pos > (int)sizeof(line) - 8) break;
+            }
+            LOG_GPU_INFO("%s", line);
+        }
+        // Sample menu/font CLUT area around y=480 and a few texture pages
+        for (int sample = 0; sample < 3; ++sample) {
+            int base_x = sample * 64; int base_y = 480;
+            char line2[256]; int p = 0;
+            p += snprintf(line2 + p, sizeof(line2) - p, "VRAM-SAMP Page %d (%d,%d):", sample, base_x, base_y);
+            for (int i = 0; i < 8; ++i) {
+                uint32_t vx = (base_x + i) & 0x3FF;
+                uint32_t vy = base_y & 0x1FF;
+                uint32_t off = (vy * VRAM_WIDTH + vx) * 2;
+                uint16_t val = (uint16_t)(gpu->vram.data[off] | (gpu->vram.data[off + 1] << 8));
+                p += snprintf(line2 + p, sizeof(line2) - p, " %04x", val);
+                if (p > (int)sizeof(line2) - 8) break;
+            }
+            LOG_GPU_INFO("%s", line2);
+        }
+    }
 }
 
 static void evq_handle_timer0(struct Interconnect* sys) {

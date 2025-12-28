@@ -6,7 +6,7 @@
 // PCSX ReARMed-style logging system implementation
 
 // --- Global State ---
-static LogLevel current_log_level = LOG_LEVEL_INFO;
+static LogLevel current_log_level = LOG_LEVEL_WARN;
 static LogCategoryState category_states[LOG_CAT_COUNT];
 static FILE* log_output_file = NULL;
 static bool log_initialized = false;

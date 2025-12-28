@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
         bios_path = "roms/SCPH1001.BIN";
     }
     log_set_level(log_level);
-    LOG_SYSTEM_INFO("Emulator started");
+    LOG_SYSTEM_WARN("Emulator started");
 
     // --- File Logging Setup ---
     // Log file rotation: if emulator_log.txt > 50MB, move to emulator_log.old.txt
@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
     SDL_Window* window = SDL_CreateWindow(
         "ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1024, 512, // Native PSX VRAM resolution
+        1024, 512, // Full VRAM size for black border (classic PSX look)
         SDL_WINDOW_OPENGL
     );
     if (!window) {
@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
     check_gl_error("After GLEW Init");
 
     // --- Emulator Component Initialization ---
-    LOG_SYSTEM_INFO("Initializing Emulator Components...");
+    LOG_SYSTEM_WARN("Initializing Emulator Components...");
 
     Bios bios_data;
     Ram ram_memory;
@@ -225,11 +225,11 @@ int main(int argc, char *argv[]) {
     Cpu cpu_state;
 
     // 1. Initialize RAM
-    LOG_SYSTEM_INFO("  Initializing RAM...");
+    LOG_SYSTEM_DEBUG("  Initializing RAM...");
     ram_init(&ram_memory);
 
     // 2. Load BIOS
-    LOG_SYSTEM_INFO("  Loading BIOS...");
+    LOG_SYSTEM_DEBUG("  Loading BIOS...");
     if (!bios_load(&bios_data, bios_path)) {
         // Cleanup on failure
         SDL_GL_DeleteContext(gl_context);
@@ -239,11 +239,11 @@ int main(int argc, char *argv[]) {
     }
 
     // 3. Initialize Interconnect (connects all hardware components)
-    LOG_SYSTEM_INFO("  Initializing Interconnect...");
+    LOG_SYSTEM_DEBUG("  Initializing Interconnect...");
     interconnect_init(&interconnect_state, &bios_data, &ram_memory);
 
     // 4. Initialize the Renderer (using the instance inside the GPU)
-    LOG_SYSTEM_INFO("  Initializing Renderer...");
+    LOG_SYSTEM_DEBUG("  Initializing Renderer...");
     if (!renderer_init(&interconnect_state.gpu.renderer)) {
         LOG_SYSTEM_ERROR("Failed to initialize renderer!");
         // Cleanup on failure
@@ -258,7 +258,7 @@ int main(int argc, char *argv[]) {
     // If no disc is loaded, the emulator will just run the BIOS to its menu.
     LOG_SYSTEM_INFO("Attempting to load game disc (optional)...");
     if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crash Bandicoot.cue")) {
-        LOG_SYSTEM_INFO("No game disc loaded. Running BIOS-only mode.");
+        LOG_SYSTEM_WARN("No game disc loaded. Running BIOS-only mode.");
         // Initialize CD-ROM in "no disc" state for BIOS menu
         interconnect_state.cdrom.disc_present = false;
         interconnect_state.cdrom.drive_state = DRIVE_IDLE;
@@ -269,7 +269,7 @@ int main(int argc, char *argv[]) {
 
 
     // 6. Initialize CPU (pass it the fully connected interconnect)
-    LOG_SYSTEM_INFO("  Initializing CPU...");
+    LOG_SYSTEM_DEBUG("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
     
     // 7. Set CPU pointer in interconnect for direct exception triggering
@@ -282,10 +282,10 @@ int main(int argc, char *argv[]) {
     // PCSX ReARMed-style: Schedule Timer0 event at boot so it is always in the event queue
     eventq_schedule(&interconnect_state, EVQ_TIMER0, 1024); // Initial guess: 1024 cycles
 
-    LOG_SYSTEM_INFO("All Emulator Components Initialized.");
+    LOG_SYSTEM_WARN("All Emulator Components Initialized.");
 
     // --- Main Emulation Loop ---
-    LOG_SYSTEM_INFO("=== Main emulation loop starting ===");
+    LOG_SYSTEM_WARN("=== Main emulation loop starting ===");
     bool should_quit = false;
     SDL_Event event;
     uint64_t total_cycles = 0;

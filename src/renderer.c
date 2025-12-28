@@ -202,7 +202,7 @@ static GLuint compile_shader(const char* source, GLenum shader_type) {
         check_gl_error("compile_shader (error path)");
         return 0; // Return 0 on failure
     }
-    LOG_RENDERER_INFO("Shader compiled successfully (Type: %s)\n", (shader_type == GL_VERTEX_SHADER) ? "Vertex" : "Fragment");
+    LOG_RENDERER_DEBUG("Shader compiled successfully (Type: %s)\n", (shader_type == GL_VERTEX_SHADER) ? "Vertex" : "Fragment");
     check_gl_error("compile_shader (success path)");
     return shader;
 }
@@ -245,7 +245,7 @@ static GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
     // glDeleteShader(vertex_shader); // Optional: Delete here if not needed elsewhere
     // glDeleteShader(fragment_shader);
 
-    LOG_RENDERER_INFO("Shader program linked successfully (ID: %u)\n", program);
+    LOG_RENDERER_DEBUG("Shader program linked successfully (ID: %u)\n", program);
     check_gl_error("link_program (success path)");
     return program;
 }
@@ -255,9 +255,9 @@ static GLuint link_program(GLuint vertex_shader, GLuint fragment_shader) {
 
 bool renderer_init(Renderer* renderer) {
     if (log_get_level() >= LOG_LEVEL_INFO) {
-        LOG_RENDERER_INFO("[RENDERER] Initializing renderer");
+        LOG_RENDERER_DEBUG("[RENDERER] Initializing renderer");
     }
-    LOG_RENDERER_INFO("Initializing Renderer...\n");
+    LOG_RENDERER_DEBUG("Initializing Renderer...\n");
     renderer->initialized = false;
     renderer->vertex_count = 0;
     // Clear CPU-side buffers initially (optional but good practice)
@@ -272,9 +272,9 @@ bool renderer_init(Renderer* renderer) {
 
 
     // Compile Shaders
-    LOG_RENDERER_INFO("Compiling vertex shader...\n");
+    LOG_RENDERER_DEBUG("Compiling vertex shader...\n");
     GLuint vs = compile_shader(vertex_shader_source, GL_VERTEX_SHADER);
-    LOG_RENDERER_INFO("Compiling fragment shader...\n");
+    LOG_RENDERER_DEBUG("Compiling fragment shader...\n");
     GLuint fs = compile_shader(fragment_shader_source, GL_FRAGMENT_SHADER);
     if (vs == 0 || fs == 0) {
         LOG_RENDERER_ERROR("Renderer Init Failed: Shader compilation error.\n");
@@ -284,7 +284,7 @@ bool renderer_init(Renderer* renderer) {
     }
 
     // Link Program
-    LOG_RENDERER_INFO("Linking shader program...\n");
+    LOG_RENDERER_DEBUG("Linking shader program...\n");
     renderer->shader_program = link_program(vs, fs);
     // Delete individual shaders now that they are linked into the program
     glDeleteShader(vs);
@@ -303,7 +303,7 @@ bool renderer_init(Renderer* renderer) {
         LOG_RENDERER_WARN("Warning: Could not find uniform 'offset'. Draw offset will not work.\n");
         check_gl_error("glGetUniformLocation offset"); // Check if there was an error other than not found
     } else {
-        LOG_RENDERER_INFO("Found uniform 'offset' at location: %d\n", renderer->uniform_offset_loc);
+        LOG_RENDERER_DEBUG("Found uniform 'offset' at location: %d\n", renderer->uniform_offset_loc);
         // Set initial offset to 0,0
         glUseProgram(renderer->shader_program); // Need to bind program to set uniform
         glUniform2i(renderer->uniform_offset_loc, 0, 0);
@@ -315,7 +315,7 @@ bool renderer_init(Renderer* renderer) {
     if (renderer->uniform_screen_scale_loc < 0) {
         LOG_RENDERER_WARN("Warning: Could not find uniform 'screen_scale'. Display scaling will be incorrect.\n");
     } else {
-        LOG_RENDERER_INFO("Found uniform 'screen_scale' at location: %d\n", renderer->uniform_screen_scale_loc);
+        LOG_RENDERER_DEBUG("Found uniform 'screen_scale' at location: %d\n", renderer->uniform_screen_scale_loc);
         glUseProgram(renderer->shader_program);
         glUniform2f(renderer->uniform_screen_scale_loc,
                     renderer->screen_width * 0.5f,
@@ -327,18 +327,18 @@ bool renderer_init(Renderer* renderer) {
     // --- Create Vertex Array Object (VAO) ---
     // VAO stores the links between VBOs and shader attributes.
     // Based on Guide Section 5.6
-    LOG_RENDERER_INFO("Creating VAO...\n");
+    LOG_RENDERER_DEBUG("Creating VAO...\n");
     glGenVertexArrays(1, &renderer->vao);
     glBindVertexArray(renderer->vao); // Bind the VAO to make it active
-    LOG_RENDERER_INFO("VAO created (ID: %u) and bound.\n", renderer->vao);
+    LOG_RENDERER_DEBUG("VAO created (ID: %u) and bound.\n", renderer->vao);
     check_gl_error("After creating/binding VAO");
 
 
     // --- Create and Configure Position Vertex Buffer Object (VBO) ---
-    LOG_RENDERER_INFO("Creating Position VBO...\n");
+    LOG_RENDERER_DEBUG("Creating Position VBO...\n");
     glGenBuffers(1, &renderer->position_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer); // Bind the new buffer to the GL_ARRAY_BUFFER target
-    LOG_RENDERER_INFO("Position VBO created (ID: %u) and bound.\n", renderer->position_buffer);
+    LOG_RENDERER_DEBUG("Position VBO created (ID: %u) and bound.\n", renderer->position_buffer);
 
     // Allocate buffer storage on the GPU. We'll upload data later using glBufferSubData.
     // GL_DYNAMIC_DRAW is a hint that the data will be modified frequently.
@@ -346,14 +346,14 @@ bool renderer_init(Renderer* renderer) {
                  VERTEX_BUFFER_LEN * sizeof(RendererPosition), // Total buffer size in bytes
                  NULL,                         // Initial data (none)
                  GL_DYNAMIC_DRAW);             // Usage hint
-    LOG_RENDERER_INFO("Position VBO allocated %lu bytes.\n", VERTEX_BUFFER_LEN * sizeof(RendererPosition));
+    LOG_RENDERER_DEBUG("Position VBO allocated %lu bytes.\n", VERTEX_BUFFER_LEN * sizeof(RendererPosition));
     check_gl_error("After position VBO glBufferData");
 
     // --- Link Position VBO to Shader Attribute ---
     // Get the location of the 'vertex_position' attribute in the shader (should be 0 as per layout qualifier)
     GLint pos_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_position");
      if (pos_attrib_loc < 0) { LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_position'.\n"); }
-     else { LOG_RENDERER_INFO("Attribute 'vertex_position' found at location %d.\n", pos_attrib_loc); }
+     else { LOG_RENDERER_DEBUG("Attribute 'vertex_position' found at location %d.\n", pos_attrib_loc); }
 
     // Enable this vertex attribute array
     glEnableVertexAttribArray(pos_attrib_loc); // Use the obtained location
@@ -364,25 +364,25 @@ bool renderer_init(Renderer* renderer) {
                            GL_SHORT,           // Data type of each component (signed 16-bit int)
                            0, // Stride (0 = tightly packed) --> Or sizeof(RendererPosition)? Set 0 for now.
                            (void*)0);          // Offset of the first component in the buffer
-    LOG_RENDERER_INFO("Position VBO linked to vertex shader attribute location %d.\n", pos_attrib_loc);
+    LOG_RENDERER_DEBUG("Position VBO linked to vertex shader attribute location %d.\n", pos_attrib_loc);
     check_gl_error("After setting position attribute pointer");
 
 
     // --- Create and Configure Color Vertex Buffer Object (VBO) ---
-    LOG_RENDERER_INFO("Creating Color VBO...\n");
+    LOG_RENDERER_DEBUG("Creating Color VBO...\n");
     glGenBuffers(1, &renderer->color_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer);
-    LOG_RENDERER_INFO("Color VBO created (ID: %u) and bound.\n", renderer->color_buffer);
+    LOG_RENDERER_DEBUG("Color VBO created (ID: %u) and bound.\n", renderer->color_buffer);
 
     // Allocate storage
     glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererColor), NULL, GL_DYNAMIC_DRAW);
-    LOG_RENDERER_INFO("Color VBO allocated %lu bytes.\n", VERTEX_BUFFER_LEN * sizeof(RendererColor));
+    LOG_RENDERER_DEBUG("Color VBO allocated %lu bytes.\n", VERTEX_BUFFER_LEN * sizeof(RendererColor));
     check_gl_error("After color VBO glBufferData");
 
     // --- Link Color VBO to Shader Attribute ---
     GLint col_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_color");
      if (col_attrib_loc < 0) { LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_color'.\n"); }
-     else { LOG_RENDERER_INFO("Attribute 'vertex_color' found at location %d.\n", col_attrib_loc); }
+     else { LOG_RENDERER_DEBUG("Attribute 'vertex_color' found at location %d.\n", col_attrib_loc); }
 
     glEnableVertexAttribArray(col_attrib_loc);
 
@@ -392,37 +392,37 @@ bool renderer_init(Renderer* renderer) {
                            GL_UNSIGNED_BYTE,   // Data type (unsigned 8-bit int)
                            0, // Stride (0 = tightly packed) --> Or sizeof(RendererColor)? Set 0 for now.
                            (void*)0);          // Offset
-    LOG_RENDERER_INFO("Color VBO linked to vertex shader attribute location %d.\n", col_attrib_loc);
+    LOG_RENDERER_DEBUG("Color VBO linked to vertex shader attribute location %d.\n", col_attrib_loc);
     check_gl_error("After setting color attribute pointer");
 
     // --- Create and Configure Texture Coordinate VBO ---
-    LOG_RENDERER_INFO("Creating TexCoord VBO...\n");
+    LOG_RENDERER_DEBUG("Creating TexCoord VBO...\n");
     glGenBuffers(1, &renderer->texcoord_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer);
     glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererTexCoord), NULL, GL_DYNAMIC_DRAW);
-    LOG_RENDERER_INFO("TexCoord VBO created (ID: %u) and bound.\n", renderer->texcoord_buffer);
+    LOG_RENDERER_DEBUG("TexCoord VBO created (ID: %u) and bound.\n", renderer->texcoord_buffer);
 
     GLint tex_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_texcoord");
     if (tex_attrib_loc >= 0) {
         glEnableVertexAttribArray(tex_attrib_loc);
         glVertexAttribIPointer(tex_attrib_loc, 2, GL_SHORT, 0, (void*)0);
-        LOG_RENDERER_INFO("Attribute 'vertex_texcoord' found at location %d.\n", tex_attrib_loc);
+        LOG_RENDERER_DEBUG("Attribute 'vertex_texcoord' found at location %d.\n", tex_attrib_loc);
     } else {
         LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_texcoord'.\n");
     }
 
     // --- Create and Configure TPage/CLUT VBO ---
-    LOG_RENDERER_INFO("Creating TPage VBO...\n");
+    LOG_RENDERER_DEBUG("Creating TPage VBO...\n");
     glGenBuffers(1, &renderer->tpage_buffer);
     glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer);
     glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererTPage), NULL, GL_DYNAMIC_DRAW);
-    LOG_RENDERER_INFO("TPage VBO created (ID: %u) and bound.\n", renderer->tpage_buffer);
+    LOG_RENDERER_DEBUG("TPage VBO created (ID: %u) and bound.\n", renderer->tpage_buffer);
 
     GLint tpage_attrib_loc = glGetAttribLocation(renderer->shader_program, "vertex_tpage");
     if (tpage_attrib_loc >= 0) {
         glEnableVertexAttribArray(tpage_attrib_loc);
         glVertexAttribIPointer(tpage_attrib_loc, 2, GL_UNSIGNED_SHORT, 0, (void*)0);
-        LOG_RENDERER_INFO("Attribute 'vertex_tpage' found at location %d.\n", tpage_attrib_loc);
+        LOG_RENDERER_DEBUG("Attribute 'vertex_tpage' found at location %d.\n", tpage_attrib_loc);
     } else {
         LOG_RENDERER_WARN("Warning: Could not find attribute 'vertex_tpage'.\n");
     }
@@ -436,7 +436,7 @@ bool renderer_init(Renderer* renderer) {
     // Allocate texture storage (1024x512, 16-bit unsigned integer)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, NULL);
     glBindTexture(GL_TEXTURE_2D, 0);
-    LOG_RENDERER_INFO("VRAM Texture created (ID: %u) as R16UI.\n", renderer->vram_texture);
+    LOG_RENDERER_DEBUG("VRAM Texture created (ID: %u) as R16UI.\n", renderer->vram_texture);
 
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
@@ -444,11 +444,11 @@ bool renderer_init(Renderer* renderer) {
     renderer->uniform_tex_window_and_loc = glGetUniformLocation(renderer->shader_program, "tex_window_and");
     renderer->uniform_tex_window_or_loc = glGetUniformLocation(renderer->shader_program, "tex_window_or");
 
-    LOG_RENDERER_INFO("Found uniform 'use_texture' at location: %d\n", renderer->uniform_use_texture_loc);
-    LOG_RENDERER_INFO("Found uniform 'raw_texture' at location: %d\n", renderer->uniform_raw_texture_loc);
-    LOG_RENDERER_INFO("Found uniform 'vram_texture' at location: %d\n", renderer->uniform_vram_texture_loc);
-    LOG_RENDERER_INFO("Found uniform 'tex_window_and' at location: %d\n", renderer->uniform_tex_window_and_loc);
-    LOG_RENDERER_INFO("Found uniform 'tex_window_or' at location: %d\n", renderer->uniform_tex_window_or_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'use_texture' at location: %d\n", renderer->uniform_use_texture_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'raw_texture' at location: %d\n", renderer->uniform_raw_texture_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'vram_texture' at location: %d\n", renderer->uniform_vram_texture_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'tex_window_and' at location: %d\n", renderer->uniform_tex_window_and_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'tex_window_or' at location: %d\n", renderer->uniform_tex_window_or_loc);
 
     // Set default texture window (no masking)
     glUseProgram(renderer->shader_program);
@@ -460,7 +460,7 @@ bool renderer_init(Renderer* renderer) {
     // --- Unbind ---
     glBindVertexArray(0); // Unbind the VAO
     glBindBuffer(GL_ARRAY_BUFFER, 0); // Unbind the VBO from the target
-    LOG_RENDERER_INFO("VAO and VBO unbound.\n");
+    LOG_RENDERER_DEBUG("VAO and VBO unbound.\n");
 
 
     // --- Initial GL State ---
@@ -474,7 +474,7 @@ bool renderer_init(Renderer* renderer) {
     renderer->initialized = true;
     renderer->texture_enabled = false;
     renderer->raw_texture_enabled = false;
-    LOG_RENDERER_INFO("Renderer Initialized Successfully.\n");
+    LOG_RENDERER_DEBUG("Renderer Initialized Successfully.\n");
     return true;
 }
 
@@ -520,7 +520,7 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
      }
 
      if (renderer->vertex_count + 6 > VERTEX_BUFFER_LEN) {
-        LOG_RENDERER_INFO("Renderer Info: Vertex buffer full (%u verts), forcing draw before push_quad.\n", renderer->vertex_count);
+        LOG_RENDERER_DEBUG("Renderer Info: Vertex buffer full (%u verts), forcing draw before push_quad.\n", renderer->vertex_count);
         renderer_draw(renderer);
         if (renderer->vertex_count + 6 > VERTEX_BUFFER_LEN) {
             LOG_RENDERER_ERROR("Renderer Error: Cannot push quad, buffer still full after draw.\n");
@@ -740,6 +740,8 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
     
     // First, flush any pending primitives
     renderer_draw(renderer);
+    // Diagnostic: log the region being blitted so we can confirm renderer sampling
+    LOG_RENDERER_WARN("[BLIT] VRAM blit region: x=%u y=%u w=%u h=%u", vram_x, vram_y, width, height);
     
     // Create positions for a screen-filling quad using VRAM coordinates
     // The vertex shader will convert these to NDC
@@ -797,11 +799,11 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
 // Draws buffered primitives and requests buffer swap (swap happens in main loop)
 void renderer_display(Renderer* renderer) {
     if (!renderer->initialized) return;
-    LOG_RENDERER_INFO("Renderer: Display requested.\n");
+    LOG_RENDERER_DEBUG("Renderer: Display requested.\n");
     // Draw any remaining buffered vertices
     renderer_draw(renderer);
     // Actual swap (SDL_GL_SwapWindow) happens in main.c/main loop
-    // LOG_RENDERER_INFO("Renderer: Display finished (swap should happen in main loop).\n");
+    // LOG_RENDERER_DEBUG("Renderer: Display finished (swap should happen in main loop).\n");
 }
 
 // Sets the drawing offset uniform. Forces a draw first.
@@ -825,20 +827,20 @@ void renderer_set_draw_offset(Renderer* renderer, int16_t x, int16_t y) {
 // Cleans up OpenGL resources
 void renderer_destroy(Renderer* renderer) {
     if (!renderer->initialized) return;
-    LOG_RENDERER_INFO("Destroying Renderer...\n");
+    LOG_RENDERER_DEBUG("Destroying Renderer...\n");
 
     // Delete OpenGL objects
-    LOG_RENDERER_INFO("  Deleting shader program (ID: %u)\n", renderer->shader_program);
+    LOG_RENDERER_DEBUG("  Deleting shader program (ID: %u)\n", renderer->shader_program);
     glDeleteProgram(renderer->shader_program); check_gl_error("destroy - glDeleteProgram");
 
-    LOG_RENDERER_INFO("  Deleting VBOs (Pos: %u, Col: %u)\n", renderer->position_buffer, renderer->color_buffer);
+    LOG_RENDERER_DEBUG("  Deleting VBOs (Pos: %u, Col: %u)\n", renderer->position_buffer, renderer->color_buffer);
     glDeleteBuffers(1, &renderer->position_buffer); check_gl_error("destroy - glDeleteBuffers pos");
     glDeleteBuffers(1, &renderer->color_buffer); check_gl_error("destroy - glDeleteBuffers col");
     // Add texcoord buffer deletion later if implemented
 
-    LOG_RENDERER_INFO("  Deleting VAO (ID: %u)\n", renderer->vao);
+    LOG_RENDERER_DEBUG("  Deleting VAO (ID: %u)\n", renderer->vao);
     glDeleteVertexArrays(1, &renderer->vao); check_gl_error("destroy - glDeleteVertexArrays");
 
     renderer->initialized = false;
-    LOG_RENDERER_INFO("Renderer Destroyed.\n");
+    LOG_RENDERER_DEBUG("Renderer Destroyed.\n");
 }
