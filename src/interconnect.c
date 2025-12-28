@@ -1993,6 +1993,18 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 dma_cmd_log_count++;
                             }
                             
+                            // Respect GPU STAT[26] (GP0 ready) to avoid overflowing the GP0 FIFO
+                            {
+                                int wait_cycles = 0;
+                                while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
+                                    // Let pending events (timers/VBlank) run so the GPU can drain
+                                    eventq_dispatch_due(inter);
+                                    if (++wait_cycles > 10000) {
+                                        LOG_DMA_WARN("DMA GPU LL: waited too long for GP0 ready, proceeding to avoid deadlock");
+                                        break;
+                                    }
+                                }
+                            }
                             gpu_gp0(&inter->gpu, command_word); // Send command to GPU GP0 port
                         }
                         if (next_addr == 0xFFFFFF) break; // Break outer loop if error occurred
@@ -2090,6 +2102,17 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                         
                         switch (channel_index) {
                             case 2: // GPU
+                                // Respect GP0 FIFO / GPUSTAT ready bit before sending data words
+                                {
+                                    int wait_cycles = 0;
+                                    while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
+                                        eventq_dispatch_due(inter);
+                                        if (++wait_cycles > 10000) {
+                                            LOG_DMA_WARN("DMA GPU: waited too long for GP0 ready while sending data, proceeding");
+                                            break;
+                                        }
+                                    }
+                                }
                                 gpu_gp0(&inter->gpu, data_word); // Send data word to GP0 (for Image Load etc.)
                                 break;
                             // Add cases for other peripherals (CDROM, SPU, MDEC) here
@@ -2240,6 +2263,15 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         // This function is only called for Linked List DMA (logo), not Block/Request (menu)
         for (uint32_t i = 0; i < words; ++i) {
             uint32_t data_word = ram_load32(sys->ram, addr);
+            // Respect GPU STAT[26] (GP0 ready) to avoid overflowing hardware FIFO
+            int waited = 0;
+            while ((gpu_read_status(&sys->gpu) & (1u << 26)) == 0) {
+                // Small busy-wait; log once when we actually wait to verify backpressure
+                if (waited == 0) LOG_DMA_DEBUG("[DMA] Waiting for GPU ready (STAT[26]=0) before sending more GP0 words");
+                waited++;
+                if (waited > 1000) break; // safety cap to avoid infinite hang in broken cases
+            }
+            if (waited > 0) LOG_DMA_INFO("[DMA] GPU DMA: waited %d iterations for GPU ready", waited);
             gpu_gp0(&sys->gpu, data_word); // Send to GP0 (Image Load)
             addr += 4;
         }

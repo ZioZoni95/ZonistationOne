@@ -112,7 +112,8 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
     gpu->gp0_mode = GP0_MODE_COMMAND; // Reset mode
     gpu->gp0_current_opcode = 0xFF; // Reset opcode tracking
     gpu->gp0_command_method = NULL; // Reset handler pointer
-    // TODO: Should also clear the internal hardware FIFO if/when implemented.
+        // Clear internal hardware FIFO
+        gpu->gp0_fifo_head = 0; gpu->gp0_fifo_tail = 0; gpu->gp0_fifo_count = 0;
 }
 
 /** GP1(0x02): Acknowledge GPU Interrupt */
@@ -310,7 +311,11 @@ static void gp0_draw_mode(Gpu* gpu) {
     gpu->texture_disable = ((value >> 11) & 1);       // Affects textured primitives
     gpu->rectangle_texture_x_flip = ((value >> 12) & 1); // Affects texture sampling
     gpu->rectangle_texture_y_flip = ((value >> 13) & 1); // Affects texture sampling
-    // printf("GP0(0xE1): Draw Mode set\n"); // Optional debug
+    // Log draw mode / TPage base for diagnosis
+    LOG_GPU_INFO("GP0(0xE1): Draw Mode set page_base=(%u,%u) texture_depth=%d semi_trans=%u draw_to_display=%u tex_disable=%u flip=(%u,%u)",
+                 gpu->page_base_x, gpu->page_base_y, (int)gpu->texture_depth, gpu->semi_transparency,
+                 (int)gpu->draw_to_display, (int)gpu->texture_disable,
+                 (int)gpu->rectangle_texture_x_flip, (int)gpu->rectangle_texture_y_flip);
 }
 
 /** GP0(0xE2): Set Texture Window */
@@ -370,18 +375,12 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
 
 /** Recompute renderer screen scale and draw offset based on display area and drawing offset. */
 static void gpu_update_display_mapping(Gpu* gpu) {
-    // Use resolution hints directly as screen scale (these come from GP1 0x08 mode bits).
-    // This is more reliable than deriving from GP1 0x06/0x07 ranges which can vary per game.
-    uint16_t horiz = gpu->display_width_hint;
-    uint16_t vert = gpu->display_height_hint;
-    
-    if (horiz <= 0) horiz = 320;
-    if (horiz > 1024) horiz = 1024;
-    if (vert <= 0) vert = 240;
-    if (vert > 512) vert = 512;
-
-    // Apply to renderer
-    renderer_set_screen_scale(&gpu->renderer, horiz, vert);
+    // Use full VRAM dimensions for renderer screen scale so that the
+    // renderer always maps VRAM coordinates 0..1023 / 0..511 directly to
+    // the window. This preserves the visible VRAM border (black area)
+    // and matches the classic PlayStation look where the display area is
+    // a region inside the full VRAM view.
+    renderer_set_screen_scale(&gpu->renderer, VRAM_WIDTH, VRAM_HEIGHT);
 
     // Draw offset maps VRAM coordinates to screen coordinates.
     // The offset is applied as-is from GP0(0xE5), without subtracting display VRAM start.
@@ -448,9 +447,12 @@ static void gp0_quad_texture_blend_opaque(Gpu* gpu) {
         uint16_t tex_addr_y = page_y + tex_v;
         uint16_t tex_val = vram_load16(&gpu->vram, (uint32_t)tex_addr_y * VRAM_WIDTH * VRAM_BPP + tex_addr_x * VRAM_BPP);
 
-        LOG_GPU_DEBUG("GP0(0x2C): V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x Color=%02x%02x%02x | VRAM Peek: CLUT[%d,%d]=%04x Tex[%d,%d]=%04x", 
+         LOG_GPU_INFO("GP0(0x2C): V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x Color=%02x%02x%02x | VRAM Peek: CLUT[%d,%d]=%04x Tex[%d,%d]=%04x DisplayStart=(%u,%u) DispHint=(%u,%u) RendererScale=(%ux%u)", 
                p[0].x, p[0].y, t[0].u, t[0].v, clut, texpage, c0.r, c0.g, c0.b,
-               clut_x, clut_y, clut_val, tex_addr_x, tex_addr_y, tex_val);
+             clut_x, clut_y, clut_val, tex_addr_x, tex_addr_y, tex_val,
+             gpu->display_vram_x_start, gpu->display_vram_y_start,
+             gpu->display_width_hint, gpu->display_height_hint,
+             (uint32_t)gpu->renderer.screen_width, (uint32_t)gpu->renderer.screen_height);
         log_limiter++;
     }
 
@@ -826,8 +828,8 @@ static void gp0_image_store(Gpu* gpu) {
  * This is a full initialization (power-on or hard reset).
  */
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {
-    LOG_GPU_INFO("GPU full initialization (with VRAM)");
-    LOG_GPU_INFO("GPU Initializing (full)...\n");
+    LOG_GPU_DEBUG("GPU full initialization (with VRAM)");
+    LOG_GPU_DEBUG("GPU Initializing (full)...\n");
     vram_init(&gpu->vram); // Init VRAM only on full reset
     // Initialize all Gpu struct members to power-on/GP1 Reset defaults
     gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
@@ -851,11 +853,13 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
     gpu->gp0_mode = GP0_MODE_COMMAND;
     gpu->gp0_command_method = NULL;
+    // Initialize GP0 FIFO
+    gpu->gp0_fifo_head = 0; gpu->gp0_fifo_tail = 0; gpu->gp0_fifo_count = 0;
     gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
     gpu->vram_load_h = 0; gpu->vram_load_count = 0;
     gpu->inter = inter;
     renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0); // Reset texture window
-    LOG_GPU_INFO("GPU Initialized (State reset, VRAM initialized).\n");
+    LOG_GPU_DEBUG("GPU Initialized (State reset, VRAM initialized).\n");
 }
 
 /**
@@ -920,8 +924,8 @@ static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
     }
 }
 
-/** Processes commands/data sent to GP0 port */
-void gpu_gp0(Gpu* gpu, uint32_t command) {
+/** Internal: process a single GP0 word (previous gpu_gp0 body moved here) */
+static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
     // Rate-limit GP0 command logging
     static uint32_t gp0_cmd_count = 0;
     gp0_cmd_count++;
@@ -1055,6 +1059,34 @@ void gpu_gp0(Gpu* gpu, uint32_t command) {
     }
 }
 
+/** Public APi: enqueue GP0 word into hardware FIFO and process available words. */
+void gpu_gp0(Gpu* gpu, uint32_t command) {
+    // If FIFO full, try to drain a bit before enqueueing (avoid dropping words)
+    if (gpu->gp0_fifo_count >= 16) {
+        LOG_GPU_WARN("GP0 FIFO full: draining before enqueue (was full)");
+        while (gpu->gp0_fifo_count > 0) {
+            uint32_t w = gpu->gp0_fifo[gpu->gp0_fifo_head];
+            gpu->gp0_fifo_head = (uint8_t)((gpu->gp0_fifo_head + 1) & 0x0F);
+            gpu->gp0_fifo_count--;
+            gpu_gp0_handle_word(gpu, w);
+            // If a command transitions to IMAGE_LOAD mode, the handler will process data words
+        }
+    }
+
+    // Enqueue the incoming word (space should now be available)
+    gpu->gp0_fifo[gpu->gp0_fifo_tail] = command;
+    gpu->gp0_fifo_tail = (uint8_t)((gpu->gp0_fifo_tail + 1) & 0x0F);
+    gpu->gp0_fifo_count++;
+
+    // Process as many words as possible from FIFO
+    while (gpu->gp0_fifo_count > 0) {
+        uint32_t w = gpu->gp0_fifo[gpu->gp0_fifo_head];
+        gpu->gp0_fifo_head = (uint8_t)((gpu->gp0_fifo_head + 1) & 0x0F);
+        gpu->gp0_fifo_count--;
+        gpu_gp0_handle_word(gpu, w);
+    }
+}
+
 /** Processes commands sent to GP1 port */
 void gpu_gp1(Gpu* gpu, uint32_t command) {
     LOG_GPU_DEBUG("[GP1] Command: 0x%08x (Opcode: 0x%02x)", command, (command >> 24) & 0xFF);
@@ -1101,8 +1133,9 @@ uint32_t gpu_read_status(Gpu* gpu) {
     r |= ((uint32_t)gpu->display_disabled << 23);
     r |= ((uint32_t)(toggle_irq ? 1 : 0) << 24);
     toggle_irq = !toggle_irq;
-    // --- Always set ready bits as per PSX-Spex/nocash ---
-    r |= (1 << 26); // STAT[26] - Ready to receive command word
+    // --- STAT Ready bits: reflect GP0 FIFO availability ---
+    // STAT[26] - Ready to receive command word (1 = ready)
+    if (gpu->gp0_fifo_count < 16) r |= (1 << 26);
     r |= (1 << 27); // STAT[27] - Ready to send VRAM to CPU
     r |= (1 << 28); // STAT[28] - Ready to receive DMA block
     // --- DMA Request Bit (STAT[25]) ---

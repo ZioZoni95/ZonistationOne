@@ -41,7 +41,7 @@ bool bios_load(Bios* bios, const char* path) {
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
     // Print a success message including the path and size.
-    LOG_BIOS_INFO("BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
+    LOG_BIOS_WARN("BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
     // Return true to indicate success.
     return true;
 }

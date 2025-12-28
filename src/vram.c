@@ -9,10 +9,10 @@
  * @param vram Pointer to the Vram struct to initialize.
  */
 void vram_init(Vram* vram) {
-    LOG_VRAM_INFO("VRAM initialized");
+    LOG_VRAM_DEBUG("VRAM initialized");
     // Fill VRAM with zeros initially. Unlike RAM, VRAM often starts cleared.
     memset(vram->data, 0x00, VRAM_SIZE);
-    LOG_VRAM_INFO("VRAM Initialized (%d bytes, filled with 0x00).", VRAM_SIZE);
+    LOG_VRAM_DEBUG("VRAM Initialized (%d bytes, filled with 0x00).", VRAM_SIZE);
 }
 
 // Helper for bounds checking (inline for potential performance)

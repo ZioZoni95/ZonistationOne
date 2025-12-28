@@ -78,7 +78,7 @@ static uint32_t estimate_dma_cycles(DmaChannel* ch) {
 
 // Initializes the DMA state to reset values.
 void dma_init(Dma* dma, struct Interconnect* inter) {
-    LOG_DMA_INFO("DMA initialized");
+    LOG_DMA_DEBUG("DMA initialized");
     dma->inter = inter; // Store pointer to Interconnect
     // DPCR reset value
     dma->control = 0x07654321;

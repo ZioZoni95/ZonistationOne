@@ -139,6 +139,11 @@ typedef struct Gpu { // Define struct Gpu
     uint8_t gp0_current_opcode;       // Opcode of the multi-word command being processed
     Gp0Mode gp0_mode;                 // Current mode (Command or ImageLoad)
     void (*gp0_command_method)(Gpu*); // Function pointer to the current command handler
+    // --- Hardware GP0 FIFO (64 bytes / 16 words) ---
+    uint32_t gp0_fifo[16];           // Hardware FIFO storage
+    uint8_t gp0_fifo_head;           // Index of next word to dequeue
+    uint8_t gp0_fifo_tail;           // Index to enqueue next word
+    uint8_t gp0_fifo_count;          // Number of words currently in FIFO
 
     // --- VRAM Load State (for GP0(A0)) ---
     uint16_t vram_load_x;             // Target X coordinate in VRAM for current image load

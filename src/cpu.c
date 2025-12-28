@@ -1441,16 +1441,7 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
             // If the func_num looks like an MMIO address (SPU range), dump CPU regs
             if (func_num >= SPU_START && func_num <= SPU_END) {
                 LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
-                for (int r = 0; r < 32; ++r) {
-                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
-                }
-                // Dump a few instructions around current PC for context
-                for (int i = 0; i < 4; ++i) {
-                    uint32_t addr = cpu->current_pc + i * 4;
-                    uint32_t insn = 0;
-                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
-                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
-                }
+                // register and instruction dumps suppressed to reduce log spam
             }
 
         } else {
@@ -1459,15 +1450,7 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
 
             if (func_num == 0xC0) {
                 LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
-                for (int r = 0; r < 32; ++r) {
-                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
-                }
-                for (int i = 0; i < 4; ++i) {
-                    uint32_t addr = cpu->current_pc + i * 4;
-                    uint32_t insn = 0;
-                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
-                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
-                }
+                // register and instruction dumps suppressed to reduce log spam
             }
         }
     }
@@ -1479,12 +1462,8 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     
     // Dedicated log for suspicious infinite loop at 0x00001010
     if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
-        LOG_CPU_INFO("[0x1010_LOOP] JR $26 to 0x00001010 detected! Full CPU state:");
-        LOG_CPU_INFO("PC=0x%08x, next_pc=0x%08x, current_pc=0x%08x, $26=0x%08x", cpu->pc, cpu->next_pc, cpu->current_pc, cpu_reg(cpu, 26));
-        for (int i = 0; i < 32; ++i) {
-            LOG_CPU_INFO("GPR[%2d]=0x%08x", i, cpu_reg(cpu, i));
-        }
-        LOG_CPU_INFO("SR=0x%08x, EPC=0x%08x, Cause=0x%08x, HI=0x%08x, LO=0x%08x", cpu->sr, cpu->epc, cpu->cause, cpu->hi, cpu->lo);
+        // Suppressed full CPU state dump for 0x1010 loop to avoid excessive logs
+        LOG_CPU_DEBUG("[0x1010_LOOP] JR $26 to 0x00001010 detected (full dump suppressed)");
     }
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
@@ -1634,30 +1613,16 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
                          cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
             if (func_type == 'C' && func_num >= SPU_START && func_num <= SPU_END) {
                 LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
-                for (int r = 0; r < 32; ++r) {
-                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
-                }
-                for (int i = 0; i < 4; ++i) {
-                    uint32_t addr = cpu->current_pc + i * 4;
-                    uint32_t insn = 0;
-                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
-                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
-                }
+                // Suppressed per-register and nearby instruction dumps to reduce log noise
+                LOG_CPU_DEBUG("[BIOS_DEBUG] GPR/INSN dump suppressed for SPU MMIO C-call at PC=0x%08x", cpu->current_pc);
             }
         } else {
             LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
                          cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
             if (func_num == 0xC0) {
                 LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
-                for (int r = 0; r < 32; ++r) {
-                    LOG_CPU_INFO("GPR[%02d]=0x%08x", r, cpu_reg(cpu, r));
-                }
-                for (int i = 0; i < 4; ++i) {
-                    uint32_t addr = cpu->current_pc + i * 4;
-                    uint32_t insn = 0;
-                    if (cpu->inter) insn = interconnect_load32(cpu->inter, addr);
-                    LOG_CPU_INFO("INSN @ 0x%08x: 0x%08x  %s", addr, insn, disassemble_mips(insn, addr));
-                }
+                // Suppressed per-register and nearby instruction dumps to reduce log noise
+                LOG_CPU_DEBUG("[BIOS_DEBUG] GPR/INSN dump suppressed for C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
             }
         }
     }

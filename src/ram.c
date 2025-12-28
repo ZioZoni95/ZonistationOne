@@ -6,7 +6,7 @@
 // Initializes the RAM memory, filling it with a recognizable pattern.
 // Based on Guide Section 2.34 [cite: 460]
 void ram_init(Ram* ram) {
-    LOG_RAM_INFO("RAM initialized");
+    LOG_RAM_DEBUG("RAM initialized");
     // Fill RAM with zeros to match real PS1 power-on state
     memset(ram->data, 0x00, RAM_SIZE);
     LOG_DEBUG("RAM Initialized (%d bytes, filled with 0x00).", RAM_SIZE);
