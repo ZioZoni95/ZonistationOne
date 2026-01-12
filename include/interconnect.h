@@ -1,7 +1,7 @@
 #ifndef INTERCONNECT_H // Include guard
 #define INTERCONNECT_H
 
-#include "event_scheduler.h" // For EVENT_COUNT and SystemEventType
+// DuckStation-style: No event scheduler (VBlank fires directly from main loop)
 #include <stdint.h>       // For uint32_t, uint16_t etc.
 #include <stdbool.h>      // For bool type
 
@@ -9,14 +9,16 @@
 struct Cpu;
 
 // Include headers for components accessed via the interconnect
-#include "bios.h"
+#include "bios/bios_core.h"  // For BiosState structure
 #include "ram.h"
 #include "dma.h"
 #include "gpu.h"
-#include "timers.h"
-#include "cdrom.h"
+#include "gpu/gpu_thread.h"
+#include "timers/timer_core.h"
 #include "sio.h"
 #include "spu.h"
+#include "irq/irq_core.h"    // Modular interrupt system
+#include "cdrom/cdrom_core.h" // Modular CDROM system
 
 
 /* --- Memory Map Definitions (Physical Addresses) ---
@@ -34,7 +36,6 @@ struct Cpu;
 
 // BIOS ROM (512 Kilobytes)
 #define BIOS_START 0x1fc00000 // Physical start address
-#define BIOS_SIZE  (512 * 1024)
 #define BIOS_END   (BIOS_START + BIOS_SIZE - 1)
 
 // Scratchpad (1 Kilobyte Data Cache RAM)
@@ -54,7 +55,7 @@ struct Cpu;
 #define IRQ_REGS_START        0x1f801070
 #define IRQ_STATUS_ADDR       0x1f801070 // Read: Pending IRQs / Write: Acknowledge IRQs
 #define IRQ_MASK_ADDR         0x1f801074 // Read/Write: Enable/Disable IRQ lines
-#define IRQ_REGS_END          (IRQ_REGS_START + 8 - 1) // Covers I_STAT and I_MASK
+// IRQ_REGS_END now defined in irq/irq_types.h
 
 // DMA Registers
 #define DMA_START 0x1f801080
@@ -93,21 +94,10 @@ struct Cpu;
 // Cache Control Register (KSEG2)
 #define CACHE_CONTROL_ADDR 0xfffe0130
 
-/* --- Interrupt Line Definitions ---
- * Defines symbolic names for the PSX hardware interrupt request lines (0-10).
- * These correspond to bits in the I_STAT and I_MASK registers.
+/* --- NOTE: Interrupt Line Definitions moved to irq/irq_types.h ---
+ * Use IrqLine enum instead of these macros.
+ * Macros kept here for backward compatibility during transition.
  */
-#define IRQ_VBLANK    0  // GPU VBlank interrupt
-#define IRQ_GPU       1  // GPU interrupt (origin depends on GPU config)
-#define IRQ_CDROM     2  // CD-ROM controller interrupt
-#define IRQ_DMA       3  // DMA controller interrupt
-#define IRQ_TIMER0    4  // Timer 0 interrupt
-#define IRQ_TIMER1    5  // Timer 1 interrupt
-#define IRQ_TIMER2    6  // Timer 2 interrupt
-#define IRQ_CTRLMEMCARD 7 // Controller and Memory Card interrupt
-#define IRQ_SIO       8  // Serial I/O interrupt (SIO0/SIO1)
-#define IRQ_SPU       9  // Sound Processing Unit interrupt
-#define IRQ_PIO      10 // PIO (Controller?) interrupt (Lightpen?)
 
 
 /* --- Interconnect Structure Definition ---
@@ -115,36 +105,30 @@ struct Cpu;
  * Routes memory accesses from the CPU to the correct component.
  */
 typedef struct Interconnect {
-    Bios* bios; // Pointer to the loaded BIOS data
+    BiosState bios_state; // Loaded BIOS state (modular system)
     Ram* ram;   // Pointer to the main RAM data buffer
     struct Cpu* cpu; // Pointer to CPU for triggering exceptions
     Gpu gpu;    // GPU state (embedded directly)
+    GpuThreadState gpu_thread_state; // GPU threading system
     Dma dma;    // DMA controller state (embedded directly)
 
     // --- Scratchpad (Fast RAM / D-Cache) ---
     uint8_t scratchpad[SCRATCHPAD_SIZE]; // 1KB fast RAM at 0x1f800000
     
-    // --- Interrupt Controller State ---
-    uint16_t irq_status;     // I_STAT Register state (reflects pending IRQs)
-    uint16_t irq_mask;       // I_MASK Register state (enables/disables IRQs)
-    uint16_t irq_line_state; // Current state of each IRQ line (for edge detection)
-    // --------------------------------
-    Timers timers_state; // <<< ADD THIS MEMBER
-    Cdrom cdrom;
-    Sio sio;  // Serial I/O (Controller and Memory Card)
-    Spu spu;  // Sound Processing Unit state (minimal)
+    // --- Interrupt Controller State (Thread-Safe Modular System) ---
+    IrqState irq_state;      // Modular interrupt controller with mutex protection
+    
+    // --- Component State (Modular Systems) ---
+    TimersState timers_state;     // Timer controller state (modular)
+    CdromState cdrom_state;  // Modular CDROM controller with mutex protection
+    Sio sio;                 // Serial I/O (Controller and Memory Card)
+    Spu spu;                 // Sound Processing Unit state (minimal)
 
-    // --- Event System State (for event_scheduler) ---
-    // These fields are used by the central event/timing system to schedule and dispatch hardware events.
-    #define EVQ_MAX_EVENTS  EVQ_EVENT_COUNT
-
-    uint32_t evq_pending;                        // Bitfield: which events are currently pending
-    uint32_t evq_target_cycle[EVQ_MAX_EVENTS];   // Target cycle for each event
-    uint32_t evq_next_cycle;                     // Cycle of the next scheduled event
-    uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
-    // --------------------------------
-
-    // Add pointers/state for other peripherals here later (Timers, SPU, CDROM, etc.)
+    // DuckStation-style: No event scheduler
+    // - VBlank fires directly from main loop every frame
+    // - Timers use direct cycle stepping (timers_add_sysclk_ticks)
+    // - CDROM checked per-frame (interconnect_check_cdrom_events)
+    uint32_t cpu_cycle_counter;  // Global CPU cycle counter (for debugging/stats)
 
 } Interconnect;
 
@@ -158,7 +142,7 @@ typedef struct Interconnect {
  * @param bios Pointer to the initialized Bios struct.
  * @param ram Pointer to the initialized Ram struct.
  */
-void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram);
+void interconnect_init(Interconnect* inter, BiosState* bios, Ram* ram);
 
 /**
  * @brief Sets the CPU pointer for the Interconnect (called after CPU initialization).

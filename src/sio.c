@@ -1,4 +1,5 @@
 #include "sio.h"
+#include "controller.h"
 #include "log.h"
 #include <string.h>
 #include <stdio.h>
@@ -49,15 +50,14 @@ void sio_init(Sio* sio) {
     sio->selected_device = 0;
     sio->transfer_step = 0;
     
-    // Controller disconnected by default (can be enabled later)
-    sio->controller_connected = false;
-    sio->button_state = 0xFFFF;  // All buttons released
+    // Initialize controller system
+    controller_init();
     
     // Memory cards not present by default
     sio->card_slot1.present = false;
     sio->card_slot2.present = false;
     
-    LOG_INFO("SIO initialized (controller and memory card interface)");
+    LOG_INFO("SIO initialized (controller ENABLED, memory card interface ready)");
 }
 
 bool sio_load_memcard(MemoryCard* card, const char* filepath) {
@@ -191,26 +191,25 @@ static void sio_handle_transfer(Sio* sio, uint8_t tx_byte) {
 }
 
 static uint8_t handle_controller_transfer(Sio* sio, uint8_t tx_byte) {
-    // Simple digital controller response (stub)
-    // Step 1: Command (0x42 = Read Digital)
-    // Step 2: Tap mode (0x00)
-    // Response: Button states (2 bytes)
+    // Digital controller protocol (PS1 standard)
+    // Command 0x42: Read Digital Controller
+    // Response format: 0x5A (ID) + button states (2 bytes)
     
     switch (sio->transfer_step) {
-        case 1:  // Command
-            if (tx_byte == 0x42) {
-                return 0x5A;  // ID (Controller ready)
+        case 1:  // Command byte
+            if (tx_byte == 0x42) {  // Read Digital command
+                return 0x5A;  // Controller ready ID
             }
-            return 0xFF;
+            return 0xFF;  // Unknown command
             
-        case 2:  // Tap mode
-            return (sio->button_state >> 8) & 0xFF;  // High byte
+        case 2:  // Tap mode (should be 0x00 for digital)
+            return (controller_get_buttons() >> 8) & 0xFF;  // High byte of buttons
             
-        case 3:  // Button data high
-            return sio->button_state & 0xFF;  // Low byte
+        case 3:  // Button data
+            return controller_get_buttons() & 0xFF;  // Low byte of buttons
             
         default:
-            return 0xFF;
+            return 0xFF;  // End of transfer
     }
 }
 

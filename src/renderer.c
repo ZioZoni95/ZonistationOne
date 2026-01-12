@@ -528,6 +528,23 @@ void renderer_push_quad(Renderer* renderer, RendererPosition pos[4], RendererCol
         }
      }
 
+    // Debug: Log first few textured quads to verify UV, CLUT, TPage
+    if (tex && renderer->texture_enabled) {
+        static int quad_debug_count = 0;
+        if (quad_debug_count < 5) {
+            uint16_t page_x = (tpage & 0xF) * 64;
+            uint16_t page_y = ((tpage >> 4) & 1) * 256;
+            uint16_t depth = (tpage >> 7) & 3;
+            uint16_t clut_x = (clut & 0x3F) * 16;
+            uint16_t clut_y = (clut >> 6) & 0x1FF;
+            
+            LOG_RENDERER_WARN("[RENDERER] Textured quad #%d: UV[0]=(%d,%d) UV[3]=(%d,%d) CLUT=0x%04X (pos %d,%d) TPage=0x%04X (page %d,%d depth=%d)\\n",
+                              quad_debug_count, tex[0].u, tex[0].v, tex[3].u, tex[3].v,
+                              clut, clut_x, clut_y, tpage, page_x, page_y, depth);
+            quad_debug_count++;
+        }
+    }
+    
     LOG_RENDERER_DEBUG("Renderer: Buffering Quad (Start Index: %u)\n", renderer->vertex_count);
     // Decompose quad into two triangles
     // PSX Quad vertex order: 0--1
@@ -664,12 +681,26 @@ void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+void renderer_push_line(Renderer* renderer, const RendererPosition* positions, const RendererColor* colors) {
+    // TODO: Implement line rendering
+    // For now, stub this out since lines are not critical for BIOS boot
+    (void)renderer;
+    (void)positions;
+    (void)colors;
+}
+
 // Uploads buffered data and performs the OpenGL draw call.
 void renderer_draw(Renderer* renderer) {
      if (!renderer->initialized) {
          LOG_RENDERER_ERROR("Renderer Error: Draw called before initialization.\n");
          return;
      }
+     
+     // Clear the framebuffer
+     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+     check_gl_error("draw - glClear");
+     
      if (renderer->vertex_count == 0) {
         // LOG_RENDERER_DEBUG("Renderer: Draw called with 0 vertices, skipping.\n"); // Optional debug
         return; // Nothing to draw
@@ -794,6 +825,78 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
     renderer_set_texture_mode(renderer, true);
     renderer_push_quad(renderer, positions, colors, texcoords, clut, tpage);
     renderer_draw(renderer);
+}
+
+// Renders the VRAM display area as a full-screen quad (for BIOS menu, etc.)
+void renderer_display_vram(Renderer* renderer, uint16_t display_x, uint16_t display_y, 
+                          uint16_t display_width, uint16_t display_height) {
+    if (!renderer->initialized) return;
+    
+    LOG_RENDERER_DEBUG("Renderer: Displaying VRAM area (%d,%d) %dx%d", 
+                      display_x, display_y, display_width, display_height);
+    
+    // 1. Flush any pending primitives to clear the batch
+    renderer_draw(renderer);
+    
+    // 2. Set up uniforms for full-screen rendering
+    // We want 0..1024, 0..512 to map to -1..1 NDC
+    glUseProgram(renderer->shader_program);
+    glUniform2i(renderer->uniform_offset_loc, 0, 0); // No offset
+    glUniform2f(renderer->uniform_screen_scale_loc, 512.0f, 256.0f); // Half dimensions
+    
+    // Enable raw texture mode (ignore vertex color, use texture directly)
+    glUniform1i(renderer->uniform_use_texture_loc, 1);
+    glUniform1i(renderer->uniform_raw_texture_loc, 1); 
+    
+    // Disable texture windows
+    if (renderer->uniform_tex_window_and_loc >= 0) glUniform2ui(renderer->uniform_tex_window_and_loc, 0xFF, 0xFF);
+    if (renderer->uniform_tex_window_or_loc >= 0) glUniform2ui(renderer->uniform_tex_window_or_loc, 0, 0);
+    
+    glUseProgram(0); // Unbind to let renderer_draw handle it
+    
+    // 3. Create a full-screen quad in VRAM coordinates
+    // Positions: Cover the entire virtual screen (0,0) to (1024,512)
+    // This maps to (-1,-1) to (1,1) in NDC due to the screen_scale above
+    RendererPosition pos[4];
+    pos[0].x = 0;    pos[0].y = 0;    // Top-Left
+    pos[1].x = 1024; pos[1].y = 0;    // Top-Right
+    pos[2].x = 0;    pos[2].y = 512;  // Bottom-Left
+    pos[3].x = 1024; pos[3].y = 512;  // Bottom-Right
+    
+    // Colors: White (ignored in raw mode, but safe default)
+    RendererColor col[4];
+    memset(col, 128, sizeof(col)); // 128 * 2 = 256 (1.0 float)
+    
+    // Texture Coordinates: Map to the requested display area in VRAM
+    // We want the quad (0-1024) to show the texture from (display_x, display_width)
+    RendererTexCoord tex[4];
+    tex[0].u = display_x;                 tex[0].v = display_y;
+    tex[1].u = display_x + display_width; tex[1].v = display_y;
+    tex[2].u = display_x;                 tex[2].v = display_y + display_height;
+    tex[3].u = display_x + display_width; tex[3].v = display_y + display_height;
+    
+    // TPage: Must be 15-bit Direct Mode (Depth = 2) to read raw VRAM pixels
+    // TPage format: | ... | Depth (2 bits) | ... |
+    // Bit 7-8: Depth (0=4bit, 1=8bit, 2=15bit)
+    uint16_t tpage = (2 << 7); 
+    uint16_t clut = 0; // Not used in 15-bit mode
+    
+    // 4. Push and Draw
+    // Note: We use renderer_push_quad to use the correct existing VAO/VBO path
+    // ensuring we don't break the GL state with invalid attribute calls.
+    renderer->texture_enabled = true; // Ensure texture unit binding happens
+    renderer->raw_texture_enabled = true;
+    
+    renderer_push_quad(renderer, pos, col, tex, clut, tpage);
+    renderer_draw(renderer);
+    
+    // 5. Restore State (Optional but recommended)
+    // Restore proper screen scale for subsequent primitives
+    glUseProgram(renderer->shader_program);
+    glUniform2f(renderer->uniform_screen_scale_loc, 
+                renderer->screen_width * 0.5f, 
+                renderer->screen_height * 0.5f);
+    glUseProgram(0);
 }
 
 // Draws buffered primitives and requests buffer swap (swap happens in main loop)

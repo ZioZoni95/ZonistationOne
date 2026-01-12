@@ -1,8 +1,14 @@
 #include "dma.h"
 #include <stdio.h> // For fprintf, stderr
 #include "log.h"
-#include "event_scheduler.h" // For eventq_schedule
-#include "interconnect.h"   // For Interconnect struct (needed for event system)
+// DuckStation-style: No event scheduler (removed)
+#include "interconnect.h"   // For Interconnect struct
+#include "irq/irq_core.h"   // For IRQ module functions
+#include "gpu/gpu_core.h"   // For GPU DMA functions
+#include "spu.h"            // For SPU (placeholders)
+#include "cdrom/cdrom_core.h" // For CDROM (placeholders)
+#include <string.h>         // For memset
+// #include "mdec.h"           // For MDEC (placeholders)
 
 // Logging: Only use LOG_DMA_ERROR for DMA hardware faults. No per-transfer logs.
 
@@ -13,65 +19,54 @@
 #define LOG_DMA_TRACE_ENABLED 0
 #endif
 
+// Constants
+#define DMA_BASE_ADDRESS_MASK 0x00FFFFFF
+#define DMA_TRANSFER_ADDRESS_MASK 0x00FFFFFC
+#define DMA_LINKED_LIST_TERMINATOR 0x00FFFFFF
+
 // Helper function to get channel control register value
 // REMOVED 'static'
 uint32_t channel_get_control(DmaChannel* ch) {
-    uint32_t r = 0;
-    r |= (uint32_t)ch->direction;      // Bit 0
-    r |= ((uint32_t)ch->step << 1);    // Bit 1
-    // r |= ((uint32_t)ch->chopping << 8); // Bit 8 - Not implemented yet
-    r |= ((uint32_t)ch->sync << 9);    // Bits 9-10
-    // r |= ((uint32_t)ch->chopping_dma_sz << 16); // Bits 16-18 - Not implemented
-    // r |= ((uint32_t)ch->chopping_cpu_sz << 20); // Bits 20-22 - Not implemented
-    r |= ((uint32_t)ch->enable << 24); // Bit 24
-    r |= ((uint32_t)ch->trigger << 28);// Bit 28
-    // r |= ((uint32_t)ch->chcr_unknown_rw << 29); // Bits 29-30 - Not implemented
-    return r;
+    return ch->channel_control.bits;
 }
 
 // Helper function to set channel control register value
 // REMOVED 'static'
 void channel_set_control(DmaChannel* ch, uint32_t value) {
-    ch->direction = (value & 1) ? FROM_RAM : TO_RAM;
-    ch->step = ((value >> 1) & 1) ? DECREMENT : INCREMENT;
-    // ch->chopping = (value >> 8) & 1; // Not implemented
-    switch ((value >> 9) & 3) {
-        case 0: ch->sync = MANUAL; break;
-        case 1: ch->sync = REQUEST; break;
-        case 2: ch->sync = LINKED_LIST; break;
-        default:
-            LOG_DMA_WARN("Warning: Invalid DMA Sync mode %d written to CHCR\n", (value >> 9) & 3);
-            break;
-    }
-    // ch->chopping_dma_sz = (value >> 16) & 7; // Not implemented
-    // ch->chopping_cpu_sz = (value >> 20) & 7; // Not implemented
-    ch->enable = (value >> 24) & 1;
-    ch->trigger = (value >> 28) & 1;
-    // ch->chcr_unknown_rw = (value >> 29) & 3; // Not implemented
+    ch->channel_control.bits = value;
 }
 
 // Checks if a channel should start transferring based on its state.
 bool dma_channel_is_active(DmaChannel* ch) {
-    if (!ch->enable) {
+    if (!ch->channel_control.enable_busy) {
         return false;
     }
-    if (ch->sync == MANUAL) {
-        return ch->trigger;
+    if (ch->channel_control.sync_mode == DMA_SYNC_MANUAL) {
+        return ch->channel_control.start_trigger;
     }
     return true;
 }
 
 // Marks a channel as finished after a transfer.
 void dma_channel_done(DmaChannel* ch) {
-    ch->enable = false;
-    ch->trigger = false;
-    // TODO: Handle setting/clearing interrupt flags in DICR here later
+    ch->channel_control.enable_busy = false;
+    ch->channel_control.start_trigger = false;
 }
 
 // Helper: Estimate cycles for a DMA transfer (very rough, tune as needed)
 static uint32_t estimate_dma_cycles(DmaChannel* ch) {
     // PS1 DMA is fast, but not instant. Use 2 cycles per word as a starting point.
-    uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+    uint32_t words;
+    if (ch->channel_control.sync_mode == DMA_SYNC_MANUAL) {
+        words = ch->block_control.manual.word_count;
+        if (words == 0) words = 0x10000;
+    } else if (ch->channel_control.sync_mode == DMA_SYNC_REQUEST) {
+        uint32_t bc = ch->block_control.request.block_count;
+        uint32_t bs = ch->block_control.request.block_size;
+        words = (bc == 0 ? 1 : bc) * (bs == 0 ? 1 : bs);
+    } else {
+        words = 1; // Linked list, estimate 1 for now
+    }
     if (words == 0) words = 1;
     return words * 2; // 2 cycles per word (tune as needed)
 }
@@ -81,29 +76,20 @@ void dma_init(Dma* dma, struct Interconnect* inter) {
     LOG_DMA_DEBUG("DMA initialized");
     dma->inter = inter; // Store pointer to Interconnect
     // DPCR reset value
-    dma->control = 0x07654321;
+    dma->control.bits = 0x07654321;
 
     // Initialize DICR fields
-    dma->force_irq = false;
-    dma->channel_irq_enable = 0;
-    dma->master_irq_enable = false;
-    dma->channel_irq_flags = 0;
-    dma->master_irq_flag = false;
-    dma->dicr_unknown_rw = 0;
+    dma->dicr.bits = 0;
 
-    // Initialize all 7 channels to default values
-    for (int i = 0; i < 7; ++i) {
-        dma->channels[i].enable = false;
-        dma->channels[i].direction = TO_RAM;
-        dma->channels[i].step = INCREMENT;
-        dma->channels[i].sync = MANUAL;
-        dma->channels[i].trigger = false;
+    // Initialize all channels to default values
+    for (int i = 0; i < DMA_NUM_CHANNELS; ++i) {
         dma->channels[i].base_addr = 0;
-        dma->channels[i].block_size = 0;
-        dma->channels[i].block_count = 0;
+        dma->channels[i].block_control.bits = 0;
+        dma->channels[i].channel_control.bits = 0;
+        dma->channels[i].request = false;
     }
 
-    printf("DMA Initialized. DPCR=0x%08x, Channels initialized.\n", dma->control);
+    printf("DMA Initialized. DPCR=0x%08x, Channels initialized.\n", dma->control.bits);
 }
 
 // Reads a 32-bit value from a DMA register address (relative offset).
@@ -111,13 +97,13 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
     uint32_t channel_index = (offset >> 4) & 0x7;
     uint32_t register_offset = offset & 0xF;
 
-    if (channel_index < 7) { // Channel Register Access
+    if (channel_index < DMA_NUM_CHANNELS) { // Channel Register Access
         DmaChannel* ch = &dma->channels[channel_index];
         switch (register_offset) {
             case 0x0: // MADR
                 return ch->base_addr;
             case 0x4: // BCR
-                return ((uint32_t)ch->block_count << 16) | (uint32_t)ch->block_size;
+                return ch->block_control.bits;
             case 0x8: // CHCR
                 return channel_get_control(ch);
             default:
@@ -127,19 +113,9 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
     } else { // Main DMA Register Access
         switch (offset) {
             case 0x70: // DPCR
-                return dma->control;
+                return dma->control.bits;
             case 0x74: // DICR
-                {
-                    uint32_t dicr = 0;
-                    dicr |= (uint32_t)dma->dicr_unknown_rw & 0x3F;
-                    dicr |= ((uint32_t)dma->force_irq << 15);
-                    dicr |= ((uint32_t)dma->channel_irq_enable << 16);
-                    dicr |= ((uint32_t)dma->master_irq_enable << 23);
-                    dicr |= ((uint32_t)dma->channel_irq_flags << 24);
-                    // Master IRQ flag (bit 31)
-                    dicr |= ((uint32_t)dma->master_irq_flag << 31);
-                    return dicr;
-                }
+                return dma->dicr.bits;
             default:
                 LOG_DMA_ERROR("Error: Unhandled DMA Main register read at offset 0x%x\n", offset);
                 return 0;
@@ -154,15 +130,14 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
     uint32_t register_offset = offset & 0xF;
     bool channel_became_active = false;
 
-    if (channel_index < 7) { // Channel Register Access
+    if (channel_index < DMA_NUM_CHANNELS) { // Channel Register Access
         DmaChannel* ch = &dma->channels[channel_index];
         switch (register_offset) {
             case 0x0: // MADR
-                ch->base_addr = value & 0x00FFFFFF;
+                ch->base_addr = value & DMA_BASE_ADDRESS_MASK;
                 break;
             case 0x4: // BCR
-                ch->block_size = (uint16_t)(value & 0xFFFF);
-                ch->block_count = (uint16_t)(value >> 16);
+                ch->block_control.bits = value;
                 break;
             case 0x8: // CHCR
                 channel_set_control(ch, value);
@@ -174,6 +149,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                     if (dma_activate_count <= 10 || dma_activate_count % 100 == 0) {
                         LOG_DMA_DEBUG("[DMA] Channel %d activated #%u", channel_index, dma_activate_count);
                     }
+                    // Start transfer
+                    dma_transfer_channel(dma, (DmaChannelIndex)channel_index);
                 }
                 break;
             default:
@@ -185,33 +162,23 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
     } else { // Main DMA Register Access
          switch (offset) {
             case 0x70: // DPCR
-                dma->control = value;
+                dma->control.bits = value;
+                // Check if any channels can now transfer
+                for (int i = 0; i < DMA_NUM_CHANNELS; i++) {
+                    if (dma_can_transfer_channel(dma, (DmaChannelIndex)i)) {
+                        dma_transfer_channel(dma, (DmaChannelIndex)i);
+                    }
+                }
                 break;
             case 0x74: // DICR
-                dma->dicr_unknown_rw = (uint8_t)(value & 0x3F);
-                dma->force_irq = (value >> 15) & 1;
-                dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
-                dma->master_irq_enable = (value >> 23) & 1;
-                LOG_DMA_DEBUG("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
-                // --- PCSX ReARMed-style immediate IRQ3 assertion after DICR write ---
-                // If the DMA transfer for channel 2 (GPU) is already done, and the BIOS enables IRQ3 after the fact,
-                // we must immediately assert IRQ3 if the condition is true (see nocash/PCSX ReARMed behavior)
-                if ((dma->channel_irq_flags & (1 << 2)) && dma->master_irq_enable) {
-                    dma->master_irq_flag = 1;
-                    interconnect_request_irq(dma->inter, IRQ_DMA, "DMA IRQ3 (DICR write, PCSX ReARMed style)");
-                }
-                // --- DMA IRQ acknowledge logic ---
+                dma->dicr.bits = (dma->dicr.bits & ~0x00FFFFFF) | (value & 0x00FFFFFF);
+                dma->dicr.bits = dma->dicr.bits & ~(value & 0x7F000000);
+                dma_update_irq(dma);
+                // Acknowledge logic
                 uint8_t ack_flags = (uint8_t)((value >> 24) & 0x7F);
                 if (ack_flags) {
-                    dma->channel_irq_flags &= ~ack_flags;
-                    // If any acknowledged channel was enabled, clear master IRQ flag
-                    if ((dma->channel_irq_enable & ack_flags) != 0) {
-                        dma->master_irq_flag = false;
-                        // Also clear IRQ3 (DMA IRQ) in irq_status
-                        if (dma->inter) {
-                            dma->inter->irq_status &= ~(1u << 3);
-                        }
-                    }
+                    dma->dicr.channel_irq_flags &= ~ack_flags;
+                    dma_update_irq(dma);
                 }
                 break;
             default:
@@ -232,3 +199,239 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
 // if (dma->channel_irq_enable & (1 << channel_index)) {
 //     interconnect_request_irq(dma->inter, IRQ_DMA, "DMA");
 // }
+
+// New functions for DuckStation-style implementation
+void dma_set_request(Dma* dma, DmaChannelIndex channel, bool request) {
+    DmaChannel* cs = &dma->channels[channel];
+    if (cs->request == request) return;
+    cs->request = request;
+    if (dma_can_transfer_channel(dma, channel)) {
+        dma_transfer_channel(dma, channel);
+    }
+}
+
+bool dma_can_transfer_channel(Dma* dma, DmaChannelIndex channel) {
+    DmaChannel* cs = &dma->channels[channel];
+    if (!dma->control.bits & (1 << (channel * 4 + 3))) return false; // Master enable
+    if (!cs->channel_control.enable_busy) return false;
+    if (cs->channel_control.sync_mode != DMA_SYNC_MANUAL) return false; // Simplified, no halt
+    return cs->request;
+}
+
+void dma_update_irq(Dma* dma) {
+    dma->dicr.master_irq_flag = (dma->dicr.force_irq ||
+                                 (dma->dicr.master_irq_enable && (dma->dicr.channel_irq_flags & dma->dicr.channel_irq_enable)));
+    if (dma->dicr.master_irq_flag) {
+        interconnect_request_irq(dma->inter, IRQ_DMA, "DMA");
+    }
+}
+
+static uint32_t dma_get_word_count_manual(DmaChannel* cs) {
+    uint32_t wc = cs->block_control.manual.word_count;
+    return (wc == 0) ? 0x10000 : wc;
+}
+
+static uint32_t dma_get_block_size(DmaChannel* cs) {
+    uint32_t bs = cs->block_control.request.block_size;
+    return (bs == 0) ? 0x10000 : bs;
+}
+
+static uint32_t dma_get_block_count(DmaChannel* cs) {
+    uint32_t bc = cs->block_control.request.block_count;
+    return (bc == 0) ? 0x10000 : bc;
+}
+
+static bool dma_is_linked_list_terminator(uint32_t address) {
+    return (address & DMA_LINKED_LIST_TERMINATOR) == DMA_LINKED_LIST_TERMINATOR;
+}
+
+static void dma_complete_transfer(Dma* dma, DmaChannelIndex channel, DmaChannel* cs) {
+    cs->channel_control.enable_busy = false;
+    if ((dma->dicr.channel_irq_enable & (1 << (uint32_t)channel)) &&
+        dma->dicr.master_irq_enable) {
+        dma->dicr.channel_irq_flags |= (1 << (uint32_t)channel);
+        dma_update_irq(dma);
+    }
+}
+
+// Placeholder DMA functions for devices not implemented
+static void dma_spu_write(const uint32_t* words, uint32_t word_count) {
+    // Placeholder
+}
+
+static void dma_spu_read(uint32_t* words, uint32_t word_count) {
+    // Placeholder
+    memset(words, 0, word_count * sizeof(uint32_t));
+}
+
+static void dma_cdrom_write(const uint32_t* words, uint32_t word_count) {
+    // Placeholder
+}
+
+static void dma_cdrom_read(uint32_t* words, uint32_t word_count) {
+    // Placeholder
+    memset(words, 0, word_count * sizeof(uint32_t));
+}
+
+static void dma_mdecin_write(const uint32_t* words, uint32_t word_count) {
+    // Placeholder
+}
+
+static void dma_mdecout_read(uint32_t* words, uint32_t word_count) {
+    // Placeholder
+    memset(words, 0, word_count * sizeof(uint32_t));
+}
+
+bool dma_transfer_channel(Dma* dma, DmaChannelIndex channel) {
+    DmaChannel* cs = &dma->channels[channel];
+    bool copy_to_device = cs->channel_control.copy_to_device;
+    cs->channel_control.start_trigger = false;
+
+    uint32_t current_address = cs->base_addr;
+    uint32_t increment = cs->channel_control.address_step_reverse ? (uint32_t)-4 : 4;
+
+    switch (cs->channel_control.sync_mode) {
+        case DMA_SYNC_MANUAL: {
+            uint32_t word_count = dma_get_word_count_manual(cs);
+            uint32_t transfer_addr = current_address & DMA_TRANSFER_ADDRESS_MASK;
+
+            if (copy_to_device) {
+                // Memory to device
+                switch (channel) {
+                    case DMA_CHANNEL_GPU:
+                        // Assume RAM is accessible via interconnect
+                        for (uint32_t i = 0; i < word_count; i++) {
+                            uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                            gpu_dma_write(&dma->inter->gpu, value);
+                            transfer_addr += increment;
+                        }
+                        gpu_end_dma_write(&dma->inter->gpu);
+                        break;
+                    case DMA_CHANNEL_SPU:
+                        // Simplified
+                        for (uint32_t i = 0; i < word_count; i++) {
+                            uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                            dma_spu_write(&value, 1);
+                            transfer_addr += increment;
+                        }
+                        break;
+                    case DMA_CHANNEL_CDROM:
+                        for (uint32_t i = 0; i < word_count; i++) {
+                            uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                            dma_cdrom_write(&value, 1);
+                            transfer_addr += increment;
+                        }
+                        break;
+                    case DMA_CHANNEL_MDECIN:
+                        for (uint32_t i = 0; i < word_count; i++) {
+                            uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                            dma_mdecin_write(&value, 1);
+                            transfer_addr += increment;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            } else {
+                // Device to memory
+                switch (channel) {
+                    case DMA_CHANNEL_GPU:
+                        gpu_dma_read(&dma->inter->gpu, NULL, word_count); // Simplified
+                        break;
+                    case DMA_CHANNEL_CDROM:
+                        {
+                            uint32_t words[1];
+                            dma_cdrom_read(words, 1);
+                            interconnect_store32(dma->inter, transfer_addr, words[0]);
+                        }
+                        break;
+                    case DMA_CHANNEL_SPU:
+                        {
+                            uint32_t words[1];
+                            dma_spu_read(words, 1);
+                            interconnect_store32(dma->inter, transfer_addr, words[0]);
+                        }
+                        break;
+                    case DMA_CHANNEL_MDECOUT:
+                        {
+                            uint32_t words[1];
+                            dma_mdecout_read(words, 1);
+                            interconnect_store32(dma->inter, transfer_addr, words[0]);
+                        }
+                        break;
+                    case DMA_CHANNEL_OTC:
+                        // Clear ordering table
+                        for (uint32_t i = 0; i < word_count - 1; i++) {
+                            uint32_t next = (transfer_addr - 4) & 0x1FFFFC;
+                            interconnect_store32(dma->inter, transfer_addr, next);
+                            transfer_addr = next;
+                        }
+                        interconnect_store32(dma->inter, transfer_addr, 0xFFFFFF);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            dma_complete_transfer(dma, channel, cs);
+            return true;
+        }
+        case DMA_SYNC_REQUEST: {
+            // Simplified, no slicing
+            uint32_t block_size = dma_get_block_size(cs);
+            uint32_t blocks_remaining = dma_get_block_count(cs);
+            for (uint32_t b = 0; b < blocks_remaining; b++) {
+                uint32_t transfer_addr = current_address & DMA_TRANSFER_ADDRESS_MASK;
+                if (copy_to_device) {
+                    switch (channel) {
+                        case DMA_CHANNEL_GPU:
+                            for (uint32_t i = 0; i < block_size; i++) {
+                                uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                                gpu_dma_write(&dma->inter->gpu, value);
+                                transfer_addr += increment;
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                } else {
+                    switch (channel) {
+                        case DMA_CHANNEL_GPU:
+                            gpu_dma_read(&dma->inter->gpu, NULL, block_size);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                current_address = transfer_addr;
+            }
+            cs->base_addr = current_address;
+            cs->block_control.request.block_count = 0;
+            dma_complete_transfer(dma, channel, cs);
+            return true;
+        }
+        case DMA_SYNC_LINKED_LIST: {
+            if (!copy_to_device) return true; // Not implemented
+            while (cs->request) {
+                uint32_t header = interconnect_load32(dma->inter, current_address & DMA_TRANSFER_ADDRESS_MASK);
+                uint32_t word_count = header >> 24;
+                uint32_t next_address = header & 0x00FFFFFF;
+                uint32_t transfer_addr = (current_address & DMA_TRANSFER_ADDRESS_MASK) + 4;
+                for (uint32_t i = 0; i < word_count; i++) {
+                    uint32_t value = interconnect_load32(dma->inter, transfer_addr);
+                    gpu_dma_write(&dma->inter->gpu, value);
+                    transfer_addr += 4;
+                }
+                current_address = next_address;
+                if (dma_is_linked_list_terminator(current_address)) {
+                    cs->base_addr = DMA_LINKED_LIST_TERMINATOR;
+                    dma_complete_transfer(dma, channel, cs);
+                    return true;
+                }
+            }
+            cs->base_addr = current_address;
+            return true;
+        }
+        default:
+            return true;
+    }
+}

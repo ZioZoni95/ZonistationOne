@@ -7,7 +7,9 @@
 #include "log.h"
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
-#include "timers.h"        // Add this include for timer event handler prototypes
+#include "timers/timer_core.h"  // Modular timer system
+#include "irq/irq_core.h"  // NEW: Modular interrupt system
+#include "threading.h"     // NEW: Thread-safe primitives
 
 // ===============================
 // Event Scheduler Implementation
@@ -124,9 +126,10 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     
     // Log VBlank with SYSTEM category to bypass timer rate limiting
     if (vblank_count <= 5 || vblank_count % 60 == 0) {
+        uint32_t i_stat = irq_read_i_stat(&sys->irq_state);
+        uint32_t i_mask = irq_read_i_mask(&sys->irq_state);
         LOG_DEBUG("[VBlank] Frame #%u at cycle %u, I_STAT=0x%04x, I_MASK=0x%04x", 
-                 vblank_count, sys->cpu_cycle_counter,
-                 sys->irq_status, sys->irq_mask);
+                 vblank_count, sys->cpu_cycle_counter, i_stat, i_mask);
     }
     
     // Always reschedule the next VBlank
@@ -137,10 +140,11 @@ static void evq_handle_vblank(struct Interconnect* sys) {
         LOG_ERROR("[VBlank] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);
     }
     
-    // Trigger VBlank interrupt (IRQ0 per PSX-SPX)
-    interconnect_request_irq(sys, 0, "VBlank");
+    // Trigger VBlank interrupt (IRQ0 per PSX-SPX) - THREAD-SAFE
+    interconnect_request_irq(sys, IRQ_VBLANK, "VBlank");
     
-    timers_on_vblank(&sys->timers_state);
+    // Notify timer 1 of VBlank edge (for sync mode)
+    timer_set_gate(&sys->timers_state, sys, 1, true);
 
     // --- Diagnostic VRAM + GPU register dump at VBlank ---
     // Dump a few frames early and every 60th frame to help diagnose display issues.
@@ -155,6 +159,9 @@ static void evq_handle_vblank(struct Interconnect* sys) {
                      gpu->display_width_hint, gpu->display_height_hint,
                      gpu->drawing_area_left, gpu->drawing_area_top, gpu->drawing_area_right, gpu->drawing_area_bottom);
 
+        // VRAM PPM dump disabled for performance
+        // Uncomment to re-enable VRAM frame dumps
+        #if 0
         // Determine dump region: prefer display_hint if non-zero, otherwise use 320x240
         uint32_t dump_x = gpu->display_vram_x_start;
         uint32_t dump_y = gpu->display_vram_y_start;
@@ -198,6 +205,16 @@ static void evq_handle_vblank(struct Interconnect* sys) {
         } else {
             LOG_GPU_INFO("[VBlank Dump] Failed to open %s for writing", fname);
         }
+        #endif
+        
+        // Get display dimensions for renderer blit
+        uint32_t dump_x = gpu->display_vram_x_start;
+        uint32_t dump_y = gpu->display_vram_y_start;
+        uint32_t dump_w = gpu->display_width_hint ? gpu->display_width_hint : 320;
+        uint32_t dump_h = gpu->display_height_hint ? gpu->display_height_hint : 240;
+        if (dump_x + dump_w > VRAM_WIDTH) dump_w = VRAM_WIDTH - dump_x;
+        if (dump_y + dump_h > VRAM_HEIGHT) dump_h = VRAM_HEIGHT - dump_y;
+        
         // Force the renderer to blit the display-area from VRAM to the screen
         if (gpu->renderer.initialized && gpu->display_width_hint > 0 && gpu->display_height_hint > 0) {
             LOG_GPU_INFO("[VBlank Dump] Forcing renderer blit of display-area (%u,%u %ux%u)", dump_x, dump_y, dump_w, dump_h);
@@ -241,10 +258,11 @@ static void evq_handle_timer0(struct Interconnect* sys) {
     if (timer0_dispatch_count < 5) {
         LOG_EVENT_DEBUG("[EventQ] DISPATCH Timer0 event handler called (count=%d)", ++timer0_dispatch_count);
     }
-    timer0_event_handler(sys);
+    // Legacy event system - timers now use direct cycle stepping
+    (void)sys;
 }
-static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(sys); }
-static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
+static void evq_handle_timer1(struct Interconnect* sys) { (void)sys; /* Legacy - not used */ }
+static void evq_handle_timer2(struct Interconnect* sys) { (void)sys; /* Legacy - not used */ }
 
 static void evq_handle_dma_gpu(struct Interconnect* sys) {
     static uint32_t gpu_dma_count = 0;
@@ -271,12 +289,13 @@ static void evq_handle_dma_gpu(struct Interconnect* sys) {
         dma->master_irq_flag = true;
         LOG_EVENT_DEBUG("[DMA] Master IRQ flag set: master_irq_flag=%d", dma->master_irq_flag);
     }
-    // If master IRQ flag is set, set IRQ3 (DMA IRQ) in irq_status
+    // If master IRQ flag is set, set IRQ3 (DMA IRQ) - THREAD-SAFE
     if (dma->master_irq_flag) {
         LOG_EVENT_DEBUG("[DMA] GPU DMA IRQ3 triggered (master IRQ flag set)");
-        interconnect_request_irq(sys, 3, "DMA_GPU"); // Use edge-triggered API
+        interconnect_request_irq(sys, IRQ_DMA, "DMA_GPU"); // THREAD-SAFE
     }
-    LOG_EVENT_DEBUG("[DMA] Handler exit: channel_irq_enable=0x%02x, master_irq_enable=%d, master_irq_flag=%d, irq_status=0x%04x", dma->channel_irq_enable, dma->master_irq_enable, dma->master_irq_flag, sys->irq_status);
+    uint32_t i_stat = irq_read_i_stat(&sys->irq_state);
+    LOG_EVENT_DEBUG("[DMA] Handler exit: channel_irq_enable=0x%02x, master_irq_enable=%d, master_irq_flag=%d, irq_status=0x%04x", dma->channel_irq_enable, dma->master_irq_enable, dma->master_irq_flag, i_stat);
 }
 
 static void evq_handle_dma_cdrom(struct Interconnect* sys) {
@@ -286,7 +305,12 @@ static void evq_handle_dma_cdrom(struct Interconnect* sys) {
 }
 
 static void evq_handle_cdrom(struct Interconnect* sys) {
-    // CDROM events are now handled via interconnect_check_cdrom_events()
-    // This handler is kept for legacy event system compatibility
-    (void)sys;
+    // CDROM second response event handler
+    LOG_EVENT_DEBUG("[CDROM] Event handler: Executing second response");
+    
+    // Forward declare cdrom_execute_second_response from cdrom_commands.c
+    extern void cdrom_execute_second_response(CdromState* cdrom, struct Interconnect* inter);
+    
+    // Execute the pending second response
+    cdrom_execute_second_response(&sys->cdrom, sys);
 } 

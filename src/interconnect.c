@@ -7,6 +7,7 @@
 #include "gpu.h"
 #include "ram.h"
 #include "cpu.h"  // For cpu_exception() and ExceptionCause
+#include "cpu/cpu_debugger.h"
 
 // Instrumentation: BIOS patch-check monitoring range
 #define BIOS_PATCH_START 0x80059DC0U
@@ -115,9 +116,10 @@ static void interconnect_force_bios_boot_config(Interconnect* inter);
  * @param bios Pointer to the loaded Bios struct.
  * @param ram Pointer to the initialized Ram struct.
  */
-void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
+void interconnect_init(Interconnect* inter, BiosState* bios, Ram* ram) {
     LOG_INTERCONNECT_DEBUG("Interconnect initialized");
-    inter->bios = bios;
+    // Copy BIOS state into interconnect
+    memcpy(&inter->bios_state, bios, sizeof(BiosState));
     inter->ram = ram;
     inter->cpu = NULL; // Will be set later via interconnect_set_cpu()
     dma_init(&inter->dma, inter); // Initialize DMA controller state
@@ -126,11 +128,11 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize Scratchpad (1KB fast RAM)
     memset(inter->scratchpad, 0, SCRATCHPAD_SIZE);
     
-    cdrom_init(&inter->cdrom,inter);
-    // Initialize Interrupt Controller state
-    inter->irq_status = 0;     // No pending interrupts (I_STAT)
-    inter->irq_mask = 0;       // Mask all IRQs at startup (I_MASK)
-    inter->irq_line_state = 0; // No IRQ lines active (for edge detection)
+    // Initialize modular CDROM controller (thread-safe)
+    cdrom_init(&inter->cdrom_state);
+    
+    // Initialize modular interrupt controller (thread-safe)
+    irq_init(&inter->irq_state);
     
     // Initialize Timer state
     timers_init(&inter->timers_state, inter);
@@ -140,7 +142,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize SPU
     spu_init(&inter->spu);
     
-    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
+    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");;
 }
 
 /**
@@ -165,23 +167,12 @@ void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
  * @param state true = line active, false = line inactive
  */
 void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool state) {
-    const uint32_t bit = (1u << irq_line);
-    const uint32_t prev_line_state = inter->irq_line_state;
+    // Use modular IRQ system (thread-safe)
+    irq_set_line(&inter->irq_state, (IrqLine)irq_line, state);
     
-    // Update line state
-    if (state) {
-        inter->irq_line_state |= bit;
-    } else {
-        inter->irq_line_state &= ~bit;
-    }
-    
-    // Edge detection: only set I_STAT on rising edge (0->1 transition)
-    if (state && !(prev_line_state & bit)) {
-        inter->irq_status |= bit;
-        static uint32_t irq_edge_count = 0;
-        if (++irq_edge_count % 100 == 0) {
-            LOG_IRQ_DEBUG("[IRQ] Rising edge #%u: line=%u I_STAT=0x%04x, I_MASK=0x%04x", irq_edge_count, irq_line, inter->irq_status, inter->irq_mask);
-        }
+    // Update CPU interrupt request after IRQ state change (DuckStation-style optimization)
+    if (inter->cpu) {
+        cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
     }
 }
 
@@ -194,21 +185,24 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    static uint32_t irq_req_count = 0;
-    if (++irq_req_count % 100 == 0) {
-        LOG_IRQ_DEBUG("[IRQ] Request #%u: line=%u by %s, I_STAT=0x%04x", irq_req_count, irq_line, source, inter->irq_status);
+    // Use modular IRQ system (thread-safe)
+    irq_request(&inter->irq_state, (IrqLine)irq_line, source);
+    
+    // Update CPU interrupt request after IRQ state change (DuckStation-style optimization)
+    if (inter->cpu) {
+        cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
     }
-    // Pulse the line (0->1->0) to trigger edge detection
-    interconnect_set_irq_line(inter, irq_line, true);
-    // Line stays high until acknowledged - don't pulse back to 0 here
 }
 
 // Helper to clear/deassert an IRQ line
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
-    // Deassert the line state (for edge detection on next request)
-    // Note: I_STAT bit is NOT cleared here - BIOS must write to I_STAT to clear it
-    (void)source;
-    interconnect_set_irq_line(inter, irq_line, false);
+    // Use modular IRQ system (thread-safe)
+    irq_clear(&inter->irq_state, (IrqLine)irq_line, source);
+    
+    // Update CPU interrupt request after IRQ state change (DuckStation-style optimization)
+    if (inter->cpu) {
+        cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
+    }
 }
 
 // Schedule an event for the CDROM (simple callback-based timer)
@@ -273,7 +267,8 @@ void interconnect_trigger_cdrom_irq(Interconnect* inter) {
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
     static uint32_t cdrom_irq_count = 0;
     if (++cdrom_irq_count <= 10 || cdrom_irq_count % 50 == 0) {
-        LOG_CDROM_DEBUG("[CDROM] IRQ #%u triggered, I_STAT=0x%04x", cdrom_irq_count, inter->irq_status);
+        uint32_t i_stat = irq_read_i_stat(&inter->irq_state);
+        LOG_CDROM_DEBUG("[CDROM] IRQ #%u triggered, I_STAT=0x%04x", cdrom_irq_count, i_stat);
     }
 }
 
@@ -287,7 +282,25 @@ void interconnect_trigger_cdrom_irq(Interconnect* inter) {
  * @return The 32-bit value read.
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
+    // Check for read breakpoints
+    if (cpu_debugger_should_break_memory(BREAKPOINT_TYPE_READ, address)) {
+        LOG_DEBUG("Debugger read breakpoint hit at address 0x%08X", address);
+    }
+
     uint32_t physical_addr = mask_region(address);
+    
+    // --- Scratchpad (1KB Fast RAM at 0x1F800000-0x1F8003FF) ---
+    // DuckStation-style: Check before other regions for performance
+    if ((physical_addr & 0xFFFFFC00) == 0x1F800000) {
+        uint32_t offset = physical_addr & 0x3FF;
+        if (inter->cpu) {
+            // Directly access scratchpad from CPU state
+            return *(uint32_t*)&inter->cpu->scratchpad[offset];
+        }
+        LOG_INTERCONNECT_ERROR("Scratchpad access without CPU pointer!");
+        return 0;
+    }
+    
     // Debug traces removed - BIOS now works correctly
     if (inter->cpu) {
         uint32_t curpc = inter->cpu->pc;
@@ -328,11 +341,11 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count < CPU_SNAPSHOT_MAX) {
             /* Log a minimal set of registers that the disassembly indicates are
                used in the branch/tests (t0, v0, s0, t2, a1). */
-            uint32_t t0 = inter->cpu->regs[8];  /* t0 = $8 */
-            uint32_t v0 = inter->cpu->regs[2];  /* v0 = $2 */
-            uint32_t s0 = inter->cpu->regs[16]; /* s0 = $16 */
-            uint32_t t2 = inter->cpu->regs[10]; /* t2 = $10 */
-            uint32_t a1 = inter->cpu->regs[5];  /* a1 = $5 */
+            uint32_t t0 = inter->cpu->regs.r[8];  /* t0 = $8 */
+            uint32_t v0 = inter->cpu->regs.r[2];  /* v0 = $2 */
+            uint32_t s0 = inter->cpu->regs.r[16]; /* s0 = $16 */
+            uint32_t t2 = inter->cpu->regs.r[10]; /* t2 = $10 */
+            uint32_t a1 = inter->cpu->regs.r[5];  /* a1 = $5 */
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count++;
             if (cpu_snapshot_count == CPU_SNAPSHOT_MAX) LOG_INFO("[BIOS_SNAPSHOT] Reached max CPU snapshots (%d)", CPU_SNAPSHOT_MAX);
@@ -363,7 +376,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         LOG_INTERCONNECT_ERROR("Unaligned load32 address: 0x%08x", address);
         // Trigger Address Error Load exception directly if CPU pointer is set
         if (inter->cpu) {
-            inter->cpu->badvaddr = address;
+            inter->cpu->cop0.badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         }
         return 0; // Return 0 (exception already triggered)
@@ -371,14 +384,10 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
 
     // --- Hardware Register Checks (Specific Addresses First) ---
 
-// --- Check Timer Range --- <<< ADD THIS BLOCK
+    // --- Check Timer Range --- (Modular timer system)
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-        uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10; // Each timer block is 0x10 bytes wide
-        uint32_t register_offset = physical_addr & 0xF; // Offset within the timer block (0, 4, 8)
-
-        // LOG_INFO("~ Read32 from Timer %d Offset 0x%x\n", timer_index, register_offset);
-        return timer_read32(&inter->timers_state, timer_index, register_offset);
+        uint32_t timer_offset = physical_addr - TIMERS_START;
+        return timers_read_register(&inter->timers_state, timer_offset);
     }
     
     // Memory Control Registers (0x1f801000 - 0x1f801020)
@@ -435,12 +444,14 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        LOG_IRQ_TRACE("Read32 from IRQ_STATUS (0x1f801070): Returning 0x%04x", inter->irq_status);
-        return (uint32_t)inter->irq_status;
+        uint32_t value = irq_read_i_stat(&inter->irq_state); // Thread-safe read
+        LOG_IRQ_TRACE("Read32 from IRQ_STATUS (0x1f801070): Returning 0x%04x", value);
+        return value;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        LOG_IRQ_TRACE("Read32 from IRQ_MASK (0x1f801074): Returning 0x%04x", inter->irq_mask);
-        return (uint32_t)inter->irq_mask;
+        uint32_t value = irq_read_i_mask(&inter->irq_state); // Thread-safe read
+        LOG_IRQ_TRACE("Read32 from IRQ_MASK (0x1f801074): Returning 0x%04x", value);
+        return value;
     }
 
     // GPU Registers
@@ -504,7 +515,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
             LOG_TRACE("interconnect_load32: vaddr=0x%08X paddr=0x%08X BIOS offset=0x%X\n", address, physical_addr, bios_offset);
             bios_load32_debug_count++;
         }
-        return bios_load32(inter->bios, bios_offset);
+        return bios_load32(&inter->bios_state, bios_offset);
     }
 
     // --- Main RAM Region (0x00000000 - 0x001FFFFF, mirrored in first 8MB) ---
@@ -601,8 +612,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         if (physical_addr >= 0x1f801070 && physical_addr <= 0x1f801077) {
             // Interrupt Controller
             // DOCS: iomap.md, "I_STAT", "I_MASK"
-            if (physical_addr == IRQ_STATUS_ADDR) return inter->irq_status;
-            if (physical_addr == IRQ_MASK_ADDR) return inter->irq_mask;
+            if (physical_addr == IRQ_STATUS_ADDR) {
+                return (uint16_t)irq_read_i_stat(&inter->irq_state);
+            }
+            if (physical_addr == IRQ_MASK_ADDR) {
+                return (uint16_t)irq_read_i_mask(&inter->irq_state);
+            }
         }
         if (physical_addr >= 0x1f801080 && physical_addr <= 0x1f8010ff) {
             // DMA
@@ -612,16 +627,15 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         if (physical_addr >= 0x1f801100 && physical_addr <= 0x1f80112f) {
             // Timers
             // DOCS: iomap.md, "Timer 0", "Timer 1", "Timer 2"
-            int timer_index = (physical_addr - 0x1f801100) / 0x10;
-            uint32_t reg_offset = physical_addr & 0xF;
-            return timer_read32(&inter->timers_state, timer_index, reg_offset);
+            uint32_t timer_offset = physical_addr - 0x1f801100;
+            return timers_read_register(&inter->timers_state, timer_offset);
         }
         if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
             // CDROM - 8-bit registers, return combined 32-bit
             // DOCS: iomap.md, "CD Index/Status", "CD Response Fifo", etc.
             uint32_t result = 0;
             for (int i = 0; i < 4; i++) {
-                result |= ((uint32_t)cdrom_read8(&inter->cdrom, physical_addr + i)) << (i * 8);
+                result |= ((uint32_t)cdrom_read_register(&inter->cdrom_state, (physical_addr + i) & 0x3)) << (i * 8);
             }
             return result;
         }
@@ -733,11 +747,11 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         static int cpu_snapshot_count16 = 0;
         const int CPU_SNAPSHOT_MAX = 64;
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count16 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
+            uint32_t t0 = inter->cpu->regs.r[8];
+            uint32_t v0 = inter->cpu->regs.r[2];
+            uint32_t s0 = inter->cpu->regs.r[16];
+            uint32_t t2 = inter->cpu->regs.r[10];
+            uint32_t a1 = inter->cpu->regs.r[5];
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count16++;
         }
@@ -765,19 +779,15 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
      if (address % 2 != 0) {
         LOG_INTERCONNECT_ERROR("Unaligned load16 address: 0x%08x", address);
         if (inter->cpu) {
-            inter->cpu->badvaddr = address;
+            inter->cpu->cop0.badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         }
         return 0;
     }
 // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-        uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10; // Each timer block is 0x10 bytes wide
-        uint32_t register_offset = physical_addr & 0xF; // Offset within the timer block (0, 4, 8)
-
-        // LOG_INFO("~ Read16 from Timer %d Offset 0x%x\n", timer_index, register_offset);
-        return timer_read16(&inter->timers_state, timer_index, register_offset);
+        uint32_t timer_offset = physical_addr - TIMERS_START;
+        return timers_read_register(&inter->timers_state, timer_offset);
     }
     
     // TEST: Add missing hardware register read handlers for 16-bit access
@@ -796,12 +806,14 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        LOG_IRQ_TRACE("Read16 from IRQ_STATUS (0x1f801070): Returning 0x%04x", inter->irq_status);
-        return inter->irq_status; // Always return current value, no masking or filtering
+        uint16_t value = (uint16_t)irq_read_i_stat(&inter->irq_state);
+        LOG_IRQ_TRACE("Read16 from IRQ_STATUS (0x1f801070): Returning 0x%04x", value);
+        return value; // Always return current value, no masking or filtering
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        LOG_IRQ_TRACE("Read16 from IRQ_MASK (0x1f801074): Returning 0x%04x", inter->irq_mask);
-        return inter->irq_mask;
+        uint16_t value = (uint16_t)irq_read_i_mask(&inter->irq_state);
+        LOG_IRQ_TRACE("Read16 from IRQ_MASK (0x1f801074): Returning 0x%04x", value);
+        return value;
      }
 
     // SPU Region (Reads usually return 0 or specific status)
@@ -826,7 +838,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     // BIOS Region (Unlikely, but check)
      if (physical_addr >= BIOS_START && physical_addr <= BIOS_END) {
         // (Removed BIOS ROM Read logs for performance)
-        return bios_load16(inter->bios, physical_addr - BIOS_START);
+        return bios_load16(&inter->bios_state, physical_addr - BIOS_START);
     }
 
     // GPU Region (Unlikely 16-bit reads)
@@ -944,11 +956,11 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         static int cpu_snapshot_count8 = 0;
         const int CPU_SNAPSHOT_MAX = 64;
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count8 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
+            uint32_t t0 = inter->cpu->regs.r[8];
+            uint32_t v0 = inter->cpu->regs.r[2];
+            uint32_t s0 = inter->cpu->regs.r[16];
+            uint32_t t2 = inter->cpu->regs.r[10];
+            uint32_t a1 = inter->cpu->regs.r[5];
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count8++;
         }
@@ -997,7 +1009,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
             LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8: %d accesses, last at 0x%08x\n", cdrom_read8_count, physical_addr);
         }
 #endif
-        return cdrom_read8(&inter->cdrom, physical_addr);
+        return cdrom_read_register(&inter->cdrom_state, physical_addr & 0x3);
     }
 
     const bool is_expansion3 =
@@ -1031,7 +1043,7 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
         if (offset < BIOS_SIZE) {
              // Implement bios_load8 if needed, or read directly:
              // LOG_INFO("~ Read8 from BIOS: Addr=0x%08x Offset=0x%x\n", physical_addr, offset); // Noisy
-             return inter->bios->data[offset];
+             return inter->bios_state.data[offset];
         } else {
              LOG_INTERCONNECT_ERROR("BIOS Load8 out of bounds: offset 0x%x\n", offset);
              return 0; // Error
@@ -1100,7 +1112,24 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
  * @param value The 32-bit value to write.
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
+    // Check for write breakpoints
+    if (cpu_debugger_should_break_memory(BREAKPOINT_TYPE_WRITE, address)) {
+        LOG_DEBUG("Debugger write breakpoint hit at address 0x%08X, value=0x%08X", address, value);
+    }
+
     uint32_t physical_addr = mask_region(address);
+    
+    // --- Scratchpad (1KB Fast RAM at 0x1F800000-0x1F8003FF) ---
+    if ((physical_addr & 0xFFFFFC00) == 0x1F800000) {
+        uint32_t offset = physical_addr & 0x3FF;
+        if (inter->cpu) {
+            *(uint32_t*)&inter->cpu->scratchpad[offset] = value;
+            return;
+        }
+        LOG_INTERCONNECT_ERROR("Scratchpad store without CPU pointer!");
+        return;
+    }
+    
     if (inter->cpu) {
         uint32_t curpc = inter->cpu->pc;
         const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
@@ -1123,11 +1152,11 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         static int cpu_snapshot_count_store32 = 0;
         const int CPU_SNAPSHOT_MAX = 64;
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store32 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
+            uint32_t t0 = inter->cpu->regs.r[8];
+            uint32_t v0 = inter->cpu->regs.r[2];
+            uint32_t s0 = inter->cpu->regs.r[16];
+            uint32_t t2 = inter->cpu->regs.r[10];
+            uint32_t a1 = inter->cpu->regs.r[5];
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count_store32++;
         }
@@ -1159,20 +1188,16 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         LOG_INTERCONNECT_ERROR("Unaligned store32 address: 0x%08x = 0x%08x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
         if (inter->cpu) {
-            inter->cpu->badvaddr = address;
+            inter->cpu->cop0.badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         }
         return;
     }
 
-    // --- Check Timer Range --- <<< ADD THIS BLOCK
+    // --- Check Timer Range --- (Modular timer system)
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-        uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10;
-        uint32_t register_offset = physical_addr & 0xF;
-
-        // LOG_INFO("~ Write32 to Timer %d Offset 0x%x = 0x%08x\n", timer_index, register_offset, value);
-        timer_write32(&inter->timers_state, timer_index, register_offset, value);
+        uint32_t timer_offset = physical_addr - TIMERS_START;
+        timers_write_register(&inter->timers_state, inter, timer_offset, value);
         return; // Handled
     }
     // --- Hardware Register Checks (Specific Addresses First) ---
@@ -1181,23 +1206,28 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
         // Trace PC for debugging I_STAT writes
         uint32_t caller_pc = inter->cpu ? inter->cpu->current_pc : 0;
-        LOG_IRQ_DEBUG("Write to I_STAT: Value=0x%08x, Before=0x%04x, PC=0x%08x", value, inter->irq_status, caller_pc);
-        // PSX-SPX: "Acknowledge: Write I_STAT (0=Clear Bit, 1=No change)"
-        // Writing 0 to a bit clears it, writing 1 has no effect
-        // duckstation: s_interrupt_status_register = s_interrupt_status_register & (value & WRITE_MASK)
-        uint16_t mask_value = (uint16_t)(value & 0x7FF);
-        uint16_t bits_to_clear = inter->irq_status & ~mask_value; // bits that will be cleared
-        inter->irq_status = inter->irq_status & mask_value;
-        // Also clear the line state for cleared IRQs (so they can trigger again on next edge)
-        inter->irq_line_state &= ~bits_to_clear;
-        LOG_IRQ_DEBUG("I_STAT after: 0x%04x, cleared bits: 0x%04x, line_state: 0x%04x", 
-                     inter->irq_status, bits_to_clear, inter->irq_line_state);
+        uint16_t old_i_stat = (uint16_t)irq_read_i_stat(&inter->irq_state);
+        LOG_IRQ_DEBUG("Write to I_STAT: Value=0x%08x, Before=0x%04x, PC=0x%08x", value, old_i_stat, caller_pc);
+        
+        // Use modular IRQ system (thread-safe)
+        irq_write_i_stat(&inter->irq_state, value);
+        
+        // Update CPU interrupt request after I_STAT change (DuckStation-style optimization)
+        if (inter->cpu) {
+            cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
+        }
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        uint16_t old_mask = inter->irq_mask;
-        // Writing sets the interrupt mask
-        inter->irq_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
+        uint16_t old_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+        
+        // Use modular IRQ system (thread-safe)
+        irq_write_i_mask(&inter->irq_state, value);
+        
+        // Update CPU interrupt request after I_MASK change (DuckStation-style optimization)
+        if (inter->cpu) {
+            cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
+        }
         
         // FIX: BIOS Boot Bypass - If BIOS is stuck in critical section loop, force enable interrupts
         static uint32_t critical_section_count = 0;
@@ -1208,23 +1238,31 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
             // If BIOS has been stuck for too long, force enable VBlank and Timer0 interrupts
             if (critical_section_count > 1000) {
                 LOG_WARN("[BIOS-BOOT] Detected stuck BIOS in critical section loop. Forcing interrupt enable.");
-                inter->irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
+                irq_write_i_mask(&inter->irq_state, 0x0003); // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
+                
+                // Update CPU interrupt request after forced I_MASK change (DuckStation-style optimization)
+                if (inter->cpu) {
+                    cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
+                }
+                
                 critical_section_count = 0;
-                LOG_INFO("[BIOS-BOOT] Forced I_MASK=0x%04x to bypass stuck state", inter->irq_mask);
+                uint16_t new_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+                LOG_INFO("[BIOS-BOOT] Forced I_MASK=0x%04x to bypass stuck state", new_mask);
             }
         } else {
             critical_section_count = 0;
         }
         last_irq_mask = value;
         
+        uint16_t new_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
         // Detect when BIOS is disabling IRQ0
-        if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
-        } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
+        if ((old_mask & 0x0001) && !(new_mask & 0x0001)) {
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, new_mask);
+        } else if (!(old_mask & 0x0001) && (new_mask & 0x0001)) {
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, new_mask);
         }
         
-        LOG_DEBUG("[IRQ] Write to I_MASK (IRQ_MASK_ADDR): Value=0x%04x, New I_MASK=0x%04x, IRQ0 enabled=%d", value, inter->irq_mask, (inter->irq_mask & 0x1) ? 1 : 0);
+        LOG_DEBUG("[IRQ] Write to I_MASK (IRQ_MASK_ADDR): Value=0x%04x, New I_MASK=0x%04x, IRQ0 enabled=%d", value, new_mask, (new_mask & 0x1) ? 1 : 0);
         return;
     }
 
@@ -1476,6 +1514,18 @@ static uint16_t last_write16_da8_value = 0;
  */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
     uint32_t physical_addr = mask_region(address);
+    
+    // --- Scratchpad (1KB Fast RAM at 0x1F800000-0x1F8003FF) ---
+    if ((physical_addr & 0xFFFFFC00) == 0x1F800000) {
+        uint32_t offset = physical_addr & 0x3FF;
+        if (inter->cpu) {
+            *(uint16_t*)&inter->cpu->scratchpad[offset] = value;
+            return;
+        }
+        LOG_INTERCONNECT_ERROR("Scratchpad store without CPU pointer!");
+        return;
+    }
+    
     if (inter->cpu) {
         uint32_t curpc = inter->cpu->pc;
         const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
@@ -1498,11 +1548,11 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         static int cpu_snapshot_count_store16 = 0;
         const int CPU_SNAPSHOT_MAX = 64;
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store16 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
+            uint32_t t0 = inter->cpu->regs.r[8];
+            uint32_t v0 = inter->cpu->regs.r[2];
+            uint32_t s0 = inter->cpu->regs.r[16];
+            uint32_t t2 = inter->cpu->regs.r[10];
+            uint32_t a1 = inter->cpu->regs.r[5];
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count_store16++;
         }
@@ -1538,7 +1588,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         LOG_INTERCONNECT_ERROR("Unaligned store16 address: 0x%08x = 0x%04x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
         if (inter->cpu) {
-            inter->cpu->badvaddr = address;
+            inter->cpu->cop0.badvaddr = address;
             cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         }
         return;
@@ -1546,15 +1596,14 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10;
-        uint32_t register_offset = physical_addr & 0xF;
+        uint32_t timer_offset = timer_base_offset;
         // Only log timer writes occasionally to reduce noise
         static uint32_t timer_write_count = 0;
         timer_write_count++;
         if (timer_write_count % 100 == 0) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Write16 to Timer%d: addr=0x%08x offset=0x%x value=0x%04x", timer_index, physical_addr, register_offset, value);
+            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Write16 to Timer: addr=0x%08x offset=0x%x value=0x%04x", physical_addr, timer_offset, value);
         }
-        timer_write16(&inter->timers_state, timer_index, register_offset, value);
+        timers_write_register(&inter->timers_state, inter, timer_offset, value);
         return; // Handled
      }
      
@@ -1582,46 +1631,55 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
             LOG_INTERCONNECT_DEBUG("[IRQ][I_STAT] Write16: Value=0x%04x, Count=%u, Last=0x%04x", value, irq_status_write_count, last_irq_status_value);
         }
         last_irq_status_value = value;
-        uint16_t prev_status = inter->irq_status;
-        // Reduce debug logging frequency
-        if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
-            LOG_DEBUG("[IRQ] I_STAT before clear: 0x%04x", inter->irq_status);
+        uint16_t prev_status = (uint16_t)irq_read_i_stat(&inter->irq_state);
+        
+        // Use modular IRQ system (thread-safe)
+        irq_write_i_stat(&inter->irq_state, value);
+        
+        // Update CPU interrupt request after I_STAT change (DuckStation-style optimization)
+        if (inter->cpu) {
+            cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
         }
-        inter->irq_status &= value; // Clear bits where value has 0
-        if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
-            LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
-        }
-        // Also clear timer interrupt_requested flags and mode[10] for Timer0, Timer1, Timer2
+        // Also clear timer interrupt flags for Timer0, Timer1, Timer2
         if ((value & (1 << TIMER0_IRQ)) == 0) {
-            inter->timers_state.timers[0].interrupt_requested = false;
-            inter->timers_state.timers[0].mode &= ~(1 << 10);
+            inter->timers_state.timers[0].irq_done = false;
+            inter->timers_state.timers[0].mode.interrupt_request_n = 1;
         }
         if ((value & (1 << TIMER1_IRQ)) == 0) {
-            inter->timers_state.timers[1].interrupt_requested = false;
-            inter->timers_state.timers[1].mode &= ~(1 << 10);
+            inter->timers_state.timers[1].irq_done = false;
+            inter->timers_state.timers[1].mode.interrupt_request_n = 1;
         }
         if ((value & (1 << TIMER2_IRQ)) == 0) {
-            inter->timers_state.timers[2].interrupt_requested = false;
-            inter->timers_state.timers[2].mode &= ~(1 << 10);
+            inter->timers_state.timers[2].irq_done = false;
+            inter->timers_state.timers[2].mode.interrupt_request_n = 1;
         }
         // Keep the existing detailed log for the first write only
         if (irq_status_write_count == 1) {
-            LOG_INTERCONNECT_DEBUG("[IRQ][I_STAT] Write16: Value=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, prev_status, inter->irq_status, __func__);
+            uint16_t new_status = (uint16_t)irq_read_i_stat(&inter->irq_state);
+            LOG_INTERCONNECT_DEBUG("[IRQ][I_STAT] Write16: Value=0x%04x, I_STAT: 0x%04x -> 0x%04x (caller: %s)", value, prev_status, new_status, __func__);
         }
         return;
     }
      if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        uint16_t old_mask = inter->irq_mask;
-        inter->irq_mask = value & 0x7FF;
+        uint16_t old_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
         
-        // Detect when BIOS is disabling IRQ0
-        if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
-        } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
+        // Use modular IRQ system (thread-safe)
+        irq_write_i_mask(&inter->irq_state, value);
+        
+        // Update CPU interrupt request after I_MASK change (DuckStation-style optimization)
+        if (inter->cpu) {
+            cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
         }
         
-        LOG_INTERCONNECT_TRACE("Write16 to IRQ_MASK: Value=0x%04x -> I_MASK=0x%04x", value, inter->irq_mask);
+        uint16_t new_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+        // Detect when BIOS is disabling IRQ0
+        if ((old_mask & 0x0001) && !(new_mask & 0x0001)) {
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, new_mask);
+        } else if (!(old_mask & 0x0001) && (new_mask & 0x0001)) {
+            LOG_INTERCONNECT_DEBUG("[IRQ] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, new_mask);
+        }
+        
+        LOG_INTERCONNECT_TRACE("Write16 to IRQ_MASK: Value=0x%04x -> I_MASK=0x%04x", value, new_mask);
         return;
      }
 
@@ -1633,12 +1691,8 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 
     // Timer Region
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
-        uint32_t timer_base_offset = physical_addr - TIMERS_START;
-        int timer_index = timer_base_offset / 0x10;
-        uint32_t register_offset = physical_addr & 0xF;
-
-        // LOG_INFO("~ Write16 to Timer %d Offset 0x%x = 0x%04x\n", timer_index, register_offset, value);
-        timer_write16(&inter->timers_state, timer_index, register_offset, value);
+        uint32_t timer_offset = physical_addr - TIMERS_START;
+        timers_write_register(&inter->timers_state, inter, timer_offset, value);
         return; // Handled
     }
 
@@ -1752,6 +1806,18 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
  */
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     uint32_t physical_addr = mask_region(address);
+    
+    // --- Scratchpad (1KB Fast RAM at 0x1F800000-0x1F8003FF) ---
+    if ((physical_addr & 0xFFFFFC00) == 0x1F800000) {
+        uint32_t offset = physical_addr & 0x3FF;
+        if (inter->cpu) {
+            inter->cpu->scratchpad[offset] = value;
+            return;
+        }
+        LOG_INTERCONNECT_ERROR("Scratchpad store without CPU pointer!");
+        return;
+    }
+    
     if (inter->cpu) {
         uint32_t curpc = inter->cpu->pc;
         const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
@@ -1774,11 +1840,11 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         static int cpu_snapshot_count_store8 = 0;
         const int CPU_SNAPSHOT_MAX = 64;
         if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store8 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
+            uint32_t t0 = inter->cpu->regs.r[8];
+            uint32_t v0 = inter->cpu->regs.r[2];
+            uint32_t s0 = inter->cpu->regs.r[16];
+            uint32_t t2 = inter->cpu->regs.r[10];
+            uint32_t a1 = inter->cpu->regs.r[5];
             LOG_INFO("[BIOS_SNAPSHOT] PC=0x%08x t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x", curpc, t0, v0, s0, t2, a1);
             cpu_snapshot_count_store8++;
         }
@@ -1825,7 +1891,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
             LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8: %d accesses, last at 0x%08x = 0x%02x\n", cdrom_write8_count, physical_addr, value);
         }
 #endif
-        cdrom_write8(&inter->cdrom, physical_addr, value);
+        cdrom_write_register(&inter->cdrom_state, inter, physical_addr & 0x3, value);
         return;
     }
 
@@ -1917,21 +1983,24 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
 // Helper to calculate transfer size for Block/Manual modes
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
-    if (ch->sync == LINKED_LIST) return 0; // Size is determined by list content
+    if (ch->channel_control.sync_mode == DMA_SYNC_LINKED_LIST) return 0; // Size is determined by list content
 
-    uint32_t bs = (uint32_t)ch->block_size;
     // In Manual mode (Sync=0), BlockSize (BC/BA field) is the word count.
     // 0 means max size (0x10000 words).
-    if (ch->sync == MANUAL) {
-        return (bs == 0) ? 0x10000 : bs;
+    if (ch->channel_control.sync_mode == DMA_SYNC_MANUAL) {
+        uint32_t wc = ch->block_control.manual.word_count;
+        return (wc == 0) ? 0x10000 : wc;
     }
 
     // In Request mode (Sync=1), size is BlockCount * BlockSize
-    uint32_t bc = (uint32_t)ch->block_count;
+    uint32_t bs = ch->block_control.request.block_size;
+    uint32_t bc = ch->block_control.request.block_count;
     if (bs == 0 || bc == 0) {
         LOG_INTERCONNECT_WARN("Warning: DMA Request sync with zero size/count (BS=%u, BC=%u)\n", bs, bc);
         return 0; // Invalid size for Request mode
     }
+    bs = (bs == 0) ? 0x10000 : bs;
+    bc = (bc == 0) ? 0x10000 : bc;
     return bs * bc;
 }
 
@@ -1950,15 +2019,16 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
     LOG_DMA_DEBUG("--- Starting DMA Transfer for Channel %d ---", channel_index);
     DmaChannel* ch = &inter->dma.channels[channel_index];
-    DmaSync sync_mode = ch->sync;
+    DmaSyncMode sync_mode = ch->channel_control.sync_mode;
+    DmaDirection direction = ch->channel_control.copy_to_device ? DMA_DIRECTION_FROM_RAM : DMA_DIRECTION_TO_RAM;
 
     LOG_DMA_DEBUG("DMA Channel %d: sync_mode=%d, direction=%d, base_addr=0x%08x", 
-                  channel_index, sync_mode, ch->direction, ch->base_addr);
+                  channel_index, sync_mode, direction, ch->base_addr);
 
     switch (sync_mode) {
-        case LINKED_LIST:
+        case DMA_SYNC_LINKED_LIST:
             // Primarily used for GPU Channel 2
-            if (channel_index == 2 && ch->direction == FROM_RAM) {
+            if (channel_index == 2 && direction == DMA_DIRECTION_FROM_RAM) {
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address from MADR
                 LOG_DMA_DEBUG("DMA GPU Linked List: Starting at 0x%08x", addr);
                 while(1) {
@@ -1987,9 +2057,12 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                             // LOG WHAT BIOS IS ACTUALLY SENDING - Critical for debugging menu rendering
                             uint8_t cmd_opcode = (command_word >> 24) & 0xFF;
                             static uint32_t dma_cmd_log_count = 0;
-                            if (dma_cmd_log_count < 200 || (cmd_opcode >= 0x60 && cmd_opcode <= 0x7F) || cmd_opcode == 0xA0) {
+                            // Temporarily log ALL commands after #250 to debug word counter issue
+                            if (dma_cmd_log_count < 200 || dma_cmd_log_count >= 250 || (cmd_opcode >= 0x60 && cmd_opcode <= 0x7F) || cmd_opcode == 0xA0) {
                                 LOG_GPU_INFO("[DMA->GPU] #%u: GP0(0x%02x) = 0x%08x (packet_addr=0x%08x, word %u/%u)",
                                            dma_cmd_log_count, cmd_opcode, command_word, addr, i+1, num_words);
+                                dma_cmd_log_count++;
+                            } else {
                                 dma_cmd_log_count++;
                             }
                             
@@ -1997,8 +2070,8 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                             {
                                 int wait_cycles = 0;
                                 while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
-                                    // Let pending events (timers/VBlank) run so the GPU can drain
-                                    eventq_dispatch_due(inter);
+                                    // DuckStation-style: No event dispatch (timers tick per-instruction in main loop)
+                                    // Just wait briefly - GPU should be ready almost immediately
                                     if (++wait_cycles > 10000) {
                                         LOG_DMA_WARN("DMA GPU LL: waited too long for GP0 ready, proceeding to avoid deadlock");
                                         break;
@@ -2031,12 +2104,12 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                 }
                 LOG_DMA_DEBUG("DMA GPU Linked List: Finished");
             } else {
-                 LOG_DMA_ERROR("Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).\n", channel_index, ch->direction);
+                 LOG_DMA_ERROR("Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).\n", channel_index, direction);
             }
             break;
 
-        case MANUAL:
-        case REQUEST:
+        case DMA_SYNC_MANUAL:
+        case DMA_SYNC_REQUEST:
             {
                 uint32_t words_to_transfer = dma_get_transfer_size_words(ch);
                 if (words_to_transfer == 0) {
@@ -2045,10 +2118,10 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                 }
 
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address
-                int32_t step = (ch->step == INCREMENT) ? 4 : -4;
+                int32_t step = (ch->channel_control.address_step_reverse ? DMA_STEP_DECREMENT : DMA_STEP_INCREMENT) == DMA_STEP_INCREMENT ? 4 : -4;
                 LOG_DMA_INFO("DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words",
-                       channel_index, (ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM"),
-                       (sync_mode == MANUAL ? "MANUAL" : "REQUEST"), step, addr, words_to_transfer);
+                       channel_index, (direction == DMA_DIRECTION_FROM_RAM ? "FROM_RAM" : "TO_RAM"),
+                       (sync_mode == DMA_SYNC_MANUAL ? "MANUAL" : "REQUEST"), step, addr, words_to_transfer);
 
                 for (uint32_t i = 0; i < words_to_transfer; ++i) {
                     // Ensure address stays within RAM bounds (mask low bits, check high bits)
@@ -2058,7 +2131,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                          break; // Stop transfer if address goes out of bounds
                     }
 
-                    if (ch->direction == FROM_RAM) {
+                    if (direction == DMA_DIRECTION_FROM_RAM) {
                         // RAM -> Peripheral
                         uint32_t data_word = interconnect_load32(inter, current_addr_masked); // Read from RAM
                         
@@ -2106,7 +2179,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 {
                                     int wait_cycles = 0;
                                     while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
-                                        eventq_dispatch_due(inter);
+                                        // DuckStation-style: No event dispatch (timers tick per-instruction in main loop)
                                         if (++wait_cycles > 10000) {
                                             LOG_DMA_WARN("DMA GPU: waited too long for GP0 ready while sending data, proceeding");
                                             break;
@@ -2125,11 +2198,28 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                         // Peripheral -> RAM
                         uint32_t data_word = 0; // Default value if peripheral not handled
                         switch (channel_index) {
+                            case 3: // CDROM - Read sector data
+                                // Read from CDROM sector buffer
+                                if (inter->cdrom_state.sector_buffer.position < inter->cdrom_state.sector_buffer.size) {
+                                    // Get data from sector buffer (big-endian)
+                                    uint32_t offset = inter->cdrom_state.sector_buffer.position;
+                                    data_word = (inter->cdrom_state.sector_buffer.data[offset] << 24) |
+                                               (inter->cdrom_state.sector_buffer.data[offset + 1] << 16) |
+                                               (inter->cdrom_state.sector_buffer.data[offset + 2] << 8) |
+                                               inter->cdrom_state.sector_buffer.data[offset + 3];
+                                    inter->cdrom_state.sector_buffer.position += 4;
+                                } else {
+                                    LOG_DMA_WARN("CDROM DMA: Reading beyond sector buffer (pos=%u, size=%u)",
+                                               inter->cdrom_state.sector_buffer.position, inter->cdrom_state.sector_buffer.size);
+                                    data_word = 0;
+                                }
+                                break;
                             case 6: // OTC - Ordering Table Clear
                                 // Value depends on position in transfer
+                                // PSX format: Each entry points to previous (addr-4), last entry = 0xFFFFFF
                                 data_word = (i == (words_to_transfer - 1)) // Is it the last word?
-                                            ? 0x00FFFFFF                  // Yes: End marker
-                                            : ((addr - 4) & 0x00FFFFFC); // No: Pointer to previous entry
+                                            ? 0xFFFFFFFF                  // Yes: End marker (0xFFFFFF in low 24 bits)
+                                            : ((addr - 4) & 0x00FFFFFF); // No: Pointer to previous entry (24-bit address)
                                 break;
                             case 2: // GPU (GPUREAD)
                                 data_word = gpu_read_data(&inter->gpu);
@@ -2167,13 +2257,20 @@ static void interconnect_force_bios_boot_config(Interconnect* inter) {
     static bool test_pattern_drawn = false;
     
     // Only force configuration if I_MASK is not already configured for IRQ0
-    if ((inter->irq_mask & 0x0001) == 0) {
+    uint16_t i_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+    if ((i_mask & 0x0001) == 0) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing I_MASK configuration for IRQ0");
         
         // Enable IRQ0 (VBlank) in I_MASK
-        inter->irq_mask |= 0x0001;  // Bit 0: IRQ0 enable
+        irq_write_i_mask(&inter->irq_state, i_mask | 0x0001);  // Bit 0: IRQ0 enable
         
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Forced I_MASK=0x%04x [PSX-Spex: IRQ0 enabled]", inter->irq_mask);
+        // Update CPU interrupt request after I_MASK change (DuckStation-style optimization)
+        if (inter->cpu) {
+            cpu_set_interrupt_request(inter->cpu, irq_check_pending(&inter->irq_state));
+        }
+        
+        uint16_t new_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Forced I_MASK=0x%04x [PSX-Spex: IRQ0 enabled]", new_mask);
     }
     
     // Also force enable GPU display if it's disabled to fix black screen
@@ -2237,7 +2334,8 @@ void interconnect_check_bios_boot(Interconnect* inter) {
     }
     
     // Also force interrupt config if we're in RAM and interrupts are still disabled
-    if (inter->cpu_cycle_counter > 1000000 && (inter->irq_mask & 0x0001) == 0) {
+    uint16_t i_mask = (uint16_t)irq_read_i_mask(&inter->irq_state);
+    if (inter->cpu_cycle_counter > 1000000 && (i_mask & 0x0001) == 0) {
         // Only log this once to avoid spam
         static bool ram_interrupt_logged = false;
         if (!ram_interrupt_logged) {
@@ -2250,11 +2348,12 @@ void interconnect_check_bios_boot(Interconnect* inter) {
 
 // Helper: Perform the actual GPU DMA transfer for channel 2
 void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
-    LOG_DMA_INFO("[DMA] Performing GPU DMA transfer (mode=%d, direction=%d)", ch->sync, ch->direction);
+    DmaDirection direction = ch->channel_control.copy_to_device ? DMA_DIRECTION_FROM_RAM : DMA_DIRECTION_TO_RAM;
+    LOG_DMA_INFO("[DMA] Performing GPU DMA transfer (mode=%d, direction=%d)", ch->channel_control.sync_mode, direction);
     // FROM_RAM: RAM -> GPU (Image Load)
-    if (ch->direction == FROM_RAM) {
+    if (direction == DMA_DIRECTION_FROM_RAM) {
         uint32_t addr = ch->base_addr & 0x001FFFFC; // 2MB RAM, word aligned
-        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+        uint32_t words = dma_get_transfer_size_words(ch);
         if (words == 0) words = 1;
         
         // Log source address for debugging menu graphics
@@ -2278,9 +2377,9 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         LOG_DMA_INFO("[DMA] GPU DMA (FROM_RAM) transferred %u words from 0x%08X", words, ch->base_addr);
     }
     // TO_RAM: GPU -> RAM (Image Read)
-    else if (ch->direction == TO_RAM) {
+    else if (direction == DMA_DIRECTION_TO_RAM) {
         uint32_t addr = ch->base_addr & 0x001FFFFC;
-        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
+        uint32_t words = dma_get_transfer_size_words(ch);
         if (words == 0) words = 1;
         for (uint32_t i = 0; i < words; ++i) {
             uint32_t data_word = gpu_read_data(&sys->gpu);
@@ -2290,7 +2389,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         LOG_DMA_INFO("[DMA] GPU DMA (TO_RAM) transferred %u words", words);
     }
     // LINKED_LIST: GPU command list
-    else if (ch->sync == LINKED_LIST) {
+    else if (ch->channel_control.sync_mode == DMA_SYNC_LINKED_LIST) {
         uint32_t addr = ch->base_addr & 0x001FFFFC;
         uint32_t safety = 0;
         while (safety++ < 0x10000) { // Safety limit to avoid infinite loops
@@ -2307,7 +2406,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         LOG_DMA_INFO("[DMA] GPU DMA (LINKED_LIST) processed command list");
     }
     else {
-        LOG_DMA_WARN("[DMA] GPU DMA: Unknown mode or direction (sync=%d, dir=%d)", ch->sync, ch->direction);
+        LOG_DMA_WARN("[DMA] GPU DMA: Unknown mode or direction (sync=%d, dir=%d)", ch->channel_control.sync_mode, direction);
     }
 
     // --- End of GPU DMA transfer logic ---

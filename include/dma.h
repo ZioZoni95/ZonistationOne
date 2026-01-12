@@ -4,66 +4,106 @@
 #include <stdint.h>
 #include <stdbool.h> // Include if using bool
 
-// --- Enums for Channel Control (CHCR - Section 3.3) ---
+// Enums from DuckStation
 typedef enum {
-    TO_RAM = 0,    // Peripheral to RAM
-    FROM_RAM = 1   // RAM to Peripheral
+    DMA_CHANNEL_MDECIN = 0,
+    DMA_CHANNEL_MDECOUT = 1,
+    DMA_CHANNEL_GPU = 2,
+    DMA_CHANNEL_CDROM = 3,
+    DMA_CHANNEL_SPU = 4,
+    DMA_CHANNEL_PIO = 5,
+    DMA_CHANNEL_OTC = 6,
+    DMA_NUM_CHANNELS = 7
+} DmaChannelIndex;
+
+typedef enum {
+    DMA_SYNC_MANUAL = 0,
+    DMA_SYNC_REQUEST = 1,
+    DMA_SYNC_LINKED_LIST = 2,
+    DMA_SYNC_RESERVED = 3
+} DmaSyncMode;
+
+typedef enum {
+    DMA_DIRECTION_TO_RAM = 0,
+    DMA_DIRECTION_FROM_RAM = 1
 } DmaDirection;
 
 typedef enum {
-    INCREMENT = 0,
-    DECREMENT = 1
+    DMA_STEP_INCREMENT = 0,
+    DMA_STEP_DECREMENT = 1
 } DmaStep;
 
-typedef enum {
-    MANUAL = 0,      // Start transfer via CHCR Trigger bit
-    REQUEST = 1,     // Sync blocks to DRQ signals
-    LINKED_LIST = 2  // Used for GPU command lists
-} DmaSync;
-
-struct Interconnect; // Forward declaration
-
-// --- Structure for a single DMA Channel ---
+// Updated DmaChannel struct to match DuckStation's ChannelState
 typedef struct {
-    // CHCR - Channel Control Register (Offset 0xX8)
-    bool enable;                 // Bit 24: Channel Enable
-    DmaDirection direction;      // Bit 0: Transfer Direction
-    DmaStep step;                // Bit 1: Address Step (Inc/Dec)
-    // Bit 8: Chopping Enable (Not implemented yet)
-    DmaSync sync;                // Bits 9-10: Sync Mode (Manual, Request, Linked List)
-    bool trigger;                // Bit 28: Manual Trigger (for Manual Sync)
-    // uint8_t chopping_dma_sz; // Bits 16-18 (Not implemented)
-    // uint8_t chopping_cpu_sz; // Bits 20-22 (Not implemented)
-    // uint8_t chcr_unknown_rw; // Bits 29-30 (Not implemented/stored yet)
-
-    // MADR - Base Address Register (Offset 0xX0)
-    uint32_t base_addr;          // Effective address (lower 24 bits)
-
-    // BCR - Block Control Register (Offset 0xX4)
-    uint16_t block_size;         // BC/BA field (Word count or block size)
-    uint16_t block_count;        // BS field (Block count for Request sync)
-
+    uint32_t base_addr;
+    union {
+        uint32_t bits;
+        struct {
+            uint32_t word_count : 16;
+        } manual;
+        struct {
+            uint32_t block_size : 16;
+            uint32_t block_count : 16;
+        } request;
+    } block_control;
+    union {
+        uint32_t bits;
+        struct {
+            uint32_t copy_to_device : 1;  // 0: to RAM, 1: from RAM
+            uint32_t address_step_reverse : 1;
+            uint32_t chopping_enable : 1;
+            uint32_t sync_mode : 2;
+            uint32_t chopping_dma_window_size : 3;
+            uint32_t chopping_cpu_window_size : 3;
+            uint32_t enable_busy : 1;
+            uint32_t start_trigger : 1;
+        };
+    } channel_control;
+    bool request;
 } DmaChannel;
 
+// DPCR register (DMA Priority Control)
+typedef union {
+    uint32_t bits;
+    struct {
+        uint8_t mdecin_priority : 3;
+        uint8_t mdecin_master_enable : 1;
+        uint8_t mdecout_priority : 3;
+        uint8_t mdecout_master_enable : 1;
+        uint8_t gpu_priority : 3;
+        uint8_t gpu_master_enable : 1;
+        uint8_t cdrom_priority : 3;
+        uint8_t cdrom_master_enable : 1;
+        uint8_t spu_priority : 3;
+        uint8_t spu_master_enable : 1;
+        uint8_t pio_priority : 3;
+        uint8_t pio_master_enable : 1;
+        uint8_t otc_priority : 3;
+        uint8_t otc_master_enable : 1;
+        uint8_t priority_offset : 3;
+        uint8_t unused : 1;
+    };
+} DmaDPCR;
+
+// DICR register (DMA Interrupt Control)
+typedef union {
+    uint32_t bits;
+    struct {
+        uint8_t dicr_unknown_rw : 6;
+        uint8_t force_irq : 1;
+        uint8_t channel_irq_enable : 7;
+        uint8_t master_irq_enable : 1;
+        uint8_t channel_irq_flags : 7;
+        uint8_t master_irq_flag : 1;
+    };
+} DmaDICR;
 
 // --- Main DMA State Structure ---
 typedef struct {
-    // DPCR - DMA Control Register (Offset 0x70)
-    uint32_t control;
-
-    // DICR - DMA Interrupt Register (Offset 0x74)
-    bool force_irq;
-    uint8_t channel_irq_enable;
-    bool master_irq_enable;
-    uint8_t channel_irq_flags;
-    bool master_irq_flag;
-    uint8_t dicr_unknown_rw;
-
-    // Array of 7 DMA Channels
-    DmaChannel channels[7];
-
-    struct Interconnect* inter; // Pointer to Interconnect for event scheduling
-
+    struct Interconnect* inter;
+    DmaDPCR control;  // DPCR
+    DmaDICR dicr;     // DICR
+    DmaChannel channels[DMA_NUM_CHANNELS];
 } Dma;
 
 // --- Function Prototypes ---
@@ -79,5 +119,10 @@ uint32_t channel_get_control(DmaChannel* ch); // <-- Declaration added
 // Helper to set channel control register value
 void channel_set_control(DmaChannel* ch, uint32_t value); // <-- Declaration added
 
+// New functions for DuckStation-style implementation
+void dma_set_request(Dma* dma, DmaChannelIndex channel, bool request);
+bool dma_can_transfer_channel(Dma* dma, DmaChannelIndex channel);
+void dma_update_irq(Dma* dma);
+bool dma_transfer_channel(Dma* dma, DmaChannelIndex channel);
 
 #endif // DMA_H

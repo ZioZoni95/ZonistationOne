@@ -1,7 +1,15 @@
 /**
  * gpu.c
  * Implementation of the PlayStation GPU emulation.
- * Handles GPU state, command processing (GP0/GP1), VRAM access, and rendering calls.
+ * 
+ * MODULAR REFACTORING STATUS (Phase 1 Complete):
+ * ✅ Phase 1: Initialization moved to src/gpu/gpu_core.c
+ * 🔄 Phase 2: Command handlers (GP0/GP1) - still here, will migrate to gpu_commands.c
+ * ⏳ Phase 3: Rendering functions - will migrate to gpu_rendering.c
+ * ⏳ Phase 4: VRAM operations - will migrate to gpu_vram.c
+ * ⏳ Phase 5: Timing/CRTC - will migrate to gpu_timing.c
+ * 
+ * This file contains legacy command processing until full migration complete.
  */
 #include "gpu.h"
 #include <stdio.h>
@@ -72,7 +80,7 @@ static void gpu_debug_dump_region(Gpu* gpu);
  * @brief Clears the GP0 command buffer.
  * @param gpu Pointer to the Gpu instance.
  */
-static void clear_gp0_command_buffer(Gpu* gpu) {
+void clear_gp0_command_buffer(Gpu* gpu) {
     gpu->gp0_command_buffer.count = 0;
     // No need to zero the buffer content itself
 }
@@ -83,7 +91,7 @@ static void clear_gp0_command_buffer(Gpu* gpu) {
  * @param gpu Pointer to the Gpu instance.
  * @param word The 32-bit command word to push.
  */
-static void push_gp0_command_word(Gpu* gpu, uint32_t word) {
+void push_gp0_command_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_command_buffer.count >= MAX_GPU_COMMAND_WORDS) {
         LOG_GPU_ERROR("FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x", gpu->gp0_current_opcode);
         // Consider triggering a CPU exception or other error handling
@@ -510,10 +518,13 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
     if (use_texture) {
         // Ensure VRAM texture is up to date before textured draws.
         renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
-        t[0].u = tex->u;       t[0].v = tex->v;
-        t[1].u = tex->u + w;   t[1].v = tex->v;
-        t[2].u = tex->u;       t[2].v = tex->v + h;
-        t[3].u = tex->u + w;   t[3].v = tex->v + h;
+        // UV coordinates are texture coordinates (0-255 within texture page)
+        // They map to the rectangle dimensions but don't add the dimensions themselves
+        // DuckStation: texcoord + offset within primitive (for rectangles, offset increments per pixel)
+        t[0].u = tex->u;           t[0].v = tex->v;
+        t[1].u = tex->u + (w-1);   t[1].v = tex->v;
+        t[2].u = tex->u;           t[2].v = tex->v + (h-1);
+        t[3].u = tex->u + (w-1);   t[3].v = tex->v + (h-1);
         renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
         renderer_set_texture_mode(&gpu->renderer, true);
         renderer_push_quad(&gpu->renderer, p, c, t, clut, tpage);
@@ -658,6 +669,7 @@ static void gp0_rect_tex_8x8_opaque(Gpu* gpu) {
 
 /** GP0(0x7C): Textured Rectangle 16x16 */
 static void gp0_rect_tex_16x16_opaque(Gpu* gpu) {
+    LOG_GPU_INFO(">>> gp0_rect_tex_16x16_opaque() CALLED! buffer count=%d\n", gpu->gp0_command_buffer.count);
     if (gpu->gp0_command_buffer.count < 3) return;
     uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
     uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
@@ -672,6 +684,15 @@ static void gp0_rect_tex_16x16_opaque(Gpu* gpu) {
     
     uint8_t opcode = (uint8_t)(cmd >> 24);
     bool raw_texture = ((cmd & 0x01000000) != 0) || (opcode & 1);
+    
+    // Debug: Log first few textured rectangles to verify parameters
+    static int debug_count = 0;
+    if (debug_count < 10) {
+        LOG_GPU_INFO("[GPU] GP0(0x%02X) Textured Rect 16x16: Cmd=0x%08X Vtx=0x%08X UV_CLUT=0x%08X -> Pos(%d,%d) UV(%d,%d) CLUT=0x%04X TPage=0x%04X (page_base=%d,depth=%d)\n",
+                      opcode, cmd, vtx, uv_clut, x, y, tex.u, tex.v, clut, tpage, gpu->page_base_x, gpu->texture_depth);
+        debug_count++;
+    }
+    
     draw_rectangle(gpu, x, y, 16, 16, col, true, raw_texture, &tex, clut, tpage);
 }
 
@@ -823,80 +844,8 @@ static void gp0_image_store(Gpu* gpu) {
 
 // --- Main GPU Public Functions ---
 
-/**
- * @brief Initializes the GPU state, including VRAM and default register values.
- * This is a full initialization (power-on or hard reset).
- */
-void gpu_init_full(Gpu* gpu, Interconnect* inter) {
-    LOG_GPU_DEBUG("GPU full initialization (with VRAM)");
-    LOG_GPU_DEBUG("GPU Initializing (full)...\n");
-    vram_init(&gpu->vram); // Init VRAM only on full reset
-    // Initialize all Gpu struct members to power-on/GP1 Reset defaults
-    gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
-    gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
-    gpu->texture_window_x_mask = 0; gpu->texture_window_y_mask = 0;
-    gpu->texture_window_x_offset = 0; gpu->texture_window_y_offset = 0;
-    gpu->dithering = false; gpu->draw_to_display = false;
-    gpu->texture_disable = false; gpu->rectangle_texture_x_flip = false;
-    gpu->rectangle_texture_y_flip = false; gpu->drawing_area_left = 0;
-    gpu->drawing_area_top = 0; gpu->drawing_area_right = 0;
-    gpu->drawing_area_bottom = 0; gpu->drawing_x_offset = 0;
-    gpu->drawing_y_offset = 0; gpu->force_set_mask_bit = false;
-    gpu->preserve_masked_pixels = false; gpu->dma_setting = GPU_DMA_Off;
-    gpu->display_disabled = true; gpu->display_vram_x_start = 0;
-    gpu->display_vram_y_start = 0; gpu->hres_raw = (HorizontalResRaw){0, 0};
-    gpu->vres = Y240Lines; gpu->vmode = Ntsc; gpu->interlaced = true;
-    gpu->display_depth = D15Bits; gpu->display_horiz_start = 0x200;
-    gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
-    gpu->display_line_end = 0x100; gpu->field = Top;
-    gpu->display_width_hint = 320; gpu->display_height_hint = 240;
-    clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
-    gpu->gp0_mode = GP0_MODE_COMMAND;
-    gpu->gp0_command_method = NULL;
-    // Initialize GP0 FIFO
-    gpu->gp0_fifo_head = 0; gpu->gp0_fifo_tail = 0; gpu->gp0_fifo_count = 0;
-    gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
-    gpu->vram_load_h = 0; gpu->vram_load_count = 0;
-    gpu->inter = inter;
-    renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0); // Reset texture window
-    LOG_GPU_DEBUG("GPU Initialized (State reset, VRAM initialized).\n");
-}
-
-/**
- * @brief Soft reset of the GPU state (does NOT clear VRAM).
- * Used for GP1(0x00) Soft Reset command.
- */
-void gpu_soft_reset(Gpu* gpu) {
-    LOG_GPU_DEBUG("GPU soft reset (no VRAM)");
-    LOG_GPU_DEBUG("GPU Soft Reset (no VRAM clear)...\n");
-    // All state reset EXCEPT VRAM
-    gpu->interrupt = false; gpu->page_base_x = 0; gpu->page_base_y = 0;
-    gpu->semi_transparency = 0; gpu->texture_depth = T4Bit;
-    gpu->texture_window_x_mask = 0; gpu->texture_window_y_mask = 0;
-    gpu->texture_window_x_offset = 0; gpu->texture_window_y_offset = 0;
-    renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0); // Reset texture window
-    gpu->dithering = false; gpu->draw_to_display = false;
-    gpu->texture_disable = false; gpu->rectangle_texture_x_flip = false;
-    gpu->rectangle_texture_y_flip = false; gpu->drawing_area_left = 0;
-    gpu->drawing_area_top = 0; gpu->drawing_area_right = 0;
-    gpu->drawing_area_bottom = 0; gpu->drawing_x_offset = 0;
-    gpu->drawing_y_offset = 0; gpu->force_set_mask_bit = false;
-    gpu->preserve_masked_pixels = false; gpu->dma_setting = GPU_DMA_Off;
-    gpu->display_disabled = true; gpu->display_vram_x_start = 0;
-    gpu->display_vram_y_start = 0; gpu->hres_raw = (HorizontalResRaw){0, 0};
-    gpu->vres = Y240Lines; gpu->vmode = Ntsc; gpu->interlaced = true;
-    gpu->display_depth = D15Bits; gpu->display_horiz_start = 0x200;
-    gpu->display_horiz_end = 0xc00; gpu->display_line_start = 0x10;
-    gpu->display_line_end = 0x100; gpu->field = Top;
-    gpu->display_width_hint = 320; gpu->display_height_hint = 240;
-    clear_gp0_command_buffer(gpu); gpu->gp0_words_remaining = 0;
-    gpu->gp0_mode = GP0_MODE_COMMAND;
-    gpu->gp0_command_method = NULL;
-    gpu->vram_load_x = 0; gpu->vram_load_y = 0; gpu->vram_load_w = 0;
-    gpu->vram_load_h = 0; gpu->vram_load_count = 0;
-    // gpu->inter remains unchanged
-    LOG_GPU_DEBUG("GPU Soft Reset complete (VRAM preserved).\n");
-}
+// NOTE: gpu_init_full() and gpu_soft_reset() moved to src/gpu/gpu_core.c
+// These implementations have been removed to prevent duplicate definitions
 
 /** Helper to write to VRAM with mask bit handling */
 static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
@@ -925,7 +874,7 @@ static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
 }
 
 /** Internal: process a single GP0 word (previous gpu_gp0 body moved here) */
-static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
+void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
     // Rate-limit GP0 command logging
     static uint32_t gp0_cmd_count = 0;
     gp0_cmd_count++;
@@ -978,11 +927,30 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
     }
 
     // Handle COMMAND mode
-    if (gpu->gp0_words_remaining == 0) {
+    // Check if this looks like a NEW command opcode (DMA packet boundary detection)
+    // We only force if: words_remaining > 1 (not just waiting for last word) AND top 3 bits indicate command type
+    uint8_t opcode_check = (uint8_t)(command >> 24);
+    uint8_t cmd_type = (opcode_check >> 5) & 0x7; // Top 3 bits
+    bool is_render_cmd = (cmd_type >= 1 && cmd_type <= 3); // 001=polygon, 010=line, 011=rect
+    bool is_env_cmd = (cmd_type == 7 && opcode_check >= 0xE0); // 111=environment
+    bool looks_like_new_cmd = (gpu->gp0_words_remaining > 2) && (is_render_cmd || is_env_cmd);
+    
+    if (gpu->gp0_words_remaining == 0 || looks_like_new_cmd) {
+        if (looks_like_new_cmd) {
+            LOG_GPU_WARN("GPU: Forcing new command 0x%02X while %d words remaining for 0x%02X (DMA packet boundary)\n", 
+                        opcode_check, gpu->gp0_words_remaining, gpu->gp0_current_opcode);
+        }
         // Start of a new command
-        uint8_t opcode = (uint8_t)(command >> 24);
+        uint8_t opcode = opcode_check;
         uint32_t expected_len = 0; void (*handler)(Gpu*) = NULL;
         gpu->gp0_current_opcode = opcode; clear_gp0_command_buffer(gpu);
+        gpu->gp0_words_remaining = 0; // Reset
+
+        static int opcode_log_count = 0;
+        if (opcode_log_count < 300 && (opcode >= 0x60 && opcode <= 0x7F)) {
+            LOG_GPU_INFO(">>> GPU DISPATCH: opcode=0x%02X command=0x%08X\n", opcode, command);
+            opcode_log_count++;
+        }
 
         // Determine expected length and handler based on opcode
         switch (opcode) {
@@ -1012,12 +980,12 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
             case 0x75: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Raw
             case 0x76: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Semi-trans
             case 0x77: expected_len = 3; handler = gp0_rect_tex_8x8_opaque; break; // Semi-trans raw
-            case 0x78: expected_len = 2; handler = gp0_rect_16x16_opaque; break;
-            case 0x7A: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // Semi-trans
-            case 0x7C: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break;
-            case 0x7D: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Raw
-            case 0x7E: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans
-            case 0x7F: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // Semi-trans raw
+            case 0x78: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // TEXTURED 16x16
+            case 0x7A: expected_len = 3; handler = gp0_rect_tex_16x16_opaque; break; // TEXTURED 16x16 Semi-trans
+            case 0x7C: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // NON-TEXTURED 16x16
+            case 0x7D: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // NON-TEXTURED 16x16 Raw
+            case 0x7E: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // NON-TEXTURED 16x16 Semi-trans
+            case 0x7F: expected_len = 2; handler = gp0_rect_16x16_opaque; break; // NON-TEXTURED 16x16 Semi-trans raw
             case 0x80: expected_len = 4; handler = gp0_copy_rectangle; break;
             case 0xA0: expected_len = 3; handler = gp0_image_load; break; // Sets up IMAGE_LOAD mode
             case 0xC0: expected_len = 3; handler = gp0_image_store; break;
@@ -1044,9 +1012,18 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
     push_gp0_command_word(gpu, command);
     gpu->gp0_words_remaining--;
 
+    // Debug: Log 0x78 command word buffering
+    if (gpu->gp0_current_opcode == 0x78) {
+        LOG_GPU_INFO(">>> 0x78: Buffered word, buffer_count=%d words_remaining=%d\n", 
+                     gpu->gp0_command_buffer.count, gpu->gp0_words_remaining);
+    }
+
     // If all words for the command received, execute the handler
     if (gpu->gp0_words_remaining == 0) {
          if (gpu->gp0_command_method != NULL) {
+             if (gpu->gp0_current_opcode == 0x78) {
+                 LOG_GPU_INFO(">>> About to call handler for GP0(0x78), buffer count=%d\n", gpu->gp0_command_buffer.count);
+             }
              (gpu->gp0_command_method)(gpu); // Call the stored function pointer
          } else {
              LOG_ERROR("GPU Error: NULL handler for GP0 opcode 0x%02x\n", gpu->gp0_current_opcode);
@@ -1061,6 +1038,14 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t command) {
 
 /** Public APi: enqueue GP0 word into hardware FIFO and process available words. */
 void gpu_gp0(Gpu* gpu, uint32_t command) {
+    uint8_t opcode = (uint8_t)(command >> 24);
+    static int gp0_log_count = 0;
+    if (gp0_log_count < 300 && (opcode >= 0x60 && opcode <= 0x7F)) {
+        LOG_GPU_INFO("### gpu_gp0() ENTRY: opcode=0x%02X command=0x%08X words_remaining=%d current_opcode=0x%02X\n", 
+                     opcode, command, gpu->gp0_words_remaining, gpu->gp0_current_opcode);
+        gp0_log_count++;
+    }
+    
     // If FIFO full, try to drain a bit before enqueueing (avoid dropping words)
     if (gpu->gp0_fifo_count >= 16) {
         LOG_GPU_WARN("GP0 FIFO full: draining before enqueue (was full)");

@@ -150,6 +150,14 @@ void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mas
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data);
 
 /**
+ * @brief Pushes a line primitive to the renderer.
+ * @param renderer Pointer to the Renderer instance.
+ * @param positions Array of 2 positions for the line endpoints.
+ * @param colors Array of 2 colors for the line endpoints.
+ */
+void renderer_push_line(Renderer* renderer, const RendererPosition* positions, const RendererColor* colors);
+
+/**
  * @brief Uploads buffered vertex data to the GPU and performs the OpenGL draw call.
  * Uses glBufferSubData to update VBOs with data from CPU buffers.
  * Issues a glDrawArrays call to render the buffered primitives (as triangles).
@@ -192,6 +200,17 @@ void renderer_destroy(Renderer* renderer);
  * @param height Display height.
  */
 void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, uint16_t width, uint16_t height);
+
+/**
+ * @brief Displays the VRAM framebuffer directly to the screen.
+ * Used for showing BIOS menu and other display content stored in VRAM.
+ * @param renderer Pointer to the Renderer instance.
+ * @param display_x X start coordinate in VRAM.
+ * @param display_y Y start coordinate in VRAM.
+ * @param display_width Display width.
+ * @param display_height Display height.
+ */
+void renderer_display_vram(Renderer* renderer, uint16_t display_x, uint16_t display_y, uint16_t display_width, uint16_t display_height);
 
 /**
  * @brief Checks for OpenGL errors using glGetError() and prints them.
