@@ -187,6 +187,11 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause);
 // --- BIOS SYSCALL handler prototype (needs Cpu to be declared) ---
 bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num);
 
+// --- BIOS Function Name Lookups ---
+const char* get_bios_a_function_name(uint32_t func_num);
+const char* get_bios_b_function_name(uint32_t func_num);
+const char* get_bios_c_function_name(uint32_t func_num);
+
 // --- Register Access ---
 /**
  * @brief Reads the value of a General Purpose Register (GPR) from the input set.
@@ -225,6 +230,9 @@ void cpu_branch(Cpu* cpu, uint32_t offset_se);
  * @return The 32-bit instruction word.
  */
 uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr);
+
+// --- Disassembler ---
+const char* disassemble_mips(uint32_t instruction, uint32_t pc);
 
 // --- Instruction Handler Prototypes (Internal linkage) ---
 // These functions implement the behavior of individual MIPS instructions.
