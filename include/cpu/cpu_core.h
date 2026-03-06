@@ -17,9 +17,8 @@ typedef struct Cpu {
     uint32_t current_pc;
     uint32_t current_instruction;  // Current instruction being executed
 
-    // --- General Purpose Registers (Dual register file for load delay) ---
-    Registers regs;      // Current register file
-    Registers out_regs;  // Output register file for load delay
+    // --- General Purpose Registers ---
+    Registers regs;      // Committed register file (all reads come from here)
 
     // --- Load Delay Slot (Dual slot system for back-to-back loads) ---
     Register load_reg_idx;
@@ -56,8 +55,34 @@ typedef struct Cpu {
     // --- Scratchpad (1KB Fast RAM at 0x1F800000) ---
     uint8_t scratchpad[1024]; // 1KB fast RAM, DuckStation-style
 
-    // --- Boot Stage Tracking ---
+    // --- Boot Stage Tracking (all state in struct for thread safety) ---
     BootStage boot_stage;
+    bool boot_jumped_to_ram;        // True once BIOS has jumped out of ROM
+    bool boot_logo_started;         // True once logo animation has started
+    bool boot_patch_loop_broken;    // True once BIOS patch verification was bypassed
+    uint64_t boot_patch_region_time;// Cumulative instructions spent in patch region
+    uint64_t boot_patch_first_entry;// Instruction count when patch region first entered
+    bool boot_patch_data_written;   // True once simulated patch data was written
+    bool boot_in_patch_region;      // True while PC is in patch verification region
+    BootStage boot_last_stage;      // Previous boot stage (for transition logging)
+    bool boot_stage_logged[9];      // Which boot stages have been logged already
+
+    // --- Execution Diagnostics (DuckStation-style: all state in struct) ---
+    uint64_t instruction_count;     // Total instructions executed
+    uint32_t diag_last_pc;          // Last PC value (for stuck-loop detection)
+    uint64_t diag_stuck_counter;    // How many consecutive instructions at same PC
+    bool diag_warned_low_kuseg;     // One-shot warning for low KUSEG execution
+    int  diag_last_bios_region;     // Last BIOS region detected (for region logging)
+    int  diag_prev_bios_region;     // Previous BIOS region (for oscillation detection)
+    int  diag_oscillation_count;    // Oscillation counter for region changes
+    bool diag_inspected_0x80000080; // One-shot inspection at exception vector
+    uint64_t diag_idle_counter;     // Idle instruction counter for WAITING_INPUT stage
+    uint32_t diag_irq_trace_count;  // Rate-limit counter for IRQ trace logs
+    uint64_t diag_irq_check_log_counter; // Rate-limit counter for periodic IRQ status
+    bool diag_last_hw_irq_pending;  // Previous hw_irq_pending state (for change detection)
+    uint32_t diag_hw_irq_change_count; // Count of hw_irq_pending state changes
+    int  diag_bios_fetch_count;     // Count of instructions logged in BIOS patch region
+    int  diag_boot_log_stage;       // Boot log stage tracker
 
 } Cpu;
 
@@ -92,14 +117,14 @@ static inline uint32_t cpu_reg_get(const Cpu* cpu, Register index) {
 
 /**
  * @brief Write register value (optimized for hot path)
- * Uses output register file for load delay slot emulation.
+ * Writes directly to the committed register file.
  * Automatically handles R0 writes (ignored).
  */
 static inline void cpu_reg_set_fast(Cpu* cpu, Register index, uint32_t value) {
     if (index != REG_ZERO) {
-        cpu->out_regs.r[index] = value;
+        cpu->regs.r[index] = value;
     }
-    cpu->out_regs.r[REG_ZERO] = 0;  // Ensure R0 stays 0
+    cpu->regs.r[REG_ZERO] = 0;  // Ensure R0 stays 0
 }
 
 /**
@@ -165,6 +190,17 @@ uint32_t cpu_reg(Cpu* cpu, Register index);
  * @param value Value to write
  */
 void cpu_set_reg(Cpu* cpu, Register index, uint32_t value);
+
+/**
+ * @brief Schedule a register write for the load delay slot
+ * Used by all load instructions (LB, LH, LW, LBU, LHU, LWL, LWR).
+ * Handles double-load hazard: if a load to the same register is already pending,
+ * the earlier value is discarded (DuckStation behavior).
+ * @param cpu Pointer to CPU state
+ * @param index Target register index
+ * @param value Value to write after one instruction delay
+ */
+void cpu_set_reg_delayed(Cpu* cpu, Register index, uint32_t value);
 
 /**
  * @brief Updates next_pc for branch instruction

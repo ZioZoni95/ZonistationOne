@@ -1108,7 +1108,7 @@ void op_lwr(Cpu* cpu, uint32_t instruction) {
     uint32_t addr = cpu_reg(cpu, rs) + offset;
 
     // Merge with pending load value if target register matches
-    uint32_t current_rt_value = (cpu->load_reg_idx == rt) ? cpu->load_value : cpu->out_regs.r[rt];
+    uint32_t current_rt_value = (cpu->load_reg_idx == rt) ? cpu->load_value : cpu->regs.r[rt];
 
     uint32_t aligned_addr = addr & ~3;
     uint32_t aligned_word = interconnect_load32(cpu->inter, aligned_addr);
