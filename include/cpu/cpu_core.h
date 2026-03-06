@@ -65,7 +65,7 @@ typedef struct Cpu {
     bool boot_patch_data_written;   // True once simulated patch data was written
     bool boot_in_patch_region;      // True while PC is in patch verification region
     BootStage boot_last_stage;      // Previous boot stage (for transition logging)
-    bool boot_stage_logged[9];      // Which boot stages have been logged already
+    bool boot_stage_logged[BOOT_STAGE_GAME_RUNNING + 1]; // Which boot stages have been logged
 
     // --- Execution Diagnostics (DuckStation-style: all state in struct) ---
     uint64_t instruction_count;     // Total instructions executed
