@@ -1,5 +1,6 @@
 #include "bios.h"       // Include the corresponding header file
 #include <stdio.h>      // For file operations (fopen, fread, fclose, perror, fprintf)
+#include <string.h>     // For memcmp, strlen
 #include "log.h"
 
 // Example: Replace LOG_BIOS_INFO or LOG_BIOS_DEBUG for frequent memory accesses with LOG_BIOS_TRACE or wrap in a higher debug level check.
@@ -79,4 +80,113 @@ uint16_t bios_load16(Bios* bios, uint32_t offset) {
     uint8_t b0 = bios->data[offset];
     uint8_t b1 = bios->data[offset + 1];
     return (uint16_t)(b0 | (b1 << 8));
+}
+
+// Walk forward from 'start' through consecutive null-terminated strings.
+// Stops after 8+ consecutive non-printable/non-whitespace bytes.
+// Each string is flushed as a plain line to stderr.
+static void print_strings_at_offset(const Bios* bios, uint32_t start) {
+    uint32_t pos = start;
+    char line[256];
+    int  line_len = 0;
+    int  null_run = 0;
+
+    while (pos < BIOS_SIZE && null_run < 8) {
+        uint8_t b = bios->data[pos++];
+        if (b == 0) {
+            if (line_len > 0) {
+                line[line_len] = '\0';
+                fprintf(stderr, "%s\n", line);
+                line_len = 0;
+            }
+            null_run++;
+        } else if (b == '\n' || b == '\r') {
+            if (line_len > 0) {
+                line[line_len] = '\0';
+                fprintf(stderr, "%s\n", line);
+                line_len = 0;
+            }
+            null_run = 0;
+        } else if (b >= 0x20 && b < 0x7F) {
+            if (line_len < (int)(sizeof(line) - 1))
+                line[line_len++] = (char)b;
+            null_run = 0;
+        } else {
+            if (line_len > 0) {
+                line[line_len] = '\0';
+                fprintf(stderr, "%s\n", line);
+                line_len = 0;
+            }
+            null_run++;
+        }
+    }
+}
+
+// Scans the BIOS ROM for the bootstrap string block starting with "PS-X Realtime
+// Kernel" and outputs each null-terminated string as a line to stderr.
+// On real hardware + devkit BIOS these are printed to the DUART debug port; on
+// retail BIOS they live silently in ROM.  This is the "hidden text".
+void bios_print_bootstrap_strings(const Bios* bios) {
+    static const char marker[] = "PS-X Realtime Kernel";
+    const uint32_t marker_len  = (uint32_t)strlen(marker);
+
+    uint32_t start = 0;
+    bool found = false;
+    for (uint32_t i = 0; i + marker_len < BIOS_SIZE; i++) {
+        if (memcmp(&bios->data[i], marker, marker_len) == 0) {
+            start = (i > 0 && bios->data[i - 1] == '\n') ? i - 1 : i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) return;
+
+    print_strings_at_offset(bios, start);
+    fprintf(stderr, "\n");
+}
+
+// Dumps all TCRF-documented hidden string blocks from the BIOS ROM to stderr.
+// Includes the bootstrap/kernel block plus PIO Shell, Control PAD driver,
+// Standard Libraries, and CD debug strings (SCPH-1001 offsets).
+void bios_print_all_hidden_strings(const Bios* bios) {
+    static const struct {
+        uint32_t    offset;
+        const char* label;
+    } blocks[] = {
+        { 0x00000,  "Bootstrap/Kernel" }, // searched via marker below
+        { 0x0E288,  "PIO Shell"        },
+        { 0x16D34,  "Control PAD"      },
+        { 0x61160,  "Std Libraries"    },
+        { 0x65E48,  "CD Debug"         },
+    };
+    static const int  block_count = (int)(sizeof(blocks) / sizeof(blocks[0]));
+
+    // Block 0: use marker search (same logic as bios_print_bootstrap_strings)
+    {
+        static const char marker[] = "PS-X Realtime Kernel";
+        const uint32_t marker_len  = (uint32_t)strlen(marker);
+        uint32_t start = 0;
+        bool found = false;
+        for (uint32_t i = 0; i + marker_len < BIOS_SIZE; i++) {
+            if (memcmp(&bios->data[i], marker, marker_len) == 0) {
+                start = (i > 0 && bios->data[i - 1] == '\n') ? i - 1 : i;
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            fprintf(stderr, "=== %s ===\n", blocks[0].label);
+            print_strings_at_offset(bios, start);
+            fprintf(stderr, "\n");
+        }
+    }
+
+    // Remaining blocks: fixed ROM offsets
+    for (int b = 1; b < block_count; b++) {
+        uint32_t off = blocks[b].offset;
+        if (off >= BIOS_SIZE) continue;
+        fprintf(stderr, "=== %s ===\n", blocks[b].label);
+        print_strings_at_offset(bios, off);
+        fprintf(stderr, "\n");
+    }
 }

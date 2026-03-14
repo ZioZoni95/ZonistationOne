@@ -87,7 +87,7 @@ struct Cpu;
 
 // Expansion Region 2 (Debug/Dev Hardware)
 #define EXPANSION_2_START 0x1f802000
-#define EXPANSION_2_SIZE  66
+#define EXPANSION_2_SIZE  0x2000  // Full EXP2 range (DUART at +0x23, POST at +0x41/0x80)
 #define EXPANSION_2_END   (EXPANSION_2_START + EXPANSION_2_SIZE - 1)
 
 // Cache Control Register (KSEG2)
@@ -144,7 +144,9 @@ typedef struct Interconnect {
     uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
     // --------------------------------
 
-    // Add pointers/state for other peripherals here later (Timers, SPU, CDROM, etc.)
+    // --- BIOS TTY line buffer (DuckStation-style EXP2 offset 0x23 capture) ---
+    char tty_line_buf[256];
+    int  tty_line_len;
 
 } Interconnect;
 

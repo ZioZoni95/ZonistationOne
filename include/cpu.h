@@ -184,13 +184,10 @@ void decode_and_execute(Cpu* cpu, uint32_t instruction);
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause);
 
-// --- BIOS SYSCALL handler prototype (needs Cpu to be declared) ---
-bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num);
+// --- BIOS SYSCALL interceptors (DuckStation-style) ---
+void handle_a0_syscall(Cpu* cpu);
+void handle_b0_syscall(Cpu* cpu);
 
-// --- BIOS Function Name Lookups ---
-const char* get_bios_a_function_name(uint32_t func_num);
-const char* get_bios_b_function_name(uint32_t func_num);
-const char* get_bios_c_function_name(uint32_t func_num);
 
 // --- Register Access ---
 /**

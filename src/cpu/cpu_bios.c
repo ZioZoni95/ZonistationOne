@@ -1,101 +1,150 @@
 #include "cpu.h"
+#include "interconnect.h"
+#include "bios.h"
 #include "log.h"
-#include "timers.h"
+#include <stdio.h>
+#include <string.h>
 
-// --- BIOS SYSCALL Handling ---
+// =============================================================================
+// BIOS Syscall Side-Channel Capture (DuckStation-style LLE)
+//
+// Called from op_jr BEFORE the CPU jumps to 0xA0 / 0xB0.
+// The BIOS still executes normally — we only read arguments to capture TTY
+// output.  We do NOT set return values ($v0/$v1).
+//
+// All character output is funnelled through the same line buffer as the
+// EXP2+0x23 DUART path (inter->tty_line_buf), so both sources produce
+// consistent [BIOS TTY] output on stderr when a newline is received.
+// =============================================================================
 
-/**
- * @brief Returns the name of a BIOS A-function for logging.
- */
-const char* get_bios_a_function_name(uint32_t func_num) {
+static const char* get_bios_a_function_name(uint32_t func_num) {
     static const char* names[] = {
-        "FileOpen", "FileSeek", "FileRead", "FileWrite", "FileClose",          // 00h-04h
-        "FileIoctl", "exit", "FileGetDeviceFlag", "FileGetc", "FilePutc",     // 05h-09h
-        "todigit", "atof", "strtoul", "strtol", "abs",                        // 0Ah-0Eh
-        "labs", "atoi", "atol", "strcat", "index",                            // 0Fh-13h
-        "rindex", "strchr", "strrchr", "strcmp", "strncmp",                   // 14h-18h
-        "strcpy", "strncpy", "strlen", "memcpy", "memset",                    // 19h-1Dh
-        "memmove", "memcmp", "memchr", "rand", "srand",                       // 1Eh-22h
-        "qsort", "strtod", "malloc", "free", "lsearch",                       // 23h-27h
-        "bsearch", "calloc", "realloc", "InitHeap", "SystemErrorExit",        // 28h-2Ch
-        "std_in_getchar", "std_in_testchar", "std_out_putchar", "std_in_gets",// 2Dh-30h
-        "std_out_puts", "printf", "SystemErrorUnresolvedException"            // 31h-33h
+        "open", "lseek", "read", "write", "close", "ioctl", "exit", "isatty",
+        "getc", "putc", "todigit", "atof", "strtoul", "strtol", "abs", "labs",
+        "atoi", "atol", "atob", "setjmp", "longjmp", "strcat", "strncat", "strcmp",
+        "strncmp", "strcpy", "strncpy", "strlen", "index", "rindex", "strchr",
+        "strrchr", "strpbrk", "strspn", "strcspn", "strtok", "strstr", "toupper",
+        "tolower", "bcopy", "bzero", "bcmp", "memcpy", "memset", "memmove", "memcmp",
+        "memchr", "rand", "srand", "qsort", "strtod", "malloc", "free", "lsearch",
+        "bsearch", "calloc", "realloc", "InitHeap", "_exit", "getchar", "putchar",
+        "gets", "puts", "printf"
     };
-    if (func_num < sizeof(names) / sizeof(names[0])) {
-        return names[func_num];
-    }
-    return "Unknown_A";
+    if (func_num < 0x40) return names[func_num];
+    return "unknown";
 }
 
-/**
- * @brief Returns the name of a BIOS B-function for logging.
- */
-const char* get_bios_b_function_name(uint32_t func_num) {
+static const char* get_bios_b_function_name(uint32_t func_num) {
     static const char* names[] = {
-        "alloc_kernel_memory", "free_kernel_memory", "init_timer", "get_timer", // 00h-03h
-        "enable_timer_irq", "disable_timer_irq", "restart_timer", "DeliverEvent", // 04h-07h
-        "OpenEvent", "CloseEvent", "WaitEvent", "TestEvent",                   // 08h-0Bh
-        "EnableEvent", "DisableEvent", "OpenTh", "CloseTh",                    // 0Ch-0Fh
-        "ChangeTh", "ReturnFromException", "SetDefaultExitFromException",      // 10h-12h
-        "SetCustomExitFromException"                                           // 13h
+        "alloc_kernel_memory", "free_kernel_memory", "init_timer", "get_timer",
+        "enable_timer_irq", "disable_timer_irq", "restart_timer", "DeliverEvent",
+        "OpenEvent", "CloseEvent", "WaitEvent", "TestEvent", "EnableEvent", "DisableEvent",
+        "OpenTh", "CloseTh", "ChangeTh", "jump_to_00000000h", "InitPAD2", "StartPAD2",
+        "StopPAD2", "PAD_init2", "PAD_dr", "ReturnFromException", "ResetEntryInt",
+        "HookEntryInt"
     };
-    if (func_num < sizeof(names) / sizeof(names[0])) {
-        return names[func_num];
-    }
-    return "Unknown_B";
+    if (func_num < 0x1A) return names[func_num];
+    return "unknown";
 }
 
-/**
- * @brief Returns the name of a BIOS C-function for logging.
- */
-const char* get_bios_c_function_name(uint32_t func_num) {
-    static const char* names[] = {
-        "EnqueueTimerAndVblankIrqs", "EnqueueSyscallHandler", "SysEnqIntRP",  // 00h-02h
-        "SysDeqIntRP", "get_free_EvCB_slot", "get_free_TCB_slot",            // 03h-05h
-        "ExceptionHandler", "InstallExceptionHandlers", "SysInitMemory",      // 06h-08h
-        "SysInitKernelVariables", "ChangeClearRCnt", "SystemError",           // 09h-0Bh
-        "SetRCnt", "GetRCnt", "StartRCnt", "StopRCnt",                        // 0Ch-0Fh
-        "ResetRCnt"                                                            // 10h
-    };
-    if (func_num < sizeof(names) / sizeof(names[0])) {
-        return names[func_num];
+// Adds one character to the interconnect's TTY line buffer.
+// Flushes to stderr as a plain line on newline.
+static void tty_add_char(Interconnect* inter, char ch) {
+    if (!inter) return;
+    uint8_t b = (uint8_t)ch;
+    if (ch == '\n' || ch == '\r') {
+        if (inter->tty_line_len > 1) {  // suppress single-char controller polling noise
+            inter->tty_line_buf[inter->tty_line_len] = '\0';
+            fprintf(stderr, "%s\n", inter->tty_line_buf);
+        }
+        inter->tty_line_len = 0;
+    } else if (b >= 0x20 && b < 0x7F) {
+        // Printable ASCII only — ignore control chars
+        if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
+            inter->tty_line_buf[inter->tty_line_len++] = ch;
     }
-    return "Unknown_C";
 }
 
-/**
- * @brief Handles specific BIOS A, B, and C function calls.
- * @return Returns true if the syscall was handled, false otherwise.
- */
-bool handle_bios_syscall(Cpu* cpu, uint32_t syscall_num) {
-    LOG_DEBUG("[BIOS_SYSCALL] Received syscall_num=0x%X", syscall_num);
-    switch (syscall_num) {
-        case 0x01: // EnterCriticalSection
-            cpu->sr &= ~1; // Disable interrupts
-            return true;   // Syscall was handled
+// Capture write(fd, buf, len) — stdout (fd=1) and stderr (fd=2) only
+static void capture_bios_write(Cpu* cpu) {
+    uint32_t fd  = cpu->regs[4];  // $a0
+    uint32_t buf = cpu->regs[5];  // $a1
+    uint32_t len = cpu->regs[6];  // $a2
 
-        case 0x02: // ExitCriticalSection
-            cpu->sr |= 1;  // Enable interrupts
-            return true;   // Syscall was handled
-
-        case 0x19: // B_clr_event(event)
-            // Stub - does nothing, but we acknowledge it as handled.
-            return true;   // Syscall was handled
-        
-
-        case 0x0C: // SetRCnt (C-function table index)
-            // Call timers_handle_setrcnt (to be implemented in timers.c)
-            if (cpu->inter && cpu->inter->timers_state.inter) {
-                timers_handle_setrcnt(&cpu->inter->timers_state, cpu);
-                LOG_INFO("[BIOS] SetRCnt syscall handled");
-                return true;
-            } else {
-                LOG_ERROR("[BIOS] SetRCnt syscall: timers/interconnect not initialized!");
-                return false;
-            }
-
-        default:
-            // We encountered a syscall we don't know how to handle.
-            return false;
+    if ((fd == 1 || fd == 2) && cpu->inter && len > 0 && len < 0x10000) {
+        for (uint32_t i = 0; i < len; i++)
+            tty_add_char(cpu->inter,
+                         (char)interconnect_load8(cpu->inter, buf + i));
     }
+}
+
+// Capture printf(fmt, ...) — output the raw format string from $a0.
+// PCSX-style: the format string itself is the "hidden text"
+// (format specifiers like %s/%08x appear literally, unsubstituted).
+static void capture_bios_printf(Cpu* cpu) {
+    uint32_t fmt = cpu->regs[4];  // $a0 = format string pointer
+
+    if (fmt && cpu->inter) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint8_t b = interconnect_load8(cpu->inter, fmt + i);
+            if (b == 0) break;
+            tty_add_char(cpu->inter, (char)b);
+        }
+    }
+}
+
+// Capture putc(c, fd) / putchar(c)
+static void capture_bios_putc(Cpu* cpu) {
+    uint32_t c  = cpu->regs[4] & 0xFF;  // $a0 = character
+    uint32_t fd = cpu->regs[5];          // $a1 = file descriptor (putchar: irrelevant)
+    uint32_t fn = cpu->regs[9];          // $t1 = A0/B0 function number
+
+    // putchar (A0:0x3C, B0:0x3D) has no fd; putc (A0:0x09, B0:0x3B) uses fd
+    int is_putchar = (fn == 0x3C || fn == 0x3D);
+    if (is_putchar || fd == 1 || fd == 2)
+        tty_add_char(cpu->inter, (char)c);
+}
+
+// Capture puts(str)
+static void capture_bios_puts(Cpu* cpu) {
+    uint32_t str = cpu->regs[4];  // $a0 = string pointer
+
+    if (str && cpu->inter) {
+        for (uint32_t i = 0; i < 512; i++) {
+            uint8_t b = interconnect_load8(cpu->inter, str + i);
+            if (b == 0) break;
+            tty_add_char(cpu->inter, (char)b);
+        }
+        tty_add_char(cpu->inter, '\n');  // puts() appends newline
+    }
+}
+
+// Called from op_jr when target == 0xA0
+void handle_a0_syscall(Cpu* cpu) {
+    uint32_t call = cpu->regs[9]; // $t1
+    LOG_CPU_DEBUG("[BIOS] A0(%s / 0x%02X)", get_bios_a_function_name(call), call);
+
+    switch (call) {
+        case 0x03: capture_bios_write(cpu);  break;  // write()
+        case 0x09:                                    // putc()
+        case 0x3C: capture_bios_putc(cpu);   break;  // putchar()
+        case 0x3E: capture_bios_puts(cpu);   break;  // puts()
+        case 0x3F: capture_bios_printf(cpu); break;  // printf() — outputs raw format string
+        default:   break;
+    }
+    // Do NOT set cpu->regs[2] — BIOS executes its real function after this hook
+}
+
+// Called from op_jr when target == 0xB0
+void handle_b0_syscall(Cpu* cpu) {
+    uint32_t call = cpu->regs[9]; // $t1
+    LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", get_bios_b_function_name(call), call);
+
+    switch (call) {
+        case 0x35: capture_bios_write(cpu); break;  // write()
+        case 0x3B:                                   // putc()
+        case 0x3D: capture_bios_putc(cpu);  break;  // putchar()
+        case 0x3F: capture_bios_puts(cpu);  break;  // puts()
+        default:   break;
+    }
+    // Do NOT set cpu->regs[2] — BIOS executes its real function after this hook
 }

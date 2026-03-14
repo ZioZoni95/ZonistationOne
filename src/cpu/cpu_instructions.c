@@ -62,8 +62,8 @@ void op_addiu(Cpu* cpu, uint32_t instruction) {
 
 void op_j(Cpu* cpu, uint32_t instruction) {
     uint32_t target_imm = instr_imm_jump(instruction);
-    // Combine upper 4 bits of current PC+4 with target
-    cpu->next_pc = (cpu->current_pc & 0xF0000000) | (target_imm << 2);
+    // Upper 4 bits come from the delay slot's PC (cpu->pc already advanced to delay slot).
+    cpu->next_pc = (cpu->pc & 0xF0000000) | (target_imm << 2);
     cpu->branch_taken = true;
 }
 
@@ -104,9 +104,9 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
              // No state change for now
              break;
         case 12: // SR (Status Register)
-            // printf("~ MTC0 SR = 0x%08x\n", value); // Debug
             LOG_CPU_DEBUG("MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
-            cpu->sr = value;
+            // Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
+            cpu->sr = (cpu->sr & ~0xF27FFFFF) | (value & 0xF27FFFFF);
             break;
         case 13: // CAUSE
              // Only bits 8 and 9 (IP0, IP1) seem writable to force software interrupts.
@@ -116,25 +116,28 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
                  LOG_CPU_WARN("MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x", value, cpu->current_pc);
              }
              break;
-        // EPC (Reg 14) is read-only. Other registers are typically MMU-related or unused.
+        case 8:  // BadVaddr (COP0 reg 8) — read-only, writes silently ignored (DuckStation)
+        case 14: // EPC (COP0 reg 14) — read-only, writes silently ignored (DuckStation)
+            LOG_CPU_WARN("MTC0 to read-only COP0 Register %u = 0x%08x at PC=0x%08x (ignored)", cop_r, value, cpu->current_pc);
+            break;
         default:
             LOG_CPU_WARN("MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
+            cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
             break;
     }
 }
 
 void op_rfe(Cpu* cpu, uint32_t instruction) {
-    // RFE: Return from Exception
-    // Moves SR bits: bit2-3 -> bit0-1, bit4-5 -> bit2-3
-    // Other bits unchanged
+    (void)instruction;
+    // RFE: Return from Exception - restores the R3000A mode stack (bits 0-5 of SR).
+    // Pop: IEp/KUp -> IEc/KUc, IEo/KUo -> IEp/KUp.
+    // IEo/KUo (bits 4-5) are preserved unchanged (not popped off).
+    // There is no EXL bit on R3000A; SR bit 10 has no meaning here.
     uint32_t old_sr = cpu->sr;
-    uint32_t new_sr = old_sr;
-    new_sr &= ~(0x3F); // Clear bits 0-5
-    new_sr |= ((old_sr >> 2) & 0x3) << 0;  // bit2-3 -> bit0-1
-    new_sr |= ((old_sr >> 4) & 0x3) << 2;  // bit4-5 -> bit2-3
-    // bits 4-5 remain unchanged as per spec
-    cpu->sr = new_sr;
-    LOG_CPU_DEBUG("RFE: SR changed from 0x%08x to 0x%08x", old_sr, new_sr);
+    uint32_t mode = old_sr & 0x3F;
+    // Keep bits 4-5 (IEo/KUo) as-is. Shift right by 2 fills bits 0-3.
+    cpu->sr = (old_sr & ~0x3F) | ((mode & 0x30) | (mode >> 2));
+    LOG_CPU_DEBUG("RFE: SR changed from 0x%08x to 0x%08x", old_sr, cpu->sr);
 }
 
 void op_bne(Cpu* cpu, uint32_t instruction) {
@@ -223,7 +226,8 @@ void op_sh(Cpu* cpu, uint32_t instruction) {
 void op_jal(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, REG_RA, cpu->pc + 4); // Link Register $31 gets PC+8 (address after delay slot)
     uint32_t target_imm = instr_imm_jump(instruction);
-    cpu->next_pc = (cpu->current_pc & 0xF0000000) | (target_imm << 2); // Same target calculation as J
+    // Upper 4 bits come from the delay slot's PC (cpu->pc already advanced to delay slot).
+    cpu->next_pc = (cpu->pc & 0xF0000000) | (target_imm << 2);
     cpu->branch_taken = true;
 }
 
@@ -251,46 +255,24 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t target_address = cpu_reg(cpu, rs);
     
-    // Detect BIOS function vector calls
+    // Detect BIOS function vector calls — DuckStation-style LLE side-channel capture.
+    // The BIOS will still execute normally (cpu->next_pc = target_address below).
+    // handle_a0/b0_syscall only capture TTY output; they do NOT fake return values.
     if (target_address == 0x000000A0 || target_address == 0x000000B0 || target_address == 0x000000C0) {
-        // Prefer a small function index in R9; if R9 looks like an address, fall back to R10.
         uint32_t func_num = cpu_reg(cpu, 9);
         if (func_num >= 0x100 || func_num == 0) {
             uint32_t alt = cpu_reg(cpu, 10);
             if (alt < 0x100 && alt != 0) func_num = alt;
-            else func_num = cpu_reg(cpu, 9); // keep original if no small alt found
         }
-        const char* vector_name = (target_address == 0xA0) ? "A" : 
-                                 (target_address == 0xB0) ? "B" : "C";
-        const char* func_name;
-        
-        if (target_address == 0xA0) {
-            func_name = get_bios_a_function_name(func_num);
-        } else if (target_address == 0xB0) {
-            func_name = get_bios_b_function_name(func_num);
-        } else {
-            func_name = get_bios_c_function_name(func_num);
-        }
-        
-        if (func_num > 0xFF) {
-            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(0x%08X) = %s() [note: func_num looks like an address]", 
-                         cpu->current_pc, vector_name, func_num, func_name);
+        const char* vector_name = (target_address == 0xA0) ? "A" :
+                                  (target_address == 0xB0) ? "B" : "C";
+        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
+                      cpu->current_pc, vector_name, func_num);
 
-            // If the func_num looks like an MMIO address (SPU range), dump CPU regs
-            if (func_num >= SPU_START && func_num <= SPU_END) {
-                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
-                // register and instruction dumps suppressed to reduce log spam
-            }
-
-        } else {
-            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh) = %s()", 
-                         cpu->current_pc, vector_name, func_num, func_name);
-
-            if (func_num == 0xC0) {
-                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
-                // register and instruction dumps suppressed to reduce log spam
-            }
-        }
+        if (target_address == 0x000000A0)
+            handle_a0_syscall(cpu);
+        else if (target_address == 0x000000B0)
+            handle_b0_syscall(cpu);
     }
     // Log other suspicious jumps to low memory or unaligned addresses
     else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
@@ -341,16 +323,21 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value_read = 0; // Default value if read fails or is unhandled
 
     switch (cop_r_src) {
+        case  3: value_read = 0; break; // BPC (breakpoint on execute) — not implemented, return 0
+        case  5: value_read = 0; break; // BDA (breakpoint on data access) — not implemented, return 0
+        case  6: value_read = 0; break; // JUMPDEST (TAR, target address register) — not implemented, return 0
+        case  7: value_read = 0; break; // DCIC (debug/cache control) — not implemented, return 0
+        case  8: value_read = cpu->badvaddr; break; // BadVaddr
+        case  9: value_read = 0; break; // BDAM (breakpoint data access mask) — not implemented, return 0
+        case 11: value_read = 0; break; // BPCM (breakpoint execute mask) — not implemented, return 0
         case 12: value_read = cpu->sr; break; // SR
         case 13: value_read = cpu->cause; break; // CAUSE
         case 14: value_read = cpu->epc; break; // EPC
-        case 8:  value_read = cpu->badvaddr; break; // BadVaddr (COP0 reg 8)
-        case 15: value_read = cpu->prid; break; // PRID (COP0 reg 15)
-        // Add reads for other COP0 registers if needed (mostly MMU/debug related)
+        case 15: value_read = cpu->prid; break; // PRID
         default:
-            LOG_WARN("Warning: MFC0 read from unhandled COP0 Register %u (PC=0x%08x)\n", cop_r_src, cpu->current_pc);
-            // Should it trigger an exception? Probably not, just return garbage/0.
-            break;
+            LOG_CPU_WARN("MFC0 read from unhandled COP0 Register %u (PC=0x%08x)", cop_r_src, cpu->current_pc);
+            cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
+            return;
     }
     // Schedule load for delay slot
     cpu->load_reg_idx = cpu_r_dest;
@@ -423,46 +410,22 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
     uint32_t target_address = cpu_reg(cpu, rs);
     uint32_t return_addr = cpu->pc + 4; // Address of instruction after delay slot
 
-    // Check for BIOS function call (to 0xA0, 0xB0, or 0xC0)
+    // Check for BIOS function call (to 0xA0, 0xB0, or 0xC0) — LLE side-channel capture
     if (target_address == 0xA0 || target_address == 0xB0 || target_address == 0xC0) {
-        // Prefer a small function index in R9; if R9 looks like an address, fall back to R10.
         uint32_t func_num = cpu_reg(cpu, 9);
         if (func_num >= 0x100 || func_num == 0) {
             uint32_t alt = cpu_reg(cpu, 10);
             if (alt < 0x100 && alt != 0) func_num = alt;
-            else func_num = cpu_reg(cpu, 9);
         }
-        const char* func_name = NULL;
-        char func_type = '?';
-        
-        if (target_address == 0xA0) {
-            func_name = get_bios_a_function_name(func_num);
-            func_type = 'A';
-        } else if (target_address == 0xB0) {
-            func_name = get_bios_b_function_name(func_num);
-            func_type = 'B';
-        } else if (target_address == 0xC0) {
-            func_name = get_bios_c_function_name(func_num);
-            func_type = 'C';
-        }
-        
-        if (func_num > 0xFF) {
-            LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(0x%08X) = %s() [note: func_num looks like an address]", 
-                         cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
-            if (func_type == 'C' && func_num >= SPU_START && func_num <= SPU_END) {
-                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call with SPU MMIO address 0x%08X at PC=0x%08x", func_num, cpu->current_pc);
-                // Suppressed per-register and nearby instruction dumps to reduce log noise
-                LOG_CPU_DEBUG("[BIOS_DEBUG] GPR/INSN dump suppressed for SPU MMIO C-call at PC=0x%08x", cpu->current_pc);
-            }
-        } else {
-            LOG_CPU_INFO("@BIOS_CALL from PC=0x%08x: %c(%02Xh) = %s()", 
-                         cpu->current_pc, func_type, func_num, func_name ? func_name : "Unknown");
-            if (func_num == 0xC0) {
-                LOG_CPU_INFO("[BIOS_DEBUG] Detected C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
-                // Suppressed per-register and nearby instruction dumps to reduce log noise
-                LOG_CPU_DEBUG("[BIOS_DEBUG] GPR/INSN dump suppressed for C-call index 0xC0 at PC=0x%08x", cpu->current_pc);
-            }
-        }
+        const char* vector_name = (target_address == 0xA0) ? "A" :
+                                  (target_address == 0xB0) ? "B" : "C";
+        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
+                     cpu->current_pc, vector_name, func_num);
+
+        if (target_address == 0xA0)
+            handle_a0_syscall(cpu);
+        else if (target_address == 0xB0)
+            handle_b0_syscall(cpu);
     }
     // Log other suspicious jumps to low memory or unaligned addresses
     else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
@@ -494,12 +457,11 @@ void op_bxx(Cpu* cpu, uint32_t instruction) {
         condition_met = (rs_value < 0);
     }
 
+    // Per MIPS spec: BGEZAL/BLTZAL write $ra UNCONDITIONALLY (even if branch not taken).
+    if (is_link) {
+        cpu_set_reg(cpu, REG_RA, cpu->pc + 4);
+    }
     if (condition_met) {
-        // Link if necessary (store PC+8 in $ra)
-        if (is_link) {
-            cpu_set_reg(cpu, REG_RA, cpu->pc + 4); //
-        }
-        // Perform the branch
         cpu_branch(cpu, imm_se);
         cpu->branch_taken = true;
     }
@@ -609,24 +571,12 @@ void op_mfhi(Cpu* cpu, uint32_t instruction) {
     // TODO: Should stall if previous DIV/MULT not finished.
 }
 
-// System Call
+// System Call - DuckStation style: just raise exception, handle in main loop
 void op_syscall(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    // Get the syscall number from register $a0
-    uint32_t syscall_num = cpu_reg(cpu, 4); 
-
-    // Attempt to handle it directly
-    bool was_handled = handle_bios_syscall(cpu, syscall_num);
-
-    // If the handler returned false, it means we don't have this
-    // syscall implemented yet. In that case, trigger a full exception
-    // so we can see it in the logs and debug it.
-    if (!was_handled) {
-        LOG_ERROR("Unhandled BIOS Syscall: 0x%02x, triggering full exception.\n", syscall_num);
-        cpu_exception(cpu, EXCEPTION_SYSCALL);
-        return; // <--- Ensure we do not continue executing after exception
-    }
-    // If it was handled, we do nothing and simply proceed to the next instruction.
+    // DuckStation just triggers the exception - the syscall is handled by BIOS code
+    // We only intercept A0/B0 syscall vectors in the main execution loop
+    cpu_exception(cpu, EXCEPTION_SYSCALL);
 }
 
 // Bitwise Not Or
@@ -757,7 +707,7 @@ void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 void op_break(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    LOG_CPU_INFO("@nocash BREAK OPCODE: EPC=0x%08x PC=0x%08x");
+    LOG_CPU_INFO("@nocash BREAK OPCODE: EPC=0x%08x PC=0x%08x", cpu->epc, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 
@@ -949,15 +899,14 @@ void op_lwc1(Cpu* cpu, uint32_t instruction) {
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
-// Load Word Coprocessor 2 (GTE) - Unimplemented
+// Load Word Coprocessor 2 (GTE): [RS + imm_se] -> GTE data register RT
 void op_lwc2(Cpu* cpu, uint32_t instruction) {
-    uint32_t cpu_r_dest = instr_t(instruction); // Target CPU register
-    uint32_t gte_r_src = instr_d(instruction);  // Source GTE register
-    uint32_t value_read = gte_read_data_register(&cpu->gte, gte_r_src);
-    
-    // Schedule load for delay slot
-    cpu->load_reg_idx = cpu_r_dest;
-    cpu->load_value = value_read;
+    uint32_t rt     = instr_t(instruction);           // destination GTE data register
+    uint32_t rs     = instr_s(instruction);           // base address register
+    uint32_t offset = instr_imm_se(instruction);
+    uint32_t addr   = cpu_reg(cpu, rs) + offset;
+    uint32_t value  = interconnect_load32(cpu->inter, addr);
+    gte_write_data_register(&cpu->gte, rt, value);
 }
 
 // Load Word Coprocessor 3 - Not supported
@@ -978,13 +927,14 @@ void op_swc1(Cpu* cpu, uint32_t instruction) {
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
-// Store Word Coprocessor 2 (GTE) - Unimplemented
+// Store Word Coprocessor 2 (GTE): GTE data register RT -> [RS + imm_se]
 void op_swc2(Cpu* cpu, uint32_t instruction) {
-    uint32_t cpu_r_src = instr_t(instruction); // Source CPU register
-    uint32_t gte_r_dest = instr_d(instruction); // Target GTE register
-    uint32_t value = cpu_reg(cpu, cpu_r_src);
-    
-    gte_write_data_register(&cpu->gte, gte_r_dest, value);
+    uint32_t rt     = instr_t(instruction);           // source GTE data register
+    uint32_t rs     = instr_s(instruction);           // base address register
+    uint32_t offset = instr_imm_se(instruction);
+    uint32_t addr   = cpu_reg(cpu, rs) + offset;
+    uint32_t value  = gte_read_data_register(&cpu->gte, rt);
+    interconnect_store32(cpu->inter, addr, value);
 }
 
 // Store Word Coprocessor 3 - Not supported

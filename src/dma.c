@@ -103,7 +103,7 @@ void dma_init(Dma* dma, struct Interconnect* inter) {
         dma->channels[i].block_count = 0;
     }
 
-    printf("DMA Initialized. DPCR=0x%08x, Channels initialized.\n", dma->control);
+    LOG_DMA_INFO("DMA Initialized. DPCR=0x%08x, Channels initialized.", dma->control);
 }
 
 // Reads a 32-bit value from a DMA register address (relative offset).

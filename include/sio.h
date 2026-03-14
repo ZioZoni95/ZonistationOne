@@ -44,6 +44,11 @@ typedef struct {
     // Controller state (basic stub for now)
     bool controller_connected;
     uint16_t button_state;    // Digital button state
+
+    // IRQ7 (IRQ_CTRLMEMCARD) pending flag.
+    // Set by sio_handle_transfer when ACK occurs and CTRL bit 12 (/ACK IRQ enable) is set.
+    // Cleared and dispatched by the interconnect after each sio_write*.
+    bool pending_irq;
 } Sio;
 
 // Initialization

@@ -180,14 +180,22 @@ static void sio_handle_transfer(Sio* sio, uint8_t tx_byte) {
     // Store response
     sio->rx_data = response;
     sio->stat |= STAT_RX_NOT_EMPTY;
-    
-    // Set ACK bit (device acknowledged)
+
+    // Set ACK bit and conditionally raise IRQ7.
+    // On real hardware /ACK is only asserted when a device is present and responds.
+    // We assert it whenever a device was addressed so the BIOS polling loop can proceed.
     if (sio->selected_device != 0) {
         sio->stat |= STAT_ACK;
+        // JOY_CTRL bit 12 = /ACK IRQ Enable: fire IRQ_CTRLMEMCARD (IRQ7) on /ACK.
+        // The interconnect will consume pending_irq and pulse the IRQ line.
+        if (sio->ctrl & (1 << 12)) {
+            sio->stat |= STAT_IRQ;
+            sio->pending_irq = true;
+        }
     }
-    
-    LOG_SYSTEM_TRACE("SIO transfer: TX=0x%02x, RX=0x%02x, step=%d, device=%d", 
-                  tx_byte, response, sio->transfer_step, sio->selected_device);
+
+    LOG_SYSTEM_TRACE("SIO transfer: TX=0x%02x, RX=0x%02x, step=%d, device=%d irq=%d",
+                  tx_byte, response, sio->transfer_step, sio->selected_device, sio->pending_irq);
 }
 
 static uint8_t handle_controller_transfer(Sio* sio, uint8_t tx_byte) {
@@ -331,14 +339,19 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
             
         case 0x0A:  // JOY_CTRL (1F80104Ah)
             sio->ctrl = value;
-            
+
             // Handle reset
             if (value & CTRL_RESET) {
                 sio->selected_device = 0;
                 sio->transfer_step = 0;
                 sio->stat = STAT_TX_RDY_1 | STAT_TX_RDY_2;
             }
-            
+
+            // Writing bit 12 acknowledges (clears) the pending IRQ7 in STAT bit 9.
+            if (value & (1 << 12)) {
+                sio->stat &= ~STAT_IRQ;
+            }
+
             // Handle deselect
             if (!(value & CTRL_SELECT)) {
                 sio->selected_device = 0;

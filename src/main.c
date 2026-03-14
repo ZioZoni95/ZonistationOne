@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <sys/stat.h> // For file size checking
 #include <unistd.h>   // For access(), rename()
 
@@ -28,8 +29,6 @@
 #include "log.h"
 #include "event_scheduler.h" // <<< ADDED: Include for event scheduling
 
-// Add prototype to fix implicit declaration warning
-void interconnect_check_bios_boot(struct Interconnect* inter);
 
 /*
  * Command Line Logging Options:
@@ -49,13 +48,14 @@ int main(int argc, char *argv[]) {
     // --- Argument Parsing ---
     // Usage: ./myps1_emu [options] <BIOS_PATH>
     const char* bios_path = NULL;
-    int log_level = LOG_LEVEL_INFO;
+    int log_level = LOG_LEVEL_WARN;
     bool show_help = false;
     bool log_single_file = false;
     int log_rate_limit_n = 0;
     bool disable_irq_logs = false;
     bool disable_interconnect_logs = false;
     bool disable_dma_logs = false;
+    bool bios_strings_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--debug") == 0) {
             log_level = LOG_LEVEL_DEBUG;
         } else if (strcmp(argv[i], "--quiet") == 0) {
-            log_level = LOG_LEVEL_WARN;
+            log_level = LOG_LEVEL_SILENT;
         } else if (strcmp(argv[i], "--trace") == 0) {
             log_level = LOG_LEVEL_TRACE;
         } else if (strcmp(argv[i], "--silent") == 0) {
@@ -76,6 +76,8 @@ int main(int argc, char *argv[]) {
             disable_interconnect_logs = true;
         } else if (strcmp(argv[i], "--no-dma-logs") == 0) {
             disable_dma_logs = true;
+        } else if (strcmp(argv[i], "--bios-strings") == 0) {
+            bios_strings_mode = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             show_help = true;
         } else if (!bios_path) {
@@ -99,6 +101,9 @@ int main(int argc, char *argv[]) {
         printf("  --no-irq-logs      Disable IRQ/interrupt logging (reduces spam)\n");
         printf("  --no-interconnect-logs Disable I/O interconnect logging (reduces spam)\n");
         printf("  --no-dma-logs      Disable DMA transfer logging\n\n");
+        printf("BIOS Debug:\n");
+        printf("  --bios-strings     Dump all TCRF hidden string blocks at startup\n");
+        printf("                     (PIO Shell, Control PAD, Std Libraries, CD debug)\n\n");
         printf("Output Control:\n");
         printf("  --log-rate-limit=N Rate limit: log first N msgs, then every Nth (default: auto)\n");
         printf("  --log-single-file  Log to emulator_log.txt instead of console\n\n");
@@ -218,7 +223,7 @@ int main(int argc, char *argv[]) {
 
     // --- Emulator Component Initialization ---
     LOG_SYSTEM_WARN("Initializing Emulator Components...");
-
+    
     Bios bios_data;
     Ram ram_memory;
     Interconnect interconnect_state;
@@ -237,6 +242,12 @@ int main(int argc, char *argv[]) {
         SDL_Quit();
         return 1;
     }
+    // Print the "hidden text" bootstrap strings from the BIOS ROM.
+    // --bios-strings dumps all TCRF blocks; default prints only the kernel banner.
+    if (bios_strings_mode)
+        bios_print_all_hidden_strings(&bios_data);
+    else
+        bios_print_bootstrap_strings(&bios_data);
 
     // 3. Initialize Interconnect (connects all hardware components)
     LOG_SYSTEM_DEBUG("  Initializing Interconnect...");
@@ -290,6 +301,9 @@ int main(int argc, char *argv[]) {
     SDL_Event event;
     uint64_t total_cycles = 0;
 
+    const uint64_t frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() / 60.0);
+    uint64_t next_frame_tick = SDL_GetPerformanceCounter() + frame_ticks;
+
     while (!should_quit) {
         // --- Handle Input/Window Events ---
         while (SDL_PollEvent(&event)) {
@@ -307,78 +321,51 @@ int main(int argc, char *argv[]) {
         // --- Run Emulation for One Frame ---
         uint32_t cycles_run = 0;
         
-        // FIX: BIOS Boot Bypass - Force continue if stuck too long
-        static uint64_t total_instructions = 0;
-        static uint32_t last_progress_pc = 0xbfc00000;
-        static uint32_t stuck_counter = 0;
-        static bool bios_menu_reached = false;
-        
         while (cycles_run < cycles_per_frame) {
-            cpu_run_next_instruction(&cpu_state);
-            eventq_dispatch_due(&interconnect_state);
-            // Check CDROM events during CPU loop (not just per-frame)
-            interconnect_check_cdrom_events(&interconnect_state);
-            // --- PCSX ReARMed-style: Immediately run another CPU instruction after event dispatch to process IRQs ---
-            cpu_run_next_instruction(&cpu_state);
-            cycles_run += 2; // FIX: Increment by 2 since we run 2 instructions per iteration
-            
-            // BIOS Boot Bypass Logic - Improved
-            total_instructions++;
-            
-            // Check if we've reached the BIOS menu (common patterns)
-            if (!bios_menu_reached && 
-                (cpu_state.pc == 0x80000000 || 
-                 (cpu_state.pc >= 0x80000000 && cpu_state.pc < 0x80200000) ||
-                 cpu_state.pc == 0x80000080)) {
-                bios_menu_reached = true;
-                LOG_SYSTEM_INFO("BIOS-BOOT: BIOS menu reached at PC=0x%08x after %llu instructions", 
-                               cpu_state.pc, total_instructions);
-                // Enable interrupts for BIOS menu operation
-                interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
-                LOG_SYSTEM_INFO("BIOS-BOOT: Interrupts enabled for BIOS menu operation.");
+            uint32_t cycles_remaining = cycles_per_frame - cycles_run;
+            uint32_t to_next_event = eventq_cycles_until_next(&interconnect_state);
+            uint32_t run_chunk = (to_next_event == 0) ? 1 : to_next_event;
+            if (run_chunk > cycles_remaining) {
+                run_chunk = cycles_remaining;
             }
-            
-            if (cpu_state.pc == last_progress_pc) {
-                stuck_counter++;
-                // If stuck for too long, force enable interrupts and continue
-                if (stuck_counter > 500000) { // Reduced from 1M to 500K for faster recovery
-                    LOG_SYSTEM_WARN("BIOS-BOOT: STUCK for %u instructions at PC=0x%08x. Forcing interrupt enable.", stuck_counter, cpu_state.pc);
-                    // Force enable interrupts to wake up BIOS
-                    interconnect_state.irq_mask = 0x0003; // Enable IRQ0 (VBlank) and IRQ1 (GPU)
-                    // Use edge-triggered API for VBlank (IRQ0, not IRQ1!)
-                    interconnect_request_irq(&interconnect_state, 0, "ForcedVBlank");
-                    stuck_counter = 0;
-                    LOG_SYSTEM_INFO("BIOS-BOOT: Forced interrupts enabled. BIOS should continue now.");
-                }
-            } else {
-                stuck_counter = 0;
-                last_progress_pc = cpu_state.pc;
+
+            for (uint32_t i = 0; i < run_chunk; ++i) {
+                cpu_run_next_instruction(&cpu_state);
             }
-            
-            // Only log progress every 10M instructions to reduce spam
-            if (total_instructions % 10000000 == 0) {
-                LOG_SYSTEM_DEBUG("BIOS-BOOT: Progress: %llu instructions, PC=0x%08x", 
-                        total_instructions, cpu_state.pc);
-            }
+
+            cycles_run += run_chunk;
         }
-        // Step timers once per frame with the total cycles executed
-        timers_step(&interconnect_state.timers_state, cycles_per_frame);
-        // Check and fire pending CDROM events
-        interconnect_check_cdrom_events(&interconnect_state);
-        // Check if BIOS needs boot helper for interrupt configuration
-        interconnect_check_bios_boot(&interconnect_state);
+
         // --- Render and Display Frame ---
         // Flush any remaining primitives to the GPU
         renderer_draw(&interconnect_state.gpu.renderer);
         // Swap buffers to display the frame
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
+
+        // Simple 60Hz throttling to keep frame timing stable.
+        uint64_t now = SDL_GetPerformanceCounter();
+        if (now < next_frame_tick) {
+            uint64_t ticks_left = next_frame_tick - now;
+            uint64_t ms_left = (ticks_left * 1000ULL) / (uint64_t)SDL_GetPerformanceFrequency();
+            if (ms_left > 1) {
+                SDL_Delay((uint32_t)(ms_left - 1));
+            }
+            while (SDL_GetPerformanceCounter() < next_frame_tick) {
+                // short spin for better frame boundary precision
+            }
+            next_frame_tick += frame_ticks;
+        } else {
+            // If the frame overran, resync to now instead of accumulating lag forever.
+            next_frame_tick = now + frame_ticks;
+        }
+
         total_cycles += cycles_per_frame;
     }
 
     // --- Cleanup ---
     LOG_SYSTEM_INFO("Emulation loop finished. Cleaning up...");
-
+    
     renderer_destroy(&interconnect_state.gpu.renderer);
     LOG_SYSTEM_INFO("Destroying SDL GL Context and Window...");
     SDL_GL_DeleteContext(gl_context);

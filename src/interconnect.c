@@ -139,7 +139,11 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     sio_init(&inter->sio);
     // Initialize SPU
     spu_init(&inter->spu);
-    
+
+    // Initialize BIOS TTY line buffer
+    inter->tty_line_len = 0;
+    inter->tty_line_buf[0] = '\0';
+
     LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
 
@@ -257,7 +261,9 @@ void interconnect_check_cdrom_events(Interconnect* inter) {
                 uint32_t cycles_late = inter->cpu_cycle_counter - cdrom_events[i].target_cycle;
                 static uint32_t evt_fire_count = 0;
                 if (++evt_fire_count <= 10 || evt_fire_count % 50 == 0) {
-                    LOG_DEBUG("[EVT] Firing #%u: %s (late=%u)", evt_fire_count, cdrom_events[i].name, cycles_late);
+                    LOG_DEBUG("[EVT] Firing #%u: %s (late=%u, target=%u, now=%u)", 
+                             evt_fire_count, cdrom_events[i].name, cycles_late,
+                             cdrom_events[i].target_cycle, inter->cpu_cycle_counter);
                 }
                 cdrom_events[i].callback(cdrom_events[i].context, cycles_late);
             }
@@ -584,14 +590,12 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         // Example: Joypad/Memory Card, SIO, DMA, Timers, CDROM, GPU, SPU, MDEC
         // Add stubs or delegate to respective modules
         if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
-            // Joypad/Memory Card
-            // DOCS: iomap.md, "JOY_DATA", "JOY_STAT", etc.
-            return sio_read32(&inter->sio, offset);
+            // Joypad/Memory Card - offset relative to SIO base 0x1f801040
+            return sio_read32(&inter->sio, physical_addr - 0x1f801040);
         }
         if (physical_addr >= 0x1f801050 && physical_addr <= 0x1f80105f) {
-            // SIO (Serial Port)
-            // DOCS: iomap.md, "SIO_DATA", "SIO_STAT", etc.
-            return sio_read32(&inter->sio, offset);
+            // SIO (Serial Port) - offset relative to SIO base 0x1f801050
+            return sio_read32(&inter->sio, physical_addr - 0x1f801050);
         }
         if (physical_addr >= 0x1f801060 && physical_addr <= 0x1f801063) {
             // RAM_SIZE
@@ -865,6 +869,13 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
          return 0x0000; // Return 0 to prevent BIOS from misinterpreting as jump target
     }
 
+    // SIO (Serial I/O) - JOY registers 0x1F801040-0x1F80104F
+    // MUST be before the generic hwregs catch-all below.
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        return sio_read16(&inter->sio, offset);
+    }
+
     // --- Hardware Register Checks (Specific Addresses First) ---
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
@@ -874,11 +885,6 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 
     // --- Fallback ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
-        // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
-        if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
-            uint32_t offset = physical_addr - 0x1f801040;
-            return sio_read16(&inter->sio, offset);
-        }
         return 0;
     }
     
@@ -1045,6 +1051,13 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // Other regions (SPU, Timers, GPU, DMA, Exp2, MemCtrl) are less likely for 8-bit reads
 
+    // SIO (Serial I/O) - JOY registers 0x1F801040-0x1F80104F
+    // MUST be before the generic hwregs catch-all below.
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        return sio_read8(&inter->sio, offset);
+    }
+
     // --- Hardware Register Checks (Specific Addresses First) ---
     if (physical_addr >= 0x1f801000 && physical_addr <= 0x1f801fff) {
         uint32_t offset = physical_addr - 0x1f801000;
@@ -1054,11 +1067,6 @@ uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
 
     // --- Fallback ---
     if ((physical_addr & 0xFFFF0000) == 0xFFFF0000) {
-        // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
-        if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
-            uint32_t offset = physical_addr - 0x1f801040;
-            return sio_read8(&inter->sio, offset);
-        }
         return 0;
     }
     
@@ -1183,15 +1191,11 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         uint32_t caller_pc = inter->cpu ? inter->cpu->current_pc : 0;
         LOG_IRQ_DEBUG("Write to I_STAT: Value=0x%08x, Before=0x%04x, PC=0x%08x", value, inter->irq_status, caller_pc);
         // PSX-SPX: "Acknowledge: Write I_STAT (0=Clear Bit, 1=No change)"
-        // Writing 0 to a bit clears it, writing 1 has no effect
-        // duckstation: s_interrupt_status_register = s_interrupt_status_register & (value & WRITE_MASK)
-        uint16_t mask_value = (uint16_t)(value & 0x7FF);
-        uint16_t bits_to_clear = inter->irq_status & ~mask_value; // bits that will be cleared
-        inter->irq_status = inter->irq_status & mask_value;
+        // Direct AND: bits set to 0 in the written value are cleared in I_STAT.
+        uint16_t write_value = (uint16_t)(value & 0x7FF);
+        inter->irq_status &= write_value;       // 0=Clear, 1=Keep
         // Also clear the line state for cleared IRQs (so they can trigger again on next edge)
-        inter->irq_line_state &= ~bits_to_clear;
-        LOG_IRQ_DEBUG("I_STAT after: 0x%04x, cleared bits: 0x%04x, line_state: 0x%04x", 
-                     inter->irq_status, bits_to_clear, inter->irq_line_state);
+        inter->irq_line_state &= write_value;
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
@@ -1202,14 +1206,24 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         // FIX: BIOS Boot Bypass - If BIOS is stuck in critical section loop, force enable interrupts
         static uint32_t critical_section_count = 0;
         static uint32_t last_irq_mask = 0xFFFF;
-        
-        if (value == 0x0000 && last_irq_mask == 0x0000) {
+
+        // Only fire hack when CPU is in RAM (not BIOS ROM 0xBFC0xxxx).
+        // Tight init loops in ROM are normal; don't hijack them before the kernel is live.
+        uint32_t current_cpu_pc = inter->cpu ? inter->cpu->current_pc : 0;
+        bool in_bios_rom = (current_cpu_pc & 0xFF000000) == 0xBFC00000;
+
+        if (value == 0x0000 && last_irq_mask == 0x0000 && !in_bios_rom) {
             critical_section_count++;
             // If BIOS has been stuck for too long, force enable VBlank and Timer0 interrupts
             if (critical_section_count > 1000) {
                 LOG_WARN("[BIOS-BOOT] Detected stuck BIOS in critical section loop. Forcing interrupt enable.");
                 inter->irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
                 critical_section_count = 0;
+                // Also ensure the CPU has both IEc (bit 0) and IEp (bit 2) set in SR
+                // so that the idle-loop RFE (which pops IEp→IEc) doesn't drain IEc to 0.
+                if (inter->cpu) {
+                    inter->cpu->sr |= 0x05; // IEc | IEp
+                }
                 LOG_INFO("[BIOS-BOOT] Forced I_MASK=0x%04x to bypass stuck state", inter->irq_mask);
             }
         } else {
@@ -1587,7 +1601,8 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
             LOG_DEBUG("[IRQ] I_STAT before clear: 0x%04x", inter->irq_status);
         }
-        inter->irq_status &= value; // Clear bits where value has 0
+        inter->irq_status &= value;  // 0=Clear, 1=Keep (PSX-SPX spec)
+        inter->irq_line_state &= value;  // Also clear line state for cleared IRQs
         if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
             LOG_DEBUG("[IRQ] I_STAT after clear: 0x%04x", inter->irq_status);
         }
@@ -1662,6 +1677,19 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         return;
     }
 
+    // SIO (Serial I/O) - JOY registers 0x1F801040-0x1F80104F
+    // MUST be checked before MEM_CONTROL_END (0x1F80107F) which otherwise swallows this range.
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        sio_write16(&inter->sio, offset, value);
+        if (inter->sio.pending_irq) {
+            inter->sio.pending_irq = false;
+            interconnect_set_irq_line(inter, IRQ_CTRLMEMCARD, true);
+            interconnect_set_irq_line(inter, IRQ_CTRLMEMCARD, false);
+        }
+        return;
+    }
+
     // Memory Control Region (General - unlikely 16-bit writes)
      if (physical_addr >= MEM_CONTROL_START && physical_addr <= MEM_CONTROL_END) {
          LOG_INTERCONNECT_DEBUG("~ Write16 to MEM_CONTROL region: Addr 0x%08x = 0x%04x (Ignoring)\n", physical_addr, value);
@@ -1732,14 +1760,6 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         return;
     }
 
-    // --- Fallback ---
-    // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
-    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
-        uint32_t offset = physical_addr - 0x1f801040;
-        sio_write16(&inter->sio, offset, value);
-        return;
-    }
-    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write16 at address: 0x%08x = 0x%04x (Mapped from 0x%08x)\n",
             physical_addr, value, address);
 }
@@ -1829,10 +1849,22 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         return;
     }
 
-     // Expansion 2 Region
+     // Expansion 2 (0x1F802000-0x1F803FFF) — BIOS POST codes + optional DUART TTY
+    // SCPH-1001 only writes POST codes (non-printable) to offset 0x041.
+    // Any printable ASCII write to any EXP2 offset is captured as TTY output.
     if (physical_addr >= EXPANSION_2_START && physical_addr <= EXPANSION_2_END) {
-         // LOG_INFO("~ Write8 to Expansion 2 region: 0x%08x = 0x%02x (Ignoring)\n", physical_addr, value); // Noisy
-         return; // Expansion 2 typically unused/debug
+        char ch = (char)(value & 0xFF);
+        if ((uint8_t)ch >= 0x20 && (uint8_t)ch < 0x7F) {
+            if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
+                inter->tty_line_buf[inter->tty_line_len++] = ch;
+        } else if (ch == '\n' || ch == '\r') {
+            if (inter->tty_line_len > 0) {
+                inter->tty_line_buf[inter->tty_line_len] = '\0';
+                fprintf(stderr, "%s\n", inter->tty_line_buf);
+                inter->tty_line_len = 0;
+            }
+        }
+        return;
     }
 
     // SPU Region
@@ -1848,6 +1880,19 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
             LOG_DEBUG("[RAM-DEBUG] STORE8: addr=0x%08x value=0x%02x (virt=0x%08x)", physical_addr, value, address);
         }
         ram_store8(inter->ram, physical_addr, value); // Delegate
+        return;
+    }
+
+    // SIO (Serial I/O) - JOY registers 0x1F801040-0x1F80104F
+    // MUST be checked before MEM_CONTROL_END (0x1F80107F).
+    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
+        uint32_t offset = physical_addr - 0x1f801040;
+        sio_write8(&inter->sio, offset, value);
+        if (inter->sio.pending_irq) {
+            inter->sio.pending_irq = false;
+            interconnect_set_irq_line(inter, IRQ_CTRLMEMCARD, true);
+            interconnect_set_irq_line(inter, IRQ_CTRLMEMCARD, false);
+        }
         return;
     }
 
@@ -1899,14 +1944,6 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         return;
     }
 
-    // --- Fallback ---
-    // SIO (Serial I/O) - Controller and Memory Card (0x1F801040-0x1F80104F)
-    if (physical_addr >= 0x1f801040 && physical_addr <= 0x1f80104f) {
-        uint32_t offset = physical_addr - 0x1f801040;
-        sio_write8(&inter->sio, offset, value);
-        return;
-    }
-    
     LOG_INTERCONNECT_ERROR("Unhandled physical memory write8 at address: 0x%08x = 0x%02x (Mapped from 0x%08x)\n",
             physical_addr, value, address);
 }
@@ -1985,11 +2022,11 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                             uint32_t command_word = interconnect_load32(inter, addr); // Read command
                             
                             // LOG WHAT BIOS IS ACTUALLY SENDING - Critical for debugging menu rendering
-                            uint8_t cmd_opcode = (command_word >> 24) & 0xFF;
+                            uint8_t cmd_opcode_from_word = (command_word >> 24) & 0xFF;
                             static uint32_t dma_cmd_log_count = 0;
-                            if (dma_cmd_log_count < 200 || (cmd_opcode >= 0x60 && cmd_opcode <= 0x7F) || cmd_opcode == 0xA0) {
-                                LOG_GPU_INFO("[DMA->GPU] #%u: GP0(0x%02x) = 0x%08x (packet_addr=0x%08x, word %u/%u)",
-                                           dma_cmd_log_count, cmd_opcode, command_word, addr, i+1, num_words);
+                            if (dma_cmd_log_count < 200 || (cmd_opcode_from_word >= 0x60 && cmd_opcode_from_word <= 0x7F) || cmd_opcode_from_word == 0xA0) {
+                                LOG_GPU_INFO("[DMA->GPU] #%u: Word Value=0x%08x (Interpreted Opcode=0x%02x) at addr=0x%08x, word %u/%u of packet",
+                                           dma_cmd_log_count, command_word, cmd_opcode_from_word, addr, i+1, num_words);
                                 dma_cmd_log_count++;
                             }
                             
@@ -2212,40 +2249,7 @@ static void interconnect_force_bios_boot_config(Interconnect* inter) {
 
 // Simplified BIOS boot helper - no recursive calls
 void interconnect_check_bios_boot(Interconnect* inter) {
-    static int boot_helper_counter = 0;
-    static bool interrupt_forced = false;
-    static bool display_forced = false;
-    boot_helper_counter++;
-    
-    // Only run the helper every 100 frames (about 1.6 seconds at 60fps) to avoid interference
-    if (boot_helper_counter % 100 != 0) {
-        return;
-    }
-    
-    // Only force interrupt config once after 100 calls (about 1.6 seconds)
-    if (!interrupt_forced) {
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing interrupt configuration after %d frames", boot_helper_counter);
-        interconnect_force_bios_boot_config(inter);
-        interrupt_forced = true;
-    }
-    
-    // Only force display config once if needed
-    if (!display_forced && inter->gpu.display_disabled) {
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing display enable after %d frames", boot_helper_counter);
-        interconnect_force_bios_boot_config(inter);
-        display_forced = true;
-    }
-    
-    // Also force interrupt config if we're in RAM and interrupts are still disabled
-    if (inter->cpu_cycle_counter > 1000000 && (inter->irq_mask & 0x0001) == 0) {
-        // Only log this once to avoid spam
-        static bool ram_interrupt_logged = false;
-        if (!ram_interrupt_logged) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS Boot Helper: Forcing IRQ0 enable after %u cycles (PC likely in RAM)", inter->cpu_cycle_counter);
-            ram_interrupt_logged = true;
-        }
-        interconnect_force_bios_boot_config(inter);
-    }
+    (void)inter;
 }
 
 // Helper: Perform the actual GPU DMA transfer for channel 2

@@ -227,12 +227,6 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
     if (cpu_cycles == 0) return;
     static int frame_counter = 0;
     frame_counter++;
-    static int boot_helper_counter = 0;
-    boot_helper_counter += cpu_cycles;
-    if (boot_helper_counter > 1000000) {
-        timer_force_bios_boot_config(timers);
-        boot_helper_counter = 0;
-    }
     // For each timer, step according to its clock source and mode
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];

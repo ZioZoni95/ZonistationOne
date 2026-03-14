@@ -810,18 +810,130 @@ void renderer_display(Renderer* renderer) {
 // Based on Guide Section 5.10
 void renderer_set_draw_offset(Renderer* renderer, int16_t x, int16_t y) {
      if (!renderer->initialized) return;
-
-     // Draw primitives with the *old* offset before changing it
      LOG_RENDERER_DEBUG("Renderer: Setting Draw Offset (%d, %d), forcing draw first.\n", x, y);
      renderer_draw(renderer);
-
-     // Bind the shader program to set the uniform
      glUseProgram(renderer->shader_program); check_gl_error("set_draw_offset - glUseProgram");
-     // Update the uniform value
      glUniform2i(renderer->uniform_offset_loc, (GLint)x, (GLint)y);
      check_gl_error("set_draw_offset - glUniform2i");
-     // Unbind the program
      glUseProgram(0);
+}
+
+// ---------------------------------------------------------------------------
+// renderer_set_drawing_area — enable scissor clipping to PSX drawing area
+// ---------------------------------------------------------------------------
+void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
+                                uint16_t right, uint16_t bottom)
+{
+    if (!renderer->initialized) return;
+    renderer_draw(renderer); // flush before changing scissor
+
+    int clip_w = (int)right  - (int)left + 1;
+    int clip_h = (int)bottom - (int)top  + 1;
+    if (clip_w <= 0) clip_w = 1;
+    if (clip_h <= 0) clip_h = 1;
+
+    // OpenGL scissor: Y=0 is bottom-left; PSX Y=0 is top-left
+    // Window height is 512 (VRAM_HEIGHT). Flip: gl_y = 512 - bottom - 1
+    int gl_y = 512 - (int)bottom - 1;
+    if (gl_y < 0) gl_y = 0;
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor((GLint)left, (GLint)gl_y, (GLsizei)clip_w, (GLsizei)clip_h);
+}
+
+// ---------------------------------------------------------------------------
+// renderer_set_semi_trans_mode — enable/disable GL blending for semi-trans
+// ---------------------------------------------------------------------------
+void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode)
+{
+    if (!renderer->initialized) return;
+    if (renderer->semi_trans_enabled == enabled && renderer->semi_trans_mode == mode)
+        return;
+
+    renderer_draw(renderer); // flush before blend state change
+
+    renderer->semi_trans_enabled = enabled;
+    renderer->semi_trans_mode    = mode;
+
+    if (!enabled) {
+        glDisable(GL_BLEND);
+        return;
+    }
+
+    glEnable(GL_BLEND);
+    switch (mode) {
+        case 0: // B/2 + F/2
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
+            break;
+        case 1: // B + F
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_ONE, GL_ONE);
+            break;
+        case 2: // B - F
+            glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+            glBlendFunc(GL_ONE, GL_ONE);
+            break;
+        case 3: // B + F/4
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+            break;
+        default:
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// renderer_push_line — draw a 2-vertex line segment immediately
+// Flushes any pending triangle batch first, then draws GL_LINES.
+// ---------------------------------------------------------------------------
+void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererColor col[2])
+{
+    if (!renderer->initialized) return;
+
+    // Flush pending triangle batch
+    renderer_draw(renderer);
+
+    // Upload 2 vertices to the existing VBOs
+    renderer->positions_data[0] = pos[0];
+    renderer->positions_data[1] = pos[1];
+    renderer->colors_data[0]    = col[0];
+    renderer->colors_data[1]    = col[1];
+    // Zero out texcoord/tpage for untextured lines
+    RendererTexCoord zero_tc = {0, 0};
+    RendererTPage    zero_tp = {0, 0};
+    renderer->texcoords_data[0] = zero_tc;
+    renderer->texcoords_data[1] = zero_tc;
+    renderer->tpage_data[0]     = zero_tp;
+    renderer->tpage_data[1]     = zero_tp;
+
+    glUseProgram(renderer->shader_program);
+    glBindVertexArray(renderer->vao);
+
+    glUniform1i(renderer->uniform_use_texture_loc, 0);
+    if (renderer->uniform_raw_texture_loc >= 0)
+        glUniform1i(renderer->uniform_raw_texture_loc, 0);
+    glUniform1i(renderer->uniform_vram_texture_loc, 0);
+
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererPosition), renderer->positions_data);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererColor), renderer->colors_data);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererTexCoord), renderer->texcoords_data);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererTPage), renderer->tpage_data);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glDrawArrays(GL_LINES, 0, 2);
+    check_gl_error("renderer_push_line - glDrawArrays");
+
+    glBindVertexArray(0);
+    glUseProgram(0);
 }
 
 // Cleans up OpenGL resources

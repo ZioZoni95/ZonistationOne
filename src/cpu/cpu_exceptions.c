@@ -20,14 +20,15 @@ static void log_exception_details(Cpu* cpu, ExceptionCause cause) {
 }
 
 static void update_status_register(Cpu* cpu) {
-    // On exception: push mode stack and set EXL=1
-    // SR bit2-3 = old bit0-1, SR bit4-5 = old bit2-3, SR bit0-1 = 0 (kernel), EXL=1
+    // On exception: push mode stack. Shift bits 0-5 left by 2.
+    // Result: IEc/KUc -> IEp/KUp, IEp/KUp -> IEo/KUo, new IEc/KUc = 0 (kernel + IRQ disabled).
+    // R3000A has no EXL bit; bit 1 is KUc (0=kernel, 1=user). Must stay 0 here.
     uint32_t old_sr = cpu->sr;
     uint32_t new_sr = old_sr;
     new_sr &= ~(0x3F); // Clear bits 0-5
-    new_sr |= ((old_sr >> 0) & 0x3) << 2;  // bit0-1 -> bit2-3
-    new_sr |= ((old_sr >> 2) & 0x3) << 4;  // bit2-3 -> bit4-5
-    new_sr |= 0x2; // EXL=1, kernel mode
+    new_sr |= ((old_sr >> 0) & 0x3) << 2;  // old IEc/KUc  -> IEp/KUp
+    new_sr |= ((old_sr >> 2) & 0x3) << 4;  // old IEp/KUp  -> IEo/KUo
+    // bits 0-1 stay 0: kernel mode, interrupts disabled
     cpu->sr = new_sr;
 }
 

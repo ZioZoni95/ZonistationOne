@@ -72,6 +72,8 @@ typedef struct {
     bool raw_texture_enabled;   // Current raw-texture mode (skip modulation)
     float screen_width;         // Target display width (in PSX pixels)
     float screen_height;        // Target display height (in PSX pixels)
+    bool semi_trans_enabled;    // Whether semi-transparency blending is active
+    uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
 } Renderer;
 
 // --- Function Prototypes ---
@@ -199,6 +201,37 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
  * @param location A string indicating where the check is being performed.
  */
 void check_gl_error(const char* location);
+
+/**
+ * @brief Renders a line segment (2 vertices) immediately.
+ * Flushes any pending triangle batch first, then draws the line.
+ * @param renderer Pointer to the Renderer instance.
+ * @param pos Array of 2 vertex positions.
+ * @param col Array of 2 vertex colors.
+ */
+void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererColor col[2]);
+
+/**
+ * @brief Sets the OpenGL scissor test rectangle from the PSX drawing area.
+ * Enables GL_SCISSOR_TEST and calls glScissor with the given coordinates.
+ * Forces a draw of any pending primitives before updating the scissor.
+ * @param renderer Pointer to the Renderer.
+ * @param left   Drawing area left boundary (inclusive).
+ * @param top    Drawing area top boundary (inclusive).
+ * @param right  Drawing area right boundary (inclusive).
+ * @param bottom Drawing area bottom boundary (inclusive).
+ */
+void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
+                                uint16_t right, uint16_t bottom);
+
+/**
+ * @brief Enables or disables semi-transparency blending and sets the blend mode.
+ * Flushes any pending primitives before changing blend state.
+ * @param renderer  Pointer to the Renderer.
+ * @param enabled   True to enable blending for semi-transparent primitives.
+ * @param mode      0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
+ */
+void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode);
 
 
 #endif // RENDERER_H

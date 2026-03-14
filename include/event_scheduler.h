@@ -55,4 +55,12 @@ void eventq_dispatch_due(struct Interconnect* sys);
  */
 uint32_t eventq_next_cycle(const struct Interconnect* sys);
 
+/**
+ * @brief Returns CPU cycles until the next scheduled event.
+ * Returns 0 when an event is already due, 1 when no events are pending.
+ * @param sys Pointer to the central system/interconnect struct.
+ * @return Cycles until next event dispatch point.
+ */
+uint32_t eventq_cycles_until_next(const struct Interconnect* sys);
+
 #endif // EVENT_SCHEDULER_H 

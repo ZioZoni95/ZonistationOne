@@ -63,10 +63,25 @@ typedef enum {
 
 // GP0 Port Mode (internal state)
 typedef enum {
-    GP0_MODE_COMMAND,   // Expecting GP0 command words
+    GP0_MODE_COMMAND,    // Expecting GP0 command words
     GP0_MODE_IMAGE_LOAD, // Expecting pixel data words for VRAM transfer
-    GP0_MODE_IMAGE_STORE // Sending pixel data words from VRAM to CPU
+    GP0_MODE_IMAGE_STORE,// Sending pixel data words from VRAM to CPU
+    GP0_MODE_POLYLINE    // Accumulating polyline vertices until terminator
 } Gp0Mode;
+
+// CRTC / timing state (scanline counter, odd/even flag, derived display area)
+typedef struct {
+    uint16_t current_scanline;     // Current scanline within the frame (0..vertical_total-1)
+    uint16_t vertical_total;       // Total scanlines per frame: 263 NTSC, 314 PAL
+    bool     in_vblank;            // True when current_scanline is outside the active display range
+    uint8_t  active_line_lsb;      // STAT[31]: alternates 0/1 each frame (odd/even line indicator)
+    uint8_t  interlaced_field;     // 0=even field, 1=odd field (used when interlaced+480i)
+    // Derived display area (updated by gpu_update_display_mapping from GP1 registers)
+    uint16_t display_vram_x;       // VRAM X origin of the scanout area (from GP1(05))
+    uint16_t display_vram_y;       // VRAM Y origin of the scanout area (from GP1(05))
+    uint16_t display_width;        // Active pixel columns (derived from GP1(06)/(08))
+    uint16_t display_height;       // Active scanlines    (derived from GP1(07)/(08))
+} CrtcState;
 
 // GP0 Command Buffer
 #define MAX_GPU_COMMAND_WORDS 16 // Max parameters for any single command + opcode word
@@ -152,6 +167,21 @@ typedef struct Gpu { // Define struct Gpu
     uint16_t vram_load_h;             // Height of the image being loaded
     uint32_t vram_load_count;         // Counter for pixels transferred during current load
 
+    // --- VRAM Dirty Tracking ---
+    bool vram_dirty;                  // True when CPU-side VRAM has been modified since last GPU upload
+
+    // --- GP1 Info Latch (for GP1(0x10) GetGPUInfo responses) ---
+    uint32_t gpu_info_latch;          // Data returned by GPUREAD after GP1(0x10) info request
+
+    // --- Polyline State (GP0(0x48/0x58) polyline accumulation) ---
+    uint32_t polyline_buffer[256];    // Vertex+color words accumulated for current polyline
+    uint32_t polyline_count;          // Number of words accumulated
+    bool polyline_shaded;             // True if polyline uses per-vertex color
+    bool polyline_semi_trans;         // True if polyline is semi-transparent
+
+    // --- CRTC / Timing State ---
+    CrtcState crtc;                    // Scanline counter, in_vblank, STAT[31], derived display area
+
     // --- VRAM ---
     Vram vram;                         // The 1MB Video RAM buffer
 
@@ -171,5 +201,14 @@ uint32_t gpu_read_data(Gpu* gpu);         // Reads data from GPUREAD port (e.g.,
 void gpu_init_full(Gpu* gpu, Interconnect* inter);
 // GPU soft reset (does NOT clear VRAM)
 void gpu_soft_reset(Gpu* gpu);
+// Advance the CRTC scanline counter and update STAT[31] / in_vblank.
+// Call once per VBlank with the number of CPU cycles elapsed since the last call.
+void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed);
+
+// --- Internal helpers shared between gpu.c and gpu_commands.c ---
+// These are non-static to allow cross-file access; not part of the public API.
+void gpu_clear_cmd_buf(Gpu* gpu);
+void gpu_push_cmd_word(Gpu* gpu, uint32_t word);
+void gpu_update_display_mapping(Gpu* gpu);
 
 #endif // GPU_H

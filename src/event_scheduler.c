@@ -112,6 +112,22 @@ uint32_t eventq_next_cycle(const struct Interconnect* sys) {
     return sys->evq_next_cycle;
 }
 
+uint32_t eventq_cycles_until_next(const struct Interconnect* sys) {
+    const uint32_t now = sys->cpu_cycle_counter;
+    const uint32_t next = sys->evq_next_cycle;
+
+    if (next == UINT32_MAX) {
+        // No pending scheduled events: execute at least one cycle.
+        return 1;
+    }
+
+    if ((int32_t)(now - next) >= 0) {
+        return 0;
+    }
+
+    return next - now;
+}
+
 // --- Example Event Handlers (Stubs) ---
 // These should be implemented to set IRQs, reschedule themselves, etc.
 
@@ -121,10 +137,13 @@ uint32_t eventq_next_cycle(const struct Interconnect* sys) {
 static void evq_handle_vblank(struct Interconnect* sys) {
     static uint32_t vblank_count = 0;
     vblank_count++;
-    
+
+    // Advance CRTC scanline counter and update STAT[31]
+    gpu_crtc_tick(&sys->gpu, VBLANK_CYCLES);
+
     // Log VBlank with SYSTEM category to bypass timer rate limiting
     if (vblank_count <= 5 || vblank_count % 60 == 0) {
-        LOG_DEBUG("[VBlank] Frame #%u at cycle %u, I_STAT=0x%04x, I_MASK=0x%04x", 
+        LOG_DEBUG("[VBlank] Frame #%u at cycle %u, I_STAT=0x%04x, I_MASK=0x%04x",
                  vblank_count, sys->cpu_cycle_counter,
                  sys->irq_status, sys->irq_mask);
     }
@@ -155,11 +174,11 @@ static void evq_handle_vblank(struct Interconnect* sys) {
                      gpu->display_width_hint, gpu->display_height_hint,
                      gpu->drawing_area_left, gpu->drawing_area_top, gpu->drawing_area_right, gpu->drawing_area_bottom);
 
-        // Determine dump region: prefer display_hint if non-zero, otherwise use 320x240
-        uint32_t dump_x = gpu->display_vram_x_start;
-        uint32_t dump_y = gpu->display_vram_y_start;
-        uint32_t dump_w = gpu->display_width_hint ? gpu->display_width_hint : 320;
-        uint32_t dump_h = gpu->display_height_hint ? gpu->display_height_hint : 240;
+        // Determine dump region from CRTC-derived display area (updated by gpu_update_display_mapping)
+        uint32_t dump_x = gpu->crtc.display_vram_x;
+        uint32_t dump_y = gpu->crtc.display_vram_y;
+        uint32_t dump_w = gpu->crtc.display_width  ? gpu->crtc.display_width  : 320;
+        uint32_t dump_h = gpu->crtc.display_height ? gpu->crtc.display_height : 240;
         // Clamp to VRAM dimensions
         if (dump_x + dump_w > VRAM_WIDTH) dump_w = VRAM_WIDTH - dump_x;
         if (dump_y + dump_h > VRAM_HEIGHT) dump_h = VRAM_HEIGHT - dump_y;
@@ -199,9 +218,9 @@ static void evq_handle_vblank(struct Interconnect* sys) {
             LOG_GPU_INFO("[VBlank Dump] Failed to open %s for writing", fname);
         }
         // Force the renderer to blit the display-area from VRAM to the screen
-        if (gpu->renderer.initialized && gpu->display_width_hint > 0 && gpu->display_height_hint > 0) {
+        if (gpu->renderer.initialized && gpu->crtc.display_width > 0 && gpu->crtc.display_height > 0) {
             LOG_GPU_INFO("[VBlank Dump] Forcing renderer blit of display-area (%u,%u %ux%u)", dump_x, dump_y, dump_w, dump_h);
-            renderer_blit_vram(&gpu->renderer, (uint16_t)dump_x, (uint16_t)dump_y, (uint16_t)dump_w, (uint16_t)dump_h);
+            renderer_blit_vram(&gpu->renderer, (uint16_t)gpu->crtc.display_vram_x, (uint16_t)gpu->crtc.display_vram_y, (uint16_t)dump_w, (uint16_t)dump_h);
         }
         // Additional diagnostic: sample specific VRAM locations useful for BIOS menu
         // Sample display origin area
