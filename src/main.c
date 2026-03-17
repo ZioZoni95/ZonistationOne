@@ -28,6 +28,7 @@
 #include "cdrom.h" // <<< UPDATED: Added include for the CD-ROM component
 #include "log.h"
 #include "event_scheduler.h" // <<< ADDED: Include for event scheduling
+#include "controller.h" // <<< ADDED: Include for gamepad input
 
 
 /*
@@ -223,11 +224,12 @@ int main(int argc, char *argv[]) {
 
     // --- Emulator Component Initialization ---
     LOG_SYSTEM_WARN("Initializing Emulator Components...");
-    
+
     Bios bios_data;
     Ram ram_memory;
     Interconnect interconnect_state;
     Cpu cpu_state;
+    Controller gamepad;  // <<< ADDED: Game controller state
 
     // 1. Initialize RAM
     LOG_SYSTEM_DEBUG("  Initializing RAM...");
@@ -282,9 +284,14 @@ int main(int argc, char *argv[]) {
     // 6. Initialize CPU (pass it the fully connected interconnect)
     LOG_SYSTEM_DEBUG("  Initializing CPU...");
     cpu_init(&cpu_state, &interconnect_state);
-    
+
     // 7. Set CPU pointer in interconnect for direct exception triggering
     interconnect_set_cpu(&interconnect_state, &cpu_state);
+
+    // 8. Initialize Controller (keyboard input) <<< ADDED
+    LOG_SYSTEM_DEBUG("  Initializing Controller...");
+    controller_init(&gamepad);
+    sio_set_controller_connected(&interconnect_state.sio, true);  // Enable in SIO
 
     // --- Schedule Initial Events (using new event system) ---
     #define VBLANK_CYCLES 564480
@@ -317,6 +324,39 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+
+        // --- Update Controller State from Keyboard <<< ADDED
+        uint16_t button_state = controller_update_from_keyboard(&gamepad);
+        sio_set_button_state(&interconnect_state.sio, button_state);
+
+        // --- Inject Keyboard Input into TTY Input Buffer for getc() ---
+        const uint8_t* keys = SDL_GetKeyboardState(NULL);
+        static bool prev_keys[SDL_NUM_SCANCODES] = {false};
+
+        // Only inject on key press (0->1 transition) to avoid repeats
+        if (keys[SDL_SCANCODE_W] && !prev_keys[SDL_SCANCODE_W])
+            interconnect_tty_input_add(&interconnect_state, 'w');
+        if (keys[SDL_SCANCODE_S] && !prev_keys[SDL_SCANCODE_S])
+            interconnect_tty_input_add(&interconnect_state, 's');
+        if (keys[SDL_SCANCODE_D] && !prev_keys[SDL_SCANCODE_D])
+            interconnect_tty_input_add(&interconnect_state, 'd');
+        if (keys[SDL_SCANCODE_A] && !prev_keys[SDL_SCANCODE_A])
+            interconnect_tty_input_add(&interconnect_state, 'a');
+        if (keys[SDL_SCANCODE_SPACE] && !prev_keys[SDL_SCANCODE_SPACE])
+            interconnect_tty_input_add(&interconnect_state, '\n');  // SPACE = Enter
+        if (keys[SDL_SCANCODE_RETURN] && !prev_keys[SDL_SCANCODE_RETURN])
+            interconnect_tty_input_add(&interconnect_state, '\n');  // Return = Enter
+        if (keys[SDL_SCANCODE_E] && !prev_keys[SDL_SCANCODE_E])
+            interconnect_tty_input_add(&interconnect_state, 'e');
+        if (keys[SDL_SCANCODE_C] && !prev_keys[SDL_SCANCODE_C])
+            interconnect_tty_input_add(&interconnect_state, 'c');
+        if (keys[SDL_SCANCODE_X] && !prev_keys[SDL_SCANCODE_X])
+            interconnect_tty_input_add(&interconnect_state, 'x');
+        if (keys[SDL_SCANCODE_Z] && !prev_keys[SDL_SCANCODE_Z])
+            interconnect_tty_input_add(&interconnect_state, 'z');
+
+        // Update previous key state
+        memcpy(prev_keys, keys, sizeof(prev_keys));
 
         // --- Run Emulation for One Frame ---
         uint32_t cycles_run = 0;

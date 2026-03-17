@@ -8,6 +8,7 @@
  */
 
 #include "gpu.h"
+#include "gpu_helpers.h"
 #include "renderer.h"
 #include "vram.h"
 #include "log.h"
@@ -307,6 +308,7 @@ static void gp0_drawing_area_top_left(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
     gpu->drawing_area_left = (uint16_t)(value & 0x3FF);
     gpu->drawing_area_top  = (uint16_t)((value >> 10) & 0x3FF);
+    LOG_GPU_DEBUG("GP0(0xE3): Drawing Area TL=(%u, %u)", gpu->drawing_area_left, gpu->drawing_area_top);
     renderer_set_drawing_area(&gpu->renderer,
         gpu->drawing_area_left, gpu->drawing_area_top,
         gpu->drawing_area_right, gpu->drawing_area_bottom);
@@ -316,6 +318,10 @@ static void gp0_drawing_area_bottom_right(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
     gpu->drawing_area_right  = (uint16_t)(value & 0x3FF);
     gpu->drawing_area_bottom = (uint16_t)((value >> 10) & 0x3FF);
+    LOG_GPU_DEBUG("GP0(0xE4): Drawing Area BR=(%u, %u), Full bounds: [%u..%u, %u..%u]",
+        gpu->drawing_area_right, gpu->drawing_area_bottom,
+        gpu->drawing_area_left, gpu->drawing_area_right,
+        gpu->drawing_area_top, gpu->drawing_area_bottom);
     renderer_set_drawing_area(&gpu->renderer,
         gpu->drawing_area_left, gpu->drawing_area_top,
         gpu->drawing_area_right, gpu->drawing_area_bottom);
@@ -418,6 +424,24 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
     t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
 
+    // Validate texture coordinates
+    uint8_t page_x, page_y, depth;
+    bool raw_tex_unused;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
+
+    for (int i = 0; i < 3; i++) {
+        if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
+            LOG_GPU_WARN("Textured triangle vertex %d UV out of bounds", i);
+        }
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Textured triangle CLUT out of bounds");
+        }
+    }
+
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
@@ -487,6 +511,24 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7] >> 16);
     t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
     t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
+
+    // Validate texture coordinates
+    uint8_t page_x, page_y, depth;
+    bool raw_texture;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_texture);
+
+    for (int i = 0; i < 3; i++) {
+        if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
+            LOG_GPU_WARN("Shaded textured triangle vertex %d UV out of bounds", i);
+        }
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Shaded textured triangle CLUT out of bounds");
+        }
+    }
 
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);

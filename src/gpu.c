@@ -382,8 +382,9 @@ static void gpu_reset_state(Gpu* gpu) {
     gpu->texture_disable = false;
     gpu->rectangle_texture_x_flip = false;
     gpu->rectangle_texture_y_flip = false;
+    // Initialize drawing area to full VRAM bounds (unrestricted)
     gpu->drawing_area_left = 0; gpu->drawing_area_top = 0;
-    gpu->drawing_area_right = 0; gpu->drawing_area_bottom = 0;
+    gpu->drawing_area_right = 1023; gpu->drawing_area_bottom = 511;
     gpu->drawing_x_offset = 0; gpu->drawing_y_offset = 0;
     gpu->force_set_mask_bit = false;
     gpu->preserve_masked_pixels = false;
@@ -420,6 +421,10 @@ static void gpu_reset_state(Gpu* gpu) {
     gpu->crtc.display_width     = 320;
     gpu->crtc.display_height    = 240;
     renderer_set_texture_window(&gpu->renderer, 0, 0, 0, 0);
+    // Set initial drawing area to full VRAM bounds
+    renderer_set_drawing_area(&gpu->renderer,
+        gpu->drawing_area_left, gpu->drawing_area_top,
+        gpu->drawing_area_right, gpu->drawing_area_bottom);
 }
 
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {

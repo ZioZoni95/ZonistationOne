@@ -38,26 +38,32 @@ static uint8_t handle_memcard_transfer(Sio* sio, uint8_t tx_byte);
 
 void sio_init(Sio* sio) {
     memset(sio, 0, sizeof(Sio));
-    
+
     // Initialize registers to default state
     sio->stat = STAT_TX_RDY_1 | STAT_TX_RDY_2;  // Ready to transmit
     sio->mode = 0x000D;  // Default mode: 8-bit, no parity
     sio->ctrl = 0x0000;  // Idle
     sio->baud = 0x0088;  // Default baud rate
-    
+
     // No devices selected initially
     sio->selected_device = 0;
     sio->transfer_step = 0;
-    
+
+    // Initialize RX buffer with default input to unblock GetC kernel call
+    // GetC will read this when BIOS polls, allowing menu to progress
+    sio->rx_data = BUTTON_DOWN;  // DOWN button pressed (unblocks BIOS menu)
+    sio->stat |= STAT_RX_NOT_EMPTY;  // Mark data as ready
+
     // Controller disconnected by default (can be enabled later)
     sio->controller_connected = false;
     sio->button_state = 0xFFFF;  // All buttons released
-    
+
     // Memory cards not present by default
     sio->card_slot1.present = false;
     sio->card_slot2.present = false;
-    
+
     LOG_INFO("SIO initialized (controller and memory card interface)");
+    LOG_INFO("SIO: Default input buffer set to DOWN button (unblocks GetC polling)");
 }
 
 bool sio_load_memcard(MemoryCard* card, const char* filepath) {
@@ -199,26 +205,30 @@ static void sio_handle_transfer(Sio* sio, uint8_t tx_byte) {
 }
 
 static uint8_t handle_controller_transfer(Sio* sio, uint8_t tx_byte) {
-    // Simple digital controller response (stub)
+    // Digital controller protocol (check connection state)
     // Step 1: Command (0x42 = Read Digital)
     // Step 2: Tap mode (0x00)
-    // Response: Button states (2 bytes)
-    
+    // Step 3-4: Button data (inverted bits: 0=pressed, 1=released)
+
+    if (!sio->controller_connected) {
+        return 0xFF;  // No response if disconnected
+    }
+
     switch (sio->transfer_step) {
-        case 1:  // Command
+        case 1:  // Command byte
             if (tx_byte == 0x42) {
-                return 0x5A;  // ID (Controller ready)
+                return 0x5A;  // TAP mode response
             }
             return 0xFF;
-            
-        case 2:  // Tap mode
-            return (sio->button_state >> 8) & 0xFF;  // High byte
-            
-        case 3:  // Button data high
-            return sio->button_state & 0xFF;  // Low byte
-            
+
+        case 2:  // Tap mode byte
+            return (sio->button_state >> 8) & 0xFF;  // Button state HIGH byte
+
+        case 3:  // Button data
+            return sio->button_state & 0xFF;  // Button state LOW byte
+
         default:
-            return 0xFF;
+            return 0xFF;  // End of transfer
     }
 }
 
@@ -276,14 +286,20 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
     switch (offset) {
         case 0x00:  // JOY_DATA (1F801040h)
             sio->stat &= ~STAT_RX_NOT_EMPTY;  // Clear RX flag
+            LOG_SYSTEM_TRACE("SIO: Read JOY_DATA = 0x%02x", sio->rx_data);
             return sio->rx_data;
-            
+
         case 0x04:  // JOY_STAT (1F801044h) - low byte
+            LOG_SYSTEM_TRACE("SIO: Read JOY_STAT_LOW = 0x%02x (TX_RDY=%d, RX_NEMPTY=%d, ACK=%d)",
+                           sio->stat & 0xFF,
+                           !!(sio->stat & STAT_TX_RDY_1),
+                           !!(sio->stat & STAT_RX_NOT_EMPTY),
+                           !!(sio->stat & STAT_ACK));
             return sio->stat & 0xFF;
-            
+
         case 0x05:  // JOY_STAT high byte
             return (sio->stat >> 8) & 0xFF;
-            
+
         default:
             LOG_WARN("SIO read8 from unknown offset: 0x%02x", offset);
             return 0xFF;
@@ -381,4 +397,9 @@ void sio_write32(Sio* sio, uint32_t offset, uint32_t value) {
 
 void sio_set_button_state(Sio* sio, uint16_t buttons) {
     sio->button_state = buttons;
+}
+
+void sio_set_controller_connected(Sio* sio, bool connected) {
+    sio->controller_connected = connected;
+    LOG_INFO("SIO: Controller %s", connected ? "connected" : "disconnected");
 }

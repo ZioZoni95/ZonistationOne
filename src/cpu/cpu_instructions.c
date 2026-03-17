@@ -257,7 +257,6 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     
     // Detect BIOS function vector calls — DuckStation-style LLE side-channel capture.
     // The BIOS will still execute normally (cpu->next_pc = target_address below).
-    // handle_a0/b0_syscall only capture TTY output; they do NOT fake return values.
     if (target_address == 0x000000A0 || target_address == 0x000000B0 || target_address == 0x000000C0) {
         uint32_t func_num = cpu_reg(cpu, 9);
         if (func_num >= 0x100 || func_num == 0) {
@@ -273,6 +272,7 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
             handle_a0_syscall(cpu);
         else if (target_address == 0x000000B0)
             handle_b0_syscall(cpu);
+        // LLE: BIOS native code will execute normally
     }
     // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
     else if ((target_address & 0x3) != 0) {

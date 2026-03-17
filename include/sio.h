@@ -11,6 +11,16 @@
 #define MEMCARD_SECTOR_SIZE 128     // Bytes per sector
 #define MEMCARD_SECTORS (MEMCARD_SIZE / MEMCARD_SECTOR_SIZE)
 
+// Controller button codes (for GetC kernel extension input simulation)
+#define BUTTON_SELECT   0x01
+#define BUTTON_L3       0x02
+#define BUTTON_R3       0x04
+#define BUTTON_START    0x08
+#define BUTTON_UP       0x10
+#define BUTTON_RIGHT    0x20
+#define BUTTON_DOWN     0x40
+#define BUTTON_LEFT     0x80
+
 // Memory Card structure
 typedef struct {
     uint8_t data[MEMCARD_SIZE];  // 128KB card data
@@ -70,5 +80,6 @@ void sio_write32(Sio* sio, uint32_t offset, uint32_t value);
 
 // Controller input (for future implementation)
 void sio_set_button_state(Sio* sio, uint16_t buttons);
+void sio_set_controller_connected(Sio* sio, bool connected);
 
 #endif // SIO_H

@@ -1,7 +1,7 @@
 # Makefile for PS1 Emulator and log splitter
 
 # Source files for the emulator
-EMU_SRCS = src/main.c src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c src/cpu/cpu_decode.c src/cpu/cpu_execution.c src/cpu/cpu_instructions.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/gpu_commands.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/gte.c src/log.c src/event_scheduler.c src/sio.c src/spu.c src/pcdrv.c
+EMU_SRCS = src/main.c src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c src/cpu/cpu_decode.c src/cpu/cpu_execution.c src/cpu/cpu_instructions.c src/bios.c src/interconnect.c src/ram.c src/dma.c src/gpu.c src/gpu_helpers.c src/gpu_commands.c src/renderer.c src/vram.c src/debugger.c src/timers.c src/cdrom.c src/gte.c src/log.c src/event_scheduler.c src/sio.c src/controller.c src/spu.c src/pcdrv.c
 EMU_OBJS = $(EMU_SRCS:.c=.o)
 EMU_BIN = myps1_emu
 

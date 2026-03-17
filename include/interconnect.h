@@ -148,6 +148,11 @@ typedef struct Interconnect {
     char tty_line_buf[256];
     int  tty_line_len;
 
+    // --- BIOS TTY input buffer (for kernel getc/putc TTY) ---
+    char tty_input_buf[256];
+    int  tty_input_read_idx;
+    int  tty_input_write_idx;
+
 } Interconnect;
 
 /* --- Function Declarations (Prototypes) --- */
@@ -290,6 +295,20 @@ void interconnect_trigger_cdrom_irq(Interconnect* inter);
  * @param inter Pointer to the Interconnect instance.
  */
 void interconnect_check_cdrom_events(Interconnect* inter);
+
+/**
+ * @brief Add a character to the TTY input buffer (for kernel getc)
+ * @param inter Pointer to the Interconnect instance.
+ * @param ch The character to add
+ */
+void interconnect_tty_input_add(Interconnect* inter, char ch);
+
+/**
+ * @brief Read a character from the TTY input buffer (for kernel getc)
+ * @param inter Pointer to the Interconnect instance.
+ * @return The next character from the buffer, or -1 if empty
+ */
+int interconnect_tty_input_get(Interconnect* inter);
 
 
 #endif // INTERCONNECT_H

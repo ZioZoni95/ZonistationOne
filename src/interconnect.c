@@ -144,6 +144,11 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     inter->tty_line_len = 0;
     inter->tty_line_buf[0] = '\0';
 
+    // Initialize BIOS TTY input buffer (for kernel getc support)
+    inter->tty_input_read_idx = 0;
+    inter->tty_input_write_idx = 0;
+    memset(inter->tty_input_buf, 0, sizeof(inter->tty_input_buf));
+
     LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
 
@@ -2332,4 +2337,39 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
     // --- End of GPU DMA transfer logic ---
     // (Reverted: No DMA IRQ3 signaling here)
 }
+
+// --- TTY Input Buffer Management (for kernel getc support) ---
+/**
+ * @brief Add a character to the TTY input buffer
+ * Called by main.c when reading keyboard input to be available for BIOS getc
+ */
+void interconnect_tty_input_add(Interconnect* inter, char ch) {
+    if (!inter) return;
+    // Circular buffer: if full (read_idx == write_idx after increment), skip
+    int next_write = (inter->tty_input_write_idx + 1) % sizeof(inter->tty_input_buf);
+    if (next_write == inter->tty_input_read_idx) {
+        // Buffer full, skip (overrun)
+        return;
+    }
+    inter->tty_input_buf[inter->tty_input_write_idx] = ch;
+    inter->tty_input_write_idx = next_write;
+    LOG_SYSTEM_TRACE("TTY input: added char '%c' (0x%02x)", (ch >= 32 && ch < 127) ? ch : '?', (unsigned char)ch);
+}
+
+/**
+ * @brief Read a character from the TTY input buffer (for kernel getc)
+ * Returns the next character from the buffer, or -1 if empty
+ */
+int interconnect_tty_input_get(Interconnect* inter) {
+    if (!inter) return -1;
+    if (inter->tty_input_read_idx == inter->tty_input_write_idx) {
+        // Buffer empty
+        return -1;
+    }
+    int ch = (unsigned char)inter->tty_input_buf[inter->tty_input_read_idx];
+    inter->tty_input_read_idx = (inter->tty_input_read_idx + 1) % sizeof(inter->tty_input_buf);
+    LOG_SYSTEM_TRACE("TTY getc: retrieved char '%c' (0x%02x)", (ch >= 32 && ch < 127) ? ch : '?', ch);
+    return ch;
+}
+
 

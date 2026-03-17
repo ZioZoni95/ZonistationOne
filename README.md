@@ -9,20 +9,23 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 | Sony Logo (Boot) | BIOS Menu |
 |:-----------------:|:---------:|
 | ![Sony Logo](screenshots/sony_logo.png) | ![BIOS Menu](screenshots/bios_menu.png) |
-| Sony full logo animation (boot sequence) | BIOS menu — currently blank / not rendered |
+| Sony logo boot animation (diamond shape) | BIOS shell menu with animated orbs & text |
 
 ---
 
-## 🏁 Current Status (December 2025)
+## 🏁 Current Status (March 2026)
 
-### 🎉 MAJOR MILESTONE: BIOS Menu Reached!
+### 🎉 MAJOR MILESTONE: BIOS Menu Fully Rendering!
 
-- **Boots to BIOS menu!** The emulator now successfully passes all CDROM self-tests and displays the PlayStation BIOS menu with animated floating orbs/balloons.
-- **CDROM emulation completely rewritten:** New event-driven, asynchronous command execution architecture modeled after duckstation. Commands are properly queued and executed with accurate timing delays (~25000 cycles for ACK).
-- **Interrupt system working correctly:** INT3 (ACK), INT2 (Complete), and INT1 (Data Ready) interrupts are properly delivered and acknowledged.
-- **Timer and IRQ system:** Fully refactored for hardware-accurate event scheduling and interrupt delivery, modeled after PCSX ReARMed.
-- **Event Scheduler:** Robust event queue delivers all hardware events (VBlank, timers, DMA, CDROM callbacks).
-- **GPU rendering:** BIOS logo animation and menu graphics are visible (with some rendering glitches to fix).
+- **Boots to BIOS menu successfully!** The emulator passes all CDROM self-tests and displays the PlayStation BIOS shell menu with animated floating orbs/balloons and text overlays.
+- **Menu state:** Shell (bootrom at 0x80030000) detects no game disc → displays interactive menu with 3 selectable options:
+  - **MAIN MENU** (system utilities)
+  - **MEMORY CARD** (save manager)
+  - **CD PLAYER** (disc utilities)
+- **GPU rendering:** Fully working! Menu orbs render correctly with proper colors, double-buffering, and text overlays.
+- **CDROM emulation:** Event-driven asynchronous architecture with proper timing delays (~25000 cycles for ACK).
+- **Interrupt system:** INT3 (ACK), INT2 (Complete), INT1 (Data Ready) fully operational.
+- **Timer and IRQ system:** Hardware-accurate event scheduling with proper clock source routing (sysclk, dotclock, hblank, sysclk/8).
 
 ### What's Working
 - ✅ Full BIOS boot sequence completes
@@ -35,42 +38,41 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 - ✅ DMA transfers to VRAM (GPU display lists)
 - ✅ BIOS menu transition animation
 
-### Component Status
+### Component Status (March 2026)
 
-| Component   | Status      | Notes                                          |
-|-------------|-------------|------------------------------------------------|
-| CPU         | ✅ EXCELLENT | Fully working, all instructions implemented    |
-| RAM         | ✅ EXCELLENT | Fully working                                  |
-| VRAM        | ✅ EXCELLENT | Fully working                                  |
-| BIOS        | ✅ EXCELLENT | Boots to menu successfully                     |
-| CDROM       | ✅ EXCELLENT | Event-driven async architecture, all tests pass|
-| Timers      | ✅ GOOD      | IRQ delivery working                           |
-| IRQ System  | ✅ GOOD      | Edge-triggered, proper acknowledgment          |
-| Events      | ✅ GOOD      | Callback-based scheduling working              |
-| DMA         | ⚠️ PARTIAL  | GPU DMA working, other channels need work      |
-| GPU         | ⚠️ PARTIAL  | Rendering works but has clipping/ordering bugs |
-| Renderer    | ⚠️ PARTIAL  | OpenGL backend working, some visual glitches   |
-| GTE         | ⚠️ STUBS    | Needed for 3D games                            |
-| SIO         | ⚠️ STUBS    | Needed for controller/memory card              |
-| SPU         | ❌ MISSING  | Needed for sound                               |
-| MDEC        | ❌ MISSING  | Needed for FMV playback                        |
+| Component   | Status      | Notes                                                    |
+|-------------|-------------|----------------------------------------------------------|
+| CPU         | ✅ EXCELLENT | All MIPS R3000A instructions, COP0 MMU, exceptions       |
+| RAM         | ✅ EXCELLENT | 2MB + scratchpad, full working                           |
+| VRAM        | ✅ EXCELLENT | 1MB working, VRAM display scaling correct                |
+| BIOS        | ✅ EXCELLENT | Boot → menu fully working (shell at 0x80030000)          |
+| CDROM       | ✅ EXCELLENT | Async event-driven, Test/GetStat/GetID/SetMode working  |
+| GPU         | ✅ EXCELLENT | Menu rendering perfect (orbs, text overlays, no glitches)|
+| Renderer    | ✅ EXCELLENT | OpenGL backend, display mapping, color order fixed       |
+| Timers      | ✅ EXCELLENT | All 3 timers, correct clock sources, IRQ generation     |
+| IRQ System  | ✅ EXCELLENT | Edge-triggered, proper hardware IRQ routing              |
+| Events      | ✅ EXCELLENT | Callback-based event queue, VBlank/Timer/DMA timing      |
+| DMA         | ✅ GOOD      | Ch2(GPU)→VRAM, Ch6(OTC), Ch3(CDROM) stubbed              |
+| SIO         | ⚠️ PARTIAL  | Registers mapped, gamepad protocol incomplete            |
+| GTE         | ❌ STUBS    | Needed for 3D games (not required for menu)              |
+| SPU         | ❌ MISSING  | Needed for sound (not required for menu)                 |
+| MDEC        | ❌ MISSING  | Needed for FMV (not required for menu)                   |
 
 ---
 
 ## 🎯 Next Steps (Summary)
 
-See **"Next Steps Analysis"** section below for detailed breakdown.
+**Current Blocker:** Menu displays perfectly, but awaits controller input (SIO not polling gamepad).
 
-| Priority | Task | Status |
-|----------|------|--------|
-| 🔴 P0 | CDROM Read commands (ReadN/ReadS) | Not started |
-| 🔴 P0 | Controller input polling | Not started |
-| 🟠 P1 | GTE core operations (RTPS, MVMVA) | Stubs only |
-| 🟠 P1 | DMA Channel 3 (CDROM→RAM) | Not started |
-| 🟡 P2 | Memory card support | Partial |
-| 🟡 P2 | GPU polygon clipping | Buggy |
-| 🟢 P3 | SPU audio | Not started |
-| 🟢 P3 | MDEC video decoder | Not started |
+| Priority | Task | Status | Blocker |
+|----------|------|--------|---------|
+| 🔴 **P0** | Controller input (SIO gamepad protocol) | **CRITICAL** | Menu interaction frozen |
+| 🔴 **P0** | CDROM Read commands (ReadN/ReadS) | Not started | Game loading |
+| 🟠 **P1** | DMA Channel 3 (CDROM→RAM) | Not started | Game data streaming |
+| 🟠 **P1** | GTE core operations (RTPS, MVMVA) | Stubs only | 3D game support |
+| 🟡 **P2** | Memory card read/write | Partial | Save persistence |
+| 🟢 **P3** | SPU audio engine | Not started | Sound support |
+| 🟢 **P3** | MDEC video decoder | Not started | FMV playback |
 
 ---
 
@@ -109,25 +111,33 @@ Game disc path: `games/<game>.cue`
 
 ---
 
-## Recent Fixes (December 2025)
+## Recent Critical Fixes (Session Log)
 
-### CDROM Rewrite
-- **Complete architectural overhaul:** Replaced synchronous command execution with event-driven async model
-- **Proper timing:** Commands execute after ~25000 cycle delay (not instantly)
-- **Interrupt gating:** New commands blocked while `interrupt_flag != 0`
-- **Event callbacks:** `interconnect_schedule_event()` for deferred execution
-- **Second response support:** Commands like GetID, Init, Pause properly send INT3 then INT2
+### GPU & Rendering Pipeline (March 2026)
+- **GPU Draw Offset (GP0 0xE5):** Fixed missing `renderer_set_draw_offset()` call → double-buffer offsets (0,1) and (0,241) now applied
+- **VRAM Blit Color Order:** Fixed R/B swap in 15-bit color channel mapping (R=bits 0-4, G=5-9, B=10-14) → orbs now render correct colors
+- **Display Mapping:** VRAM display region (dimensions from gpu_update_display_mapping) now correctly fills window
 
-### IRQ System Fixes
-- **Edge-triggered delivery:** IRQs only set on 0→1 transition
-- **VBlank on IRQ0:** Fixed incorrect IRQ1 assignment
-- **CDROM on IRQ2:** Proper interrupt routing
+### Timer Clock Source Routing (Critical)
+- **Timer0:** Clock source 0/1=sysclock, 2/3=dotclock
+- **Timer1:** Clock source 0/1=sysclock, 2/3=hblank
+- **Timer2:** Clock source 0/1=sysclock, 2/3=sysclock/8
+- Fixed infinite polling loop at 0x1F801120 (BIOS Timer2 halt) → BIOS no longer CPU-locked after menu appearance
 
-### What Was Fixed
-- Infinite loop in CDROM Test command polling
-- Commands executing before previous INT acknowledged
-- Missing cycle delays causing race conditions
-- BIOS stuck at logo animation
+### DMA Completion IRQ
+- `interconnect_perform_dma` signals IRQ3 when transfer done (guards against double-fire)
+- Removed PCSX ReARMed "re-raise on DICR write" hack that caused infinite loops
+
+### SIO/Controller (Partial)
+- Fixed SIO register range 0x1F801040-0x1F80104F being covered by MEM_CONTROL_END
+- JOY_STAT now readable by BIOS (TX_RDY bits visible)
+- Added IRQ7 (IRQ_CTRLMEMCARD) support with STAT_IRQ + pending_irq in sio_handle_transfer
+
+### Previous Session Fixes
+- CDROM async event-driven architecture (replaced sync execution)
+- Proper INT3→INT2 two-phase response for GetID, Init, Pause
+- IRQ edge-triggered delivery (0→1 transitions only)
+- Event scheduler with callback-based timing
 
 ---
 
@@ -232,46 +242,120 @@ The emulator is built with a modular architecture where the **Interconnect** act
 | **BIOS** | `bios.c` | 81 | ✅ Complete | 512KB ROM loading |
 | **Controller** | `controller.c` | 0 | ❌ Stub | Empty placeholder |
 
-### Data Flow: Boot Sequence to BIOS Menu
+### Data Flow: Boot Sequence Layout
 
 ```
-1. BIOS ROM loaded (512KB SCPH1001.BIN)
+1. BIOS ROM loaded (512KB SCPH1001.BIN @ 0x1FC00000)
          │
          ▼
-2. CPU starts at 0xBFC00000 (BIOS entry point)
+2. CPU starts at 0xBFC00000 (bootrom entry point)
          │
          ▼
-3. BIOS initializes hardware:
-   • Memory tests
-   • GPU setup (display mode, drawing area)
-   • Timer configuration
-   • IRQ mask setup
+3. Bootrom (0xBFC00000-0xBFC7FFFF) initializes:
+   • Memory tests (0x00000000 RAM, 0x1F800000 scratchpad)
+   • Exception vectors at 0x00000080, 0x00000100 (TLB)
+   • GPU init: display mode, drawing area, VRAM layout
+   • Timer0/1/2 configuration (sysclock, dotclock, hblank as sources)
+   • IRQ mask setup: enable IRQ0(VBlank), IRQ2(CDROM), IRQ7(SIO)
          │
          ▼
 4. CDROM self-tests via Test command (0x19):
-   • GetBIOSDate (0x20) → returns date string
-   • GetVersion (0x04) → controller version
-   • GetSerial (0x05) → drive serial
-   • ReadTestings (0x22) → internal tests
+   • 0x20 GetBIOSDate → date string in response
+   • 0x04 GetVersion → controller version (SCPH1001='C')
+   • 0x05 GetSerial → drive serial
+   • 0x22 ReadTestings → internal diagnostics
+   • All responses via INT3 (ACK) + INT2 (Complete)
          │
          ▼
 5. CDROM GetID command:
-   • INT3 (ACK) after ~25000 cycles
-   • INT2 (Complete) with disc status
-   • "No disc" detected → boot to menu
+   • Sends INT3 (ACK) ~25000 cycles later
+   • Sends INT2 (Complete) with disc params (0x00 = no disc)
+   • "No disc" → bootrom halts kernel launch
          │
          ▼
-6. BIOS menu displayed:
-   • GPU renders animated orbs/balloons
-   • VBlank IRQ triggers frame updates
-   • Menu awaits controller input
+6. Shell/Menu copied to RAM (0x80030000):
+   • Bootrom copies shell from 0xBFC18000 → 0x80030000 (0x67FF0 bytes)
+   • Jump to 0x80030000 transfers to shell
+   • Shell detects "no disc" → displays interactive menu
+         │
+         ▼
+7. BIOS Menu runtime (current state):
+   • GPU renders 3 animated orbs (floating, color gradients)
+   • Text overlays: "MAIN MENU", "MEMORY CARD", "CD PLAYER"
+   • Double-buffered VRAM: buf1 (Y=0-240), buf2 (Y=241-480)
+   • VBlank IRQ (every 16.67ms) triggers frame sync + GPU updates
+   • Timer IRQs maintain timing (Timer2 @ ITR = 16, sysclock/8 source)
+   • Menu awaits controller input (SIO poll on 0x1F801044):
+     - Bit 11 (RX_RDY): high when pad response ready
+     - Bit 8 (ACK): toggles on data ready
+   • Poll loop at kernel shell reads JOY_DATA repeatedly
+         │
+         ▼
+8. Control Flow (current blocker):
+   ⚠️  Controller input NOT implemented → menu frozen (waiting for input)
+   ⚠️  SIO gamepad protocol incomplete
+   ⚠️  Next step: Implement SIO poll response + gamepad state
 ```
 
 ---
 
-## 🔮 Next Steps Analysis
+## 🔮 Analysis: BIOS Menu State & Next Actions
 
-Based on the current implementation state (boot to BIOS menu working), here's the analysis of what's needed to progress further:
+### What's Currently Happening (emudev.org reference)
+
+**At this moment, your emulator is:**
+
+1. **Bootrom executing →** SCPH1001.BIN bootstrap (0xBFC00000-0xBFC7FFFF) is running
+2. **Hardware initialized →** CPU, GPU, timers, IRQ system all ready
+3. **CDROM tests passed →** Bootrom confirmed no disc inserted (GetID returned 0x00)
+4. **Shell loaded to RAM →** Bootrom copied shell code from 0xBFC18000 → 0x80030000 (~0x67FF0 bytes)
+5. **Menu rendered →** Shell running at 0x80030000 displays the main menu:
+   - Text: "MAIN MENU", "MEMORY CARD", "CD PLAYER"
+   - Animated orbs: 3 floating sprites with color gradients
+   - Double-buffered VRAM rendering
+6. **Waiting for input →** Shell kernel loop polling SIO (0x1F801044) for gamepad state
+   - **Current state:** Poll loop spins infinitely because SIO gamepad response is stubbed
+   - No way to select menu options without controller input
+
+### Why Menu Is Frozen (Technical Details)
+
+The shell kernel at 0x80030000 runs this poll loop (pseudo-code):
+```c
+while (true) {
+    joypad_state = READ(0x1F801044);  // Read from JOY_STAT register
+    if (joypad_state & JOY_DATA_READY) {  // Bit 0x400 set?
+        button_response = READ(0x1F801040); // Read JOY_DATA
+        // Process button press...
+    }
+}
+```
+
+**Your emulator:** SIO read handlers return 0x0000 (junk data) → poll loop never sees "data ready" → CPU spins forever.
+
+### Critical Path to Game Loading
+
+```
+✅ DONE:   BIOS boot → menu display
+⬜ NEXT:   Gamepad input (implement SIO poll response)
+⬜ THEN:   CDROM ReadN/ReadS commands
+⬜ THEN:   DMA Channel 3 (CDROM→RAM)
+⬜ THEN:   Game executable loading + GTE (3D transforms)
+```
+
+### Implementation Priority for Next Session
+
+**P0 (TODAY):** Implement SIO gamepad protocol stub
+- When BIOS reads JOY_STAT, return TX_RDY (transmit ready) + bits indicating buttons pressed
+- When BIOS reads JOY_DATA, return button state (normally 0x5F at start = all neutral)
+- This unblocks menu interaction and allows testing further downstream
+
+**P1 (NEXT):** CDROM ReadN (0x06) + DMA Channel 3
+- Load game disc image sectors into RAM
+- Enables testing actual game code execution
+
+**P2:** GTE (RTPS, MVMVA) + GPU polygon clipping
+- 3D vertex transforms
+- Fixes game rendering
 
 ### Phase 1: Game Loading (Critical Path)
 

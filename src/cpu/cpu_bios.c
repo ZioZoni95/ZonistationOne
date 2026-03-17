@@ -131,13 +131,18 @@ void handle_a0_syscall(Cpu* cpu) {
         case 0x3F: capture_bios_printf(cpu); break;  // printf() — outputs raw format string
         default:   break;
     }
-    // Do NOT set cpu->regs[2] — BIOS executes its real function after this hook
+    // LLE: Do NOT fake return values — BIOS kernel executes its real getc/putc implementations
+    // TTY input is provided via interconnect_tty_input_add() called from main.c keyboard handler
 }
 
 // Called from op_jr when target == 0xB0
 void handle_b0_syscall(Cpu* cpu) {
     uint32_t call = cpu->regs[9]; // $t1
-    LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", get_bios_b_function_name(call), call);
+
+    // Suppress noise for high-frequency polling calls (GetC = 0x32, etc.)
+    if (call != 0x32) {
+        LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", get_bios_b_function_name(call), call);
+    }
 
     switch (call) {
         case 0x35: capture_bios_write(cpu); break;  // write()
