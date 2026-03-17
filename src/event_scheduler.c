@@ -199,10 +199,10 @@ static void evq_handle_vblank(struct Interconnect* sys) {
                     uint8_t lo = gpu->vram.data[off];
                     uint8_t hi = gpu->vram.data[off + 1];
                     uint16_t raw = (uint16_t)(lo | (hi << 8));
-                    // PSX VRAM is 15-bit BGR (bits: 0-4 B, 5-9 G, 10-14 R)
-                    uint8_t b5 = raw & 0x1F;
+                    // PSX VRAM is 15-bit: bits 0-4=R, 5-9=G, 10-14=B (XBBBBBGGGGGRRRRR)
+                    uint8_t r5 = raw & 0x1F;
                     uint8_t g5 = (raw >> 5) & 0x1F;
-                    uint8_t r5 = (raw >> 10) & 0x1F;
+                    uint8_t b5 = (raw >> 10) & 0x1F;
                     // Expand 5-bit to 8-bit
                     uint8_t r8 = (r5 << 3) | (r5 >> 2);
                     uint8_t g8 = (g5 << 3) | (g5 >> 2);

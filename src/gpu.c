@@ -42,6 +42,10 @@ void gpu_update_display_mapping(Gpu* gpu) {
     } else if (gpu->display_height_hint) {
         disp_h = gpu->display_height_hint;
     }
+    // For interlaced mode the line range covers one field (~240 lines) but the
+    // logical frame height is 480. Use the hint when it's larger.
+    if (gpu->display_height_hint > disp_h)
+        disp_h = gpu->display_height_hint;
 
     // Store computed display area into CRTC state for the VBlank blit path.
     gpu->crtc.display_vram_x = gpu->display_vram_x_start;
@@ -49,8 +53,8 @@ void gpu_update_display_mapping(Gpu* gpu) {
     gpu->crtc.display_width  = disp_w;
     gpu->crtc.display_height = disp_h;
 
-    // Renderer screen scale stays at full VRAM dimensions so renderer_blit_vram
-    // (which uses hard-coded 0..1024 x 0..512 quad positions) maps correctly to NDC.
+    // Keep full VRAM dimensions so polygon coordinates (0..1023 × 0..511) are
+    // visible — full VRAM view, VRAM objects remain visible as the user prefers.
     renderer_set_screen_scale(&gpu->renderer, VRAM_WIDTH, VRAM_HEIGHT);
     renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
 }

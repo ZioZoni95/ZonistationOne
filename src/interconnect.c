@@ -2195,6 +2195,21 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
     LOG_DMA_DEBUG("--- Finished DMA Transfer for Channel %d ---", channel_index);
+
+    // Signal DMA completion IRQ (IRQ3) if the channel has IRQ enabled in DICR.
+    // Edge-triggered on I_STAT[3]: only raise IRQ3 when I_STAT bit 3 transitions 0→1.
+    // Using I_STAT[3] (not channel_irq_flags) as the guard ensures the IRQ re-fires
+    // after the BIOS clears I_STAT[3] via direct write (0xFFF7), even if DICR flags
+    // were not properly ACKed (e.g. BIOS writes ack_flags for wrong channel).
+    if (inter->dma.channel_irq_enable & (1 << channel_index)) {
+        inter->dma.channel_irq_flags |= (1 << channel_index);
+        inter->dma.master_irq_flag = inter->dma.force_irq ||
+            (inter->dma.master_irq_enable &&
+             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
+        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA))) {
+            interconnect_request_irq(inter, IRQ_DMA, "DMA channel done");
+        }
+    }
 }
 
 // --- BIOS Boot Helper: Force Interrupt Configuration ---

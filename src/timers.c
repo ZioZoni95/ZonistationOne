@@ -182,6 +182,8 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
             t->mode |= (1 << 10);
             interconnect_request_irq(timers->inter, t->irq, "Timer re-assert after mode write");
         }
+        // Schedule next event so IRQ fires at the right time
+        timers_schedule_next_event(timers, timer_index);
         return;
     }
     switch (offset) {
@@ -234,30 +236,31 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         double timer_clock_hz = 0.0;
         bool use_hblank = false, use_dotclock = false, use_div8 = false;
 
-        // --- Clock source selection per DOCS/timers.md ---
+        // --- Clock source selection per PSX-SPX ---
+        // Per spec, both values in each pair map to the same clock:
+        //   Timer0: 0/1 = sysclock,   2/3 = dotclock
+        //   Timer1: 0/1 = sysclock,   2/3 = hblank
+        //   Timer2: 0/1 = sysclock,   2/3 = sysclock/8
         switch (i) {
-            case 0: // Timer0: System clock or dotclock
-                if (t->clock_source == 0) {
+            case 0: // Timer0
+                if (t->clock_source <= 1) {
                     timer_clock_hz = PSX_SYSCLK_HZ;
-                } else if (t->clock_source == 1) {
-                    timer_clock_hz = DOTCLOCK_NTSC_HZ; // TODO: PAL support
+                } else {
+                    timer_clock_hz = DOTCLOCK_NTSC_HZ;
                     use_dotclock = true;
                 }
                 break;
-            case 1: // Timer1: System clock, HBlank, or dotclock
-                if (t->clock_source == 0) {
+            case 1: // Timer1
+                if (t->clock_source <= 1) {
                     timer_clock_hz = PSX_SYSCLK_HZ;
-                } else if (t->clock_source == 1) {
-                    timer_clock_hz = DOTCLOCK_NTSC_HZ; // Not commonly used
-                    use_dotclock = true;
-                } else if (t->clock_source == 2) {
+                } else {
                     use_hblank = true;
                 }
                 break;
-            case 2: // Timer2: System clock or system clock / 8
-                if (t->clock_source == 0) {
+            case 2: // Timer2
+                if (t->clock_source <= 1) {
                     timer_clock_hz = PSX_SYSCLK_HZ;
-                } else if (t->clock_source == 3) {
+                } else {
                     timer_clock_hz = PSX_SYSCLK_HZ / 8.0;
                     use_div8 = true;
                 }

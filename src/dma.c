@@ -193,24 +193,21 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
                 dma->master_irq_enable = (value >> 23) & 1;
                 LOG_DMA_DEBUG("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
-                // --- PCSX ReARMed-style immediate IRQ3 assertion after DICR write ---
-                // If the DMA transfer for channel 2 (GPU) is already done, and the BIOS enables IRQ3 after the fact,
-                // we must immediately assert IRQ3 if the condition is true (see nocash/PCSX ReARMed behavior)
-                if ((dma->channel_irq_flags & (1 << 2)) && dma->master_irq_enable) {
-                    dma->master_irq_flag = 1;
-                    interconnect_request_irq(dma->inter, IRQ_DMA, "DMA IRQ3 (DICR write, PCSX ReARMed style)");
-                }
                 // --- DMA IRQ acknowledge logic ---
+                // The PCSX ReARMed "re-raise on write" hack has been removed: with proper
+                // edge-triggered DMA completion IRQ, re-raising here causes infinite loops
+                // when the BIOS ACKs the wrong channel (e.g. ack_flags=0x08 for ch3 while
+                // ch2 flag is set), trapping the CPU in the interrupt handler forever.
                 uint8_t ack_flags = (uint8_t)((value >> 24) & 0x7F);
                 if (ack_flags) {
                     dma->channel_irq_flags &= ~ack_flags;
-                    // If any acknowledged channel was enabled, clear master IRQ flag
-                    if ((dma->channel_irq_enable & ack_flags) != 0) {
-                        dma->master_irq_flag = false;
-                        // Also clear IRQ3 (DMA IRQ) in irq_status
-                        if (dma->inter) {
-                            dma->inter->irq_status &= ~(1u << 3);
-                        }
+                    // Recompute master_irq_flag after ACK
+                    dma->master_irq_flag = dma->force_irq ||
+                        (dma->master_irq_enable &&
+                         (dma->channel_irq_flags & dma->channel_irq_enable) != 0);
+                    // If no enabled channels remain pending, clear I_STAT[3]
+                    if (!dma->master_irq_flag && dma->inter) {
+                        dma->inter->irq_status &= ~(1u << 3);
                     }
                 }
                 break;

@@ -749,11 +749,12 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
     RendererColor colors[4];
     RendererTexCoord texcoords[4];
     
-    // Full screen in VRAM coordinates (0-1023, 0-511 maps to -1..1, 1..-1)
+    // Full VRAM in screen coordinates (0-1023, 0-511 maps to -1..1, 1..-1)
+    // The texture coordinates select the actual display region within VRAM.
     // Top-left
     positions[0].x = 0;
     positions[0].y = 0;
-    // Top-right  
+    // Top-right
     positions[1].x = 1024;
     positions[1].y = 0;
     // Bottom-left
@@ -827,18 +828,30 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
     if (!renderer->initialized) return;
     renderer_draw(renderer); // flush before changing scissor
 
-    int clip_w = (int)right  - (int)left + 1;
-    int clip_h = (int)bottom - (int)top  + 1;
+    // Scale drawing-area VRAM coordinates to window pixels.
+    // screen_width/height hold the active display dimensions (e.g. 320x240).
+    // The SDL window is always 1024x512. With screen_scale = (sw/2, sh/2) the
+    // display area fills the window, so: win_x = vram_x * 1024 / sw.
+    float sw = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
+    float sh = renderer->screen_height ? renderer->screen_height : 512.0f;
+    float sx = 1024.0f / sw;
+    float sy = 512.0f  / sh;
+
+    int gl_left  = (int)((float)left  * sx);
+    int gl_right = (int)((float)(right  + 1) * sx);
+    int gl_top   = (int)((float)top   * sy);
+    int gl_bot   = (int)((float)(bottom + 1) * sy);
+    int clip_w   = gl_right - gl_left;
+    int clip_h   = gl_bot   - gl_top;
     if (clip_w <= 0) clip_w = 1;
     if (clip_h <= 0) clip_h = 1;
 
-    // OpenGL scissor: Y=0 is bottom-left; PSX Y=0 is top-left
-    // Window height is 512 (VRAM_HEIGHT). Flip: gl_y = 512 - bottom - 1
-    int gl_y = 512 - (int)bottom - 1;
+    // OpenGL scissor: Y=0 is bottom of window; flip.
+    int gl_y = 512 - gl_bot;
     if (gl_y < 0) gl_y = 0;
 
     glEnable(GL_SCISSOR_TEST);
-    glScissor((GLint)left, (GLint)gl_y, (GLsizei)clip_w, (GLsizei)clip_h);
+    glScissor((GLint)gl_left, (GLint)gl_y, (GLsizei)clip_w, (GLsizei)clip_h);
 }
 
 // ---------------------------------------------------------------------------

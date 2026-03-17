@@ -621,9 +621,7 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     switch (cmd) {
         case CDC_GETID:
             if (!cdrom->disc_present) {
-                // No disc
-                push_response(cdrom, 0x08);  // Error + shell open
-                push_response(cdrom, 0x40);
+                // No disc: INT5 with error bytes [0x08=no-disc, 0x40=cannot-read]
                 send_error(cdrom, 0x08, 0x40);
             } else {
                 // Licensed disc
@@ -800,7 +798,7 @@ static uint8_t get_stat_byte(Cdrom *cdrom) {
     
     if (cdrom->motor_on)
         stat |= STAT_BYTE_MOTOR_ON;
-    if (cdrom->shell_open || !cdrom->disc_present)
+    if (cdrom->shell_open)
         stat |= STAT_BYTE_SHELL_OPEN;
     if (cdrom->drive_state == DRIVE_READING)
         stat |= STAT_BYTE_READING;

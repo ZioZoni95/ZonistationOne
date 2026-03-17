@@ -3,6 +3,7 @@
 #include "interconnect.h"
 #include "event_scheduler.h"
 #include "gte.h"
+#include "timers.h"
 
 // ============================================================================
 // CPU Execution Loop - DuckStation Style
@@ -90,6 +91,11 @@ void cpu_run_next_instruction(Cpu* cpu) {
 
     // --- 8. Advance Cycle Counter ---
     cpu->inter->cpu_cycle_counter++;
+
+    // --- 8a. Step timers every 64 cycles so counters advance for BIOS busy-waits ---
+    if ((cpu->inter->cpu_cycle_counter & 0x3F) == 0) {
+        timers_step(&cpu->inter->timers_state, 64);
+    }
 
     // --- 9. Check for Events ---
     if (cpu->inter->cpu_cycle_counter >= cpu->inter->evq_next_cycle) {

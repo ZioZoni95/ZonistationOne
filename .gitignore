@@ -1,2 +1,9 @@
+# Build output
+myps1_emu
 
- 
+# Debug / capture output
+emulator_log.txt
+*.ppm
+
+# ROM files (do not distribute)
+roms/

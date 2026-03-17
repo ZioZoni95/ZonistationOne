@@ -274,9 +274,9 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
         else if (target_address == 0x000000B0)
             handle_b0_syscall(cpu);
     }
-    // Log other suspicious jumps to low memory or unaligned addresses
-    else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
-        LOG_CPU_DEBUG("@SUSPICIOUS_JR from PC=0x%08x: $%d=0x%08x -> jumping to 0x%08x", 
+    // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
+    else if ((target_address & 0x3) != 0) {
+        LOG_CPU_DEBUG("@SUSPICIOUS_JR from PC=0x%08x: $%d=0x%08x -> unaligned target 0x%08x",
                          cpu->current_pc, rs, target_address, target_address);
     }
     
@@ -427,9 +427,9 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
         else if (target_address == 0xB0)
             handle_b0_syscall(cpu);
     }
-    // Log other suspicious jumps to low memory or unaligned addresses
-    else if (target_address < 0x00010000 || (target_address & 0x3) != 0) {
-        LOG_CPU_DEBUG("@SUSPICIOUS_JALR from PC=0x%08x: $%d=0x%08x -> jumping to 0x%08x, return to $%d=0x%08x", 
+    // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
+    else if ((target_address & 0x3) != 0) {
+        LOG_CPU_DEBUG("@SUSPICIOUS_JALR from PC=0x%08x: $%d=0x%08x -> unaligned target 0x%08x, return to $%d=0x%08x",
                          cpu->current_pc, rs, target_address, target_address, rd, return_addr);
     }
 

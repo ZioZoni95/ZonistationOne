@@ -327,6 +327,8 @@ static void gp0_drawing_offset(Gpu* gpu) {
     uint16_t y_raw = (uint16_t)((value >> 11) & 0x7FF);
     gpu->drawing_x_offset = (int16_t)(x_raw << 5) >> 5;
     gpu->drawing_y_offset = (int16_t)(y_raw << 5) >> 5;
+    LOG_GPU_DEBUG("GP0(0xE5): Drawing Offset (%d, %d)", gpu->drawing_x_offset, gpu->drawing_y_offset);
+    renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
     gpu_update_display_mapping(gpu);
 }
 
