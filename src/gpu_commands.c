@@ -150,6 +150,16 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
         renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
         gpu->vram_dirty = false;
         // Apply texture flip if enabled (for rectangle primitives)
+        // Force neutral gray color for raw texture mode (no vertex color modulation)
+        if (raw_texture) {
+            for (int i = 0; i < 4; i++) {
+                c[i].r = 128;
+                c[i].g = 128;
+                c[i].b = 128;
+            }
+            LOG_GPU_DEBUG("GP0 rect: Raw texture mode enabled");
+        }
+
         t[0].u = tex->u;       t[0].v = tex->v;
         t[1].u = tex->u + w;   t[1].v = tex->v;
         t[2].u = tex->u;       t[2].v = tex->v + h;
@@ -442,6 +452,16 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
         }
     }
 
+    // Force neutral gray color for raw texture mode (no vertex color modulation)
+    if (raw_texture) {
+        for (int i = 0; i < 3; i++) {
+            colors[i].r = 128;
+            colors[i].g = 128;
+            colors[i].b = 128;
+        }
+        LOG_GPU_DEBUG("GP0 tri: Raw texture mode enabled");
+    }
+
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
@@ -530,9 +550,19 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
         }
     }
 
+    // Force neutral gray color for raw texture mode (no vertex color modulation)
+    if (raw_texture) {
+        for (int i = 0; i < 3; i++) {
+            c[i].r = 128;
+            c[i].g = 128;
+            c[i].b = 128;
+        }
+        LOG_GPU_DEBUG("GP0 shaded tri: Raw texture mode enabled");
+    }
+
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
-    renderer_set_raw_texture_mode(&gpu->renderer, false);
+    renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
     renderer_push_triangle(&gpu->renderer, p, c, t, clut, texpage);
 }
@@ -600,6 +630,34 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     t[3].u = (GLshort)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
     t[3].v = (GLshort)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
 
+    // Validate texture coordinates
+    uint8_t page_x, page_y, depth;
+    bool raw_tex_unused;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
+
+    for (int i = 0; i < 4; i++) {
+        if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
+            LOG_GPU_WARN("Textured quad vertex %d UV out of bounds", i);
+        }
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Textured quad CLUT out of bounds");
+        }
+    }
+
+    // Force neutral gray color for raw texture mode (no vertex color modulation)
+    if (raw_texture) {
+        for (int i = 0; i < 4; i++) {
+            c[i].r = 128;
+            c[i].g = 128;
+            c[i].b = 128;
+        }
+        LOG_GPU_DEBUG("GP0 quad: Raw texture mode enabled");
+    }
+
     static int log_limiter = 0;
     if (log_limiter < 10) {
         LOG_GPU_DEBUG("GP0 textured quad V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x",
@@ -661,9 +719,39 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
         if (i == 0) clut    = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
         if (i == 1) texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
     }
+
+    // Extract raw_texture flag from texpage
+    uint8_t page_x, page_y, depth;
+    bool raw_texture;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_texture);
+
+    // Validate texture coordinates
+    for (int i = 0; i < 4; i++) {
+        if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
+            LOG_GPU_WARN("Shaded textured quad vertex %d UV out of bounds", i);
+        }
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Shaded textured quad CLUT out of bounds");
+        }
+    }
+
+    // Force neutral gray color for raw texture mode (no vertex color modulation)
+    if (raw_texture) {
+        for (int i = 0; i < 4; i++) {
+            c[i].r = 128;
+            c[i].g = 128;
+            c[i].b = 128;
+        }
+        LOG_GPU_DEBUG("GP0 shaded quad: Raw texture mode enabled");
+    }
+
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
-    renderer_set_raw_texture_mode(&gpu->renderer, false);
+    renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
@@ -831,6 +919,23 @@ static void gp0_rect_var_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     uint16_t tpage = make_tpage(gpu);
     uint16_t w = (uint16_t)(dim & 0xFFFF); uint16_t h = (uint16_t)(dim >> 16);
     if (w == 0) w = 1; if (h == 0) h = 1;
+
+    // Validate texture coordinates
+    uint8_t page_x, page_y, depth;
+    bool raw_tex_unused;
+    gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
+
+    if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
+        LOG_GPU_WARN("Variable textured rect UV (%d,%d) out of bounds", tex.u, tex.v);
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Variable textured rect CLUT out of bounds");
+        }
+    }
+
     upload_vram_if_dirty(gpu);
     draw_rectangle(gpu, x, y, w, h, col, true, raw_texture, &tex, clut, tpage, semi_trans);
 }
@@ -868,6 +973,23 @@ static void gp0_rect_fixed_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture,
     RendererTexCoord tex = { .u=(GLshort)(uv_clut & 0xFF), .v=(GLshort)((uv_clut>>8)&0xFF) };
     uint16_t clut  = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = make_tpage(gpu);
+
+    // Validate texture coordinates
+    uint8_t page_x, page_y, depth;
+    bool raw_tex_unused;
+    gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
+
+    if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
+        LOG_GPU_WARN("Fixed %ux%u textured rect UV (%d,%d) out of bounds", size, size, tex.u, tex.v);
+    }
+
+    // Validate CLUT if using paletted texture
+    if (depth != 2) {  // not 15-bit direct color
+        if (!gpu_validate_clut_coords(clut, depth)) {
+            LOG_GPU_WARN("Fixed %ux%u textured rect CLUT out of bounds", size, size);
+        }
+    }
+
     upload_vram_if_dirty(gpu);
     draw_rectangle(gpu, x, y, size, size, col, true, raw_texture, &tex, clut, tpage, semi_trans);
 }

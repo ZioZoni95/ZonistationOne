@@ -40,6 +40,24 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // exception_pending is per-instruction state; clear it before running this step.
     cpu->exception_pending = false;
 
+    // --- GTE Busy Stalling ---
+    // Decrement GTE cycles remaining; clear busy when complete
+    if (cpu->gte.busy && cpu->gte.cycles_remaining > 0) {
+        cpu->gte.cycles_remaining--;
+        if (cpu->gte.cycles_remaining == 0) {
+            cpu->gte.busy = false;
+        }
+    }
+
+    // --- GTE Load Delay Advancement (Phase B5) ---
+    // Shift pending delayed value to current, preparing it to be returned on next MFC2
+    if (cpu->gte_next_load_delay_reg != 255) {
+        cpu->gte_load_delay_reg = cpu->gte_next_load_delay_reg;
+        cpu->gte_load_delay_value = cpu->gte_next_load_delay_value;
+        cpu->gte_next_load_delay_reg = 255;  // Clear pending
+        cpu->gte_next_load_delay_value = 0;
+    }
+
     // --- 1. Handle Load Delay from previous instruction ---
     // Must commit before the interrupt check so the register file is consistent
     // at exception entry (EPC points to the interrupted instruction, regs already updated).

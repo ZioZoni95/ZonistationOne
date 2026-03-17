@@ -756,15 +756,89 @@ void op_cop1(Cpu* cpu, uint32_t instruction) {
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
-// Coprocessor 2 (GTE) Opcode - Currently unimplemented
+// Coprocessor 2 (GTE) Opcode - Handles MFC2/MTC2/CFC2/CTC2 and GTE instructions
 void op_cop2(Cpu* cpu, uint32_t instruction) {
-    uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
-    (void)cycles;
-    LOG_TRACE("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
-    
-    // Execute the GTE instruction
-    // TODO: Handle GTE busy state and timing if needed
-    // For now, we'll just continue execution
+    // Phase B6: Check COP0 SR.CU2 (bit 30) to verify GTE is enabled
+    // If bit 30 = 0, COP2 is disabled and should raise an exception
+    bool cop2_enabled = (cpu->sr & (1u << 30)) != 0;
+    if (!cop2_enabled) {
+        LOG_WARN("COP2 (GTE) access attempted with SR.CU2=0, raising exception\n");
+        cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
+        return;
+    }
+
+    // COP2 instruction format:
+    // Bits 26-31: opcode (0x12 for COP2)
+    // Bits 21-25: rs field (operation type)
+    //   0x00 = MFC2 (Move From Coprocessor 2 data reg)
+    //   0x02 = CFC2 (Move From Coprocessor 2 control reg)
+    //   0x04 = MTC2 (Move To Coprocessor 2 data reg)
+    //   0x06 = CTC2 (Move To Coprocessor 2 control reg)
+    //   0x10+ = GTE operation
+
+    uint32_t rs = instr_s(instruction);  // Operation type (bits 21-25)
+    uint32_t rt = instr_t(instruction);  // General purpose register
+    uint32_t rd_or_imm = instr_d(instruction); // GTE register or param (bits 11-15)
+
+    switch (rs) {
+        case 0x00: // MFC2 - Move From Coprocessor 2 (data reg)
+        {
+            // rt = GTE data register rd_or_imm (subject to load delay)
+            // If this GTE register has a delayed value pending, return the delayed value
+            // Otherwise, return the actual current register value
+            uint32_t gte_reg_value;
+
+            if (cpu->gte_load_delay_reg == rd_or_imm) {
+                // This GTE register has a delayed write; return the delayed value
+                gte_reg_value = cpu->gte_load_delay_value;
+            } else {
+                // No delay for this register; read directly from GTE
+                gte_reg_value = gte_read_data_register(&cpu->gte, rd_or_imm);
+            }
+
+            // Schedule this value in the load delay slot (will become rt next cycle)
+            cpu->load_reg_idx = rt;
+            cpu->load_value = gte_reg_value;
+            break;
+        }
+
+        case 0x02: // CFC2 - Move From Coprocessor 2 (control reg)
+        {
+            // rt = GTE control register rd_or_imm
+            uint32_t gte_control_value = gte_read_control_register(&cpu->gte, rd_or_imm);
+
+            // Schedule in load delay slot
+            cpu->load_reg_idx = rt;
+            cpu->load_value = gte_control_value;
+            break;
+        }
+
+        case 0x04: // MTC2 - Move To Coprocessor 2 (data reg)
+        {
+            // GTE data register rd_or_imm = rt
+            uint32_t value = cpu_reg(cpu, rt);
+            gte_write_data_register(&cpu->gte, rd_or_imm, value);
+            break;
+        }
+
+        case 0x06: // CTC2 - Move To Coprocessor 2 (control reg)
+        {
+            // GTE control register rd_or_imm = rt
+            uint32_t value = cpu_reg(cpu, rt);
+            gte_write_control_register(&cpu->gte, rd_or_imm, value);
+            break;
+        }
+
+        default: // GTE operation (rs >= 0x10)
+        {
+            // This is a GTE instruction, not a move instruction
+            // Pass to GTE execution with full instruction word
+            uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
+            (void)cycles;
+            LOG_TRACE("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+            break;
+        }
+    }
 }
 
 // Coprocessor 3 Opcode - Triggers exception

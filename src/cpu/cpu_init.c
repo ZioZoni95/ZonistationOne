@@ -60,6 +60,12 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     LOG_CPU_DEBUG("Initializing GTE...");
     gte_init(&cpu->gte);
 
+    // Initialize GTE Load Delay (Phase B5)
+    cpu->gte_load_delay_reg = 255;      // No pending delay (255 = disabled)
+    cpu->gte_load_delay_value = 0;
+    cpu->gte_next_load_delay_reg = 255; // No next delay
+    cpu->gte_next_load_delay_value = 0;
+
     LOG_CPU_INFO("CPU initialized, PC=0x%08x", cpu->pc);
     // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }

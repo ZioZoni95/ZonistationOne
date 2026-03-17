@@ -102,6 +102,7 @@ static const uint8_t unr_table[257] = {
 static int64_t sign_extend_44(int64_t val);
 static void truncate_and_set_mac(Gte* gte, int index, int64_t value, int shift);
 static void truncate_and_set_ir(Gte* gte, int index, int32_t value, bool lm);
+static void push_rgb_from_mac(Gte* gte);
 
 static void gte_mul_mat_vec(Gte* gte, const int16_t* m, const int32_t* t, const int16_t* v, int shift, bool lm) {
     int64_t mac1 = ((int64_t)t[0] << 12) + ((int64_t)m[0] * v[0]) + ((int64_t)m[1] * v[1]) + ((int64_t)m[2] * v[2]);
@@ -203,6 +204,43 @@ static void truncate_and_set_ir(Gte* gte, int index, int32_t value, bool lm) {
         set_flag(gte, 24 - (index - 1));
     }
     gte->data[GTE_REG_IR0 + index] = (int16_t)value; // Store as 16-bit (sign extended on read)
+}
+
+// Truncate MAC value to 8-bit RGB with saturation flag setting
+// DuckStation reference: MAC >> 4 clamped to [0, 255]
+static uint32_t truncate_rgb(Gte* gte, int index, int32_t value) {
+    // value is MAC >> shift, now shift right by 4 more to convert to 8-bit color space
+    // Actually, after truncate_and_set_mac, we have MAC stored. Need to shift by 4 here.
+    // DuckStation does: TruncateRGB(MAC >> 4)
+    // But MAC is already shifted in truncate_and_set_mac. We need the original 32-bit value.
+    // For now, take MAC and shift by 4, then clamp.
+    int32_t mac_val = value >> 4;  // Convert 16-bit (0-1023 range) to 8-bit (0-255)
+
+    if (mac_val < 0 || mac_val > 0xFF) {
+        // Set appropriate saturation flag for R(24), G(23), or B(22)
+        set_flag(gte, 24 - index);
+        return (mac_val < 0) ? 0 : 0xFF;
+    }
+    return (uint32_t)mac_val;
+}
+
+// Push RGB value from MAC registers to RGB FIFO
+// DuckStation reference: MAC1>>4, MAC2>>4, MAC3>>4, clamped to [0,255]
+static void push_rgb_from_mac(Gte* gte) {
+    int32_t mac1 = gte->data[GTE_REG_MAC1];
+    int32_t mac2 = gte->data[GTE_REG_MAC2];
+    int32_t mac3 = gte->data[GTE_REG_MAC3];
+
+    uint32_t r = truncate_rgb(gte, 1, mac1);
+    uint32_t g = truncate_rgb(gte, 2, mac2);
+    uint32_t b = truncate_rgb(gte, 3, mac3);
+
+    uint32_t rgb = r | (g << 8) | (b << 16);
+
+    // Shift FIFO: RGB0 ← RGB1 ← RGB2 ← new value
+    gte->data[GTE_REG_RGB0] = gte->data[GTE_REG_RGB1];
+    gte->data[GTE_REG_RGB1] = gte->data[GTE_REG_RGB2];
+    gte->data[GTE_REG_RGB2] = rgb;
 }
 
 static uint32_t count_leading_zeros(uint16_t val) {
@@ -349,8 +387,20 @@ void gte_nclip(Gte* gte);
 void gte_mvmva(Gte* gte, uint32_t instruction);
 void gte_sqr(Gte* gte, uint32_t instruction);
 void gte_op(Gte* gte, uint32_t instruction);
+void gte_ncs(Gte* gte, uint32_t instruction);
+void gte_nct(Gte* gte, uint32_t instruction);
+void gte_nccs(Gte* gte, uint32_t instruction);
+void gte_ncct(Gte* gte, uint32_t instruction);
+void gte_cc(Gte* gte, uint32_t instruction);
+void gte_cdp(Gte* gte, uint32_t instruction);
+void gte_ncds(Gte* gte, uint32_t instruction);
+void gte_ncdt(Gte* gte, uint32_t instruction);
+void gte_dpcs(Gte* gte, uint32_t instruction);
+void gte_dpct(Gte* gte, uint32_t instruction);
 void gte_dcpl(Gte* gte);
 void gte_intpl(Gte* gte);
+void gte_gpf(Gte* gte, uint32_t instruction);
+void gte_gpl(Gte* gte, uint32_t instruction);
 void gte_avsz3(Gte* gte);
 void gte_avsz4(Gte* gte);
 
@@ -467,8 +517,59 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             cycles = 23;
             break;
             
+        case 0x10: // DPCS - Depth Cueing Single
+            gte_dpcs(gte, instruction);
+            cycles = 8;
+            break;
+
+        case 0x13: // NCDS - Normal Color Depth Cue Single
+            gte_ncds(gte, instruction);
+            cycles = 19;
+            break;
+
+        case 0x14: // CDP - Color Depth Cueing
+            gte_cdp(gte, instruction);
+            cycles = 13;
+            break;
+
+        case 0x16: // NCDT - Normal Color Depth Cue Triple
+            gte_ncdt(gte, instruction);
+            cycles = 44;
+            break;
+
+        case 0x1B: // NCCS - Normal Color Color Single
+            gte_nccs(gte, instruction);
+            cycles = 17;
+            break;
+
+        case 0x1C: // CC - Color Color
+            gte_cc(gte, instruction);
+            cycles = 11;
+            break;
+
+        case 0x1E: // NCS - Normal Color Single
+            gte_ncs(gte, instruction);
+            cycles = 14;
+            break;
+
+        case 0x1F: // NCCT - Normal Color Color Triple
+            // gte_ncct(gte, instruction);
+            cycles = 39;
+            LOG_GTE_DEBUG("GTE: NCCT (Normal Color Color Triple) - TODO: Implement\n");
+            break;
+
+        case 0x20: // NCT - Normal Color Triple
+            gte_nct(gte, instruction);
+            cycles = 30;
+            break;
+
         case 0x3D: // GPF - General Purpose Interpolation
-            // gte_gpf(gte, instruction);
+            gte_gpf(gte, instruction);
+            cycles = 5;
+            break;
+
+        case 0x3E: // GPL - General Purpose Interpolation with Base
+            gte_gpl(gte, instruction);
             cycles = 5;
             break;
             
@@ -481,7 +582,11 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             break;
         }
     }
-    
+
+    // Set GTE busy flag to prevent CPU from reading results before completion
+    gte->busy = true;
+    gte->cycles_remaining = cycles;
+
     return cycles;
 }
 
@@ -695,6 +800,176 @@ void gte_op(Gte* gte, uint32_t instruction) {
     truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
 }
 
+// --- Color Calculation Helper ---
+// Common pattern for all color operations (NCS, NCT, etc.)
+static void gte_color_calc_step(Gte* gte, int16_t* v, int shift, bool lm) {
+    // Load light matrix (L11 L12 L13 | L21 L22 L23 | L31 L32 L33)
+    int16_t l11 = (int16_t)gte->control[GTE_CTL_L11L12];
+    int16_t l12 = (int16_t)(gte->control[GTE_CTL_L11L12] >> 16);
+    int16_t l13 = (int16_t)gte->control[GTE_CTL_L13L21];
+    int16_t l21 = (int16_t)(gte->control[GTE_CTL_L13L21] >> 16);
+    int16_t l22 = (int16_t)gte->control[GTE_CTL_L22L23];
+    int16_t l23 = (int16_t)(gte->control[GTE_CTL_L22L23] >> 16);
+    int16_t l31 = (int16_t)gte->control[GTE_CTL_L31L32];
+    int16_t l32 = (int16_t)(gte->control[GTE_CTL_L31L32] >> 16);
+    int16_t l33 = (int16_t)gte->control[GTE_CTL_L33];
+
+    // Multiply light matrix × vector
+    // Result = [MAC1, MAC2, MAC3] = L * [VX, VY, VZ]
+    int64_t mac1 = ((int64_t)l11 * v[0]) + ((int64_t)l12 * v[1]) + ((int64_t)l13 * v[2]);
+    int64_t mac2 = ((int64_t)l21 * v[0]) + ((int64_t)l22 * v[1]) + ((int64_t)l23 * v[2]);
+    int64_t mac3 = ((int64_t)l31 * v[0]) + ((int64_t)l32 * v[1]) + ((int64_t)l33 * v[2]);
+
+    // Add background color (RBK, GBK, BBK) << 12
+    int32_t rbk = gte->control[GTE_CTL_RBK];
+    int32_t gbk = gte->control[GTE_CTL_GBK];
+    int32_t bbk = gte->control[GTE_CTL_BBK];
+
+    mac1 += ((int64_t)rbk << 12);
+    mac2 += ((int64_t)gbk << 12);
+    mac3 += ((int64_t)bbk << 12);
+
+    mac1 = sign_extend_44(mac1);
+    mac2 = sign_extend_44(mac2);
+    mac3 = sign_extend_44(mac3);
+
+    // Store to MACs and truncate
+    truncate_and_set_mac(gte, 1, mac1, shift);
+    truncate_and_set_mac(gte, 2, mac2, shift);
+    truncate_and_set_mac(gte, 3, mac3, shift);
+
+    // Extract 16-bit color components and saturate to IR
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
+
+    // Push RGB from MAC to FIFO (DuckStation: MAC >> 4 clamped to [0, 0xFF])
+    push_rgb_from_mac(gte);
+}
+
+// --- NCS (0x1E): Normal Color Single ---
+void gte_ncs(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+
+    LOG_GTE_DEBUG("GTE: NCS (Normal Color Single, sf=%d, lm=%d)\n", shift, lm);
+
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    // Load V0
+    int16_t v[3];
+    v[0] = (int16_t)gte->data[GTE_REG_V0_XY];
+    v[1] = (int16_t)(gte->data[GTE_REG_V0_XY] >> 16);
+    v[2] = (int16_t)gte->data[GTE_REG_V0_Z];
+
+    // Perform color calculation
+    gte_color_calc_step(gte, v, shift ? 12 : 0, lm);
+}
+
+// --- NCT (0x20): Normal Color Triple ---
+void gte_nct(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+
+    LOG_GTE_DEBUG("GTE: NCT (Normal Color Triple, sf=%d, lm=%d)\n", shift, lm);
+
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    // Process all three vertices
+    for (int v_idx = 0; v_idx < 3; v_idx++) {
+        int16_t v[3];
+
+        if (v_idx == 0) {  // V0
+            v[0] = (int16_t)gte->data[GTE_REG_V0_XY];
+            v[1] = (int16_t)(gte->data[GTE_REG_V0_XY] >> 16);
+            v[2] = (int16_t)gte->data[GTE_REG_V0_Z];
+        } else if (v_idx == 1) {  // V1
+            v[0] = (int16_t)gte->data[GTE_REG_V1_XY];
+            v[1] = (int16_t)(gte->data[GTE_REG_V1_XY] >> 16);
+            v[2] = (int16_t)gte->data[GTE_REG_V1_Z];
+        } else {  // V2
+            v[0] = (int16_t)gte->data[GTE_REG_V2_XY];
+            v[1] = (int16_t)(gte->data[GTE_REG_V2_XY] >> 16);
+            v[2] = (int16_t)gte->data[GTE_REG_V2_Z];
+        }
+
+        // Perform color calculation
+        gte_color_calc_step(gte, v, shift ? 12 : 0, lm);
+    }
+}
+
+// --- NCCS (0x1B): Normal Color Color Single ---
+void gte_nccs(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("GTE: NCCS (Normal Color Color Single) - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCS pattern for now
+    gte_ncs(gte, instruction);
+}
+
+// --- NCCT (0x1F): Normal Color Color Triple ---
+void gte_ncct(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("GTE: NCCT (Normal Color Color Triple) - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCT pattern for now
+    gte_nct(gte, instruction);
+}
+
+// --- CC (0x1C): Color Color ---
+void gte_cc(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("GTE: CC (Color Color) - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: similar to NCS but using IR
+    gte_ncs(gte, instruction);
+}
+
+// --- CDP (0x14): Color Depth Cueing ---
+void gte_cdp(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    bool lm = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("GTE: CDP (Color Depth Cueing) - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use CC pattern
+    gte_cc(gte, instruction);
+}
+
+// --- NCDS (0x13): Normal Color Depth Cue Single ---
+void gte_ncds(Gte* gte, uint32_t instruction) {
+    LOG_GTE_DEBUG("GTE: NCDS - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCS
+    gte_ncs(gte, instruction);
+}
+
+// --- NCDT (0x16): Normal Color Depth Cue Triple ---
+void gte_ncdt(Gte* gte, uint32_t instruction) {
+    LOG_GTE_DEBUG("GTE: NCDT - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCT
+    gte_nct(gte, instruction);
+}
+
+// --- DPCS (0x10): Depth Cueing Single ---
+void gte_dpcs(Gte* gte, uint32_t instruction) {
+    LOG_GTE_DEBUG("GTE: DPCS - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCS
+    gte_ncs(gte, instruction);
+}
+
+// ---DPCT (0x2A): Depth Cueing Triple ---
+void gte_dpct(Gte* gte, uint32_t instruction) {
+    LOG_GTE_DEBUG("GTE: DPCT - SIMPLIFIED IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+    // Simplified: use NCT
+    gte_nct(gte, instruction);
+}
+
 void gte_dcpl(Gte* gte) {
     (void)gte;
     LOG_GTE_DEBUG("GTE: DCPL (Depth Cueing) - TODO: Implement\n");
@@ -702,9 +977,73 @@ void gte_dcpl(Gte* gte) {
 }
 
 void gte_intpl(Gte* gte) {
-    (void)gte;
-    LOG_GTE_DEBUG("GTE: INTPL (Interpolation) - TODO: Implement\n");
-    // TODO: Implement interpolation
+    LOG_GTE_DEBUG("GTE: INTPL (Interpolation) - BASIC IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    // INTPL: [MAC1,2,3] = [IR1,IR2,IR3] * IR0 + [MAC1,MAC2,MAC3]
+    int16_t ir0 = (int16_t)gte->data[GTE_REG_IR0];
+    int16_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
+    int16_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
+    int16_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
+
+    int32_t mac1 = gte->data[GTE_REG_MAC1];
+    int32_t mac2 = gte->data[GTE_REG_MAC2];
+    int32_t mac3 = gte->data[GTE_REG_MAC3];
+
+    int64_t result1 = ((int64_t)ir1 * ir0) + mac1;
+    int64_t result2 = ((int64_t)ir2 * ir0) + mac2;
+    int64_t result3 = ((int64_t)ir3 * ir0) + mac3;
+
+    truncate_and_set_mac(gte, 1, result1, 0);
+    truncate_and_set_mac(gte, 2, result2, 0);
+    truncate_and_set_mac(gte, 3, result3, 0);
+
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], 0);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], 0);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], 0);
+
+    // Push RGB to FIFO
+    push_rgb_from_mac(gte);
+}
+
+void gte_gpf(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    LOG_GTE_DEBUG("GTE: GPF (General Purpose Interpolation) - BASIC IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    // GPF: [MAC] = ([IR1,IR2,IR3] * IR0 + [MAC1,MAC2,MAC3]) >> (sf*12)
+    int16_t ir0 = (int16_t)gte->data[GTE_REG_IR0];
+    int16_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
+    int16_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
+    int16_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
+
+    int32_t mac1 = gte->data[GTE_REG_MAC1];
+    int32_t mac2 = gte->data[GTE_REG_MAC2];
+    int32_t mac3 = gte->data[GTE_REG_MAC3];
+
+    int64_t result1 = ((int64_t)ir1 * ir0) + mac1;
+    int64_t result2 = ((int64_t)ir2 * ir0) + mac2;
+    int64_t result3 = ((int64_t)ir3 * ir0) + mac3;
+
+    truncate_and_set_mac(gte, 1, result1, shift ? 12 : 0);
+    truncate_and_set_mac(gte, 2, result2, shift ? 12 : 0);
+    truncate_and_set_mac(gte, 3, result3, shift ? 12 : 0);
+
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], 0);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], 0);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], 0);
+
+    // Push RGB to FIFO
+    push_rgb_from_mac(gte);
+}
+
+void gte_gpl(Gte* gte, uint32_t instruction) {
+    int shift = (instruction >> 19) & 1;
+    LOG_GTE_DEBUG("GTE: GPL (General Purpose Interpolation with Base) - BASIC IMPL\n");
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    // GPL: Similar to GPF, uses previous MAC as base
+    gte_gpf(gte, instruction);  // Simplified: use GPF
 }
 
 void gte_avsz3(Gte* gte) {
