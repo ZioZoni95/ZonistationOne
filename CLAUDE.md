@@ -97,9 +97,8 @@ Rate-limiting: `log_set_rate_limit(category, first_n, every_n)` — structure ex
 
 ## Active Plans
 
-- **Logging refactor**: replace `log.c` with rxi/log.c base + Dear ImGui overlay window.
-  See `.claude/plans/` for full plan. Next: download rxi/log.c + imgui sources, rewrite log.c,
-  create `src/debug_ui.cpp`, update Makefile.
+- **UI FBO Refactor**: ✅ Complete. Main SDL window acts as an ImGui host/DockSpace. The PS1 display is rendered to an FBO and shown in an ImGui window. All components have their own log windows. CLI logging removed.
+- **Comprehensive Logging Overhaul**: Systematic upgrade of all `LOG_*` calls across all components to match DuckStation/PCSX-Redux accuracy and formatting. Phase 1 (Core System & Memory Bus) completed. Phase 2 (CPU & Execution) is next. See `.claude/plans/kernel_logging.md` (or equivalent plan file) for details.
 
 ---
 

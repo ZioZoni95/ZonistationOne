@@ -76,15 +76,20 @@ A work-in-progress PlayStation 1 emulator written in C (C99), inspired by nocash
 
 ---
 
-## 📝 Logging System
+## 📝 Logging System & Debug UI
 
-The emulator uses a unified logging macro scheme:
+The emulator uses a unified logging macro scheme integrated with a full **ImGui IDE-style Debug UI**:
 
 - **Macros:** Use `LOG_<CATEGORY>_<LEVEL>(...)` for all logging calls
 - **Levels:** `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`
-- **Categories:** `CPU`, `CDROM`, `DMA`, `IRQ`, `GPU`, `TIMER`, `SYSTEM`, etc.
+- **Categories:** `SYSTEM`, `CPU`, `CDROM`, `DMA`, `IRQ`, `GPU`, `TIMER`, `BIOS`, `INTERCONNECT`, `RENDERER`, `EVENT`, `GTE`, `VRAM`, `RAM`, `DEBUG`, `MDEC`
 
-See `include/log.h` for details.
+### Multi-Window Debug Interface
+Inspired by PCSX-Redux, the main SDL2 window acts as an **ImGui DockSpace**. 
+- The PS1 display is rendered to an off-screen FBO and displayed within an ImGui window.
+- Independent log windows exist for every hardware component.
+- You can filter logs by keyword, auto-scroll, and dynamically change the global Log Level via the "Options" menu.
+- Floating viewports allow you to drag debug windows completely outside the main emulator window.
 
 ---
 
@@ -92,7 +97,7 @@ See `include/log.h` for details.
 ```sh
 make
 ```
-Requires: gcc, SDL2, OpenGL, GLEW
+Requires: gcc, g++, SDL2, OpenGL, GLEW
 
 ## Running
 ```sh
@@ -104,9 +109,8 @@ Game disc path: `games/<game>.cue`
 ### Command Line Options
 | Option | Description |
 |--------|-------------|
-| `--debug` | Set log level to DEBUG |
-| `--trace` | Set log level to TRACE |
-| `--quiet` | Set log level to WARN |
+| `--game=<path>` | Load a game disc (.cue or .bin) & boot via BIOS |
+| `--exe=<path>`  | Boot PS-X EXE directly (skips BIOS entirely) |
 | `--help` | Show help message |
 
 ---

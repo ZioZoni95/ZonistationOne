@@ -49,6 +49,10 @@ typedef struct {
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
     GLuint vram_texture;    // Texture object for VRAM
 
+    // Off-screen rendering (PCSX-Redux pattern)
+    GLuint display_fbo;     // Framebuffer Object for the main display
+    GLuint display_texture; // Texture attached to the display FBO
+
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
     GLint uniform_use_texture_loc;
@@ -86,6 +90,13 @@ typedef struct {
  * @return True if initialization was successful, false otherwise.
  */
 bool renderer_init(Renderer* renderer);
+
+/**
+ * @brief Gets the OpenGL texture ID used for the off-screen display.
+ * @param renderer Pointer to the Renderer.
+ * @return OpenGL texture ID.
+ */
+GLuint renderer_get_display_texture(Renderer* renderer);
 
 /**
  * @brief Buffers a triangle's vertex data for later drawing.

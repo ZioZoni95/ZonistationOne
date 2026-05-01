@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 // --- Global State ---
-static LogLevel current_log_level = LOG_LEVEL_WARN;
+LogLevel current_log_level = LOG_LEVEL_WARN;
 static LogCategoryState category_states[LOG_CAT_COUNT];
 static bool log_initialized = false;
 static FILE* log_file_handle = NULL;
@@ -52,10 +52,10 @@ void log_init(void) {
 
     // rxi: accept everything (our filter decides what reaches here)
     rxi_log_set_level(RXI_LOG_TRACE);
-    // Add colored stderr sink
-    rxi_log_add_fp(stderr, RXI_LOG_TRACE);
+    
+    // Disable stdout/stderr output entirely so we only log to ImGui sinks
+    rxi_log_set_quiet(true);
 
-    setvbuf(stderr, NULL, _IONBF, 0);
     log_initialized = true;
 }
 

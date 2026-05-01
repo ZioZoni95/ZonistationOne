@@ -438,6 +438,24 @@ bool renderer_init(Renderer* renderer) {
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("VRAM Texture created (ID: %u) as R16UI.\n", renderer->vram_texture);
 
+    // --- Create Off-screen Display FBO (PCSX-Redux pattern) ---
+    glGenFramebuffers(1, &renderer->display_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+
+    glGenTextures(1, &renderer->display_texture);
+    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderer->display_texture, 0);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        LOG_RENDERER_ERROR("Renderer Init Failed: Display FBO is not complete.\n");
+        return false;
+    }
+    LOG_RENDERER_DEBUG("Display FBO created successfully (FBO: %u, Texture: %u).\n", renderer->display_fbo, renderer->display_texture);
+    // Note: We leave display_fbo bound so all PSX rendering goes here!
+
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
     renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
@@ -956,9 +974,14 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     glUseProgram(0);
 }
 
+GLuint renderer_get_display_texture(Renderer* renderer) {
+    if (!renderer || !renderer->initialized) return 0;
+    return renderer->display_texture;
+}
+
 // Cleans up OpenGL resources
 void renderer_destroy(Renderer* renderer) {
-    if (!renderer->initialized) return;
+    if (!renderer || !renderer->initialized) return;
     LOG_RENDERER_DEBUG("Destroying Renderer...\n");
 
     // Delete OpenGL objects

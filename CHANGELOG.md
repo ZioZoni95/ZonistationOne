@@ -8,8 +8,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
-- **Logging Subsystem**: Migrated to `rxi/log` for multi-sink component-based logging. Includes runtime verbosity control (`--debug`, `--trace`, `--quiet`) and component filtering (PCSX ReARMed style).
-- **ImGui Debug UI**: Integrated Dear ImGui with multi-viewport support (docking branch) allowing debug windows to detach from the main SDL2 emulator window.
+- **IDE-style Debug UI**: Completely refactored the interface to mirror PCSX-Redux. The main SDL2 window now acts purely as an ImGui DockSpace.
+- **FBO Display Rendering**: The PS1 display is no longer drawn directly to the default framebuffer. It is rendered to an off-screen OpenGL Framebuffer Object (FBO) and displayed within a dedicated ImGui window, allowing it to be docked or dragged out.
+- **Modular Component Logs**: Replaced the monolithic console with individual, dockable ImGui log windows for every hardware component (CPU, GPU, CDROM, BIOS/Kernel, DMA, etc.).
+- **ImGui Log Level Selector**: Global log verbosity (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `SILENT`) can now be toggled in real-time from the ImGui "Options" menu.
+- **Kernel/TTY Logging**: Captured BIOS `printf`/`putchar` syscalls are now accurately routed to the ImGui "BIOS Log" window instead of raw `stderr`.
 - **CPU cycle model (DuckStation-style)**: `downcount` + `muldiv_completion_tick` fields in `Cpu`
   struct. Execution loop decrements `downcount` per instruction; event dispatcher fires when
   `downcount <= 0` and resets it to `next_event - cpu_cycle_counter`.
@@ -21,6 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `src/interconnect.c` (slim, ~156 lines) — init, CDROM event scheduling, TTY buffer
 - **CDROM audio + disc modules**: `src/cdrom_audio.c`, `src/cdrom_commands.c`, `src/cdrom_disc.c`
   with matching headers.
+
+### Changed
+- Standard command-line logging (stdout/stderr) has been completely disabled in favor of the ImGui interface. CLI flags like `--quiet` and `--debug` have been removed.
 
 ### Fixed
 - Timer clock source routing: all three timer clock_source bit pairs now handled correctly

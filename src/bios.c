@@ -96,14 +96,14 @@ static void print_strings_at_offset(const Bios* bios, uint32_t start) {
         if (b == 0) {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                fprintf(stderr, "%s\n", line);
+                LOG_BIOS_INFO("%s", line);
                 line_len = 0;
             }
             null_run++;
         } else if (b == '\n' || b == '\r') {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                fprintf(stderr, "%s\n", line);
+                LOG_BIOS_INFO("%s", line);
                 line_len = 0;
             }
             null_run = 0;
@@ -114,7 +114,7 @@ static void print_strings_at_offset(const Bios* bios, uint32_t start) {
         } else {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                fprintf(stderr, "%s\n", line);
+                LOG_BIOS_INFO("%s", line);
                 line_len = 0;
             }
             null_run++;
@@ -142,7 +142,7 @@ void bios_print_bootstrap_strings(const Bios* bios) {
     if (!found) return;
 
     print_strings_at_offset(bios, start);
-    fprintf(stderr, "\n");
+    LOG_BIOS_INFO(" ");
 }
 
 // Dumps all TCRF-documented hidden string blocks from the BIOS ROM to stderr.
@@ -175,9 +175,9 @@ void bios_print_all_hidden_strings(const Bios* bios) {
             }
         }
         if (found) {
-            fprintf(stderr, "=== %s ===\n", blocks[0].label);
+            LOG_BIOS_INFO("=== %s ===", blocks[0].label);
             print_strings_at_offset(bios, start);
-            fprintf(stderr, "\n");
+            LOG_BIOS_INFO(" ");
         }
     }
 
@@ -185,8 +185,8 @@ void bios_print_all_hidden_strings(const Bios* bios) {
     for (int b = 1; b < block_count; b++) {
         uint32_t off = blocks[b].offset;
         if (off >= BIOS_SIZE) continue;
-        fprintf(stderr, "=== %s ===\n", blocks[b].label);
+        LOG_BIOS_INFO("=== %s ===", blocks[b].label);
         print_strings_at_offset(bios, off);
-        fprintf(stderr, "\n");
+        LOG_BIOS_INFO(" ");
     }
 }

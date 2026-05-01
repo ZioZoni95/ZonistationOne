@@ -54,40 +54,13 @@ int main(int argc, char *argv[]) {
     const char* bios_path = NULL;
     const char* game_path = NULL;
     const char* exe_path = NULL;
-    int log_level = LOG_LEVEL_WARN;
     bool show_help = false;
-    bool log_single_file = false;
-    int log_rate_limit_n = 0;
-    bool disable_irq_logs = false;
-    bool disable_interconnect_logs = false;
-    bool disable_dma_logs = false;
-    bool bios_strings_mode = false;
 
     for (int i = 1; i < argc; ++i) {
-        if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
-            log_rate_limit_n = atoi(argv[i] + 17);
-        } else if (strncmp(argv[i], "--game=", 7) == 0) {
+        if (strncmp(argv[i], "--game=", 7) == 0) {
             game_path = argv[i] + 7;
         } else if (strncmp(argv[i], "--exe=", 6) == 0) {
             exe_path = argv[i] + 6;
-        } else if (strcmp(argv[i], "--log-single-file") == 0) {
-            log_single_file = true;
-        } else if (strcmp(argv[i], "--debug") == 0) {
-            log_level = LOG_LEVEL_DEBUG;
-        } else if (strcmp(argv[i], "--quiet") == 0) {
-            log_level = LOG_LEVEL_SILENT;
-        } else if (strcmp(argv[i], "--trace") == 0) {
-            log_level = LOG_LEVEL_TRACE;
-        } else if (strcmp(argv[i], "--silent") == 0) {
-            log_level = LOG_LEVEL_SILENT;
-        } else if (strcmp(argv[i], "--no-irq-logs") == 0) {
-            disable_irq_logs = true;
-        } else if (strcmp(argv[i], "--no-interconnect-logs") == 0) {
-            disable_interconnect_logs = true;
-        } else if (strcmp(argv[i], "--no-dma-logs") == 0) {
-            disable_dma_logs = true;
-        } else if (strcmp(argv[i], "--bios-strings") == 0) {
-            bios_strings_mode = true;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             show_help = true;
         } else if (!bios_path) {
@@ -99,85 +72,29 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+    
     if (show_help) {
-        printf("PS1 Emulator with PCSX ReARMed-style Component-Based Logging\n");
+        printf("PS1 Emulator\n");
         printf("Usage: %s [options] <BIOS_PATH>\n\n", argv[0]);
-        printf("Log Level Options:\n");
-        printf("  --silent           No logging output\n");
-        printf("  --quiet            Warnings and errors only\n");
-        printf("  --debug            Verbose debug output (default: INFO)\n");
-        printf("  --trace            Ultra-verbose trace output\n\n");
-        printf("Component Control (PCSX ReARMed style):\n");
-        printf("  --no-irq-logs      Disable IRQ/interrupt logging (reduces spam)\n");
-        printf("  --no-interconnect-logs Disable I/O interconnect logging (reduces spam)\n");
-        printf("  --no-dma-logs      Disable DMA transfer logging\n\n");
-        printf("BIOS Debug:\n");
-        printf("  --bios-strings     Dump all TCRF hidden string blocks at startup\n");
-        printf("                     (PIO Shell, Control PAD, Std Libraries, CD debug)\n\n");
-        printf("Output Control:\n");
-        printf("  --log-rate-limit=N Rate limit: log first N msgs, then every Nth (default: auto)\n");
-        printf("  --log-single-file  Log to emulator_log.txt instead of console\n\n");
         printf("Game Loading:\n");
         printf("  --game=<path>      Load a game disc (.cue or .bin) & boot via BIOS\n");
         printf("  --exe=<path>       Boot PS-X EXE directly (skips BIOS entirely)\n\n");
-        printf("Categories: SYSTEM, CPU, IRQ, DMA, GPU, CDROM, TIMER, BIOS, INTERCONNECT,\n");
-        printf("           RENDERER, EVENT, GTE, VRAM, RAM, DEBUG\n\n");
-        printf("Examples:\n");
-        printf("  %s roms/SCPH1001.BIN                    # Default logging\n", argv[0]);
-        printf("  %s --debug --no-irq-logs roms/SCPH1001.BIN  # Debug without IRQ spam\n", argv[0]);
-        printf("  %s --game='games/Ace Combat 2 (Europe).bin' --debug --log-single-file\n", argv[0]);
-        printf("  %s --quiet --log-single-file roms/SCPH1001.BIN # Minimal to file\n\n", argv[0]);
         printf("  --help, -h         Show this help message\n");
         printf("  <BIOS_PATH>        Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
         return 0;
     }
+    
     // Initialize new logging system
     log_init();
-    if (log_rate_limit_n > 0) {
-        // Apply rate limiting to noisy categories
-        log_set_rate_limit(LOG_CAT_IRQ, 5, log_rate_limit_n);
-        log_set_rate_limit(LOG_CAT_INTERCONNECT, 10, log_rate_limit_n);
-        log_set_rate_limit(LOG_CAT_DMA, 5, log_rate_limit_n);
-    }
     
-    // Apply component-specific disable options (PCSX ReARMed style)
-    if (disable_irq_logs) {
-        log_set_category_enabled(LOG_CAT_IRQ, false);
-        LOG_SYSTEM_INFO("IRQ logging disabled");
-    }
-    if (disable_interconnect_logs) {
-        log_set_category_enabled(LOG_CAT_INTERCONNECT, false);
-        LOG_SYSTEM_INFO("Interconnect logging disabled");
-    }
-    if (disable_dma_logs) {
-        log_set_category_enabled(LOG_CAT_DMA, false);
-        LOG_SYSTEM_INFO("DMA logging disabled");
-    }
     if (!bios_path) {
         bios_path = "roms/SCPH1001.BIN";
     }
-    log_set_level(log_level);
+    
     LOG_SYSTEM_WARN("Emulator started");
 
     // --- File Logging Setup ---
-    // Log file rotation: if emulator_log.txt > 50MB, move to emulator_log.old.txt
-    if (log_single_file) {
-        const char* log_filename = "emulator_log.txt";
-        struct stat st;
-        if (stat(log_filename, &st) == 0 && st.st_size > 50 * 1024 * 1024) {
-            unlink("emulator_log.old.txt");
-            rename(log_filename, "emulator_log.old.txt");
-        }
-        FILE *log_file = freopen(log_filename, "w", stdout);
-        if (log_file == NULL) {
-            perror("Failed to open log file for stdout");
-            return 1;
-        }
-        freopen(log_filename, "a", stderr);
-        setbuf(stdout, NULL);
-        setbuf(stderr, NULL);
-                 LOG_SYSTEM_INFO("--- Log Started ---");
-    }
+    // (Removed CLI-based log file setup; ImGui handles logging now)
 
     // --- Configuration ---
     // Define a number of CPU cycles to run per frame. This helps pace the emulation.
@@ -261,11 +178,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     // Print the "hidden text" bootstrap strings from the BIOS ROM.
-    // --bios-strings dumps all TCRF blocks; default prints only the kernel banner.
-    if (bios_strings_mode)
-        bios_print_all_hidden_strings(&bios_data);
-    else
-        bios_print_bootstrap_strings(&bios_data);
+    bios_print_bootstrap_strings(&bios_data);
 
     // 3. Initialize Interconnect (connects all hardware components)
     LOG_SYSTEM_DEBUG("  Initializing Interconnect...");
@@ -538,12 +451,21 @@ int main(int argc, char *argv[]) {
         // Flush any remaining primitives to the GPU
         renderer_draw(&interconnect_state.gpu.renderer);
         
+        // --- Render Debug UI to Main Window ---
+        // Bind default framebuffer (0) for the main SDL window
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f); // Dark grey background for the ImGui host window
+        glClear(GL_COLOR_BUFFER_BIT);
+
         // Render Debug UI
-        debug_ui_render();
+        debug_ui_render(&cpu_state, &interconnect_state);
 
         // Swap buffers to display the frame
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
+        
+        // Re-bind the display FBO so PSX rendering goes back to the texture!
+        glBindFramebuffer(GL_FRAMEBUFFER, interconnect_state.gpu.renderer.display_fbo);
 
         // Simple 60Hz throttling to keep frame timing stable.
         uint64_t now = SDL_GetPerformanceCounter();

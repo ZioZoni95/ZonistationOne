@@ -62,13 +62,12 @@ static void tty_add_char(Interconnect* inter, char ch) {
     if (ch == '\n' || ch == '\r') {
         if (inter->tty_line_len > 0) {
             inter->tty_line_buf[inter->tty_line_len] = '\0';
-            fprintf(stderr, "[%s:0x%02X] %s\n", 
+            LOG_BIOS_INFO("[TTY] [%s:0x%02X] %s",
                     bios_last_syscall.table == 0 ? "A0" : "B0",
                     bios_last_syscall.func,
                     inter->tty_line_buf);
         }
-        inter->tty_line_len = 0;
-    } else if (b >= 0x20 && b < 0x7F) {
+        inter->tty_line_len = 0;    } else if (b >= 0x20 && b < 0x7F) {
         // Printable ASCII only — ignore control chars
         if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
             inter->tty_line_buf[inter->tty_line_len++] = ch;

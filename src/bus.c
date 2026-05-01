@@ -1693,7 +1693,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
         } else if (ch == '\n' || ch == '\r') {
             if (inter->tty_line_len > 0) {
                 inter->tty_line_buf[inter->tty_line_len] = '\0';
-                fprintf(stderr, "%s\n", inter->tty_line_buf);
+                LOG_BIOS_INFO("[TTY] [EXP2] %s", inter->tty_line_buf);
                 inter->tty_line_len = 0;
             }
         }
