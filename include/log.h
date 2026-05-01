@@ -188,4 +188,10 @@ LogLevel log_get_current_level(void);
 #define log_get_level() log_get_current_level()
 const char* log_category_name(LogCategory category);
 
+// --- Multi-sink API (ImGui, custom callbacks) ---
+// Registered sinks receive raw (category, level, message) before rxi formatting.
+typedef void (*LogSinkFn)(int category, int level, const char* msg, void* udata);
+void log_add_sink(LogSinkFn fn, void* udata);
+void log_set_stderr_quiet(bool quiet);  // suppress colored stderr (e.g. when only logging to file)
+
 #endif // LOG_H
