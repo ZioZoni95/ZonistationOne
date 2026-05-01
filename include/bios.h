@@ -8,6 +8,25 @@
 // Define the standard size of a PlayStation BIOS ROM. [cite: 114]
 #define BIOS_SIZE (512 * 1024) // 512KB
 
+#pragma pack(push, 1)
+typedef struct {
+    char id[8];            // 0x000-0x007 PS-X EXE
+    char pad1[8];          // 0x008-0x00F
+    uint32_t initial_pc;   // 0x010
+    uint32_t initial_gp;   // 0x014
+    uint32_t load_address; // 0x018
+    uint32_t file_size;    // 0x01C excluding 0x800-byte header
+    uint32_t unk0;         // 0x020
+    uint32_t unk1;         // 0x024
+    uint32_t memfill_start;// 0x028
+    uint32_t memfill_size; // 0x02C
+    uint32_t initial_sp_base;   // 0x030
+    uint32_t initial_sp_offset;  // 0x034
+    uint32_t reserved[5];  // 0x038-0x04B
+    char marker[0x7B4];    // 0x04C-0x7FF
+} PSEXEHeader;
+#pragma pack(pop)
+
 // Structure to hold the BIOS data in memory.
 typedef struct {
     // A buffer large enough to hold the entire BIOS content.

@@ -66,6 +66,10 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->gte_next_load_delay_reg = 255; // No next delay
     cpu->gte_next_load_delay_value = 0;
 
+    // Initialize cycle accounting
+    cpu->downcount = 1;              // fire dispatch immediately on first cycle
+    cpu->muldiv_completion_tick = 0; // no pending MulDiv
+
     LOG_CPU_INFO("CPU initialized, PC=0x%08x", cpu->pc);
     // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }

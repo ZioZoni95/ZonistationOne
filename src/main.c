@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/stat.h> // For file size checking
 #include <unistd.h>   // For access(), rename()
 
@@ -25,7 +26,8 @@
 #include "bios.h"
 #include "ram.h"
 #include "renderer.h"
-#include "cdrom.h" // <<< UPDATED: Added include for the CD-ROM component
+#include "cdrom.h"
+#include "cdrom_audio.h"
 #include "log.h"
 #include "event_scheduler.h" // <<< ADDED: Include for event scheduling
 #include "controller.h" // <<< ADDED: Include for gamepad input
@@ -49,6 +51,8 @@ int main(int argc, char *argv[]) {
     // --- Argument Parsing ---
     // Usage: ./myps1_emu [options] <BIOS_PATH>
     const char* bios_path = NULL;
+    const char* game_path = NULL;
+    const char* exe_path = NULL;
     int log_level = LOG_LEVEL_WARN;
     bool show_help = false;
     bool log_single_file = false;
@@ -61,6 +65,10 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (strncmp(argv[i], "--log-rate-limit=", 17) == 0) {
             log_rate_limit_n = atoi(argv[i] + 17);
+        } else if (strncmp(argv[i], "--game=", 7) == 0) {
+            game_path = argv[i] + 7;
+        } else if (strncmp(argv[i], "--exe=", 6) == 0) {
+            exe_path = argv[i] + 6;
         } else if (strcmp(argv[i], "--log-single-file") == 0) {
             log_single_file = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
@@ -108,11 +116,15 @@ int main(int argc, char *argv[]) {
         printf("Output Control:\n");
         printf("  --log-rate-limit=N Rate limit: log first N msgs, then every Nth (default: auto)\n");
         printf("  --log-single-file  Log to emulator_log.txt instead of console\n\n");
+        printf("Game Loading:\n");
+        printf("  --game=<path>      Load a game disc (.cue or .bin) & boot via BIOS\n");
+        printf("  --exe=<path>       Boot PS-X EXE directly (skips BIOS entirely)\n\n");
         printf("Categories: SYSTEM, CPU, IRQ, DMA, GPU, CDROM, TIMER, BIOS, INTERCONNECT,\n");
         printf("           RENDERER, EVENT, GTE, VRAM, RAM, DEBUG\n\n");
         printf("Examples:\n");
         printf("  %s roms/SCPH1001.BIN                    # Default logging\n", argv[0]);
         printf("  %s --debug --no-irq-logs roms/SCPH1001.BIN  # Debug without IRQ spam\n", argv[0]);
+        printf("  %s --game='games/Ace Combat 2 (Europe).bin' --debug --log-single-file\n", argv[0]);
         printf("  %s --quiet --log-single-file roms/SCPH1001.BIN # Minimal to file\n\n", argv[0]);
         printf("  --help, -h         Show this help message\n");
         printf("  <BIOS_PATH>        Path to PS1 BIOS image (default: roms/SCPH1001.BIN)\n");
@@ -176,7 +188,7 @@ int main(int argc, char *argv[]) {
 
     // --- SDL & OpenGL Initialization ---
          LOG_SYSTEM_INFO("Initializing SDL Video...");
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
                  LOG_SYSTEM_ERROR("SDL_Init Error: %s", SDL_GetError());
         return 1;
     }
@@ -269,15 +281,24 @@ int main(int argc, char *argv[]) {
     // 5. Load a game disc into the CD-ROM drive (OPTIONAL)
     // NOTE: The emulator can run BIOS-only without a game disc
     // If no disc is loaded, the emulator will just run the BIOS to its menu.
+    /* Open SDL audio device for CD audio output */
+    cdrom_audio_sdl_open(&interconnect_state.cdrom.audio_fifo);
+
     LOG_SYSTEM_INFO("Attempting to load game disc (optional)...");
-    if (!cdrom_load_disc(&interconnect_state.cdrom, "games/Crash Bandicoot.cue")) {
-        LOG_SYSTEM_WARN("No game disc loaded. Running BIOS-only mode.");
-        // Initialize CD-ROM in "no disc" state for BIOS menu
+    if (game_path != NULL) {
+        if (!cdrom_load_disc(&interconnect_state.cdrom, game_path)) {
+            LOG_SYSTEM_WARN("Failed to load game disc: %s. Running BIOS-only mode.", game_path);
+            interconnect_state.cdrom.disc_present = false;
+            interconnect_state.cdrom.drive_state = DRIVE_IDLE;
+            LOG_SYSTEM_INFO("CD-ROM initialized in no-disc state for BIOS menu.");
+        } else {
+            LOG_SYSTEM_INFO("Game disc loaded successfully: %s", game_path);
+        }
+    } else {
+        LOG_SYSTEM_WARN("No game disc specified. Running BIOS-only mode.");
         interconnect_state.cdrom.disc_present = false;
         interconnect_state.cdrom.drive_state = DRIVE_IDLE;
         LOG_SYSTEM_INFO("CD-ROM initialized in no-disc state for BIOS menu.");
-    } else {
-        LOG_SYSTEM_INFO("Game disc loaded successfully.");
     }
 
 
@@ -287,6 +308,135 @@ int main(int argc, char *argv[]) {
 
     // 7. Set CPU pointer in interconnect for direct exception triggering
     interconnect_set_cpu(&interconnect_state, &cpu_state);
+
+    // 6.5 Boot EXE Injection (HLE BootEXE mode, bypasses BIOS entirely)
+    if (exe_path != NULL) {
+        // Let BIOS initialize kernel and jump to shell entry before sideloading.
+        // This mirrors common emulator behavior and avoids missing BIOS init state.
+        const uint32_t shell_entry_pc = 0x80030000;
+        const uint64_t max_warmup_instructions = 20000000ULL;
+        uint64_t warmup_count = 0;
+        while (cpu_state.pc != shell_entry_pc && warmup_count < max_warmup_instructions) {
+            cpu_run_next_instruction(&cpu_state);
+            warmup_count++;
+        }
+        if (cpu_state.pc == shell_entry_pc) {
+            LOG_SYSTEM_INFO("BootEXE warmup reached BIOS shell entry PC=0x%08x after %llu instructions",
+                            shell_entry_pc, (unsigned long long)warmup_count);
+        } else {
+            LOG_SYSTEM_WARN("BootEXE warmup timeout before BIOS shell entry (last PC=0x%08x)", cpu_state.pc);
+        }
+
+        LOG_SYSTEM_INFO("=== BootEXE Mode (HLE) ===");
+        LOG_SYSTEM_INFO("Loading EXE directly: %s", exe_path);
+
+        FILE *exe_file = fopen(exe_path, "rb");
+        if (exe_file == NULL) {
+            LOG_SYSTEM_ERROR("Failed to open EXE file: %s", exe_path);
+            SDL_GL_DeleteContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
+
+        PSEXEHeader exe_header;
+        size_t header_read = fread(&exe_header, 1, sizeof(exe_header), exe_file);
+        if (header_read < sizeof(exe_header)) {
+            LOG_SYSTEM_ERROR("EXE file too small (got %zu bytes, need 2048)", header_read);
+            fclose(exe_file);
+            SDL_GL_DeleteContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
+
+        if (memcmp(exe_header.id, "PS-X EXE", 8) != 0) {
+            LOG_SYSTEM_ERROR("Invalid PSX EXE magic signature");
+            fclose(exe_file);
+            SDL_GL_DeleteContext(gl_context);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
+
+        uint32_t entry_point = exe_header.initial_pc;
+        uint32_t initial_gp = exe_header.initial_gp;
+        uint32_t load_address = exe_header.load_address;
+        uint32_t file_size = exe_header.file_size;
+        uint32_t memfill_start = exe_header.memfill_start;
+        uint32_t memfill_size = exe_header.memfill_size;
+        uint32_t initial_sp_base = exe_header.initial_sp_base;
+        uint32_t initial_sp_offset = exe_header.initial_sp_offset;
+
+        LOG_SYSTEM_INFO("PSX EXE Header:");
+        LOG_SYSTEM_INFO("  Entry Point: 0x%08x", entry_point);
+        LOG_SYSTEM_INFO("  Initial GP: 0x%08x", initial_gp);
+        LOG_SYSTEM_INFO("  Load Address: 0x%08x", load_address);
+        LOG_SYSTEM_INFO("  File Size: %u bytes", file_size);
+
+        if (memfill_size > 0) {
+            uint32_t memfill_offset = memfill_start & 0x1FFFFF;
+            uint32_t memfill_bytes = memfill_size & ~3u;
+            if (memfill_offset + memfill_bytes > 0x200000) {
+                LOG_SYSTEM_ERROR("Invalid EXE memfill range: 0x%08x + %u", memfill_start, memfill_size);
+                fclose(exe_file);
+                SDL_GL_DeleteContext(gl_context);
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return 1;
+            }
+            memset((uint8_t*)interconnect_state.ram->data + memfill_offset, 0, memfill_bytes);
+            LOG_SYSTEM_INFO("Memfill cleared: 0x%08x + %u", memfill_start, memfill_bytes);
+        }
+
+        if (file_size > 0) {
+            if (fseek(exe_file, 0x800, SEEK_SET) != 0) {
+                LOG_SYSTEM_ERROR("Failed to seek EXE payload");
+                fclose(exe_file);
+                SDL_GL_DeleteContext(gl_context);
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return 1;
+            }
+
+            if (load_address < 0x80000000 || load_address + file_size > 0x80200000) {
+                LOG_SYSTEM_ERROR("Invalid EXE load address range: 0x%08x + %u", load_address, file_size);
+                fclose(exe_file);
+                SDL_GL_DeleteContext(gl_context);
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return 1;
+            }
+
+            uint32_t ram_offset = load_address & 0x1FFFFF;
+            uint8_t *ram_ptr = (uint8_t*)interconnect_state.ram->data + ram_offset;
+
+            size_t bytes_read = fread(ram_ptr, 1, file_size, exe_file);
+            if (bytes_read != file_size) {
+                LOG_SYSTEM_ERROR("Failed to read EXE data: got %zu/%u bytes", bytes_read, file_size);
+                fclose(exe_file);
+                SDL_GL_DeleteContext(gl_context);
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return 1;
+            }
+
+            LOG_SYSTEM_INFO("Loaded %u bytes at RAM[0x%08x]", file_size, ram_offset);
+        }
+
+        cpu_state.out_regs[28] = initial_gp;
+        cpu_state.out_regs[29] = initial_sp_base + initial_sp_offset;
+        cpu_state.out_regs[30] = cpu_state.out_regs[29];
+        cpu_state.regs[28] = cpu_state.out_regs[28];
+        cpu_state.regs[29] = cpu_state.out_regs[29];
+        cpu_state.regs[30] = cpu_state.out_regs[30];
+        cpu_state.pc = entry_point;
+        cpu_state.next_pc = entry_point + 4;
+        cpu_state.current_pc = entry_point;
+        LOG_SYSTEM_WARN("CPU PC set to EXE entry point: 0x%08x (bypassing BIOS)", entry_point);
+
+        fclose(exe_file);
+    }
 
     // 8. Initialize Controller (keyboard input) <<< ADDED
     LOG_SYSTEM_DEBUG("  Initializing Controller...");
@@ -372,6 +522,9 @@ int main(int argc, char *argv[]) {
             for (uint32_t i = 0; i < run_chunk; ++i) {
                 cpu_run_next_instruction(&cpu_state);
             }
+            
+            // Step timers for the cycles that just ran
+            timers_step(&interconnect_state.timers_state, run_chunk);
 
             cycles_run += run_chunk;
         }
@@ -406,6 +559,8 @@ int main(int argc, char *argv[]) {
     // --- Cleanup ---
     LOG_SYSTEM_INFO("Emulation loop finished. Cleaning up...");
     
+    cdrom_audio_sdl_close();
+    cdrom_eject_disc(&interconnect_state.cdrom);
     renderer_destroy(&interconnect_state.gpu.renderer);
     LOG_SYSTEM_INFO("Destroying SDL GL Context and Window...");
     SDL_GL_DeleteContext(gl_context);

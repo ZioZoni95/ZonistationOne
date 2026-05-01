@@ -60,6 +60,29 @@ uint16_t controller_update_from_keyboard(Controller* ctrl) {
     if (keys[SDL_SCANCODE_SPACE]) buttons &= ~(1 << 3);  // START
     if (keys[SDL_SCANCODE_BACKSPACE]) buttons &= ~(1 << 0);  // SELECT
 
+    // Log button state changes
+    if (buttons != ctrl->button_state) {
+        static uint16_t last_logged_state = 0xFFFF;
+        if (buttons != last_logged_state) {
+            const char* pressed_buttons[16] = {
+                "SELECT", "unused1", "unused2", "START",
+                "UP", "RIGHT", "DOWN", "LEFT",
+                "L2", "R2", "L1", "R1",
+                "TRIANGLE", "CIRCLE", "CROSS", "SQUARE"
+            };
+            
+            // Print which buttons changed from released (1) to pressed (0)
+            for (int i = 0; i < 16; i++) {
+                bool was_released = (ctrl->button_state >> i) & 1;
+                bool now_pressed = !((buttons >> i) & 1);
+                if (was_released && now_pressed) {
+                    LOG_TRACE("[Controller] Button pressed: %s (0x%04x)", pressed_buttons[i], buttons);
+                }
+            }
+            last_logged_state = buttons;
+        }
+    }
+
     ctrl->button_state = buttons;
     return buttons;
 }

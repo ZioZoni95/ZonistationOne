@@ -2,6 +2,7 @@
 #include "interconnect.h"
 #include "bios.h"
 #include "log.h"
+#include "timers.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -16,6 +17,13 @@
 // EXP2+0x23 DUART path (inter->tty_line_buf), so both sources produce
 // consistent [BIOS TTY] output on stderr when a newline is received.
 // =============================================================================
+
+// Track the most recent BIOS syscall for context
+static struct {
+    int table;  // 0 = A0, 1 = B0
+    uint32_t func;
+    const char* name;
+} bios_last_syscall = {0, 0, "none"};
 
 static const char* get_bios_a_function_name(uint32_t func_num) {
     static const char* names[] = {
@@ -52,9 +60,12 @@ static void tty_add_char(Interconnect* inter, char ch) {
     if (!inter) return;
     uint8_t b = (uint8_t)ch;
     if (ch == '\n' || ch == '\r') {
-        if (inter->tty_line_len > 1) {  // suppress single-char controller polling noise
+        if (inter->tty_line_len > 0) {
             inter->tty_line_buf[inter->tty_line_len] = '\0';
-            fprintf(stderr, "%s\n", inter->tty_line_buf);
+            fprintf(stderr, "[%s:0x%02X] %s\n", 
+                    bios_last_syscall.table == 0 ? "A0" : "B0",
+                    bios_last_syscall.func,
+                    inter->tty_line_buf);
         }
         inter->tty_line_len = 0;
     } else if (b >= 0x20 && b < 0x7F) {
@@ -121,7 +132,12 @@ static void capture_bios_puts(Cpu* cpu) {
 // Called from op_jr when target == 0xA0
 void handle_a0_syscall(Cpu* cpu) {
     uint32_t call = cpu->regs[9]; // $t1
-    LOG_CPU_DEBUG("[BIOS] A0(%s / 0x%02X)", get_bios_a_function_name(call), call);
+    
+    bios_last_syscall.table = 0;
+    bios_last_syscall.func = call;
+    bios_last_syscall.name = get_bios_a_function_name(call);
+    
+    LOG_CPU_DEBUG("[BIOS] A0(%s / 0x%02X)", bios_last_syscall.name, call);
 
     switch (call) {
         case 0x03: capture_bios_write(cpu);  break;  // write()
@@ -139,9 +155,13 @@ void handle_a0_syscall(Cpu* cpu) {
 void handle_b0_syscall(Cpu* cpu) {
     uint32_t call = cpu->regs[9]; // $t1
 
-    // Suppress noise for high-frequency polling calls (GetC = 0x32, etc.)
-    if (call != 0x32) {
-        LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", get_bios_b_function_name(call), call);
+    bios_last_syscall.table = 1;
+    bios_last_syscall.func = call;
+    bios_last_syscall.name = get_bios_b_function_name(call);
+    
+    // Suppress noise for high-frequency polling calls (GetC = 0x32, B0(0x2C), etc.)
+    if (call != 0x32 && call != 0x2C) {
+        LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", bios_last_syscall.name, call);
     }
 
     switch (call) {

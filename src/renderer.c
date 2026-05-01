@@ -468,6 +468,13 @@ bool renderer_init(Renderer* renderer) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     check_gl_error("After glClearColor");
 
+    // Enable scissor test with default bounds covering entire VRAM (1024×512)
+    // This ensures clipping is enabled even if GPU drawing area setup is called before renderer init
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, 1024, 512);
+    LOG_RENDERER_DEBUG("GL_SCISSOR_TEST enabled with default bounds (0,0,1024,512)\n");
+    check_gl_error("After scissor initialization");
+
     // Potentially enable depth testing if needed later
     // glEnable(GL_DEPTH_TEST);
 

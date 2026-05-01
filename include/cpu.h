@@ -139,6 +139,10 @@ typedef struct Cpu {
     // --- Boot Stage Tracking ---
     BootStage boot_stage;   // Current BIOS/boot stage for debugging visibility
 
+    // --- Cycle Accounting (DuckStation-style) ---
+    int32_t  downcount;              // countdown to next event (decrements per instruction)
+    uint32_t muldiv_completion_tick; // cycle when pending MULT/DIV finishes (for MFHI/MFLO stall)
+
 } Cpu;
 
 

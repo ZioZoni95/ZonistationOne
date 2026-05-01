@@ -1,9 +1,39 @@
 # Build output
 myps1_emu
+cpu_test
+*.o
 
 # Debug / capture output
 emulator_log.txt
 *.ppm
+logs/
+*.txt
 
 # ROM files (do not distribute)
 roms/
+
+# Game disc images (do not distribute)
+games/*.bin
+games/*.iso
+games/*.cue
+games/*.img
+games/*.exe
+games/*.99
+games/*.mdf
+games/*.mds
+
+# Reference / large external codebases
+duckstation_ref/
+duckstation/
+
+# Backup files
+backup/
+*.bak
+
+# Screenshots
+screenshots/
+Screenshot*.png
+
+# Misc
+Hack.zip
+guide.tex

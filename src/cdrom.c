@@ -1,777 +1,344 @@
 /*
- * PlayStation 1 CDROM Controller
- * Event-driven implementation based on PSX-SPX documentation and duckstation reference
+ * CDROM Controller core: init, register I/O, interrupt delivery, event callbacks.
+ * Command handlers live in cdrom_commands.c.
+ * Disc/async in cdrom_disc.c. Audio in cdrom_audio.c.
  */
 
 #include "cdrom.h"
 #include "interconnect.h"
-#include "event_scheduler.h"
 #include "log.h"
 #include <string.h>
 #include <stdlib.h>
 
-// Forward declarations
-static void send_ack(Cdrom *cdrom);
-static void send_complete(Cdrom *cdrom);
-static void send_error(Cdrom *cdrom, uint8_t error_flags, uint8_t reason);
-static void push_response(Cdrom *cdrom, uint8_t value);
-static uint8_t pop_param(Cdrom *cdrom);
-static uint8_t get_stat_byte(Cdrom *cdrom);
+/* =========================================================================
+ * Helper functions (called from cdrom_commands.c via extern declarations)
+ * ========================================================================= */
 
-// Event callbacks (called by event scheduler)
-static void command_event_callback(void *context, uint32_t cycles_late);
-static void drive_event_callback(void *context, uint32_t cycles_late);
-static void second_response_callback(void *context, uint32_t cycles_late);
+uint8_t cdrom_get_stat_byte(Cdrom *cdrom) {
+    uint8_t s = 0;
+    if (cdrom->motor_on)                           s |= STAT_BYTE_MOTOR_ON;
+    if (cdrom->shell_open)                         s |= STAT_BYTE_SHELL_OPEN;
+    if (cdrom->drive_state == DRIVE_READING)       s |= STAT_BYTE_READING;
+    if (cdrom->drive_state == DRIVE_SEEKING)       s |= STAT_BYTE_SEEKING;
+    if (cdrom->drive_state == DRIVE_PLAYING)       s |= STAT_BYTE_PLAYING;
+    return s;
+}
 
-// =============================================================================
-// Initialization
-// =============================================================================
+void cdrom_push_response(Cdrom *cdrom, uint8_t v) {
+    fifo_push(&cdrom->response_fifo, v);
+}
+
+uint8_t cdrom_pop_param(Cdrom *cdrom) {
+    return fifo_pop(&cdrom->param_fifo);
+}
+
+void cdrom_send_ack(Cdrom *cdrom) {
+    cdrom->interrupt_flag = CDROM_INT_ACK;
+    LOG_CDROM_DEBUG("[CDROM] INT3 ACK\n");
+    if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+}
+
+void cdrom_send_complete(Cdrom *cdrom) {
+    cdrom->interrupt_flag = CDROM_INT_COMPLETE;
+    LOG_CDROM_DEBUG("[CDROM] INT2 Complete\n");
+    if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+}
+
+void cdrom_send_error(Cdrom *cdrom, uint8_t err, uint8_t reason) {
+    fifo_clear(&cdrom->response_fifo);
+    cdrom_push_response(cdrom, err);
+    cdrom_push_response(cdrom, reason);
+    cdrom->interrupt_flag = CDROM_INT_ERROR;
+    LOG_CDROM_DEBUG("[CDROM] INT5 Error err=0x%02X reason=0x%02X\n", err, reason);
+    if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+}
+
+/* =========================================================================
+ * Event Scheduling
+ * ========================================================================= */
+
+static void command_event_callback(void *ctx, uint32_t cycles_late);
+static void drive_event_callback(void *ctx, uint32_t cycles_late);
+static void second_response_callback(void *ctx, uint32_t cycles_late);
+
+void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
+    if (cdrom->inter)
+        interconnect_schedule_event(cdrom->inter, cycles,
+                                    command_event_callback, cdrom, "CDROM_CMD");
+}
+
+void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
+    if (cdrom->inter)
+        interconnect_schedule_event(cdrom->inter, cycles,
+                                    drive_event_callback, cdrom, "CDROM_DRIVE");
+}
+
+void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
+    if (cdrom->inter)
+        interconnect_schedule_event(cdrom->inter, cycles,
+                                    second_response_callback, cdrom, "CDROM_INT2");
+}
+
+static void command_event_callback(void *ctx, uint32_t cycles_late) {
+    (void)cycles_late;
+    Cdrom *cdrom = (Cdrom *)ctx;
+    if (cdrom->interrupt_flag != 0) {
+        cdrom_schedule_command_event(cdrom, CDROM_ACK_DELAY);
+        return;
+    }
+    cdrom_execute_command(cdrom);
+}
+
+static void drive_event_callback(void *ctx, uint32_t cycles_late) {
+    (void)cycles_late;
+    Cdrom *cdrom = (Cdrom *)ctx;
+    if (cdrom->interrupt_flag != 0) {
+        /* Drive event blocked by pending INT — retry after a short delay.
+           For CDDA there is no INT1, so don't retry there. */
+        if (cdrom->drive_state != DRIVE_PLAYING)
+            return;  /* INT ACK handler reschedules for reading */
+        /* For CDDA, try again shortly */
+        cdrom_schedule_drive_event(cdrom, CDROM_MIN_INT_DELAY);
+        return;
+    }
+    cdrom_execute_drive(cdrom);
+}
+
+static void second_response_callback(void *ctx, uint32_t cycles_late) {
+    (void)cycles_late;
+    Cdrom *cdrom = (Cdrom *)ctx;
+    if (cdrom->interrupt_flag != 0) {
+        cdrom_schedule_second_response_event(cdrom, CDROM_ACK_DELAY);
+        return;
+    }
+    cdrom_execute_second_response(cdrom);
+}
+
+/* =========================================================================
+ * Init / Reset
+ * ========================================================================= */
 
 void cdrom_init(Cdrom *cdrom, struct Interconnect *inter) {
-    memset(cdrom, 0, sizeof(Cdrom));
-    cdrom->inter = inter;
-    cdrom->pending_command = CDC_NONE;
-    cdrom->current_command = CDC_NONE;
+    memset(cdrom, 0, sizeof(*cdrom));
+    cdrom->inter            = inter;
+    cdrom->pending_command  = CDC_NONE;
+    cdrom->current_command  = CDC_NONE;
     cdrom->second_response_cmd = CDC_NONE;
-    cdrom->drive_state = DRIVE_IDLE;
+    cdrom->drive_state      = DRIVE_IDLE;
+    cdrom->vol_ll = cdrom->vol_rr = 0x80;
     fifo_init(&cdrom->param_fifo);
     fifo_init(&cdrom->response_fifo);
+    cdrom_audio_init(&cdrom->audio_fifo, &cdrom->xa_adpcm_state);
 }
 
 void cdrom_reset(Cdrom *cdrom) {
-    struct Interconnect *inter = cdrom->inter;
-    FILE *disc = cdrom->disc_file;
-    uint32_t disc_size = cdrom->disc_size_sectors;
     bool disc_present = cdrom->disc_present;
-    
-    memset(cdrom, 0, sizeof(Cdrom));
-    
-    cdrom->inter = inter;
-    cdrom->disc_file = disc;
-    cdrom->disc_size_sectors = disc_size;
-    cdrom->disc_present = disc_present;
-    
-    cdrom->pending_command = CDC_NONE;
-    cdrom->current_command = CDC_NONE;
+
+    /* Reset only command/drive state — disc, async reader, audio unchanged */
+    cdrom->index               = 0;
+    cdrom->interrupt_enable    = 0;
+    cdrom->interrupt_flag      = 0;
+    cdrom->pending_command     = CDC_NONE;
+    cdrom->current_command     = CDC_NONE;
     cdrom->second_response_cmd = CDC_NONE;
-    cdrom->drive_state = DRIVE_IDLE;
-    cdrom->motor_on = disc_present;
-    
+    cdrom->pending_param_count = 0;
+    cdrom->second_response_size = 0;
+    cdrom->drive_state         = DRIVE_IDLE;
+    cdrom->motor_on            = disc_present;
+    cdrom->shell_open          = false;
+    cdrom->read_after_seek     = false;
+    cdrom->play_after_seek     = false;
+    cdrom->current_lba         = 0;
+    cdrom->target_lba          = 0;
+    cdrom->setloc_lba          = 0;
+    cdrom->setloc_pending      = false;
+    cdrom->current_subq_lba    = 0;
+    cdrom->cdda_speed          = 1;
+    cdrom->mode                = 0;
+    cdrom->double_speed        = false;
+    cdrom->xa_adpcm_enable     = false;
+    cdrom->whole_sector        = false;
+    cdrom->xa_filter_enable    = false;
+    cdrom->xa_filter_file      = 0;
+    cdrom->xa_filter_channel   = 0;
+    cdrom->report_enable       = false;
+    cdrom->auto_pause          = false;
+    cdrom->cdda_enable         = false;
+    cdrom->muted               = false;
+    cdrom->data_buffer_armed   = false;
+    cdrom->current_read_buffer  = 0;
+    cdrom->current_write_buffer = 0;
+    cdrom->vol_ll = cdrom->vol_rr = 0x80;
+    cdrom->vol_lr = cdrom->vol_rl = 0;
+    memset(cdrom->sector_buffers, 0, sizeof(cdrom->sector_buffers));
+    memset(&cdrom->last_subq, 0, sizeof(cdrom->last_subq));
+
     fifo_init(&cdrom->param_fifo);
     fifo_init(&cdrom->response_fifo);
+    cdrom_audio_init(&cdrom->audio_fifo, &cdrom->xa_adpcm_state);
 }
 
-// =============================================================================
-// Disc Management
-// =============================================================================
+/* =========================================================================
+ * Disc Management
+ * ========================================================================= */
 
 bool cdrom_load_disc(Cdrom *cdrom, const char *cue_path) {
-    // Parse CUE file to find BIN file
-    FILE *cue = fopen(cue_path, "r");
-    if (!cue) {
-        LOG_CDROM_ERROR("[CDROM] Failed to open CUE file: %s\n", cue_path);
-        return false;
-    }
-    
-    char line[256];
-    char bin_filename[256] = {0};
-    
-    while (fgets(line, sizeof(line), cue)) {
-        if (strstr(line, "FILE")) {
-            char *quote1 = strchr(line, '"');
-            if (quote1) {
-                char *quote2 = strchr(quote1 + 1, '"');
-                if (quote2) {
-                    size_t len = quote2 - quote1 - 1;
-                    strncpy(bin_filename, quote1 + 1, len);
-                    bin_filename[len] = '\0';
-                    break;
-                }
-            }
-        }
-    }
-    fclose(cue);
-    
-    if (bin_filename[0] == '\0') {
-        LOG_CDROM_ERROR("[CDROM] Could not find BIN file in CUE\n");
-        return false;
-    }
-    
-    // Build path to BIN file (same directory as CUE)
-    char bin_path[512];
-    const char *last_slash = strrchr(cue_path, '/');
-    if (last_slash) {
-        size_t dir_len = last_slash - cue_path + 1;
-        strncpy(bin_path, cue_path, dir_len);
-        bin_path[dir_len] = '\0';
-        strcat(bin_path, bin_filename);
-    } else {
-        strcpy(bin_path, bin_filename);
-    }
-    
-    // Open BIN file
-    FILE *bin = fopen(bin_path, "rb");
-    if (!bin) {
-        LOG_CDROM_ERROR("[CDROM] Failed to open BIN file: %s\n", bin_path);
-        return false;
-    }
-    
-    // Get file size and calculate sectors
-    fseek(bin, 0, SEEK_END);
-    long file_size = ftell(bin);
-    fseek(bin, 0, SEEK_SET);
-    
-    cdrom->disc_file = bin;
-    cdrom->disc_size_sectors = file_size / CDROM_SECTOR_SIZE;
+    if (cdrom->disc_present) cdrom_disc_unload(&cdrom->disc);
+
+    if (!cdrom_disc_load(&cdrom->disc, cue_path)) return false;
+
     cdrom->disc_present = true;
-    cdrom->motor_on = true;
-    
-    // Simple TOC for single-track data disc
-    cdrom->first_track = 1;
-    cdrom->last_track = 1;
-    cdrom->track_lba[1] = 0;  // Track 1 starts at LBA 0
-    
-    LOG_CDROM_INFO("[CDROM] Loaded disc: %s (%ld bytes, %u sectors)\n", 
-             bin_path, file_size, cdrom->disc_size_sectors);
-    
+    cdrom->shell_open   = false;
+    cdrom->motor_on     = true;
+
+    /* Seed SubQ to track 1 start */
+    cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, 0);
+
+    /* Start async reader */
+    cdrom_async_reader_init(&cdrom->async_reader, &cdrom->disc);
+
+    LOG_CDROM_INFO("[CDROM] Disc loaded: %u tracks, %u sectors\n",
+                   cdrom->disc.last_track, cdrom->disc.total_sectors);
     return true;
 }
 
 void cdrom_eject_disc(Cdrom *cdrom) {
-    if (cdrom->disc_file) {
-        fclose(cdrom->disc_file);
-        cdrom->disc_file = NULL;
-    }
+    if (cdrom->async_reader.thread) cdrom_async_reader_shutdown(&cdrom->async_reader);
+    cdrom_disc_unload(&cdrom->disc);
     cdrom->disc_present = false;
-    cdrom->motor_on = false;
-    cdrom->shell_open = true;
+    cdrom->motor_on     = false;
+    cdrom->shell_open   = true;
 }
 
-// =============================================================================
-// Event Scheduling (via interconnect/event_scheduler)
-// =============================================================================
-
-static void schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->inter) {
-        interconnect_schedule_event(cdrom->inter, cycles, 
-                                    command_event_callback, cdrom, "CDROM_CMD");
-    }
-}
-
-static void schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->inter) {
-        interconnect_schedule_event(cdrom->inter, cycles,
-                                    drive_event_callback, cdrom, "CDROM_DRIVE");
-    }
-}
-
-static void schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->inter) {
-        interconnect_schedule_event(cdrom->inter, cycles,
-                                    second_response_callback, cdrom, "CDROM_INT2");
-    }
-}
-
-// =============================================================================
-// Register Access
-// =============================================================================
+/* =========================================================================
+ * Register Access
+ * ========================================================================= */
 
 uint8_t cdrom_read8(Cdrom *cdrom, uint32_t addr) {
     uint32_t offset = addr & 0x3;
-    
     switch (offset) {
-        case 0: {
-            // Status register (0x1F801800)
-            uint8_t status = cdrom->index & STAT_INDEX_MASK;
-            
-            if (fifo_is_empty(&cdrom->param_fifo))
-                status |= STAT_PRMEMPT;
-            if (!fifo_is_full(&cdrom->param_fifo))
-                status |= STAT_PRMWRDY;
-            if (!fifo_is_empty(&cdrom->response_fifo))
-                status |= STAT_RSLRRDY;
-            if (cdrom->data_buffer_valid && cdrom->data_buffer_index < cdrom->data_buffer_size)
-                status |= STAT_DRQSTS;
-            if (cdrom->pending_command != CDC_NONE)
-                status |= STAT_BUSYSTS;
-            
-            return status;
-        }
-        
-        case 1: // Response FIFO (all indices)
-            return fifo_pop(&cdrom->response_fifo);
-        
-        case 2: // Data FIFO (all indices)
-            if (cdrom->data_buffer_valid && cdrom->data_buffer_index < cdrom->data_buffer_size) {
-                return cdrom->data_buffer[cdrom->data_buffer_index++];
-            }
-            return 0;
-        
-        case 3:
-            if (cdrom->index == 0 || cdrom->index == 2) {
-                // Interrupt enable register
-                return cdrom->interrupt_enable | 0xE0;
-            } else {
-                // Interrupt flag register
-                return cdrom->interrupt_flag | 0xE0;
-            }
-        
-        default:
-            return 0;
+
+    case 0: {
+        /* Status register */
+        SectorBuffer *sb = &cdrom->sector_buffers[cdrom->current_read_buffer];
+        uint8_t st = cdrom->index & STAT_INDEX_MASK;
+        if (fifo_is_empty(&cdrom->param_fifo))    st |= STAT_PRMEMPT;
+        if (!fifo_is_full(&cdrom->param_fifo))    st |= STAT_PRMWRDY;
+        if (!fifo_is_empty(&cdrom->response_fifo)) st |= STAT_RSLRRDY;
+        if (cdrom->data_buffer_armed && sb->valid && sb->position < sb->data_size)
+            st |= STAT_DRQSTS;
+        if (cdrom->pending_command != CDC_NONE)   st |= STAT_BUSYSTS;
+        return st;
+    }
+
+    case 1:
+        return fifo_pop(&cdrom->response_fifo);
+
+    case 2: {
+        SectorBuffer *sb = &cdrom->sector_buffers[cdrom->current_read_buffer];
+        if (cdrom->data_buffer_armed && sb->valid && sb->position < sb->data_size)
+            return sb->raw[sb->data_start + sb->position++];
+        return 0;
+    }
+
+    case 3:
+        if (cdrom->index == 0 || cdrom->index == 2)
+            return cdrom->interrupt_enable | 0xE0;
+        else
+            return cdrom->interrupt_flag | 0xE0;
+
+    default:
+        return 0;
     }
 }
 
 void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
     uint32_t offset = addr & 0x3;
-    
     switch (offset) {
-        case 0: // Index register
-            cdrom->index = value & 0x3;
-            break;
-        
-        case 1:
-            switch (cdrom->index) {
-                case 0: {
-                    // Command register (0x1F801801.Index0)
-                    // Block commands if busy or interrupt pending
-                    if (cdrom->pending_command != CDC_NONE) {
-                        LOG_CDROM_WARN("[CDROM] Command 0x%02X ignored - BUSY\n", value);
-                        return;
-                    }
-                    if (cdrom->interrupt_flag != 0) {
-                        LOG_CDROM_WARN("[CDROM] Command 0x%02X ignored - INT pending (%d)\n", 
-                                value, cdrom->interrupt_flag);
-                        return;
-                    }
-                    
-                    LOG_CDROM_DEBUG("[CDROM] Cmd 0x%02X", value);
-                    
-                    // Save parameters for command execution
-                    cdrom->pending_command = (CdromCommand)value;
-                    cdrom->pending_param_count = cdrom->param_fifo.count;
-                    for (int i = 0; i < cdrom->pending_param_count; i++) {
-                        cdrom->pending_params[i] = fifo_peek(&cdrom->param_fifo, i);
-                    }
-                    
-                    // Schedule command execution
-                    schedule_command_event(cdrom, CDROM_ACK_DELAY);
-                    break;
-                }
-                case 1: // Sound map data out
-                    break;
-                case 2: // Sound map coding info
-                    break;
-                case 3: // Right-CD to Right-SPU volume
-                    break;
-            }
-            break;
-        
-        case 2:
-            switch (cdrom->index) {
-                case 0: // Parameter FIFO
-                    fifo_push(&cdrom->param_fifo, value);
-                    break;
-                case 1: // Interrupt enable
-                    cdrom->interrupt_enable = value & 0x1F;
-                    break;
-                case 2: // Left-CD to Left-SPU volume
-                    break;
-                case 3: // Right-CD to Left-SPU volume
-                    break;
-            }
-            break;
-        
-        case 3:
-            switch (cdrom->index) {
-                case 0:
-                    // Request register
-                    if (value & 0x80) {
-                        // Want data - start transferring sector to data FIFO
-                        if (cdrom->data_buffer_valid) {
-                            cdrom->data_buffer_index = 0;
-                        }
-                    } else {
-                        // Clear data buffer
-                        cdrom->data_buffer_valid = false;
-                        cdrom->data_buffer_index = 0;
-                        cdrom->data_buffer_size = 0;
-                    }
-                    break;
-                case 1: {
-                    // Interrupt acknowledge
-                    uint8_t ack = value & 0x1F;
-                    cdrom->interrupt_flag &= ~ack;
-                    
-                    if (value & 0x40) {
-                        // Clear parameter FIFO
-                        fifo_clear(&cdrom->param_fifo);
-                    }
-                    
-                    LOG_CDROM_DEBUG("[CDROM] INT ACK: 0x%02X, remaining: %d\n", ack, cdrom->interrupt_flag);
-                    
-                    // If we have a second response pending and INT is now clear, schedule it
-                    if (cdrom->second_response_cmd != CDC_NONE && cdrom->interrupt_flag == 0) {
-                        schedule_second_response_event(cdrom, CDROM_READ_DELAY);
-                    }
-                    
-                    // If we're reading and INT cleared, schedule next sector
-                    if (cdrom->drive_state == DRIVE_READING && cdrom->interrupt_flag == 0) {
-                        schedule_drive_event(cdrom, CDROM_READ_DELAY);
-                    }
-                    break;
-                }
-                case 2: // Left-CD to Right-SPU volume
-                    break;
-                case 3: // Apply volume changes
-                    break;
-            }
-            break;
-    }
-}
 
-// =============================================================================
-// Command Execution
-// =============================================================================
+    case 0:
+        cdrom->index = value & 0x3;
+        break;
 
-static void command_event_callback(void *context, uint32_t cycles_late) {
-    Cdrom *cdrom = (Cdrom *)context;
-    
-    LOG_CDROM_DEBUG("[CDROM] command_event_callback: pending_cmd=0x%02X, int_flag=%d\n",
-                    cdrom->pending_command, cdrom->interrupt_flag);
-    
-    // If interrupt still pending, reschedule
-    if (cdrom->interrupt_flag != 0) {
-        LOG_CDROM_DEBUG("[CDROM] Command blocked by INT, rescheduling\n");
-        schedule_command_event(cdrom, CDROM_ACK_DELAY);
-        return;
-    }
-    
-    cdrom_execute_command(cdrom);
-}
-
-void cdrom_execute_command(Cdrom *cdrom) {
-    CdromCommand cmd = cdrom->pending_command;
-    cdrom->pending_command = CDC_NONE;
-    cdrom->current_command = cmd;
-    
-    // Restore parameters
-    fifo_clear(&cdrom->param_fifo);
-    for (int i = 0; i < cdrom->pending_param_count; i++) {
-        fifo_push(&cdrom->param_fifo, cdrom->pending_params[i]);
-    }
-    
-    LOG_CDROM_DEBUG("[CDROM] Exec cmd 0x%02X", cmd);
-    fifo_clear(&cdrom->response_fifo);
-    
-    switch (cmd) {
-        case CDC_GETSTAT:
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            break;
-        
-        case CDC_SETLOC: {
-            uint8_t mm = pop_param(cdrom);
-            uint8_t ss = pop_param(cdrom);
-            uint8_t ff = pop_param(cdrom);
-            
-            // BCD to binary
-            uint8_t min = ((mm >> 4) * 10) + (mm & 0x0F);
-            uint8_t sec = ((ss >> 4) * 10) + (ss & 0x0F);
-            uint8_t frame = ((ff >> 4) * 10) + (ff & 0x0F);
-            
-            // MSF to LBA (subtract 2 second lead-in = 150 frames)
-            cdrom->setloc_lba = ((min * 60 + sec) * 75 + frame) - 150;
-            cdrom->setloc_pending = true;
-            
-            LOG_CDROM_DEBUG("[CDROM] SetLoc: %02d:%02d:%02d -> LBA %u\n", 
-                     min, sec, frame, cdrom->setloc_lba);
-            
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
+    case 1:
+        switch (cdrom->index) {
+        case 0: {
+            /* Command register */
+            if (cdrom->pending_command != CDC_NONE) {
+                LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (busy)\n", value);
+                return;
+            }
+            if (cdrom->interrupt_flag != 0) {
+                LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (INT%d pending)\n",
+                               value, cdrom->interrupt_flag);
+                return;
+            }
+            cdrom->pending_command       = (CdromCommand)value;
+            cdrom->pending_param_count   = cdrom->param_fifo.count;
+            for (int i = 0; i < cdrom->pending_param_count; i++)
+                cdrom->pending_params[i] = fifo_peek(&cdrom->param_fifo, (uint8_t)i);
+            cdrom_schedule_command_event(cdrom, CDROM_ACK_DELAY);
             break;
         }
-        
-        case CDC_READN:
-        case CDC_READS: {
-            if (cdrom->setloc_pending) {
-                cdrom->current_lba = cdrom->setloc_lba;
-                cdrom->setloc_pending = false;
-            }
-            
-            cdrom->drive_state = DRIVE_READING;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            
-            // Schedule first sector read
-            schedule_drive_event(cdrom, CDROM_READ_DELAY);
-            break;
+        case 1: break; /* sound map data */
+        case 2: break; /* sound map coding */
+        case 3: break; /* R→R SPU volume */
         }
-        
-        case CDC_STOP:
-            cdrom->drive_state = DRIVE_STOPPING;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = CDC_STOP;
-            break;
-        
-        case CDC_PAUSE:
-            if (cdrom->drive_state == DRIVE_READING) {
-                cdrom->drive_state = DRIVE_PAUSING;
-            }
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = CDC_PAUSE;
-            break;
-        
-        case CDC_INIT:
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = CDC_INIT;
-            break;
-        
-        case CDC_MUTE:
-            cdrom->muted = true;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            break;
-        
-        case CDC_DEMUTE:
-            cdrom->muted = false;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            break;
-        
-        case CDC_SETFILTER:
-            cdrom->xa_filter_file = pop_param(cdrom);
-            cdrom->xa_filter_channel = pop_param(cdrom);
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            break;
-        
-        case CDC_SETMODE: {
-            uint8_t mode = pop_param(cdrom);
-            cdrom->mode = mode;
-            cdrom->double_speed = (mode & 0x80) != 0;
-            cdrom->xa_adpcm_enable = (mode & 0x40) != 0;
-            cdrom->whole_sector = (mode & 0x20) != 0;
-            cdrom->xa_filter_enable = (mode & 0x08) != 0;
-            cdrom->report_enable = (mode & 0x04) != 0;
-            cdrom->auto_pause = (mode & 0x02) != 0;
-            cdrom->cdda_enable = (mode & 0x01) != 0;
-            
-            LOG_CDROM_DEBUG("[CDROM] SetMode: 0x%02X (2x=%d, whole=%d)\n",
-                     mode, cdrom->double_speed, cdrom->whole_sector);
-            
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            break;
+        break;
+
+    case 2:
+        switch (cdrom->index) {
+        case 0: fifo_push(&cdrom->param_fifo, value); break;
+        case 1: cdrom->interrupt_enable = value & 0x1F; break;
+        case 2: cdrom->vol_ll = value; break; /* L→L */
+        case 3: cdrom->vol_rl = value; break; /* R→L */
         }
-        
-        case CDC_GETLOCP:
-            push_response(cdrom, 0x00);  // Track
-            push_response(cdrom, 0x01);  // Index
-            push_response(cdrom, 0x00);  // Relative MM
-            push_response(cdrom, 0x02);  // Relative SS
-            push_response(cdrom, 0x00);  // Relative FF
-            push_response(cdrom, 0x00);  // Absolute MM
-            push_response(cdrom, 0x02);  // Absolute SS
-            push_response(cdrom, 0x00);  // Absolute FF
-            send_ack(cdrom);
-            break;
-        
-        case CDC_GETTN:
-            push_response(cdrom, get_stat_byte(cdrom));
-            push_response(cdrom, 0x01);  // First track (BCD)
-            push_response(cdrom, 0x01);  // Last track (BCD)
-            send_ack(cdrom);
-            break;
-        
-        case CDC_GETTD: {
-            uint8_t track = pop_param(cdrom);
-            push_response(cdrom, get_stat_byte(cdrom));
-            
-            if (track == 0) {
-                // Track 0 = lead-out (disc length)
-                uint32_t lba = cdrom->disc_size_sectors + 150;
-                uint8_t min = (lba / 75) / 60;
-                uint8_t sec = (lba / 75) % 60;
-                push_response(cdrom, ((min / 10) << 4) | (min % 10));
-                push_response(cdrom, ((sec / 10) << 4) | (sec % 10));
+        break;
+
+    case 3:
+        switch (cdrom->index) {
+        case 0:
+            /* Request register */
+            if (value & 0x80) {
+                /* Arm data buffer: reset read pointer */
+                cdrom->data_buffer_armed = true;
+                cdrom->sector_buffers[cdrom->current_read_buffer].position = 0;
             } else {
-                // Track 1 starts at 00:02:00
-                push_response(cdrom, 0x00);
-                push_response(cdrom, 0x02);
+                /* Disarm / clear buffer */
+                cdrom->data_buffer_armed = false;
+                cdrom->sector_buffers[cdrom->current_read_buffer].valid = false;
             }
-            send_ack(cdrom);
             break;
-        }
-        
-        case CDC_SEEKL:
-        case CDC_SEEKP:
-            if (cdrom->setloc_pending) {
-                cdrom->target_lba = cdrom->setloc_lba;
-                cdrom->setloc_pending = false;
-            }
-            cdrom->drive_state = DRIVE_SEEKING;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = cmd;
-            break;
-        
-        case CDC_TEST: {
-            uint8_t subfunction = pop_param(cdrom);
-            LOG_CDROM_DEBUG("[CDROM] Test(0x%02X)", subfunction);
-            
-            switch (subfunction) {
-                case 0x20:
-                    // CDROM BIOS date/version (yy,mm,dd,ver)
-                    // SCPH1001 uses: 94/09/19, version C0
-                    LOG_CDROM_DEBUG("[CDROM] Test(0x20): Version 94/09/19 vC0");
-                    push_response(cdrom, 0x94);  // Year (BCD)
-                    push_response(cdrom, 0x09);  // Month (BCD)
-                    push_response(cdrom, 0x19);  // Day (BCD)
-                    push_response(cdrom, 0xC0);  // Version
-                    send_ack(cdrom);
-                    break;
-                
-                case 0x04:
-                    // Reset SCEx counters
-                    LOG_CDROM_DEBUG("[CDROM] Test(0x04): Reset SCEx");
-                    cdrom->motor_on = true;  // Force motor on per duckstation
-                    push_response(cdrom, get_stat_byte(cdrom));
-                    send_ack(cdrom);
-                    break;
-                
-                case 0x05:
-                    // Get SCEx counters - returns stat, total_reads, success_count
-                    LOG_CDROM_DEBUG("[CDROM] Test(0x05): SCEx counters");
-                    push_response(cdrom, get_stat_byte(cdrom));  // stat byte first!
-                    push_response(cdrom, 0x00);  // TOC reads
-                    push_response(cdrom, 0x00);  // SCEx strings received
-                    send_ack(cdrom);
-                    break;
-                
-                case 0x22:
-                    // Get region string - "for U/C" for US region
-                    LOG_CDROM_DEBUG("[CDROM] Test(0x22): Region U/C");
-                    push_response(cdrom, 'f');
-                    push_response(cdrom, 'o');
-                    push_response(cdrom, 'r');
-                    push_response(cdrom, ' ');
-                    push_response(cdrom, 'U');
-                    push_response(cdrom, '/');
-                    push_response(cdrom, 'C');
-                    send_ack(cdrom);
-                    break;
-                
-                default:
-                    LOG_CDROM_WARN("[CDROM] Unknown test: 0x%02X\n", subfunction);
-                    push_response(cdrom, get_stat_byte(cdrom));
-                    send_ack(cdrom);
-                    break;
+
+        case 1: {
+            /* Interrupt acknowledge */
+            uint8_t ack = value & 0x1F;
+            cdrom->interrupt_flag &= ~ack;
+            if (value & 0x40) fifo_clear(&cdrom->param_fifo);
+
+            LOG_CDROM_DEBUG("[CDROM] INT ACK 0x%02X remaining=%d\n", ack, cdrom->interrupt_flag);
+
+            if (cdrom->interrupt_flag == 0) {
+                /* Second response pending */
+                if (cdrom->second_response_cmd != CDC_NONE)
+                    cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
+
+                /* Reading: schedule next sector delivery */
+                if (cdrom->drive_state == DRIVE_READING)
+                    cdrom_schedule_drive_event(cdrom, CDROM_READ_DELAY_1X / (cdrom->double_speed ? 2 : 1));
             }
             break;
         }
-        
-        case CDC_GETID:
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = CDC_GETID;
-            break;
-        
-        case CDC_MOTORON:
-            cdrom->motor_on = true;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_ack(cdrom);
-            cdrom->second_response_cmd = CDC_MOTORON;
-            break;
-        
-        default:
-            LOG_CDROM_WARN("[CDROM] Unknown command: 0x%02X\n", cmd);
-            send_error(cdrom, ERROR_INVALID_COMMAND, 0x40);
-            break;
-    }
-    
-    fifo_clear(&cdrom->param_fifo);
-    cdrom->current_command = CDC_NONE;
-}
-
-// =============================================================================
-// Second Response Handling
-// =============================================================================
-
-static void second_response_callback(void *context, uint32_t cycles_late) {
-    Cdrom *cdrom = (Cdrom *)context;
-    
-    if (cdrom->interrupt_flag != 0) {
-        // Reschedule if INT still pending
-        schedule_second_response_event(cdrom, CDROM_READ_DELAY);
-        return;
-    }
-    
-    cdrom_execute_second_response(cdrom);
-}
-
-void cdrom_execute_second_response(Cdrom *cdrom) {
-    CdromCommand cmd = cdrom->second_response_cmd;
-    cdrom->second_response_cmd = CDC_NONE;
-    
-    fifo_clear(&cdrom->response_fifo);
-    
-    switch (cmd) {
-        case CDC_GETID:
-            if (!cdrom->disc_present) {
-                // No disc: INT5 with error bytes [0x08=no-disc, 0x40=cannot-read]
-                send_error(cdrom, 0x08, 0x40);
-            } else {
-                // Licensed disc
-                push_response(cdrom, get_stat_byte(cdrom));
-                push_response(cdrom, 0x00);  // Flags: licensed
-                push_response(cdrom, 0x20);  // Type: mode 2
-                push_response(cdrom, 0x00);  // Attr
-                push_response(cdrom, 'S');   // Region: SCEI
-                push_response(cdrom, 'C');
-                push_response(cdrom, 'E');
-                push_response(cdrom, 'A');   // America
-                send_complete(cdrom);
-            }
-            break;
-        
-        case CDC_INIT:
-            cdrom->motor_on = cdrom->disc_present;
-            cdrom->drive_state = DRIVE_IDLE;
-            cdrom->mode = 0;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_complete(cdrom);
-            break;
-        
-        case CDC_STOP:
-            cdrom->motor_on = false;
-            cdrom->drive_state = DRIVE_IDLE;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_complete(cdrom);
-            break;
-        
-        case CDC_PAUSE:
-            cdrom->drive_state = DRIVE_IDLE;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_complete(cdrom);
-            break;
-        
-        case CDC_SEEKL:
-        case CDC_SEEKP:
-            cdrom->current_lba = cdrom->target_lba;
-            cdrom->drive_state = DRIVE_IDLE;
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_complete(cdrom);
-            break;
-        
-        case CDC_MOTORON:
-            push_response(cdrom, get_stat_byte(cdrom));
-            send_complete(cdrom);
-            break;
-        
-        default:
-            break;
-    }
-}
-
-// =============================================================================
-// Drive Event (Sector Reading)
-// =============================================================================
-
-static void drive_event_callback(void *context, uint32_t cycles_late) {
-    Cdrom *cdrom = (Cdrom *)context;
-    
-    if (cdrom->interrupt_flag != 0) {
-        // Wait for INT to be acknowledged
-        return;
-    }
-    
-    cdrom_execute_drive(cdrom);
-}
-
-void cdrom_execute_drive(Cdrom *cdrom) {
-    if (cdrom->drive_state != DRIVE_READING) {
-        return;
-    }
-    
-    // Read sector from disc
-    if (!cdrom->disc_file) {
-        LOG_CDROM_ERROR("[CDROM] No disc file!\n");
-        return;
-    }
-    
-    long offset = (long)cdrom->current_lba * CDROM_SECTOR_SIZE;
-    
-    if (fseek(cdrom->disc_file, offset, SEEK_SET) != 0) {
-        LOG_CDROM_ERROR("[CDROM] Seek failed to LBA %u\n", cdrom->current_lba);
-        return;
-    }
-    
-    uint8_t sector[CDROM_SECTOR_SIZE];
-    if (fread(sector, 1, CDROM_SECTOR_SIZE, cdrom->disc_file) != CDROM_SECTOR_SIZE) {
-        LOG_CDROM_ERROR("[CDROM] Read failed at LBA %u\n", cdrom->current_lba);
-        return;
-    }
-    
-    // Extract data portion (skip sync + header for data sectors)
-    // Mode 2 Form 1: 12 sync + 4 header + 8 subheader + 2048 data + 4 EDC + 276 ECC
-    // Mode 2 Form 2: 12 sync + 4 header + 8 subheader + 2324 data + 4 EDC
-    if (cdrom->whole_sector) {
-        // Copy whole sector minus sync (2340 bytes from offset 12)
-        memcpy(cdrom->data_buffer, sector + 12, 2340);
-        cdrom->data_buffer_size = 2340;
-    } else {
-        // Data only (2048 bytes from offset 24 for Mode 2 Form 1)
-        memcpy(cdrom->data_buffer, sector + 24, 2048);
-        cdrom->data_buffer_size = 2048;
-    }
-    
-    cdrom->data_buffer_index = 0;
-    cdrom->data_buffer_valid = true;
-    
-    // Send INT1 (data ready)
-    fifo_clear(&cdrom->response_fifo);
-    push_response(cdrom, get_stat_byte(cdrom));
-    cdrom->interrupt_flag = CDROM_INT_DATA_READY;
-    
-    LOG_CDROM_DEBUG("[CDROM] Read sector %u, INT1\n", cdrom->current_lba);
-    
-    // Advance to next sector
-    cdrom->current_lba++;
-    
-    // Trigger IRQ
-    if (cdrom->inter) {
-        interconnect_trigger_cdrom_irq(cdrom->inter);
-    }
-}
-
-// =============================================================================
-// Async Interrupt Delivery
-// =============================================================================
-
-void cdrom_deliver_async_interrupt(Cdrom *cdrom) {
-    if (cdrom->async_interrupt != 0) {
-        if (cdrom->interrupt_flag == 0) {
-            fifo_clear(&cdrom->response_fifo);
-            for (int i = 0; i < cdrom->async_response_size; i++) {
-                push_response(cdrom, cdrom->async_response[i]);
-            }
-            cdrom->interrupt_flag = cdrom->async_interrupt;
-            cdrom->async_interrupt = 0;
-            cdrom->async_response_size = 0;
-            
-            if (cdrom->inter) {
-                interconnect_trigger_cdrom_irq(cdrom->inter);
-            }
+        case 2: cdrom->vol_lr = value; break; /* L→R */
+        case 3: cdrom->vol_rr = value; break; /* Apply (R→R, already stored) */
         }
+        break;
     }
 }
 
-// =============================================================================
-// Status Queries
-// =============================================================================
+/* =========================================================================
+ * Status Queries
+ * ========================================================================= */
 
 bool cdrom_has_pending_command(Cdrom *cdrom) {
     return cdrom->pending_command != CDC_NONE;
@@ -781,63 +348,10 @@ bool cdrom_has_pending_interrupt(Cdrom *cdrom) {
     return (cdrom->interrupt_flag & cdrom->interrupt_enable) != 0;
 }
 
-// =============================================================================
-// Helper Functions
-// =============================================================================
+/* =========================================================================
+ * Audio Frame (called by SPU/SDL)
+ * ========================================================================= */
 
-static void push_response(Cdrom *cdrom, uint8_t value) {
-    fifo_push(&cdrom->response_fifo, value);
-}
-
-static uint8_t pop_param(Cdrom *cdrom) {
-    return fifo_pop(&cdrom->param_fifo);
-}
-
-static uint8_t get_stat_byte(Cdrom *cdrom) {
-    uint8_t stat = 0;
-    
-    if (cdrom->motor_on)
-        stat |= STAT_BYTE_MOTOR_ON;
-    if (cdrom->shell_open)
-        stat |= STAT_BYTE_SHELL_OPEN;
-    if (cdrom->drive_state == DRIVE_READING)
-        stat |= STAT_BYTE_READING;
-    if (cdrom->drive_state == DRIVE_SEEKING)
-        stat |= STAT_BYTE_SEEKING;
-    if (cdrom->drive_state == DRIVE_PLAYING)
-        stat |= STAT_BYTE_PLAYING;
-    
-    return stat;
-}
-
-static void send_ack(Cdrom *cdrom) {
-    cdrom->interrupt_flag = CDROM_INT_ACK;
-    LOG_CDROM_DEBUG("[CDROM] INT3 (ACK)");
-    
-    if (cdrom->inter) {
-        interconnect_trigger_cdrom_irq(cdrom->inter);
-    } else {
-        LOG_CDROM_ERROR("[CDROM] send_ack: inter is NULL!\n");
-    }
-}
-
-static void send_complete(Cdrom *cdrom) {
-    cdrom->interrupt_flag = CDROM_INT_COMPLETE;
-    LOG_CDROM_DEBUG("[CDROM] INT2 (Complete)");
-    
-    if (cdrom->inter) {
-        interconnect_trigger_cdrom_irq(cdrom->inter);
-    }
-}
-
-static void send_error(Cdrom *cdrom, uint8_t error_flags, uint8_t reason) {
-    fifo_clear(&cdrom->response_fifo);
-    push_response(cdrom, error_flags);
-    push_response(cdrom, reason);
-    cdrom->interrupt_flag = CDROM_INT_ERROR;
-    LOG_CDROM_DEBUG("[CDROM] INT5 (Error)\n");
-    
-    if (cdrom->inter) {
-        interconnect_trigger_cdrom_irq(cdrom->inter);
-    }
+void cdrom_get_audio_frame(Cdrom *cdrom, int16_t *left, int16_t *right) {
+    cdrom_audio_get_frame(&cdrom->audio_fifo, left, right);
 }

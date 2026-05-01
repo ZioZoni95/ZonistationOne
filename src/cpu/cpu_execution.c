@@ -107,17 +107,23 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 7. Finalize ---
     cpu->out_regs[REG_ZERO] = 0;
 
-    // --- 8. Advance Cycle Counter ---
+    // --- 8. Advance Cycle Counters ---
     cpu->inter->cpu_cycle_counter++;
+    cpu->downcount--;
 
-    // --- 8a. Step timers every 64 cycles so counters advance for BIOS busy-waits ---
+    // Step timers every 64 cycles so counters advance for BIOS busy-waits.
     if ((cpu->inter->cpu_cycle_counter & 0x3F) == 0) {
         timers_step(&cpu->inter->timers_state, 64);
     }
 
-    // --- 9. Check for Events ---
-    if (cpu->inter->cpu_cycle_counter >= cpu->inter->evq_next_cycle) {
+    // --- 9. Dispatch Events (DuckStation-style downcount) ---
+    if (cpu->downcount <= 0) {
         eventq_dispatch_due(cpu->inter);
+        // Recalculate downcount = cycles until next scheduled event
+        uint32_t next = cpu->inter->evq_next_cycle;
+        uint32_t now  = cpu->inter->cpu_cycle_counter;
+        cpu->downcount = (next != UINT32_MAX && (int32_t)(next - now) > 0)
+                       ? (int32_t)(next - now) : 1;
     }
 
     // --- 10. Check CDROM custom events ---

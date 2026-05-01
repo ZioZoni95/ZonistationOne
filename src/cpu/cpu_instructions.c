@@ -265,8 +265,11 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
         }
         const char* vector_name = (target_address == 0xA0) ? "A" :
                                   (target_address == 0xB0) ? "B" : "C";
-        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
-                      cpu->current_pc, vector_name, func_num);
+        // Suppress B0(0x2C) spam (error handler called frequently)
+        if (!(target_address == 0xB0 && func_num == 0x2C)) {
+            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
+                          cpu->current_pc, vector_name, func_num);
+        }
 
         if (target_address == 0x000000A0)
             handle_a0_syscall(cpu);
@@ -410,7 +413,9 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
     uint32_t target_address = cpu_reg(cpu, rs);
     uint32_t return_addr = cpu->pc + 4; // Address of instruction after delay slot
 
-    // Check for BIOS function call (to 0xA0, 0xB0, or 0xC0) — LLE side-channel capture
+    // DISABLED for LLE mode: Let BIOS ROM handle syscalls natively
+    // HLE interceptors are moved to LowLevelEmulation branch
+    /*
     if (target_address == 0xA0 || target_address == 0xB0 || target_address == 0xC0) {
         uint32_t func_num = cpu_reg(cpu, 9);
         if (func_num >= 0x100 || func_num == 0) {
@@ -427,8 +432,9 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
         else if (target_address == 0xB0)
             handle_b0_syscall(cpu);
     }
+    */
     // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
-    else if ((target_address & 0x3) != 0) {
+    if ((target_address & 0x3) != 0) {
         LOG_CPU_DEBUG("@SUSPICIOUS_JALR from PC=0x%08x: $%d=0x%08x -> unaligned target 0x%08x, return to $%d=0x%08x",
                          cpu->current_pc, rs, target_address, target_address, rd, return_addr);
     }
@@ -491,6 +497,10 @@ void op_sra(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, rd, (uint32_t)(value_signed >> shamt));
 }
 
+// PSX MIPS mul/div latencies (DuckStation cpu_core.cpp values)
+#define MULT_TICKS  7   // MULT / MULTU
+#define DIV_TICKS  37   // DIV / DIVU
+
 // Signed division
 void op_div(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
@@ -509,8 +519,7 @@ void op_div(Cpu* cpu, uint32_t instruction) {
         cpu->lo = (uint32_t)(n / d); // Quotient
         cpu->hi = (uint32_t)(n % d); // Remainder
     }
-    // Note: Division takes many cycles; result isn't available immediately.
-    // We ignore timing for now. HI/LO access should stall if op not finished.
+    cpu->muldiv_completion_tick = cpu->inter->cpu_cycle_counter + DIV_TICKS;
 }
 
 // Unsigned division
@@ -527,14 +536,19 @@ void op_divu(Cpu* cpu, uint32_t instruction) {
         cpu->lo = n / d; // Quotient
         cpu->hi = n % d; // Remainder
     }
-    // Ignore timing stall for now.
+    cpu->muldiv_completion_tick = cpu->inter->cpu_cycle_counter + DIV_TICKS;
 }
 
 // Move From LO
 void op_mflo(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
-    cpu_set_reg(cpu, rd, cpu->lo); //
-    // TODO: Should stall if previous DIV/MULT not finished.
+    // Stall until MulDiv completes (DuckStation-style)
+    if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
+        uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
+        cpu->inter->cpu_cycle_counter += stall;
+        cpu->downcount -= (int32_t)stall;
+    }
+    cpu_set_reg(cpu, rd, cpu->lo);
 }
 
 // Shift Right Logical
@@ -567,8 +581,13 @@ void op_slt(Cpu* cpu, uint32_t instruction) {
 // Move From HI
 void op_mfhi(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
-    cpu_set_reg(cpu, rd, cpu->hi); //
-    // TODO: Should stall if previous DIV/MULT not finished.
+    // Stall until MulDiv completes (DuckStation-style)
+    if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
+        uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
+        cpu->inter->cpu_cycle_counter += stall;
+        cpu->downcount -= (int32_t)stall;
+    }
+    cpu_set_reg(cpu, rd, cpu->hi);
 }
 
 // System Call - DuckStation style: just raise exception, handle in main loop
@@ -686,14 +705,12 @@ void op_srlv(Cpu* cpu, uint32_t instruction) {
 void op_multu(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
-    // Perform 64-bit multiplication
     uint64_t val_rs = (uint64_t)cpu_reg(cpu, rs);
     uint64_t val_rt = (uint64_t)cpu_reg(cpu, rt);
     uint64_t result_64 = val_rs * val_rt;
-    // Store result in HI/LO
-    cpu->hi = (uint32_t)(result_64 >> 32);  //
-    cpu->lo = (uint32_t)(result_64 & 0xFFFFFFFF); //
-    // Ignore timing stall for now
+    cpu->hi = (uint32_t)(result_64 >> 32);
+    cpu->lo = (uint32_t)(result_64 & 0xFFFFFFFF);
+    cpu->muldiv_completion_tick = cpu->inter->cpu_cycle_counter + MULT_TICKS;
 }
 
 // Bitwise Exclusive Or
@@ -715,14 +732,12 @@ void op_break(Cpu* cpu, uint32_t instruction) {
 void op_mult(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t rt = instr_t(instruction);
-    // Perform 64-bit signed multiplication
     int64_t val_rs_s = (int64_t)(int32_t)cpu_reg(cpu, rs);
     int64_t val_rt_s = (int64_t)(int32_t)cpu_reg(cpu, rt);
     int64_t result_s64 = val_rs_s * val_rt_s;
-    // Store result in HI/LO
-    cpu->hi = (uint32_t)((uint64_t)result_s64 >> 32); //
-    cpu->lo = (uint32_t)((uint64_t)result_s64 & 0xFFFFFFFF); //
-    // Ignore timing stall
+    cpu->hi = (uint32_t)((uint64_t)result_s64 >> 32);
+    cpu->lo = (uint32_t)((uint64_t)result_s64 & 0xFFFFFFFF);
+    cpu->muldiv_completion_tick = cpu->inter->cpu_cycle_counter + MULT_TICKS;
 }
 
 // Subtract (Signed, with Overflow check)

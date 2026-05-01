@@ -1,307 +1,194 @@
+// SIO (PAD) Implementation based on DuckStation
+// Implements PSX Serial I/O controller and memory card interface
+// Based on DuckStation's pad.cpp: https://github.com/stenzek/duckstation
+
 #include "sio.h"
 #include "log.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 
-// Forward declarations
-static uint8_t handle_controller_transfer(Sio* sio, uint8_t tx_byte);
-static uint8_t handle_memcard_transfer(Sio* sio, uint8_t tx_byte);
+#define SIO_DBG(...) LOG_TRACE(__VA_ARGS__)
 
-// SIO Status Register bits
-#define STAT_TX_RDY_1      (1 << 0)  // Ready to send (TX FIFO not full)
-#define STAT_RX_NOT_EMPTY  (1 << 1)  // RX FIFO not empty
-#define STAT_TX_RDY_2      (1 << 2)  // Ready to send (TX finished)
-#define STAT_RX_PARITY_ERR (1 << 3)  // RX Parity error
-#define STAT_ACK           (1 << 7)  // ACK input level
-#define STAT_IRQ           (1 << 9)  // Interrupt request
+// ============================================================================
+// STATE MACHINE
+// ============================================================================
+typedef enum {
+    STATE_IDLE,
+    STATE_TRANSMITTING,
+    STATE_WAITING_FOR_ACK
+} SioState;
 
-// SIO Control Register bits
-#define CTRL_TX_ENABLE     (1 << 0)  // TX Enable
-#define CTRL_SELECT        (1 << 1)  // /JOYn output (0=High/Idle, 1=Low/Select)
-#define CTRL_RX_ENABLE     (1 << 2)  // RX Enable
-#define CTRL_ACK_IRQ_ENABLE (1 << 10) // Acknowledge IRQ
-#define CTRL_RESET         (1 << 6)  // Reset
-#define CTRL_RX_IRQ_MODE   (1 << 8)  // RX Interrupt mode
-#define CTRL_TX_IRQ_ENABLE (1 << 10) // TX Interrupt enable
-#define CTRL_RX_IRQ_ENABLE (1 << 11) // RX Interrupt enable
-#define CTRL_ACK_IRQ       (1 << 12) // Acknowledge IRQ enable
+typedef enum {
+    ACTIVE_DEVICE_NONE,
+    ACTIVE_DEVICE_CONTROLLER,
+    ACTIVE_DEVICE_MEMCARD,
+    ACTIVE_DEVICE_MULTITAP
+} ActiveDevice;
 
-// Memory Card commands
-#define MEMCARD_CMD_ACCESS    0x81  // Memory card access command
-#define MEMCARD_CMD_READ      0x52  // Read sector
-#define MEMCARD_CMD_WRITE     0x57  // Write sector
-#define MEMCARD_CMD_GET_ID    0x53  // Get ID
+// ============================================================================
+// REGISTER BITFIELDS (PSX-SPX Reference)
+// ============================================================================
 
-// Memory Card responses
-#define MEMCARD_FLAG_READY    0x5A  // Card ready
-#define MEMCARD_FLAG_ERROR    0xFF  // Card error
+// JOY_CTRL (1F80104Ah)
+#define CTRL_TXEN        (1 << 0)   // TX Enable
+#define CTRL_SELECT      (1 << 1)   // /JOYn output (0=High, 1=Low/Select)
+#define CTRL_RXEN        (1 << 2)   // RX Enable
+#define CTRL_ACK         (1 << 4)   // ACK input level (read-only when pulsed via IRQ)
+#define CTRL_RESET       (1 << 6)   // Soft reset
+#define CTRL_RXIMODE     (2 << 8)   // RX Interrupt Mode (bits 9-8)
+#define CTRL_TXINTEN     (1 << 10)  // TX Interrupt enable
+#define CTRL_RXINTEN     (1 << 11)  // RX Interrupt enable
+#define CTRL_ACKINTEN    (1 << 12)  // ACK Interrupt enable
+#define CTRL_SLOT        (1 << 13)  // Multitap slot select
+
+// JOY_STAT (1F801044h)
+#define STAT_TXRDY       (1 << 0)   // TX Ready (FIFO not full)
+#define STAT_RXFIFONEMPTY (1 << 1)  // RX FIFO not empty
+#define STAT_TXDONE      (1 << 2)   // TX Done
+#define STAT_PARITYERR   (1 << 3)   // Parity error
+#define STAT_ACKINPUT    (1 << 7)   // ACK input
+#define STAT_INTR        (1 << 9)   // Interrupt (IRQ7)
+#define STAT_BAUDEN      (1 << 10)  // Baud enable
+
+// ============================================================================
+// CONTROLLER PROTOCOL
+// ============================================================================
+
+// Controller response bytes for digital pad
+#define CTRL_RESPONSE_ID       0x41  // Digital controller ID
+#define CTRL_RESPONSE_READY    0x5A  // Controller ready
+#define CTRL_NO_RESPONSE       0xFF  // No device connected
+
+// Memory card response
+#define MEMCARD_RESPONSE_ID    0x5A  // Memory card ID
+#define MEMCARD_NO_RESPONSE    0xFF
+
+// ============================================================================
+// SIO INTERNAL STATE
+// ============================================================================
+
+// Extended Sio structure (internal state)
+typedef struct {
+    // Registers
+    uint8_t tx_data;
+    uint8_t rx_data;
+    uint32_t stat;
+    uint16_t mode;
+    uint16_t ctrl;
+    uint16_t baud;
+
+    // Transfer state machine
+    SioState state;
+    ActiveDevice active_device;
+    uint8_t transmit_value;
+    uint8_t receive_buffer;
+    bool receive_buffer_full;
+    bool transmit_buffer_full;
+    uint8_t transmit_buffer;
+    uint32_t transfer_ticks;
+    uint32_t ack_delay_ticks;
+
+    // Controller state
+    bool controller_connected;
+    uint16_t button_state;
+    uint8_t controller_transfer_step;
+
+    // Memory Cards
+    MemoryCard card_slot1;
+    MemoryCard card_slot2;
+    bool card_slot1_present;
+    bool card_slot2_present;
+
+    // Pending events
+    bool pending_irq;
+    uint32_t pending_irq_type;  // 0=none, 1=TX, 2=RX, 3=ACK
+} SioInternal;
+
+static SioInternal sio_internal = {};
+
+// ============================================================================
+// FORWARD DECLARATIONS
+// ============================================================================
+
+static void sio_soft_reset(void);
+static void sio_begin_transfer(void);
+static void sio_do_transfer(void);
+static void sio_do_ack(void);
+static void sio_end_transfer(void);
+static void sio_update_joystat(void);
+static void sio_trigger_irq(const char* type);
+static uint8_t sio_controller_transfer(uint8_t tx_byte);
+static bool sio_can_transfer(void);
+static void sio_reset_device_transfer_state(void);
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
 
 void sio_init(Sio* sio) {
     memset(sio, 0, sizeof(Sio));
+    memset(&sio_internal, 0, sizeof(SioInternal));
 
-    // Initialize registers to default state
-    sio->stat = STAT_TX_RDY_1 | STAT_TX_RDY_2;  // Ready to transmit
-    sio->mode = 0x000D;  // Default mode: 8-bit, no parity
-    sio->ctrl = 0x0000;  // Idle
-    sio->baud = 0x0088;  // Default baud rate
+    // Initialize register state
+    sio_internal.stat = STAT_TXRDY | STAT_TXDONE;
+    sio_internal.mode = 0x000D;   // 8-bit, no parity
+    sio_internal.ctrl = 0x0000;
+    sio_internal.baud = 0x0088;
 
-    // No devices selected initially
-    sio->selected_device = 0;
-    sio->transfer_step = 0;
+    // Initialize state machine
+    sio_internal.state = STATE_IDLE;
+    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.transmit_buffer_full = false;
+    sio_internal.receive_buffer_full = false;
 
-    // Initialize RX buffer with default input to unblock GetC kernel call
-    // GetC will read this when BIOS polls, allowing menu to progress
-    sio->rx_data = BUTTON_DOWN;  // DOWN button pressed (unblocks BIOS menu)
-    sio->stat |= STAT_RX_NOT_EMPTY;  // Mark data as ready
+    // Initialize controller
+    sio_internal.controller_connected = false;
+    sio_internal.button_state = 0xFFFF;  // All buttons released
+    sio_internal.controller_transfer_step = 0;
 
-    // Controller disconnected by default (can be enabled later)
-    sio->controller_connected = false;
-    sio->button_state = 0xFFFF;  // All buttons released
+    // Initialize memory cards
+    sio_internal.card_slot1_present = false;
+    sio_internal.card_slot2_present = false;
 
-    // Memory cards not present by default
-    sio->card_slot1.present = false;
-    sio->card_slot2.present = false;
+    // Copy to public structure
+    sio->stat = sio_internal.stat;
+    sio->mode = sio_internal.mode;
+    sio->ctrl = sio_internal.ctrl;
+    sio->baud = sio_internal.baud;
+    sio->button_state = sio_internal.button_state;
+    sio->controller_connected = sio_internal.controller_connected;
 
-    LOG_INFO("SIO initialized (controller and memory card interface)");
-    LOG_INFO("SIO: Default input buffer set to DOWN button (unblocks GetC polling)");
+    LOG_INFO("SIO initialized (DuckStation-style implementation)");
 }
 
-bool sio_load_memcard(MemoryCard* card, const char* filepath) {
-    FILE* file = fopen(filepath, "rb");
-    if (!file) {
-        LOG_WARN("Memory card file not found: %s (will create on first save)", filepath);
-        return false;
-    }
-    
-    size_t bytes_read = fread(card->data, 1, MEMCARD_SIZE, file);
-    fclose(file);
-    
-    if (bytes_read != MEMCARD_SIZE) {
-        LOG_ERROR("Invalid memory card file size: %zu bytes (expected %d)", 
-                  bytes_read, MEMCARD_SIZE);
-        return false;
-    }
-    
-    strncpy(card->filepath, filepath, sizeof(card->filepath) - 1);
-    card->filepath[sizeof(card->filepath) - 1] = '\0';
-    card->present = true;
-    card->dirty = false;
-    
-    LOG_INFO("Memory card loaded: %s (%d KB)", filepath, MEMCARD_SIZE / 1024);
-    return true;
-}
+// ============================================================================
+// REGISTER ACCESS
+// ============================================================================
 
-bool sio_save_memcard(MemoryCard* card) {
-    if (!card->dirty || !card->present) {
-        return true;  // Nothing to save
-    }
-    
-    FILE* file = fopen(card->filepath, "wb");
-    if (!file) {
-        LOG_ERROR("Failed to open memory card file for writing: %s", card->filepath);
-        return false;
-    }
-    
-    size_t bytes_written = fwrite(card->data, 1, MEMCARD_SIZE, file);
-    fclose(file);
-    
-    if (bytes_written != MEMCARD_SIZE) {
-        LOG_ERROR("Failed to write complete memory card file: %zu/%d bytes", 
-                  bytes_written, MEMCARD_SIZE);
-        return false;
-    }
-    
-    card->dirty = false;
-    LOG_INFO("Memory card saved: %s", card->filepath);
-    return true;
-}
-
-void sio_create_memcard(MemoryCard* card, const char* filepath) {
-    // Initialize with formatted card data (proper PSX memory card format)
-    memset(card->data, 0x00, MEMCARD_SIZE);
-    
-    // Memory card header (first 128 bytes of first sector)
-    card->data[0] = 'M';
-    card->data[1] = 'C';
-    
-    strncpy(card->filepath, filepath, sizeof(card->filepath) - 1);
-    card->filepath[sizeof(card->filepath) - 1] = '\0';
-    card->present = true;
-    card->dirty = true;
-    
-    // Save immediately to create file
-    sio_save_memcard(card);
-    
-    LOG_INFO("Created new memory card: %s", filepath);
-}
-
-// Handle data transfer when a byte is written to JOY_DATA
-static void sio_handle_transfer(Sio* sio, uint8_t tx_byte) {
-    uint8_t response = 0xFF;  // Default response (no device)
-    
-    // Check if device is selected
-    if (!(sio->ctrl & CTRL_SELECT)) {
-        // Not selected, reset state
-        sio->selected_device = 0;
-        sio->transfer_step = 0;
-        sio->rx_data = 0xFF;
-        return;
-    }
-    
-    // First byte determines device type
-    if (sio->transfer_step == 0) {
-        if (tx_byte == 0x01) {
-            // Controller command
-            sio->selected_device = 1;
-            response = 0xFF;  // Controller ID (digital pad)
-            if (sio->controller_connected) {
-                response = 0x41;  // Digital controller ID
-            }
-        } else if (tx_byte == MEMCARD_CMD_ACCESS) {
-            // Memory card command
-            sio->selected_device = 2;
-            response = MEMCARD_FLAG_READY;  // Card present
-            // Check if card is present in slot 1 (we'll use slot 1 for now)
-            if (!sio->card_slot1.present) {
-                response = MEMCARD_FLAG_ERROR;
-            }
-        } else {
-            // Unknown command
-            sio->selected_device = 0;
-            response = 0xFF;
-        }
-        sio->transfer_step = 1;
-    } else {
-        // Subsequent bytes depend on device type
-        if (sio->selected_device == 1) {
-            // Controller transfer
-            response = handle_controller_transfer(sio, tx_byte);
-        } else if (sio->selected_device == 2) {
-            // Memory card transfer
-            response = handle_memcard_transfer(sio, tx_byte);
-        }
-        sio->transfer_step++;
-    }
-    
-    // Store response
-    sio->rx_data = response;
-    sio->stat |= STAT_RX_NOT_EMPTY;
-
-    // Set ACK bit and conditionally raise IRQ7.
-    // On real hardware /ACK is only asserted when a device is present and responds.
-    // We assert it whenever a device was addressed so the BIOS polling loop can proceed.
-    if (sio->selected_device != 0) {
-        sio->stat |= STAT_ACK;
-        // JOY_CTRL bit 12 = /ACK IRQ Enable: fire IRQ_CTRLMEMCARD (IRQ7) on /ACK.
-        // The interconnect will consume pending_irq and pulse the IRQ line.
-        if (sio->ctrl & (1 << 12)) {
-            sio->stat |= STAT_IRQ;
-            sio->pending_irq = true;
-        }
-    }
-
-    LOG_SYSTEM_TRACE("SIO transfer: TX=0x%02x, RX=0x%02x, step=%d, device=%d irq=%d",
-                  tx_byte, response, sio->transfer_step, sio->selected_device, sio->pending_irq);
-}
-
-static uint8_t handle_controller_transfer(Sio* sio, uint8_t tx_byte) {
-    // Digital controller protocol (check connection state)
-    // Step 1: Command (0x42 = Read Digital)
-    // Step 2: Tap mode (0x00)
-    // Step 3-4: Button data (inverted bits: 0=pressed, 1=released)
-
-    if (!sio->controller_connected) {
-        return 0xFF;  // No response if disconnected
-    }
-
-    switch (sio->transfer_step) {
-        case 1:  // Command byte
-            if (tx_byte == 0x42) {
-                return 0x5A;  // TAP mode response
-            }
-            return 0xFF;
-
-        case 2:  // Tap mode byte
-            return (sio->button_state >> 8) & 0xFF;  // Button state HIGH byte
-
-        case 3:  // Button data
-            return sio->button_state & 0xFF;  // Button state LOW byte
-
-        default:
-            return 0xFF;  // End of transfer
-    }
-}
-
-static uint8_t handle_memcard_transfer(Sio* sio, uint8_t tx_byte) {
-    // Memory card protocol (simplified)
-    // This is a complex protocol - implementing basic read/write
-    
-    MemoryCard* card = &sio->card_slot1;  // Use slot 1
-    
-    if (!card->present) {
-        return MEMCARD_FLAG_ERROR;
-    }
-    
-    switch (sio->transfer_step) {
-        case 1:  // Command
-            sio->tx_buffer[0] = tx_byte;
-            return MEMCARD_FLAG_READY;  // Card ready
-            
-        case 2:  // Acknowledge
-            return 0x5A;  // ID
-            
-        case 3:  // MSB of address/sector
-            sio->tx_buffer[1] = tx_byte;
-            return 0x5D;  // Acknowledge
-            
-        case 4:  // LSB of address/sector
-            sio->tx_buffer[2] = tx_byte;
-            return 0x00;  // Acknowledge
-            
-        default:
-            // Data transfer phase
-            if (sio->tx_buffer[0] == MEMCARD_CMD_READ) {
-                // Read command - return card data
-                uint16_t sector = (sio->tx_buffer[1] << 8) | sio->tx_buffer[2];
-                uint32_t offset = sector * MEMCARD_SECTOR_SIZE + (sio->transfer_step - 5);
-                if (offset < MEMCARD_SIZE) {
-                    return card->data[offset];
-                }
-            } else if (sio->tx_buffer[0] == MEMCARD_CMD_WRITE) {
-                // Write command - store data
-                uint16_t sector = (sio->tx_buffer[1] << 8) | sio->tx_buffer[2];
-                uint32_t offset = sector * MEMCARD_SECTOR_SIZE + (sio->transfer_step - 5);
-                if (offset < MEMCARD_SIZE) {
-                    card->data[offset] = tx_byte;
-                    card->dirty = true;
-                }
-                return 0x5A;  // Acknowledge
-            }
-            return 0xFF;
-    }
-}
-
-// Register access implementations
 uint8_t sio_read8(Sio* sio, uint32_t offset) {
     switch (offset) {
-        case 0x00:  // JOY_DATA (1F801040h)
-            sio->stat &= ~STAT_RX_NOT_EMPTY;  // Clear RX flag
-            LOG_SYSTEM_TRACE("SIO: Read JOY_DATA = 0x%02x", sio->rx_data);
-            return sio->rx_data;
+        case 0x00: {  // JOY_DATA (1F801040h)
+            // Return RX buffer
+            uint8_t value = sio_internal.receive_buffer_full ? sio_internal.receive_buffer : 0xFF;
+            SIO_DBG("[SIO] Read JOY_DATA = 0x%02x (full=%d, step=%d, device=%d)",
+                value, sio_internal.receive_buffer_full, sio_internal.controller_transfer_step,
+                sio_internal.active_device);
+            
+            // Clear RX buffer full flag
+            sio_internal.receive_buffer_full = false;
+            sio_update_joystat();
+            
+            return value;
+        }
 
-        case 0x04:  // JOY_STAT (1F801044h) - low byte
-            LOG_SYSTEM_TRACE("SIO: Read JOY_STAT_LOW = 0x%02x (TX_RDY=%d, RX_NEMPTY=%d, ACK=%d)",
-                           sio->stat & 0xFF,
-                           !!(sio->stat & STAT_TX_RDY_1),
-                           !!(sio->stat & STAT_RX_NOT_EMPTY),
-                           !!(sio->stat & STAT_ACK));
-            return sio->stat & 0xFF;
+        case 0x04:  // JOY_STAT low byte (1F801044h)
+            return sio_internal.stat & 0xFF;
 
         case 0x05:  // JOY_STAT high byte
-            return (sio->stat >> 8) & 0xFF;
+            return (sio_internal.stat >> 8) & 0xFF;
 
         default:
-            LOG_WARN("SIO read8 from unknown offset: 0x%02x", offset);
             return 0xFF;
     }
 }
@@ -309,25 +196,23 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
 uint16_t sio_read16(Sio* sio, uint32_t offset) {
     switch (offset) {
         case 0x04:  // JOY_STAT (1F801044h)
-            return sio->stat;
-            
+            return sio_internal.stat;
+
         case 0x08:  // JOY_MODE (1F801048h)
-            return sio->mode;
-            
+            return sio_internal.mode;
+
         case 0x0A:  // JOY_CTRL (1F80104Ah)
-            return sio->ctrl;
-            
+            return sio_internal.ctrl;
+
         case 0x0E:  // JOY_BAUD (1F80104Eh)
-            return sio->baud;
-            
+            return sio_internal.baud;
+
         default:
-            LOG_WARN("SIO read16 from unknown offset: 0x%02x", offset);
             return 0xFFFF;
     }
 }
 
 uint32_t sio_read32(Sio* sio, uint32_t offset) {
-    // Read 32-bit value (combine two 16-bit reads)
     uint16_t low = sio_read16(sio, offset);
     uint16_t high = sio_read16(sio, offset + 2);
     return (high << 16) | low;
@@ -336,70 +221,359 @@ uint32_t sio_read32(Sio* sio, uint32_t offset) {
 void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
     switch (offset) {
         case 0x00:  // JOY_DATA (1F801040h)
-            sio->tx_data = value;
-            sio_handle_transfer(sio, value);
-            break;
+            SIO_DBG("[SIO] Write JOY_DATA = 0x%02x", value);
             
+            if (sio_internal.transmit_buffer_full) {
+                LOG_WARN("SIO TX FIFO overrun");
+            }
+
+            sio_internal.transmit_buffer = value;
+            sio_internal.transmit_buffer_full = true;
+
+            // Fire TX interrupt if enabled
+            if (sio_internal.ctrl & CTRL_TXINTEN) {
+                sio_trigger_irq("TX");
+            }
+
+            // Start transfer if conditions allow
+            if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
+                sio_begin_transfer();
+            }
+            break;
+
         default:
-            LOG_WARN("SIO write8 to unknown offset: 0x%02x = 0x%02x", offset, value);
             break;
     }
 }
 
 void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
     switch (offset) {
+        case 0x00:  // JOY_DATA halfword write
+            // JOY_DATA is effectively byte-oriented for pad transfers.
+            // Keep low byte semantics for BIOS code using 16-bit stores.
+            sio_write8(sio, 0x00, (uint8_t)(value & 0xFF));
+            break;
+
         case 0x08:  // JOY_MODE (1F801048h)
-            sio->mode = value;
-            LOG_SYSTEM_DEBUG("SIO MODE = 0x%04x", value);
+            sio_internal.mode = value;
+            SIO_DBG("[SIO] Write JOY_MODE = 0x%04x", value);
             break;
-            
-        case 0x0A:  // JOY_CTRL (1F80104Ah)
-            sio->ctrl = value;
 
-            // Handle reset
+        case 0x0A: {  // JOY_CTRL (1F80104Ah)
+            SIO_DBG("[SIO] Write JOY_CTRL = 0x%04x (SELECT=%d, TXEN=%d, RESET=%d, ACK=%d)",
+                    value, !!(value & CTRL_SELECT), !!(value & CTRL_TXEN),
+                    !!(value & CTRL_RESET), !!(value & CTRL_ACK));
+
+            sio_internal.ctrl = value;
+
+            // Handle soft reset
             if (value & CTRL_RESET) {
-                sio->selected_device = 0;
-                sio->transfer_step = 0;
-                sio->stat = STAT_TX_RDY_1 | STAT_TX_RDY_2;
+                sio_soft_reset();
+                break;
             }
 
-            // Writing bit 12 acknowledges (clears) the pending IRQ7 in STAT bit 9.
-            if (value & (1 << 12)) {
-                sio->stat &= ~STAT_IRQ;
+            // Handle ACK (write to clear IRQ)
+            if (value & CTRL_ACK) {
+                sio_internal.stat &= ~STAT_INTR;
+                sio_internal.stat &= ~STAT_ACKINPUT;
             }
 
-            // Handle deselect
+            // Handle SELECT deassert
             if (!(value & CTRL_SELECT)) {
-                sio->selected_device = 0;
-                sio->transfer_step = 0;
+                sio_reset_device_transfer_state();
             }
-            
-            LOG_SYSTEM_DEBUG("SIO CTRL = 0x%04x (select=%d, reset=%d)", 
-                         value, !!(value & CTRL_SELECT), !!(value & CTRL_RESET));
+
+            // Handle transfer enable/disable
+            if (!(value & CTRL_SELECT) || !(value & CTRL_TXEN)) {
+                if (sio_internal.state != STATE_IDLE) {
+                    sio_end_transfer();
+                }
+            } else {
+                if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
+                    sio_begin_transfer();
+                }
+            }
+
+            sio_update_joystat();
             break;
-            
+        }
+
         case 0x0E:  // JOY_BAUD (1F80104Eh)
-            sio->baud = value;
-            LOG_SYSTEM_DEBUG("SIO BAUD = 0x%04x", value);
+            sio_internal.baud = value;
+            SIO_DBG("[SIO] Write JOY_BAUD = 0x%04x", value);
             break;
-            
+
         default:
-            LOG_WARN("SIO write16 to unknown offset: 0x%02x = 0x%04x", offset, value);
             break;
     }
 }
 
 void sio_write32(Sio* sio, uint32_t offset, uint32_t value) {
-    // Write 32-bit value (split into two 16-bit writes)
     sio_write16(sio, offset, value & 0xFFFF);
     sio_write16(sio, offset + 2, (value >> 16) & 0xFFFF);
 }
 
+// ============================================================================
+// PUBLIC INTERFACE
+// ============================================================================
+
 void sio_set_button_state(Sio* sio, uint16_t buttons) {
+    if (buttons != sio_internal.button_state) {
+        static uint16_t last_logged = 0xFFFF;
+        if (buttons != last_logged) {
+            SIO_DBG("[SIO] Button state: 0x%04x (was 0x%04x)", buttons, sio_internal.button_state);
+            last_logged = buttons;
+        }
+    }
+    sio_internal.button_state = buttons;
     sio->button_state = buttons;
 }
 
 void sio_set_controller_connected(Sio* sio, bool connected) {
+    sio_internal.controller_connected = connected;
     sio->controller_connected = connected;
     LOG_INFO("SIO: Controller %s", connected ? "connected" : "disconnected");
+}
+
+// ============================================================================
+// INTERNAL TRANSFER LOGIC (DuckStation-style)
+// ============================================================================
+
+static bool sio_can_transfer(void) {
+    return sio_internal.transmit_buffer_full &&
+           (sio_internal.ctrl & CTRL_SELECT) &&
+           (sio_internal.ctrl & CTRL_TXEN);
+}
+
+static void sio_soft_reset(void) {
+    if (sio_internal.state != STATE_IDLE) {
+        sio_end_transfer();
+    }
+
+    sio_internal.ctrl = 0;
+    sio_internal.stat = STAT_TXRDY | STAT_TXDONE;
+    sio_internal.mode = 0;
+    sio_internal.receive_buffer = 0;
+    sio_internal.receive_buffer_full = false;
+    sio_internal.transmit_buffer = 0;
+    sio_internal.transmit_buffer_full = false;
+    sio_reset_device_transfer_state();
+    sio_update_joystat();
+    SIO_DBG("[SIO] Soft reset");
+}
+
+static void sio_begin_transfer(void) {
+    SIO_DBG("[SIO] BeginTransfer");
+    
+    if (sio_internal.state != STATE_IDLE || !sio_can_transfer()) {
+        return;
+    }
+
+    sio_internal.state = STATE_TRANSMITTING;
+    sio_internal.ctrl |= CTRL_RXEN;
+    sio_internal.transmit_value = sio_internal.transmit_buffer;
+    sio_internal.transmit_buffer_full = false;
+
+    // In DuckStation this would schedule an event after some ticks
+    // For our simplified implementation, do transfer immediately
+    sio_do_transfer();
+}
+
+static void sio_do_transfer(void) {
+    SIO_DBG("[SIO] DoTransfer");
+    
+    uint8_t data_out = sio_internal.transmit_value;
+    uint8_t data_in = 0xFF;
+    bool ack = false;
+
+    // Try to transfer to active device
+    if (sio_internal.active_device == ACTIVE_DEVICE_NONE) {
+        // Autodetect connected device
+        if (sio_internal.controller_connected) {
+            const uint8_t prev_step = sio_internal.controller_transfer_step;
+            data_in = sio_controller_transfer(data_out);
+            // ACK is based on protocol progress, not data value.
+            // Button bytes can legitimately be 0xFF when no buttons are pressed.
+            ack = (sio_internal.controller_transfer_step != prev_step);
+            if (ack) {
+                sio_internal.active_device = ACTIVE_DEVICE_CONTROLLER;
+                SIO_DBG("[SIO] Controller detected");
+            }
+        } else {
+            ack = false;
+        }
+    } else if (sio_internal.active_device == ACTIVE_DEVICE_CONTROLLER) {
+        const uint8_t prev_step = sio_internal.controller_transfer_step;
+        data_in = sio_controller_transfer(data_out);
+        // Continue ACKing while controller exchange advances through steps 0..3.
+        ack = (sio_internal.controller_transfer_step != prev_step);
+    }
+
+    // Store response
+    sio_internal.receive_buffer = data_in;
+    sio_internal.receive_buffer_full = true;
+
+    // Fire RX interrupt if enabled
+    if (sio_internal.ctrl & CTRL_RXINTEN) {
+        sio_trigger_irq("RX");
+    }
+
+    SIO_DBG("[SIO] Transfer done: TX=0x%02x, RX=0x%02x, ACK=%d", data_out, data_in, ack);
+
+    // Device no longer responding
+    if (!ack) {
+        sio_internal.active_device = ACTIVE_DEVICE_NONE;
+        sio_end_transfer();
+    } else {
+        // Device still responding - wait for ACK
+        // In real DuckStation this schedules state = WAITING_FOR_ACK with a timer
+        // For simplicity, we immediately mark ACK
+        sio_internal.state = STATE_WAITING_FOR_ACK;
+        // Simulate ACK delay (in real impl this would be scheduled timer)
+        sio_do_ack();
+    }
+
+    sio_update_joystat();
+}
+
+static void sio_do_ack(void) {
+    SIO_DBG("[SIO] DoACK");
+    
+    sio_internal.stat |= STAT_ACKINPUT;
+
+    // Fire ACK interrupt if enabled
+    if (sio_internal.ctrl & CTRL_ACKINTEN) {
+        sio_trigger_irq("ACK");
+    }
+
+    sio_end_transfer();
+    sio_update_joystat();
+
+    // Chain next transfer if possible
+    if (sio_can_transfer()) {
+        sio_begin_transfer();
+    }
+}
+
+static void sio_end_transfer(void) {
+    SIO_DBG("[SIO] EndTransfer");
+    
+    if (sio_internal.state == STATE_IDLE) {
+        return;  // Already idle
+    }
+
+    sio_internal.state = STATE_IDLE;
+}
+
+static void sio_reset_device_transfer_state(void) {
+    SIO_DBG("[SIO] ResetDeviceTransferState (step=%d)", sio_internal.controller_transfer_step);
+    
+    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    
+    // Only reset transfer step after a complete 4-byte sequence
+    // or if we're not in the middle of a sequence
+    if (sio_internal.controller_transfer_step >= 4) {
+        sio_internal.controller_transfer_step = 0;
+        SIO_DBG("[SIO] Sequence complete, resetting step");
+    } else if (sio_internal.controller_transfer_step > 0) {
+        // Keep step across SELECT toggles - the BIOS does multiple transfers per sequence
+        SIO_DBG("[SIO] Keeping step=%d for next transfer", sio_internal.controller_transfer_step);
+    }
+}
+
+static void sio_update_joystat(void) {
+    sio_internal.stat &= ~(STAT_TXRDY | STAT_RXFIFONEMPTY | STAT_TXDONE);
+
+    if (!sio_internal.transmit_buffer_full) {
+        sio_internal.stat |= STAT_TXRDY;
+    }
+
+    if (sio_internal.receive_buffer_full) {
+        sio_internal.stat |= STAT_RXFIFONEMPTY;
+    }
+
+    if (!sio_internal.transmit_buffer_full && sio_internal.state == STATE_IDLE) {
+        sio_internal.stat |= STAT_TXDONE;
+    }
+}
+
+static void sio_trigger_irq(const char* type) {
+    sio_internal.stat |= STAT_INTR;
+    sio_internal.pending_irq = true;
+    SIO_DBG("[SIO] IRQ: %s", type);
+}
+
+// ============================================================================
+// CONTROLLER PROTOCOL (Digital Pad)
+// ============================================================================
+
+static uint8_t sio_controller_transfer(uint8_t tx_byte) {
+    uint8_t response = 0xFF;
+
+    SIO_DBG("[SIO_CTRL] Transfer step %d, TX=0x%02x, buttons=0x%04x",
+            sio_internal.controller_transfer_step, tx_byte, sio_internal.button_state);
+
+    switch (sio_internal.controller_transfer_step) {
+        case 0:
+            // First byte: check command (0x01 = read state)
+            if (tx_byte == 0x01) {
+                response = CTRL_RESPONSE_ID;  // 0x41 = digital controller
+                sio_internal.controller_transfer_step = 1;
+                SIO_DBG("[SIO_CTRL] Step 0->1: Recevied 0x01, sending controller ID 0x41");
+            } else {
+                response = 0xFF;
+                SIO_DBG("[SIO_CTRL] Step 0: Unknown command 0x%02x", tx_byte);
+            }
+            break;
+
+        case 1:
+            // Second byte: usually data request (0x42 = read digital)
+            response = CTRL_RESPONSE_READY;  // 0x5A
+            sio_internal.controller_transfer_step = 2;
+            SIO_DBG("[SIO_CTRL] Step 1->2: Sending separator 0x5A");
+            break;
+
+        case 2:
+            // Third byte: button state HIGH byte
+            response = (sio_internal.button_state >> 8) & 0xFF;
+            sio_internal.controller_transfer_step = 3;
+            SIO_DBG("[SIO_CTRL] Step 2->3: Sending button_high 0x%02x", response);
+            break;
+
+        case 3:
+            // Fourth byte: button state LOW byte
+            response = sio_internal.button_state & 0xFF;
+            sio_internal.controller_transfer_step = 4;
+            SIO_DBG("[SIO_CTRL] Step 3->4: Sending button_low 0x%02x", response);
+            break;
+
+        case 4:
+        default:
+            // End of transfer - keep returning 0xFF until next transfer
+            response = 0xFF;
+            sio_internal.controller_transfer_step = 4;  // Stay at 4 until reset
+            SIO_DBG("[SIO_CTRL] Step 4+: Transfer complete, EOP");
+            break;
+    }
+
+    SIO_DBG("[SIO_CTRL] Response: 0x%02x", response);
+    return response;
+}
+
+// ============================================================================
+// MEMORY CARD STUBS (Not implemented yet)
+// ============================================================================
+
+bool sio_load_memcard(MemoryCard* card, const char* filepath) {
+    LOG_WARN("Memory card loading not implemented");
+    return false;
+}
+
+bool sio_save_memcard(MemoryCard* card) {
+    LOG_WARN("Memory card saving not implemented");
+    return false;
+}
+
+void sio_create_memcard(MemoryCard* card, const char* filepath) {
+    LOG_WARN("Memory card creation not implemented");
 }

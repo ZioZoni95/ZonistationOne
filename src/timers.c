@@ -297,7 +297,12 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
                 if (t->irq_on_target && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ TRIGGERED on target (mode=0x%04x, counter=%u, target=%u)", 
+                                    i, t->mode, t->counter, t->target);
                     interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
+                } else if (t->irq_on_target) {
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d WOULD trigger IRQ on target but interrupt enable bit not set in mode (mode=0x%04x)", 
+                                    i, t->mode);
                 }
                 t->counter = 0; // Reset on target
                 continue;
@@ -308,6 +313,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
                 if (t->irq_on_ffff && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ TRIGGERED on overflow (mode=0x%04x)", i, t->mode);
                     interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
                 }
                 t->counter = 0; // Always reset on overflow
