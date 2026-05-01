@@ -29,7 +29,8 @@
 #include "cdrom.h"
 #include "cdrom_audio.h"
 #include "log.h"
-#include "event_scheduler.h" // <<< ADDED: Include for event scheduling
+#include "debug_ui.h"
+#include "event_scheduler.h"
 #include "controller.h" // <<< ADDED: Include for gamepad input
 
 
@@ -233,6 +234,9 @@ int main(int argc, char *argv[]) {
     }
     LOG_SYSTEM_INFO("GLEW Initialized. OpenGL Version: %s", glGetString(GL_VERSION));
     check_gl_error("After GLEW Init");
+
+    // Initialize ImGui Debug UI
+    debug_ui_init(window, gl_context);
 
     // --- Emulator Component Initialization ---
     LOG_SYSTEM_WARN("Initializing Emulator Components...");
@@ -464,6 +468,7 @@ int main(int argc, char *argv[]) {
     while (!should_quit) {
         // --- Handle Input/Window Events ---
         while (SDL_PollEvent(&event)) {
+            debug_ui_process_event(&event);
             if (event.type == SDL_QUIT) {
                 LOG_SYSTEM_INFO("SDL_QUIT event received.");
                 should_quit = true;
@@ -532,6 +537,10 @@ int main(int argc, char *argv[]) {
         // --- Render and Display Frame ---
         // Flush any remaining primitives to the GPU
         renderer_draw(&interconnect_state.gpu.renderer);
+        
+        // Render Debug UI
+        debug_ui_render();
+
         // Swap buffers to display the frame
         SDL_GL_SwapWindow(window);
         check_gl_error("After SwapWindow");
@@ -559,6 +568,7 @@ int main(int argc, char *argv[]) {
     // --- Cleanup ---
     LOG_SYSTEM_INFO("Emulation loop finished. Cleaning up...");
     
+    debug_ui_shutdown();
     cdrom_audio_sdl_close();
     cdrom_eject_disc(&interconnect_state.cdrom);
     renderer_destroy(&interconnect_state.gpu.renderer);

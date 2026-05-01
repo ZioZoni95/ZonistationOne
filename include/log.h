@@ -48,6 +48,10 @@ typedef struct {
 } LogCategoryState;
 
 // --- Core Logging Functions ---
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void log_init(void);
 void log_set_level(LogLevel level);
 void log_set_category_enabled(LogCategory category, bool enabled);
@@ -57,6 +61,7 @@ bool log_should_print(LogCategory category, LogLevel level);
 
 // Internal logging function
 void log_print(LogCategory category, LogLevel level, const char* format, ...);
+
 
 // --- Direct Component-Specific Macros (PCSX ReARMed style) ---
 // These call log_print directly to avoid circular definitions
@@ -193,5 +198,9 @@ const char* log_category_name(LogCategory category);
 typedef void (*LogSinkFn)(int category, int level, const char* msg, void* udata);
 void log_add_sink(LogSinkFn fn, void* udata);
 void log_set_stderr_quiet(bool quiet);  // suppress colored stderr (e.g. when only logging to file)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LOG_H

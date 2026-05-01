@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Logging Subsystem**: Migrated to `rxi/log` for multi-sink component-based logging. Includes runtime verbosity control (`--debug`, `--trace`, `--quiet`) and component filtering (PCSX ReARMed style).
+- **ImGui Debug UI**: Integrated Dear ImGui with multi-viewport support (docking branch) allowing debug windows to detach from the main SDL2 emulator window.
 - **CPU cycle model (DuckStation-style)**: `downcount` + `muldiv_completion_tick` fields in `Cpu`
   struct. Execution loop decrements `downcount` per instruction; event dispatcher fires when
   `downcount <= 0` and resets it to `next_event - cpu_cycle_counter`.
