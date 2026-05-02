@@ -31,7 +31,8 @@
 #include "log.h"
 #include "debug_ui.h"
 #include "event_scheduler.h"
-#include "controller.h" // <<< ADDED: Include for gamepad input
+#include "controller.h"
+#include "debugger.h"
 
 
 /*
@@ -428,24 +429,31 @@ int main(int argc, char *argv[]) {
 
         // --- Run Emulation for One Frame ---
         uint32_t cycles_run = 0;
-        
-        while (cycles_run < cycles_per_frame) {
-            uint32_t cycles_remaining = cycles_per_frame - cycles_run;
-            uint32_t to_next_event = eventq_cycles_until_next(&interconnect_state);
-            uint32_t run_chunk = (to_next_event == 0) ? 1 : to_next_event;
-            if (run_chunk > cycles_remaining) {
-                run_chunk = cycles_remaining;
-            }
+        Debugger* dbg = &interconnect_state.debugger;
 
-            for (uint32_t i = 0; i < run_chunk; ++i) {
-                cpu_run_next_instruction(&cpu_state);
-            }
-            
-            // Step timers for the cycles that just ran
-            timers_step(&interconnect_state.timers_state, run_chunk);
+        if (!dbg->paused) {
+            while (cycles_run < cycles_per_frame) {
+                uint32_t cycles_remaining = cycles_per_frame - cycles_run;
+                uint32_t to_next_event = eventq_cycles_until_next(&interconnect_state);
+                uint32_t run_chunk = (to_next_event == 0) ? 1 : to_next_event;
+                if (run_chunk > cycles_remaining) run_chunk = cycles_remaining;
 
-            cycles_run += run_chunk;
+                for (uint32_t i = 0; i < run_chunk; ++i) {
+                    cpu_run_next_instruction(&cpu_state);
+                    if (dbg->paused) goto emulation_paused;
+                }
+
+                timers_step(&interconnect_state.timers_state, run_chunk);
+                cycles_run += run_chunk;
+            }
+        } else if (debug_ui_step_requested()) {
+            // Single-step: execute exactly one instruction from the current PC
+            dbg->step_skip_bp = true;
+            dbg->paused = false;
+            cpu_run_next_instruction(&cpu_state);
+            dbg->paused = true;
         }
+        emulation_paused:;
 
         // --- Render and Display Frame ---
         // Flush any remaining primitives to the GPU

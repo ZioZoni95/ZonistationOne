@@ -59,8 +59,7 @@ typedef struct {
     GLint uniform_raw_texture_loc; // 1 = use raw texture color (no modulation)
     GLint uniform_vram_texture_loc;
     GLint uniform_screen_scale_loc; // Location for screen scaling uniform
-    GLint uniform_tex_window_and_loc; // Location for texture window AND mask
-    GLint uniform_tex_window_or_loc;  // Location for texture window OR mask
+    GLint uniform_tex_window_loc;      // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -156,11 +155,22 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
 
 /**
- * @brief Uploads VRAM data to the GPU texture.
+ * @brief Uploads VRAM data to the GPU texture (full 1024x512).
  * @param renderer Pointer to the Renderer instance.
  * @param vram_data Pointer to the VRAM data (1024x512 uint16_t).
  */
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data);
+
+/**
+ * @brief Uploads a rectangular sub-region of VRAM to the GPU texture.
+ * Uses glTexSubImage2D with GL_UNPACK_ROW_LENGTH for efficiency.
+ * @param renderer  Pointer to the Renderer instance.
+ * @param vram_data Pointer to full 1024x512 VRAM buffer.
+ * @param x, y      Top-left of the dirty region (VRAM coords).
+ * @param w, h      Width and height of the dirty region.
+ */
+void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
+                                uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
 /**
  * @brief Uploads buffered vertex data to the GPU and performs the OpenGL draw call.

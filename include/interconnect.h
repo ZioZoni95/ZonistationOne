@@ -2,6 +2,7 @@
 #define INTERCONNECT_H
 
 #include "event_scheduler.h" // For EVENT_COUNT and SystemEventType
+#include "debugger.h"
 #include <stdint.h>       // For uint32_t, uint16_t etc.
 #include <stdbool.h>      // For bool type
 
@@ -152,6 +153,9 @@ typedef struct Interconnect {
     char tty_input_buf[256];
     int  tty_input_read_idx;
     int  tty_input_write_idx;
+
+    // --- Debugger ---
+    Debugger debugger;
 
 } Interconnect;
 

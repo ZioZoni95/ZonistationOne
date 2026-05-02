@@ -4,6 +4,7 @@
 #include "event_scheduler.h"
 #include "gte.h"
 #include "timers.h"
+#include "debugger.h"
 
 // ============================================================================
 // CPU Execution Loop - DuckStation Style
@@ -71,6 +72,14 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // are derived from the instruction about to execute.
     cpu->current_pc = cpu->pc;
     cpu->in_delay_slot = cpu->branch_taken;
+
+    // --- Breakpoint check (before executing the instruction) ---
+    if (!cpu->inter->debugger.step_skip_bp) {
+        debugger_check_breakpoint(&cpu->inter->debugger, cpu);
+        if (cpu->inter->debugger.paused) return;
+    } else {
+        cpu->inter->debugger.step_skip_bp = false;
+    }
 
     // --- 2. Check for pending interrupt ---
     if (CheckPendingInterrupt(cpu)) {

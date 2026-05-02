@@ -7,6 +7,7 @@
 #include "gpu.h"
 #include "ram.h"
 #include "cpu.h"
+#include "debugger.h"
 
 // --- Initialization ---
 /**
@@ -50,6 +51,8 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     inter->tty_input_read_idx = 0;
     inter->tty_input_write_idx = 0;
     memset(inter->tty_input_buf, 0, sizeof(inter->tty_input_buf));
+
+    debugger_init(&inter->debugger);
 
     LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }

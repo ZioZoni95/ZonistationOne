@@ -12,6 +12,7 @@ void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context);
 void debug_ui_process_event(SDL_Event* event);
 void debug_ui_render(void* cpu_ptr, void* interconnect_ptr);
 void debug_ui_shutdown(void);
+bool debug_ui_step_requested(void); // Consumed once per call (edge-triggered)
 
 #ifdef __cplusplus
 }

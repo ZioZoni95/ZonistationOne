@@ -8,15 +8,21 @@
 #include <string>
 #include <mutex>
 #include <map>
+#include <cstdio>
+#include <cstring>
 
 extern "C" {
 #include "cpu.h"
 #include "interconnect.h"
 #include "renderer.h"
+#include "debugger.h"
 }
 
-// Disassembler from cpu_disasm.c
 extern "C" const char* disassemble_mips(uint32_t instruction, uint32_t pc);
+
+// ---------------------------------------------------------------------------
+// Log subsystem
+// ---------------------------------------------------------------------------
 
 struct LogEntry {
     int level;
@@ -34,49 +40,490 @@ struct LogComponent {
 };
 
 static std::map<LogCategory, LogComponent> g_log_components = {
-    {LOG_CAT_SYSTEM,       {"System Log",       LOG_CAT_SYSTEM,       false, true, true, {}, {}}},
-    {LOG_CAT_CPU,          {"CPU Log",          LOG_CAT_CPU,          false, true, true, {}, {}}},
-    {LOG_CAT_IRQ,          {"IRQ Log",          LOG_CAT_IRQ,          false, true, true, {}, {}}},
-    {LOG_CAT_DMA,          {"DMA Log",          LOG_CAT_DMA,          false, true, true, {}, {}}},
-    {LOG_CAT_GPU,          {"GPU Log",          LOG_CAT_GPU,          false, true, true, {}, {}}},
-    {LOG_CAT_CDROM,        {"CDROM Log",        LOG_CAT_CDROM,        false, true, true, {}, {}}},
-    {LOG_CAT_TIMER,        {"Timer Log",        LOG_CAT_TIMER,        false, true, true, {}, {}}},
-    {LOG_CAT_BIOS,         {"BIOS Log",         LOG_CAT_BIOS,         true,  true, true, {}, {}}}, // Default open
-    {LOG_CAT_INTERCONNECT, {"Interconnect Log", LOG_CAT_INTERCONNECT, false, true, true, {}, {}}},
-    {LOG_CAT_RENDERER,     {"Renderer Log",     LOG_CAT_RENDERER,     false, true, true, {}, {}}},
-    {LOG_CAT_EVENT,        {"Event Log",        LOG_CAT_EVENT,        false, true, true, {}, {}}},
-    {LOG_CAT_GTE,          {"GTE Log",          LOG_CAT_GTE,          false, true, true, {}, {}}},
-    {LOG_CAT_VRAM,         {"VRAM Log",         LOG_CAT_VRAM,         false, true, true, {}, {}}},
-    {LOG_CAT_RAM,          {"RAM Log",          LOG_CAT_RAM,          false, true, true, {}, {}}},
-    {LOG_CAT_DEBUG,        {"Debug Log",        LOG_CAT_DEBUG,        false, true, true, {}, {}}},
-    {LOG_CAT_MDEC,         {"MDEC Log",         LOG_CAT_MDEC,         false, true, true, {}, {}}}
+    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       false, true, true, {}, {}}},
+    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          false, true, true, {}, {}}},
+    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          false, true, true, {}, {}}},
+    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          false, true, true, {}, {}}},
+    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          false, true, true, {}, {}}},
+    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        false, true, true, {}, {}}},
+    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        false, true, true, {}, {}}},
+    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true,  true, true, {}, {}}},
+    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, false, true, true, {}, {}}},
+    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     false, true, true, {}, {}}},
+    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        false, true, true, {}, {}}},
+    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          false, true, true, {}, {}}},
+    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         false, true, true, {}, {}}},
+    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          false, true, true, {}, {}}},
+    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        false, true, true, {}, {}}},
+    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         false, true, true, {}, {}}}
 };
 
 static std::mutex g_log_mutex;
 
-static bool g_show_display = true;
-static bool g_show_disasm = true;
-
 static void log_sink_callback(int category, int level, const char* msg, void* udata) {
     (void)udata;
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    
     auto it = g_log_components.find((LogCategory)category);
     if (it != g_log_components.end()) {
         it->second.buffer.push_back({level, msg});
-        if (it->second.buffer.size() > 5000) {
+        if (it->second.buffer.size() > 5000)
             it->second.buffer.erase(it->second.buffer.begin());
-        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Window visibility flags
+// ---------------------------------------------------------------------------
+
+static bool g_show_display     = true;
+static bool g_show_disasm      = true;
+static bool g_show_registers   = true;
+static bool g_show_breakpoints = false;
+
+// ---------------------------------------------------------------------------
+// Disasm state
+// ---------------------------------------------------------------------------
+
+static bool     g_disasm_follow_pc    = true;
+static uint32_t g_disasm_view_addr    = 0xBFC00000;
+static char     g_goto_addr_buf[12]   = "";
+static bool     g_scroll_to_pc        = false;
+
+// Step edge: set by UI, consumed once by main loop via debug_ui_step_requested()
+static bool g_step_pending = false;
+
+extern "C" bool debug_ui_step_requested(void) {
+    bool v = g_step_pending;
+    g_step_pending = false;
+    return v;
+}
+
+// ---------------------------------------------------------------------------
+// MIPS register names
+// ---------------------------------------------------------------------------
+
+static const char* s_gpr_names[32] = {
+    "zero", "at", "v0", "v1", "a0", "a1", "a2", "a3",
+    "t0",   "t1", "t2", "t3", "t4", "t5", "t6", "t7",
+    "s0",   "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+    "t8",   "t9", "k0", "k1", "gp", "sp", "fp", "ra"
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+static bool dbg_has_bp(Debugger* dbg, uint32_t addr) {
+    for (uint32_t i = 0; i < dbg->breakpoint_count; i++)
+        if (dbg->breakpoints[i] == addr) return true;
+    return false;
+}
+
+static bool dbg_bp_enabled(Debugger* dbg, uint32_t addr) {
+    for (uint32_t i = 0; i < dbg->breakpoint_count; i++)
+        if (dbg->breakpoints[i] == addr) return dbg->bp_enabled[i];
+    return false;
+}
+
+static void dbg_toggle_bp(Debugger* dbg, uint32_t addr) {
+    for (uint32_t i = 0; i < dbg->breakpoint_count; i++) {
+        if (dbg->breakpoints[i] == addr) {
+            dbg->bp_enabled[i] = !dbg->bp_enabled[i];
+            return;
+        }
+    }
+    debugger_add_breakpoint(dbg, addr);
+}
+
+// ---------------------------------------------------------------------------
+// Log window
+// ---------------------------------------------------------------------------
+
+static void draw_component_log_window(LogComponent& comp) {
+    if (!comp.is_open) return;
+
+    ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(comp.name, &comp.is_open)) { ImGui::End(); return; }
+
+    if (ImGui::Button("Clear")) {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        comp.buffer.clear();
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto-scroll", &comp.auto_scroll);
+    ImGui::SameLine();
+    ImGui::Checkbox("Mono", &comp.monospace);
+    ImGui::SameLine();
+    bool copy = ImGui::Button("Copy");
+    ImGui::SameLine();
+    comp.filter.Draw("Filter", -100.0f);
+
+    ImGui::Separator();
+    ImGui::BeginChild("scrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+
+    if (comp.monospace) ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);
+    if (copy) ImGui::LogToClipboard();
+
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        std::vector<int> indices;
+        for (int i = 0; i < (int)comp.buffer.size(); i++)
+            if (comp.filter.PassFilter(comp.buffer[i].message.c_str()))
+                indices.push_back(i);
+
+        ImGuiListClipper clipper;
+        clipper.Begin((int)indices.size());
+        while (clipper.Step()) {
+            for (int n = clipper.DisplayStart; n < clipper.DisplayEnd; n++) {
+                const auto& e = comp.buffer[indices[n]];
+                ImVec4 col = {1,1,1,1};
+                if      (e.level == LOG_LEVEL_ERROR) col = {1.0f, 0.4f, 0.4f, 1.0f};
+                else if (e.level == LOG_LEVEL_WARN)  col = {1.0f, 0.8f, 0.4f, 1.0f};
+                else if (e.level == LOG_LEVEL_DEBUG) col = {0.4f, 0.8f, 1.0f, 1.0f};
+                else if (e.level == LOG_LEVEL_TRACE) col = {0.6f, 0.6f, 0.6f, 1.0f};
+                ImGui::PushStyleColor(ImGuiCol_Text, col);
+                ImGui::TextUnformatted(e.message.c_str());
+                ImGui::PopStyleColor();
+            }
+        }
+        clipper.End();
+    }
+
+    if (copy) ImGui::LogFinish();
+    if (comp.monospace) ImGui::PopFont();
+    if (comp.auto_scroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        ImGui::SetScrollHereY(1.0f);
+
+    ImGui::EndChild();
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// CPU Registers window
+// ---------------------------------------------------------------------------
+
+static void draw_registers_window(Cpu* cpu) {
+    if (!g_show_registers) return;
+
+    ImGui::SetNextWindowSize(ImVec2(260, 520), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("CPU Registers", &g_show_registers)) { ImGui::End(); return; }
+
+    if (!cpu) { ImGui::TextDisabled("No CPU"); ImGui::End(); return; }
+
+    // PC / COP0
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.4f, 1.0f));
+    ImGui::Text("PC   %08X", cpu->current_pc);
+    ImGui::PopStyleColor();
+    ImGui::Text("SR   %08X", cpu->sr);
+    ImGui::Text("Cause%08X", cpu->cause);
+    ImGui::Text("EPC  %08X", cpu->epc);
+    ImGui::Text("HI   %08X  LO   %08X", cpu->hi, cpu->lo);
+    ImGui::Separator();
+
+    // GPR table: 2 columns
+    if (ImGui::BeginTable("gpr", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+        for (int i = 0; i < 32; i++) {
+            ImGui::TableNextColumn();
+            uint32_t val = cpu->regs[i];
+            if (val != 0)
+                ImGui::TextColored(ImVec4(0.9f, 0.9f, 0.5f, 1.0f), "$%-4s %08X", s_gpr_names[i], val);
+            else
+                ImGui::TextDisabled("$%-4s %08X", s_gpr_names[i], val);
+        }
+        ImGui::EndTable();
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// Breakpoints window (PCSX-Redux style)
+// ---------------------------------------------------------------------------
+
+static char g_add_bp_buf[12] = "";
+
+static void draw_breakpoints_window(Interconnect* inter) {
+    if (!g_show_breakpoints) return;
+
+    ImGui::SetNextWindowSize(ImVec2(380, 280), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Breakpoints", &g_show_breakpoints)) { ImGui::End(); return; }
+
+    Debugger* dbg = &inter->debugger;
+
+    if (dbg->breakpoint_count > 0) {
+        static ImGuiTableFlags tflags =
+            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersOuter |
+            ImGuiTableFlags_BordersV | ImGuiTableFlags_RowBg;
+
+        if (ImGui::BeginTable("bptable", 4, tflags)) {
+            ImGui::TableSetupColumn("#",      ImGuiTableColumnFlags_WidthFixed, 24.0f);
+            ImGui::TableSetupColumn("Address",ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn("Active", ImGuiTableColumnFlags_WidthFixed, 48.0f);
+            ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableHeadersRow();
+
+            int to_remove = -1;
+            for (uint32_t i = 0; i < dbg->breakpoint_count; i++) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%d", (int)i);
+
+                ImGui::TableNextColumn();
+                // Clicking the address jumps disasm there
+                char label[32];
+                snprintf(label, sizeof(label), "%08X##bp%d", dbg->breakpoints[i], (int)i);
+                if (ImGui::Button(label)) {
+                    g_disasm_view_addr = dbg->breakpoints[i];
+                    g_disasm_follow_pc = false;
+                    g_show_disasm = true;
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::PushID((int)i);
+                ImGui::Checkbox("##en", &dbg->bp_enabled[i]);
+                ImGui::PopID();
+
+                ImGui::TableNextColumn();
+                ImGui::PushID((int)(i + 1000));
+                if (ImGui::SmallButton("Delete")) to_remove = (int)i;
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+
+            if (to_remove >= 0)
+                debugger_remove_breakpoint(dbg, dbg->breakpoints[to_remove]);
+        }
+    } else {
+        ImGui::TextDisabled("No breakpoints.");
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Add:"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(110.0f);
+    ImGui::InputText("##bpaddr", g_add_bp_buf, sizeof(g_add_bp_buf),
+                     ImGuiInputTextFlags_CharsHexadecimal);
+    ImGui::SameLine();
+    if (ImGui::Button("Add BP")) {
+        char* end;
+        uint32_t addr = (uint32_t)strtoul(g_add_bp_buf, &end, 16);
+        if (end != g_add_bp_buf && *end == '\0')
+            debugger_add_breakpoint(dbg, addr);
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// Disassembly window
+// ---------------------------------------------------------------------------
+
+static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
+    if (!g_show_disasm) return;
+
+    ImGui::SetNextWindowSize(ImVec2(480, 560), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Disassembly", &g_show_disasm)) { ImGui::End(); return; }
+
+    if (!cpu || !inter) { ImGui::TextDisabled("Not initialized"); ImGui::End(); return; }
+
+    Debugger* dbg = &inter->debugger;
+
+    // --- Toolbar ---
+    bool paused = dbg->paused;
+
+    if (!paused) {
+        if (ImGui::Button("Pause")) dbg->paused = true;
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+        if (ImGui::Button(" Run  ")) { dbg->paused = false; g_disasm_follow_pc = true; }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::Button("Step")) { g_step_pending = true; }
+        ImGui::SameLine();
+        if (ImGui::Button("Go to PC")) {
+            g_disasm_view_addr = cpu->current_pc;
+            g_scroll_to_pc = true;
+        }
+    }
+
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.4f, 1.0f));
+    ImGui::Text("  PC: %08X", cpu->current_pc);
+    ImGui::PopStyleColor();
+
+    ImGui::SameLine(0, 20);
+    ImGui::Checkbox("Follow PC", &g_disasm_follow_pc);
+
+    ImGui::Separator();
+
+    // Auto-follow PC when running
+    if (!dbg->paused && g_disasm_follow_pc)
+        g_disasm_view_addr = (cpu->current_pc > 32 * 4) ? (cpu->current_pc - 32 * 4) : 0;
+
+    // Disasm list — show 128 instructions starting from g_disasm_view_addr
+    const int ROWS = 128;
+    const float footer_h = ImGui::GetFrameHeightWithSpacing() + 8.0f;
+    ImGui::BeginChild("##disasmlist", ImVec2(0.0f, -footer_h), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+
+    ImGuiListClipper clipper;
+    clipper.Begin(ROWS);
+
+    // Scroll to PC row when requested
+    if (g_scroll_to_pc || (!dbg->paused && g_disasm_follow_pc)) {
+        uint32_t pc_row = (cpu->current_pc >= g_disasm_view_addr)
+                          ? (cpu->current_pc - g_disasm_view_addr) / 4 : 0;
+        if (pc_row < (uint32_t)ROWS) {
+            float row_height = ImGui::GetTextLineHeightWithSpacing();
+            ImGui::SetScrollY(pc_row * row_height - ImGui::GetWindowHeight() * 0.4f);
+        }
+        g_scroll_to_pc = false;
+    }
+
+    while (clipper.Step()) {
+        for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+            uint32_t addr = g_disasm_view_addr + (uint32_t)(row * 4);
+            uint32_t raw  = interconnect_load32(inter, addr);
+            const char* dis = disassemble_mips(raw, addr);
+
+            bool is_pc = (addr == cpu->current_pc);
+            bool has_bp = dbg_has_bp(dbg, addr);
+            bool bp_en  = has_bp && dbg_bp_enabled(dbg, addr);
+
+            // Row highlight: draw background rect directly into window draw list
+            if (is_pc) {
+                ImVec2 rmin = ImGui::GetCursorScreenPos();
+                rmin.x = ImGui::GetWindowPos().x + ImGui::GetScrollX();
+                ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
+                                rmin.y + ImGui::GetTextLineHeightWithSpacing() };
+                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(70, 70, 0, 130));
+            } else if (has_bp && bp_en) {
+                ImVec2 rmin = ImGui::GetCursorScreenPos();
+                rmin.x = ImGui::GetWindowPos().x + ImGui::GetScrollX();
+                ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
+                                rmin.y + ImGui::GetTextLineHeightWithSpacing() };
+                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(70, 0, 0, 100));
+            }
+
+            // BP marker (clickable dot)
+            ImGui::PushID(row);
+            if (has_bp) {
+                ImVec4 dot_col = bp_en ? ImVec4(1.0f,0.25f,0.25f,1.0f)
+                                       : ImVec4(0.5f,0.25f,0.25f,1.0f);
+                ImGui::PushStyleColor(ImGuiCol_Text, dot_col);
+                if (ImGui::SmallButton("●")) dbg_toggle_bp(dbg, addr);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f,0.3f,0.3f,1.0f));
+                if (ImGui::SmallButton("·")) debugger_add_breakpoint(dbg, addr);
+                ImGui::PopStyleColor();
+            }
+            ImGui::PopID();
+
+            ImGui::SameLine();
+
+            // Arrow + address + disasm
+            if (is_pc) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f,1.0f,0.2f,1.0f));
+                ImGui::Text("▶ %08X  %08X  %s", addr, raw, dis);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::Text("  %08X  %08X  %s", addr, raw, dis);
+            }
+        }
+    }
+    clipper.End();
+    ImGui::EndChild();
+
+    // Footer: Go-to address
+    ImGui::Separator();
+    ImGui::Text("Go to:"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    if (ImGui::InputText("##goto", g_goto_addr_buf, sizeof(g_goto_addr_buf),
+                         ImGuiInputTextFlags_CharsHexadecimal |
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+        char* end;
+        uint32_t addr = (uint32_t)strtoul(g_goto_addr_buf, &end, 16);
+        if (end != g_goto_addr_buf) {
+            g_disasm_view_addr = addr & ~3u;
+            g_disasm_follow_pc = false;
+            g_scroll_to_pc = true;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Go")) {
+        char* end;
+        uint32_t addr = (uint32_t)strtoul(g_goto_addr_buf, &end, 16);
+        if (end != g_goto_addr_buf) {
+            g_disasm_view_addr = addr & ~3u;
+            g_disasm_follow_pc = false;
+            g_scroll_to_pc = true;
+        }
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// PS1 Display window
+// ---------------------------------------------------------------------------
+
+static void draw_ps1_display(GLuint texture_id) {
+    if (!g_show_display) return;
+
+    ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    if (ImGui::Begin("PS1 Display", &g_show_display,
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImVec2 size = ImGui::GetContentRegionAvail();
+        if (texture_id)
+            ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(0, 1), ImVec2(1, 0));
+        else
+            ImGui::TextDisabled("Display not ready");
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// ---------------------------------------------------------------------------
+// Dockspace initial layout
+// ---------------------------------------------------------------------------
+
+static void setup_dockspace(ImGuiID dockspace_id) {
+    static bool first_time = true;
+    if (!first_time) return;
+    first_time = false;
+
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+    ImGuiID main = dockspace_id;
+    ImGuiID right = ImGui::DockBuilderSplitNode(main, ImGuiDir_Right, 0.38f, nullptr, &main);
+    ImGuiID right_bottom;
+    ImGuiID right_top = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.62f, nullptr, &right_bottom);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(main, ImGuiDir_Down, 0.22f, nullptr, &main);
+
+    ImGui::DockBuilderDockWindow("PS1 Display",   main);
+    ImGui::DockBuilderDockWindow("Disassembly",   right_top);
+    ImGui::DockBuilderDockWindow("CPU Registers", right_bottom);
+    ImGui::DockBuilderDockWindow("Breakpoints",   right_bottom);
+    ImGui::DockBuilderDockWindow("BIOS",          bottom);
+
+    for (auto& pair : g_log_components) {
+        if (pair.second.category != LOG_CAT_BIOS)
+            ImGui::DockBuilderDockWindow(pair.second.name, bottom);
+    }
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;           // Enable Docking
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;         // Enable Multi-Viewport / Platform Windows
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
     ImGui::StyleColorsDark();
 
@@ -96,240 +543,133 @@ extern "C" void debug_ui_process_event(SDL_Event* event) {
     ImGui_ImplSDL2_ProcessEvent(event);
 }
 
-static void draw_component_log_window(LogComponent& comp) {
-    if (!comp.is_open) return;
-
-    ImGui::SetNextWindowSize(ImVec2(500, 300), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(comp.name, &comp.is_open)) {
-        ImGui::End();
-        return;
-    }
-
-    if (ImGui::Button("Clear")) {
-        std::lock_guard<std::mutex> lock(g_log_mutex);
-        comp.buffer.clear();
-    }
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto-scroll", &comp.auto_scroll);
-    ImGui::SameLine();
-    ImGui::Checkbox("Monospace", &comp.monospace);
-    ImGui::SameLine();
-    bool copy = ImGui::Button("Copy");
-    ImGui::SameLine();
-    comp.filter.Draw("Filter", -100.0f);
-
-    ImGui::Separator();
-    ImGui::BeginChild("scrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
-
-    if (comp.monospace) ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);
-
-    if (copy) ImGui::LogToClipboard();
-
-    {
-        std::lock_guard<std::mutex> lock(g_log_mutex);
-        
-        std::vector<int> line_offsets;
-        for (int i = 0; i < (int)comp.buffer.size(); i++) {
-            const auto& entry = comp.buffer[i];
-            if (comp.filter.PassFilter(entry.message.c_str())) {
-                line_offsets.push_back(i);
-            }
-        }
-
-        ImGuiListClipper clipper;
-        clipper.Begin(line_offsets.size());
-        while (clipper.Step()) {
-            for (int line_no = clipper.DisplayStart; line_no < clipper.DisplayEnd; line_no++) {
-                const auto& entry = comp.buffer[line_offsets[line_no]];
-                
-                ImVec4 color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                if (entry.level == LOG_LEVEL_ERROR) color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
-                else if (entry.level == LOG_LEVEL_WARN) color = ImVec4(1.0f, 0.8f, 0.4f, 1.0f);
-                else if (entry.level == LOG_LEVEL_DEBUG) color = ImVec4(0.4f, 0.8f, 1.0f, 1.0f);
-                else if (entry.level == LOG_LEVEL_TRACE) color = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
-
-                ImGui::PushStyleColor(ImGuiCol_Text, color);
-                ImGui::TextUnformatted(entry.message.c_str());
-                ImGui::PopStyleColor();
-            }
-        }
-        clipper.End();
-    }
-
-    if (copy) ImGui::LogFinish();
-
-    if (comp.monospace) ImGui::PopFont();
-
-    if (comp.auto_scroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-        ImGui::SetScrollHereY(1.0f);
-
-    ImGui::EndChild();
-    ImGui::End();
-}
-
-static void draw_disasm_window(Cpu* cpu, Interconnect* interconnect) {
-    if (!g_show_disasm) return;
-
-    ImGui::SetNextWindowSize(ImVec2(400, 500), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("CPU Disassembly", &g_show_disasm)) {
-        ImGui::End();
-        return;
-    }
-
-    if (!cpu || !interconnect) {
-        ImGui::Text("CPU/Interconnect not initialized.");
-        ImGui::End();
-        return;
-    }
-
-    uint32_t pc = cpu->pc;
-    uint32_t start_pc = (pc > 0x40) ? (pc - 0x40) : 0;
-    uint32_t end_pc = pc + 0x100;
-
-    ImGui::BeginChild("DisasmScroll", ImVec2(0, 0), true);
-    for (uint32_t current_addr = start_pc; current_addr < end_pc; current_addr += 4) {
-        uint32_t instruction = interconnect_load32(interconnect, current_addr);
-        const char* disasm_text = disassemble_mips(instruction, current_addr);
-
-        if (current_addr == pc) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow for current PC
-            ImGui::Text("-> %08X: %08X  %s", current_addr, instruction, disasm_text);
-            ImGui::PopStyleColor();
-            
-            // Auto scroll to PC if out of view
-            if (ImGui::GetScrollY() == 0 || ImGui::GetScrollY() == ImGui::GetScrollMaxY()) {
-                ImGui::SetScrollHereY(0.5f);
-            }
-        } else {
-            ImGui::Text("   %08X: %08X  %s", current_addr, instruction, disasm_text);
-        }
-    }
-    ImGui::EndChild();
-
-    ImGui::End();
-}
-
-static void draw_ps1_display(GLuint texture_id) {
-    if (!g_show_display) return;
-
-    ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    if (ImGui::Begin("PS1 Display", &g_show_display, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-        ImVec2 size = ImGui::GetContentRegionAvail();
-        if (texture_id) {
-            ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(0, 1), ImVec2(1, 0)); // UV flipped for OpenGL
-        } else {
-            ImGui::Text("Display not initialized.");
-        }
-    }
-    ImGui::End();
-    ImGui::PopStyleVar();
-}
-
-static void setup_dockspace(ImGuiID dockspace_id) {
-    static bool first_time = true;
-    if (first_time) {
-        first_time = false;
-        
-        ImGui::DockBuilderRemoveNode(dockspace_id);
-        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-        ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
-
-        ImGuiID dock_main_id = dockspace_id;
-        ImGuiID dock_right_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.35f, nullptr, &dock_main_id);
-        ImGuiID dock_down_id = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.25f, nullptr, &dock_main_id);
-
-        ImGui::DockBuilderDockWindow("PS1 Display", dock_main_id);
-        ImGui::DockBuilderDockWindow("CPU Disassembly", dock_right_id);
-        ImGui::DockBuilderDockWindow("BIOS Log", dock_down_id);
-        
-        // All other logs will dock to the bottom by default if opened
-        for (auto& pair : g_log_components) {
-            if (pair.second.category != LOG_CAT_BIOS) {
-                ImGui::DockBuilderDockWindow(pair.second.name, dock_down_id);
-            }
-        }
-        ImGui::DockBuilderFinish(dockspace_id);
-    }
-}
-
 extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     Cpu* cpu = (Cpu*)cpu_ptr;
-    Interconnect* interconnect = (Interconnect*)interconnect_ptr;
+    Interconnect* inter = (Interconnect*)interconnect_ptr;
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    // Setup Main Menu Bar
+    // --- Main Menu Bar ---
     if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::BeginMenu("Views")) {
-            ImGui::MenuItem("PS1 Display", NULL, &g_show_display);
-            ImGui::MenuItem("CPU Disassembly", NULL, &g_show_disasm);
-            ImGui::Separator();
-            for (auto& pair : g_log_components) {
-                ImGui::MenuItem(pair.second.name, NULL, &pair.second.is_open);
+
+        // Emulator menu
+        if (ImGui::BeginMenu("Emulator")) {
+            Debugger* dbg = inter ? &inter->debugger : nullptr;
+            bool paused = dbg && dbg->paused;
+            if (!paused) {
+                if (ImGui::MenuItem("Pause", "F5")) { if (dbg) dbg->paused = true; }
+            } else {
+                if (ImGui::MenuItem("Run",   "F5")) { if (dbg) { dbg->paused = false; g_disasm_follow_pc = true; } }
+                if (ImGui::MenuItem("Step",  "F11")) g_step_pending = true;
             }
             ImGui::EndMenu();
         }
-        
+
+        // Debug menu
+        if (ImGui::BeginMenu("Debug")) {
+            ImGui::MenuItem("Disassembly",   nullptr, &g_show_disasm);
+            ImGui::MenuItem("CPU Registers", nullptr, &g_show_registers);
+            ImGui::MenuItem("Breakpoints",   nullptr, &g_show_breakpoints);
+            ImGui::MenuItem("PS1 Display",   nullptr, &g_show_display);
+            ImGui::EndMenu();
+        }
+
+        // Logs menu
+        if (ImGui::BeginMenu("Logs")) {
+            if (ImGui::MenuItem("Open All")) {
+                for (auto& p : g_log_components) p.second.is_open = true;
+            }
+            if (ImGui::MenuItem("Close All")) {
+                for (auto& p : g_log_components) p.second.is_open = false;
+            }
+            ImGui::Separator();
+            for (auto& pair : g_log_components)
+                ImGui::MenuItem(pair.second.name, nullptr, &pair.second.is_open);
+            ImGui::EndMenu();
+        }
+
+        // Options menu
         if (ImGui::BeginMenu("Options")) {
             extern LogLevel current_log_level;
             int level = (int)current_log_level;
-            ImGui::Text("Global Log Level:");
+            ImGui::TextUnformatted("Log Level:");
             if (ImGui::RadioButton("Silent", level == LOG_LEVEL_SILENT)) log_set_level(LOG_LEVEL_SILENT);
-            if (ImGui::RadioButton("Error", level == LOG_LEVEL_ERROR)) log_set_level(LOG_LEVEL_ERROR);
-            if (ImGui::RadioButton("Warn", level == LOG_LEVEL_WARN)) log_set_level(LOG_LEVEL_WARN);
-            if (ImGui::RadioButton("Info", level == LOG_LEVEL_INFO)) log_set_level(LOG_LEVEL_INFO);
-            if (ImGui::RadioButton("Debug", level == LOG_LEVEL_DEBUG)) log_set_level(LOG_LEVEL_DEBUG);
-            if (ImGui::RadioButton("Trace", level == LOG_LEVEL_TRACE)) log_set_level(LOG_LEVEL_TRACE);
+            if (ImGui::RadioButton("Error",  level == LOG_LEVEL_ERROR))  log_set_level(LOG_LEVEL_ERROR);
+            if (ImGui::RadioButton("Warn",   level == LOG_LEVEL_WARN))   log_set_level(LOG_LEVEL_WARN);
+            if (ImGui::RadioButton("Info",   level == LOG_LEVEL_INFO))   log_set_level(LOG_LEVEL_INFO);
+            if (ImGui::RadioButton("Debug",  level == LOG_LEVEL_DEBUG))  log_set_level(LOG_LEVEL_DEBUG);
+            if (ImGui::RadioButton("Trace",  level == LOG_LEVEL_TRACE))  log_set_level(LOG_LEVEL_TRACE);
             ImGui::EndMenu();
         }
-        
+
+        // Status: show PAUSED indicator in menu bar
+        if (inter && inter->debugger.paused) {
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - 80.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+            ImGui::TextUnformatted("  [PAUSED]  ");
+            ImGui::PopStyleColor();
+        }
+
         ImGui::EndMainMenuBar();
     }
 
-    // Create a full-screen dockspace for the ImGui host window
+    // --- Full-screen DockSpace ---
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::SetNextWindowViewport(viewport->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::Begin("DockSpace Demo", nullptr, window_flags);
+    ImGuiWindowFlags dock_flags =
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoNavFocus;
+    ImGui::Begin("##DockHost", nullptr, dock_flags);
     ImGui::PopStyleVar(3);
 
-    ImGuiID dockspace_id = ImGui::GetID("MyDockSpace");
+    ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
     ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
     setup_dockspace(dockspace_id);
 
-    // Render inner windows
-    for (auto& pair : g_log_components) {
+    // Draw windows
+    draw_disasm_window(cpu, inter);
+    draw_registers_window(cpu);
+    if (inter) draw_breakpoints_window(inter);
+
+    for (auto& pair : g_log_components)
         draw_component_log_window(pair.second);
-    }
-    
-    draw_disasm_window(cpu, interconnect);
-    
+
     GLuint tex_id = 0;
-    if (interconnect) {
-        tex_id = renderer_get_display_texture(&interconnect->gpu.renderer);
-    }
+    if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
     draw_ps1_display(tex_id);
 
-    ImGui::End(); // End DockSpace
+    ImGui::End(); // DockHost
+
+    // Keyboard shortcuts (F5 / F11) — processed when ImGui has focus
+    if (!ImGui::GetIO().WantTextInput && inter) {
+        Debugger* dbg = &inter->debugger;
+        if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
+            if (dbg->paused) { dbg->paused = false; g_disasm_follow_pc = true; }
+            else dbg->paused = true;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_F11) && dbg->paused)
+            g_step_pending = true;
+    }
 
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     ImGuiIO& io = ImGui::GetIO();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
-        SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
+        SDL_Window* bkp_win = SDL_GL_GetCurrentWindow();
+        SDL_GLContext bkp_ctx = SDL_GL_GetCurrentContext();
         ImGui::UpdatePlatformWindows();
         ImGui::RenderPlatformWindowsDefault();
-        SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
+        SDL_GL_MakeCurrent(bkp_win, bkp_ctx);
     }
 }
 
@@ -338,4 +678,3 @@ extern "C" void debug_ui_shutdown(void) {
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 }
-

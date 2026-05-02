@@ -88,8 +88,7 @@ const char* fragment_shader_source =
     "\n"
     "uniform usampler2D vram_texture;\n"  // Integer sampler for R16UI
     "uniform int use_texture;\n"
-    "uniform uvec2 tex_window_and;\n"
-    "uniform uvec2 tex_window_or;\n"
+    "uniform ivec4 u_texWindow; // (and_x, and_y, or_x, or_y) pre-computed masks\n"
     "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
@@ -118,8 +117,8 @@ const char* fragment_shader_source =
     "        // Apply Texture Window to UV coordinates (0-255)\n"
     "        uint u_raw = uint(tex_coord.x) & 0xFFu;\n"
     "        uint v_raw = uint(tex_coord.y) & 0xFFu;\n"
-    "        uint u = (u_raw & tex_window_and.x) | tex_window_or.x;\n"
-    "        uint v = (v_raw & tex_window_and.y) | tex_window_or.y;\n"
+    "        uint u = (u_raw & uint(u_texWindow.x)) | uint(u_texWindow.z);\n"
+    "        uint v = (v_raw & uint(u_texWindow.y)) | uint(u_texWindow.w);\n"
     "\n"
     "        vec3 tex_rgb = vec3(0.0);\n"
     "        uint raw_color = 0u;\n"
@@ -459,19 +458,16 @@ bool renderer_init(Renderer* renderer) {
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
     renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
-    renderer->uniform_tex_window_and_loc = glGetUniformLocation(renderer->shader_program, "tex_window_and");
-    renderer->uniform_tex_window_or_loc = glGetUniformLocation(renderer->shader_program, "tex_window_or");
+    renderer->uniform_tex_window_loc = glGetUniformLocation(renderer->shader_program, "u_texWindow");
 
     LOG_RENDERER_DEBUG("Found uniform 'use_texture' at location: %d\n", renderer->uniform_use_texture_loc);
     LOG_RENDERER_DEBUG("Found uniform 'raw_texture' at location: %d\n", renderer->uniform_raw_texture_loc);
     LOG_RENDERER_DEBUG("Found uniform 'vram_texture' at location: %d\n", renderer->uniform_vram_texture_loc);
-    LOG_RENDERER_DEBUG("Found uniform 'tex_window_and' at location: %d\n", renderer->uniform_tex_window_and_loc);
-    LOG_RENDERER_DEBUG("Found uniform 'tex_window_or' at location: %d\n", renderer->uniform_tex_window_or_loc);
+    LOG_RENDERER_DEBUG("Found uniform 'u_texWindow' at location: %d\n", renderer->uniform_tex_window_loc);
 
-    // Set default texture window (no masking)
+    // Default texture window: no masking (and_x=0xFF, and_y=0xFF, or_x=0, or_y=0)
     glUseProgram(renderer->shader_program);
-    if (renderer->uniform_tex_window_and_loc >= 0) glUniform2ui(renderer->uniform_tex_window_and_loc, 0xFF, 0xFF);
-    if (renderer->uniform_tex_window_or_loc >= 0) glUniform2ui(renderer->uniform_tex_window_or_loc, 0, 0);
+    if (renderer->uniform_tex_window_loc >= 0) glUniform4i(renderer->uniform_tex_window_loc, 0xFF, 0xFF, 0, 0);
     if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
     glUseProgram(0);
 
@@ -673,11 +669,8 @@ void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mas
     renderer_draw(renderer);
 
     glUseProgram(renderer->shader_program);
-    if (renderer->uniform_tex_window_and_loc >= 0) {
-        glUniform2ui(renderer->uniform_tex_window_and_loc, and_x, and_y);
-    }
-    if (renderer->uniform_tex_window_or_loc >= 0) {
-        glUniform2ui(renderer->uniform_tex_window_or_loc, or_x, or_y);
+    if (renderer->uniform_tex_window_loc >= 0) {
+        glUniform4i(renderer->uniform_tex_window_loc, (GLint)and_x, (GLint)and_y, (GLint)or_x, (GLint)or_y);
     }
     glUseProgram(0);
 }
@@ -686,6 +679,17 @@ void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     if (!renderer->initialized) return;
     glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, vram_data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
+                                uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    if (!renderer->initialized || w == 0 || h == 0) return;
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 1024);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RED_INTEGER, GL_UNSIGNED_SHORT,
+                    &vram_data[(uint32_t)y * 1024u + x]);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 

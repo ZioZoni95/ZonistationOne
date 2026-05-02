@@ -2,51 +2,57 @@
  * debugger.c
  * Implementation of the simple debugger component.
  */
-#include "debugger.h" // Include own header (which now includes cpu.h)
-// #include "cpu.h"   // This include is now redundant here, but harmless
+#include "debugger.h"
+#include "cpu.h"
 #include <stdio.h>
 #include <string.h>
 #include "log.h"
-
-// NOTE: All function definitions use 'Cpu*' to match the prototypes
-//       which now see the typedef via debugger.h including cpu.h.
 
 /**
  * @brief Initializes the debugger state.
  */
 void debugger_init(Debugger* dbg) {
-    LOG_DEBUGGER_INFO("Debugger initialized");
-    if (log_get_level() >= LOG_LEVEL_DEBUG) {
-    printf("Initializing Debugger...\n");
-    }
     dbg->breakpoint_count = 0;
     dbg->read_watchpoint_count = 0;
     dbg->write_watchpoint_count = 0;
     dbg->paused = false;
+    dbg->step_skip_bp = false;
+    for (int i = 0; i < MAX_BREAKPOINTS; i++) dbg->bp_enabled[i] = true;
 }
 
 // ============================================================================
 // Breakpoint Management
 // ============================================================================
 bool debugger_add_breakpoint(Debugger* dbg, uint32_t addr) {
-    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) if (dbg->breakpoints[i] == addr) { if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint at 0x%08x already exists.\n", addr); return true; }
-    if (dbg->breakpoint_count >= MAX_BREAKPOINTS) { if (log_get_level() >= LOG_LEVEL_WARN) fprintf(stderr, "Debugger Error: Cannot add breakpoint at 0x%08x. Maximum (%d) reached.\n", addr, MAX_BREAKPOINTS); return false; }
-    dbg->breakpoints[dbg->breakpoint_count++] = addr; if (log_get_level() >= LOG_LEVEL_INFO) LOG_DEBUGGER_INFO("[DEBUGGER] Breakpoint added at 0x%08x", addr); return true;
-}
-bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
-    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) { if (dbg->breakpoints[i] == addr) { dbg->breakpoints[i] = dbg->breakpoints[--dbg->breakpoint_count]; if (log_get_level() >= LOG_LEVEL_INFO) LOG_DEBUGGER_INFO("[DEBUGGER] Breakpoint removed at 0x%08x", addr); return true; }}
-    if (log_get_level() >= LOG_LEVEL_DEBUG) printf("Debugger: Breakpoint at 0x%08x not found for removal.\n", addr); return false;
+    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i)
+        if (dbg->breakpoints[i] == addr) return true;
+    if (dbg->breakpoint_count >= MAX_BREAKPOINTS) return false;
+    uint32_t idx = dbg->breakpoint_count++;
+    dbg->breakpoints[idx] = addr;
+    dbg->bp_enabled[idx] = true;
+    return true;
 }
 
-// DEFINITION uses 'Cpu*'
-void debugger_check_breakpoint(Debugger* dbg, Cpu* cpu) {
-    if (dbg->paused) return;
-    uint32_t current_pc = cpu->current_pc; // Access okay because cpu.h is included
+bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
     for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) {
-        if (dbg->breakpoints[i] == current_pc) {
-            char reason_str[64];
-            snprintf(reason_str, sizeof(reason_str), "Breakpoint hit at PC=0x%08x", current_pc);
-            debugger_handle_break(dbg, cpu, reason_str);
+        if (dbg->breakpoints[i] == addr) {
+            uint32_t last = --dbg->breakpoint_count;
+            dbg->breakpoints[i] = dbg->breakpoints[last];
+            dbg->bp_enabled[i]  = dbg->bp_enabled[last];
+            return true;
+        }
+    }
+    return false;
+}
+
+void debugger_check_breakpoint(Debugger* dbg, struct Cpu* cpu) {
+    if (dbg->paused) return;
+    uint32_t current_pc = ((Cpu*)cpu)->current_pc;
+    for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) {
+        if (dbg->bp_enabled[i] && dbg->breakpoints[i] == current_pc) {
+            char reason[64];
+            snprintf(reason, sizeof(reason), "Breakpoint at 0x%08x", current_pc);
+            debugger_handle_break(dbg, cpu, reason);
             return;
         }
     }
@@ -158,23 +164,16 @@ bool debugger_remove_write_watchpoint(Debugger* dbg, uint32_t addr) {
  * @param addr The starting memory address being read from.
  * @param size The size of the read access (1, 2, or 4 bytes).
  */
-// Definition uses 'struct Cpu*' to match header
 void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
-    if (dbg->paused) return; // Don't check if already paused
-
-    // Iterate through active read watchpoints
+    if (dbg->paused) return;
+    Cpu* c = (Cpu*)cpu;
     for (uint32_t i = 0; i < dbg->read_watchpoint_count; ++i) {
-        uint32_t wp_addr = dbg->read_watchpoints[i];
-
-        // Check if the watchpoint address falls within the range being accessed:
-        // Access range is [addr, addr + size)
-        if (wp_addr >= addr && wp_addr < (addr + size)) {
-             char reason_str[100];
-             snprintf(reason_str, sizeof(reason_str),
-                      "Read watchpoint triggered for wp@0x%08x (Access Addr=0x%08x, Size=%u, PC=0x%08x)",
-                      wp_addr, addr, size, cpu->current_pc); // Access member okay
-             debugger_handle_break(dbg, cpu, reason_str); // Pass 'struct Cpu*'
-             return; // Found a match, trigger break and exit check
+        uint32_t wp = dbg->read_watchpoints[i];
+        if (wp >= addr && wp < (addr + size)) {
+            char reason[100];
+            snprintf(reason, sizeof(reason), "Read watchpoint 0x%08x (PC=0x%08x)", wp, c->current_pc);
+            debugger_handle_break(dbg, cpu, reason);
+            return;
         }
     }
 }
@@ -186,23 +185,16 @@ void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t add
  * @param addr The starting memory address being written to.
  * @param size The size of the write access (1, 2, or 4 bytes).
  */
-// Definition uses 'struct Cpu*' to match header
 void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
-     if (dbg->paused) return; // Don't check if already paused
-
-     // Iterate through active write watchpoints
-     for (uint32_t i = 0; i < dbg->write_watchpoint_count; ++i) {
-        uint32_t wp_addr = dbg->write_watchpoints[i];
-
-        // Check if the watchpoint address falls within the range being accessed:
-        // Access range is [addr, addr + size)
-        if (wp_addr >= addr && wp_addr < (addr + size)) {
-             char reason_str[100];
-             snprintf(reason_str, sizeof(reason_str),
-                      "Write watchpoint triggered for wp@0x%08x (Access Addr=0x%08x, Size=%u, PC=0x%08x)",
-                      wp_addr, addr, size, cpu->current_pc); // Access member okay
-             debugger_handle_break(dbg, cpu, reason_str); // Pass 'struct Cpu*'
-             return; // Found a match, trigger break and exit check
+    if (dbg->paused) return;
+    Cpu* c = (Cpu*)cpu;
+    for (uint32_t i = 0; i < dbg->write_watchpoint_count; ++i) {
+        uint32_t wp = dbg->write_watchpoints[i];
+        if (wp >= addr && wp < (addr + size)) {
+            char reason[100];
+            snprintf(reason, sizeof(reason), "Write watchpoint 0x%08x (PC=0x%08x)", wp, c->current_pc);
+            debugger_handle_break(dbg, cpu, reason);
+            return;
         }
     }
 }
@@ -211,16 +203,7 @@ void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t ad
 // Break Handler
 // ============================================================================
 
-// DEFINITION uses 'Cpu*'
-void debugger_handle_break(Debugger* dbg, Cpu* cpu, const char* reason) {
-    printf("\n--- Debugger Break ---\n");
-    printf("Reason: %s\n", reason);
-    printf("PC:     0x%08x\n", cpu->current_pc); // Access okay
-    printf(" R4(a0): %08x  R5(a1): %08x  R6(a2): %08x  R7(a3): %08x\n",
-           cpu->regs[4], cpu->regs[5], cpu->regs[6], cpu->regs[7]);
-    printf(" R8(t0): %08x  R9(t1): %08x R10(t2): %08x R11(t3): %08x\n",
-           cpu->regs[8], cpu->regs[9], cpu->regs[10], cpu->regs[11]);
-    dbg->paused = true; // Signal the main loop to pause
-    printf("Execution Paused. (Implement resume mechanism in main loop)\n");
-    printf("----------------------\n");
+void debugger_handle_break(Debugger* dbg, struct Cpu* cpu, const char* reason) {
+    (void)cpu; (void)reason;
+    dbg->paused = true;
 }

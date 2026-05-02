@@ -126,6 +126,16 @@ static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: upload VRAM only when dirty
+// ---------------------------------------------------------------------------
+static inline void upload_vram_if_dirty(Gpu* gpu) {
+    if (gpu->vram_dirty) {
+        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
+        gpu->vram_dirty = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helper: Draw a rectangle as a quad
 // ---------------------------------------------------------------------------
 static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t h,
@@ -144,11 +154,10 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
 
     bool use_texture = textured && tex;
 
+    if (use_texture) upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
 
     if (use_texture) {
-        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
-        gpu->vram_dirty = false;
         // Apply texture flip if enabled (for rectangle primitives)
         // Force neutral gray color for raw texture mode (no vertex color modulation)
         if (raw_texture) {
@@ -188,16 +197,6 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
 static inline uint16_t make_tpage(Gpu* gpu) {
     return (uint16_t)(gpu->page_base_x | (gpu->page_base_y << 4) |
                       ((uint16_t)gpu->texture_depth << 7));
-}
-
-// ---------------------------------------------------------------------------
-// Helper: upload VRAM only when dirty
-// ---------------------------------------------------------------------------
-static inline void upload_vram_if_dirty(Gpu* gpu) {
-    if (gpu->vram_dirty) {
-        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
-        gpu->vram_dirty = false;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1050,8 +1049,8 @@ static void gp0_copy_rectangle(Gpu* gpu) {
             vram_write_masked(gpu, doff, pixel);
         }
     }
-    gpu->vram_dirty = true;
-    renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
+    renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
+                              dst_x, dst_y, w, h);
     gpu->vram_dirty = false;
 }
 
@@ -1331,8 +1330,9 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
         gpu->gp0_words_remaining--;
         if (gpu->gp0_words_remaining == 0) {
             gpu->gp0_mode = GP0_MODE_COMMAND;
-            gpu->vram_dirty = true;
-            renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
+            renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
+                                      gpu->vram_load_x, gpu->vram_load_y,
+                                      gpu->vram_load_w, gpu->vram_load_h);
             gpu->vram_dirty = false;
             LOG_GPU_DEBUG("GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
                          gpu->vram_load_x, gpu->vram_load_y,
