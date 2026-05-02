@@ -166,6 +166,8 @@ typedef struct Cdrom {
     CdromCommand second_response_cmd;
     uint8_t      pending_params[16];
     uint8_t      pending_param_count;
+    bool         cmd_event_pending;     /* guard: command event slot active */
+    bool         second_event_pending;  /* guard: second_response event slot active */
 
     /* Second response data buffer (for async responses) */
     uint8_t second_response_data[16];
@@ -248,6 +250,9 @@ bool cdrom_has_pending_interrupt(Cdrom *cdrom);
 
 /* Audio frame for SPU/SDL (one stereo pair) */
 void cdrom_get_audio_frame(Cdrom *cdrom, int16_t *left, int16_t *right);
+
+/* DMA: read one 32-bit word from armed sector buffer (CDROM → RAM channel 3) */
+uint32_t cdrom_dma_read_word(Cdrom *cdrom);
 
 /* =========================================================================
  * FIFO Inline Functions

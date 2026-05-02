@@ -9,7 +9,7 @@
 void spu_init(Spu* spu) {
     if (!spu) return;
     memset(spu->regs, 0, sizeof(spu->regs));
-    LOG_INTERCONNECT_DEBUG("SPU: initialized (MMIO %08x-%08x)", SPU_START, SPU_END);
+    LOG_INTERCONNECT_DEBUG("[SPU] SPU: initialized (MMIO %08x-%08x)", SPU_START, SPU_END);
 }
 
 static inline int spu_offset_for_addr(uint32_t physical_addr) {
@@ -32,8 +32,7 @@ uint16_t spu_read16(struct Interconnect* inter, uint32_t physical_addr) {
 
     uint32_t c = access_counts[idx];
     if (c <= 5 || (c % 100) == 0) {
-        LOG_INTERCONNECT_TRACE("SPU READ16 @ %08x idx=%03d count=%u -> 0x%04x", physical_addr, idx, c, val);
-    }
+}
 
     return val;
 }
@@ -58,8 +57,7 @@ void spu_write16(struct Interconnect* inter, uint32_t physical_addr, uint16_t va
     write_counts[idx]++;
     uint32_t c = write_counts[idx];
     if (c <= 5 || (c % 100) == 0) {
-        LOG_INTERCONNECT_TRACE("SPU WRITE16 @ %08x idx=%03d count=%u: 0x%04x -> 0x%04x", physical_addr, idx, c, prev, value);
-    }
+}
 }
 
 void spu_write32(struct Interconnect* inter, uint32_t physical_addr, uint32_t value) {

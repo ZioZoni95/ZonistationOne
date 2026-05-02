@@ -397,7 +397,7 @@ void gte_ncds(Gte* gte, uint32_t instruction);
 void gte_ncdt(Gte* gte, uint32_t instruction);
 void gte_dpcs(Gte* gte, uint32_t instruction);
 void gte_dpct(Gte* gte, uint32_t instruction);
-void gte_dcpl(Gte* gte);
+void gte_dcpl(Gte* gte, uint32_t instruction);
 void gte_intpl(Gte* gte);
 void gte_gpf(Gte* gte, uint32_t instruction);
 void gte_gpl(Gte* gte, uint32_t instruction);
@@ -407,9 +407,9 @@ void gte_avsz4(Gte* gte);
 // --- GTE Initialization ---
 
 void gte_init(Gte* gte) {
-    LOG_GTE_INFO("GTE initialized");
+    LOG_GTE_INFO("[GTE] GTE initialized");
     
-    LOG_GTE_DEBUG("Initializing GTE...\n");
+    LOG_GTE_DEBUG("[GTE] Initializing GTE...");
     
     // Clear all data registers
     memset(gte->data, 0, sizeof(gte->data));
@@ -421,14 +421,14 @@ void gte_init(Gte* gte) {
     gte->busy = false;
     gte->cycles_remaining = 0;
     
-    LOG_GTE_DEBUG("GTE Initialized\n");
+    LOG_GTE_DEBUG("[GTE] GTE Initialized");
 }
 
 // --- GTE Register Access ---
 
 int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
     if (reg >= 32) {
-        LOG_GTE_ERROR("GTE: Invalid data register read: %u\n", reg);
+        LOG_GTE_ERROR("[GTE] GTE: Invalid data register read: %u", reg);
         return 0;
     }
     return gte->data[reg];
@@ -436,7 +436,7 @@ int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
 
 void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) {
-        LOG_GTE_ERROR("GTE: Invalid data register write: %u = 0x%08x\n", reg, value);
+        LOG_GTE_ERROR("[GTE] GTE: Invalid data register write: %u = 0x%08x", reg, value);
         return;
     }
     gte->data[reg] = value;
@@ -444,7 +444,7 @@ void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
 
 int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
     if (reg >= 32) {
-        LOG_GTE_ERROR("GTE: Invalid control register read: %u\n", reg);
+        LOG_GTE_ERROR("[GTE] GTE: Invalid control register read: %u", reg);
         return 0;
     }
     return gte->control[reg];
@@ -452,7 +452,7 @@ int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
 
 void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) {
-        LOG_GTE_ERROR("GTE: Invalid control register write: %u = 0x%08x\n", reg, value);
+        LOG_GTE_ERROR("[GTE] GTE: Invalid control register write: %u = 0x%08x", reg, value);
         return;
     }
     gte->control[reg] = value;
@@ -462,8 +462,7 @@ void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
 
 uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
     // Per-instruction logging is TRACE level (too spammy for DEBUG)
-    LOG_GTE_TRACE("[GTE] Executing instruction: 0x%08x", instruction);
-    uint32_t opcode = (instruction >> 20) & 0x3F; // Bits 25-20
+uint32_t opcode = (instruction >> 20) & 0x3F; // Bits 25-20
     uint32_t cycles = 1; // Default cycle count
     
     switch (opcode) {
@@ -493,7 +492,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             break;
             
         case 0x29: // DCPL - Depth Cueing
-            gte_dcpl(gte);
+            gte_dcpl(gte, instruction);
             cycles = 5;
             break;
             
@@ -553,9 +552,8 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
             break;
 
         case 0x1F: // NCCT - Normal Color Color Triple
-            // gte_ncct(gte, instruction);
+            gte_ncct(gte, instruction);
             cycles = 39;
-            LOG_GTE_DEBUG("GTE: NCCT (Normal Color Color Triple) - TODO: Implement\n");
             break;
 
         case 0x20: // NCT - Normal Color Triple
@@ -576,7 +574,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
         default: {
             static int unhandled_gte_count = 0;
             if (unhandled_gte_count < 10) {
-                LOG_GTE_WARN("GTE: Unhandled instruction 0x%08x (opcode 0x%02x)\n", instruction, opcode);
+                LOG_GTE_WARN("[GTE] GTE: Unhandled instruction 0x%08x (opcode 0x%02x) @ 0x%08x", instruction, opcode);
                 unhandled_gte_count++;
             }
             break;
@@ -596,7 +594,7 @@ void gte_rtps(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1; // sf bit
     bool lm = (instruction >> 10) & 1;   // lm bit
     
-    LOG_GTE_DEBUG("GTE: RTPS (sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: RTPS (sf=%d, lm=%d)", shift, lm);
 
     // V0
     int16_t v[3];
@@ -613,7 +611,7 @@ void gte_rtpt(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1; // sf bit
     bool lm = (instruction >> 10) & 1;   // lm bit
     
-    LOG_GTE_DEBUG("GTE: RTPT (sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: RTPT (sf=%d, lm=%d)", shift, lm);
 
     gte->control[GTE_CTL_FLAG] = 0;
     
@@ -644,7 +642,7 @@ void gte_nclip(Gte* gte) {
     int16_t sx2 = (int16_t)gte->data[GTE_REG_SXY2];
     int16_t sy2 = (int16_t)(gte->data[GTE_REG_SXY2] >> 16);
     
-    LOG_GTE_DEBUG("GTE: NCLIP SXY0(%d,%d) SXY1(%d,%d) SXY2(%d,%d)\n", sx0, sy0, sx1, sy1, sx2, sy2);
+    LOG_GTE_DEBUG("[GTE] GTE: NCLIP SXY0(%d,%d) SXY1(%d,%d) SXY2(%d,%d)", sx0, sy0, sx1, sy1, sx2, sy2);
     
     int64_t mac0 = (int64_t)sx0 * sy1 + (int64_t)sx1 * sy2 + (int64_t)sx2 * sy0 -
                    (int64_t)sx0 * sy2 - (int64_t)sx1 * sy0 - (int64_t)sx2 * sy1;
@@ -652,7 +650,7 @@ void gte_nclip(Gte* gte) {
     gte->control[GTE_CTL_FLAG] = 0;
     truncate_and_set_mac(gte, 0, mac0, 0);
     
-    LOG_GTE_DEBUG("GTE: NCLIP Result MAC0=%ld\n", mac0);
+    LOG_GTE_DEBUG("[GTE] GTE: NCLIP Result MAC0=%ld", mac0);
 }
 
 void gte_mvmva(Gte* gte, uint32_t instruction) {
@@ -662,7 +660,7 @@ void gte_mvmva(Gte* gte, uint32_t instruction) {
     int vec_idx = (instruction >> 15) & 3;
     int tr_idx = (instruction >> 13) & 3;
 
-    LOG_GTE_DEBUG("GTE: MVMVA (sf=%d, lm=%d, mat=%d, vec=%d, tr=%d)\n", shift, lm, mat_idx, vec_idx, tr_idx);
+    LOG_GTE_DEBUG("[GTE] GTE: MVMVA (sf=%d, lm=%d, mat=%d, vec=%d, tr=%d)", shift, lm, mat_idx, vec_idx, tr_idx);
 
     int16_t m[9];
     int32_t t[3];
@@ -752,7 +750,7 @@ void gte_mvmva(Gte* gte, uint32_t instruction) {
 void gte_sqr(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
-    LOG_GTE_DEBUG("GTE: SQR (sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: SQR (sf=%d, lm=%d)", shift, lm);
     
     int32_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
     int32_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
@@ -775,7 +773,7 @@ void gte_op(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
     
-    LOG_GTE_DEBUG("GTE: OP (sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: OP (sf=%d, lm=%d)", shift, lm);
     
     int16_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
     int16_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
@@ -852,7 +850,7 @@ void gte_ncs(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
 
-    LOG_GTE_DEBUG("GTE: NCS (Normal Color Single, sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: NCS (Normal Color Single, sf=%d, lm=%d)", shift, lm);
 
     gte->control[GTE_CTL_FLAG] = 0;
 
@@ -871,7 +869,7 @@ void gte_nct(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
 
-    LOG_GTE_DEBUG("GTE: NCT (Normal Color Triple, sf=%d, lm=%d)\n", shift, lm);
+    LOG_GTE_DEBUG("[GTE] GTE: NCT (Normal Color Triple, sf=%d, lm=%d)", shift, lm);
 
     gte->control[GTE_CTL_FLAG] = 0;
 
@@ -898,31 +896,122 @@ void gte_nct(Gte* gte, uint32_t instruction) {
     }
 }
 
+/* NCCS/NCCT core: Full Normal-Color-Color transform for one vertex.
+   DuckStation reference: NCCS() in gte.cpp — LLM*V → BK+LCM*IR → RGBC*IR → RGB FIFO */
+static void gte_nccs_core(Gte *gte, const int16_t *v, int shift, bool lm) {
+    /* Step 1: [MAC1,2,3] = LLM * V */
+    int16_t l11 = (int16_t)gte->control[GTE_CTL_L11L12];
+    int16_t l12 = (int16_t)(gte->control[GTE_CTL_L11L12] >> 16);
+    int16_t l13 = (int16_t)gte->control[GTE_CTL_L13L21];
+    int16_t l21 = (int16_t)(gte->control[GTE_CTL_L13L21] >> 16);
+    int16_t l22 = (int16_t)gte->control[GTE_CTL_L22L23];
+    int16_t l23 = (int16_t)(gte->control[GTE_CTL_L22L23] >> 16);
+    int16_t l31 = (int16_t)gte->control[GTE_CTL_L31L32];
+    int16_t l32 = (int16_t)(gte->control[GTE_CTL_L31L32] >> 16);
+    int16_t l33 = (int16_t)gte->control[GTE_CTL_L33];
+
+    int64_t mac1 = sign_extend_44(((int64_t)l11 * v[0]) + ((int64_t)l12 * v[1]) + ((int64_t)l13 * v[2]));
+    int64_t mac2 = sign_extend_44(((int64_t)l21 * v[0]) + ((int64_t)l22 * v[1]) + ((int64_t)l23 * v[2]));
+    int64_t mac3 = sign_extend_44(((int64_t)l31 * v[0]) + ((int64_t)l32 * v[1]) + ((int64_t)l33 * v[2]));
+
+    truncate_and_set_mac(gte, 1, mac1, shift);
+    truncate_and_set_mac(gte, 2, mac2, shift);
+    truncate_and_set_mac(gte, 3, mac3, shift);
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
+
+    /* Step 2: [MAC1,2,3] = BK*4096 + LCM * [IR1,IR2,IR3] */
+    int16_t lcr1 = (int16_t)gte->control[GTE_CTL_LR1LR2];
+    int16_t lcr2 = (int16_t)(gte->control[GTE_CTL_LR1LR2] >> 16);
+    int16_t lcr3 = (int16_t)gte->control[GTE_CTL_LR3LG1];
+    int16_t lcg1 = (int16_t)(gte->control[GTE_CTL_LR3LG1] >> 16);
+    int16_t lcg2 = (int16_t)gte->control[GTE_CTL_LG2LG3];
+    int16_t lcg3 = (int16_t)(gte->control[GTE_CTL_LG2LG3] >> 16);
+    int16_t lcb1 = (int16_t)gte->control[GTE_CTL_LB1LB2];
+    int16_t lcb2 = (int16_t)(gte->control[GTE_CTL_LB1LB2] >> 16);
+    int16_t lcb3 = (int16_t)gte->control[GTE_CTL_LB3];
+
+    int16_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
+    int16_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
+    int16_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
+
+    mac1 = sign_extend_44(((int64_t)gte->control[GTE_CTL_RBK] << 12)
+                          + ((int64_t)lcr1 * ir1) + ((int64_t)lcr2 * ir2) + ((int64_t)lcr3 * ir3));
+    mac2 = sign_extend_44(((int64_t)gte->control[GTE_CTL_GBK] << 12)
+                          + ((int64_t)lcg1 * ir1) + ((int64_t)lcg2 * ir2) + ((int64_t)lcg3 * ir3));
+    mac3 = sign_extend_44(((int64_t)gte->control[GTE_CTL_BBK] << 12)
+                          + ((int64_t)lcb1 * ir1) + ((int64_t)lcb2 * ir2) + ((int64_t)lcb3 * ir3));
+
+    truncate_and_set_mac(gte, 1, mac1, shift);
+    truncate_and_set_mac(gte, 2, mac2, shift);
+    truncate_and_set_mac(gte, 3, mac3, shift);
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
+
+    /* Step 3: [MAC1,2,3] = [R*IR1, G*IR2, B*IR3] << 4 */
+    uint8_t r = (uint8_t)gte->data[GTE_REG_RGBC];
+    uint8_t g = (uint8_t)(gte->data[GTE_REG_RGBC] >> 8);
+    uint8_t b = (uint8_t)(gte->data[GTE_REG_RGBC] >> 16);
+
+    ir1 = (int16_t)gte->data[GTE_REG_IR1];
+    ir2 = (int16_t)gte->data[GTE_REG_IR2];
+    ir3 = (int16_t)gte->data[GTE_REG_IR3];
+
+    mac1 = sign_extend_44(((int64_t)r * ir1) << 4);
+    mac2 = sign_extend_44(((int64_t)g * ir2) << 4);
+    mac3 = sign_extend_44(((int64_t)b * ir3) << 4);
+
+    truncate_and_set_mac(gte, 1, mac1, shift);
+    truncate_and_set_mac(gte, 2, mac2, shift);
+    truncate_and_set_mac(gte, 3, mac3, shift);
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
+
+    /* Step 4: push RGB FIFO */
+    push_rgb_from_mac(gte);
+}
+
 // --- NCCS (0x1B): Normal Color Color Single ---
 void gte_nccs(Gte* gte, uint32_t instruction) {
-    int shift = (instruction >> 19) & 1;
-    bool lm = (instruction >> 10) & 1;
-    LOG_GTE_DEBUG("GTE: NCCS (Normal Color Color Single) - SIMPLIFIED IMPL\n");
+    int shift = ((instruction >> 19) & 1) ? 12 : 0;
+    bool lm   = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("[GTE] NCCS sf=%d lm=%d", shift, lm);
     gte->control[GTE_CTL_FLAG] = 0;
-    // Simplified: use NCS pattern for now
-    gte_ncs(gte, instruction);
+    int16_t v[3];
+    v[0] = (int16_t)gte->data[GTE_REG_V0_XY];
+    v[1] = (int16_t)(gte->data[GTE_REG_V0_XY] >> 16);
+    v[2] = (int16_t)gte->data[GTE_REG_V0_Z];
+    gte_nccs_core(gte, v, shift, lm);
 }
 
 // --- NCCT (0x1F): Normal Color Color Triple ---
 void gte_ncct(Gte* gte, uint32_t instruction) {
-    int shift = (instruction >> 19) & 1;
-    bool lm = (instruction >> 10) & 1;
-    LOG_GTE_DEBUG("GTE: NCCT (Normal Color Color Triple) - SIMPLIFIED IMPL\n");
+    int shift = ((instruction >> 19) & 1) ? 12 : 0;
+    bool lm   = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("[GTE] NCCT sf=%d lm=%d", shift, lm);
     gte->control[GTE_CTL_FLAG] = 0;
-    // Simplified: use NCT pattern for now
-    gte_nct(gte, instruction);
+    static const int regs[3][2] = {
+        {GTE_REG_V0_XY, GTE_REG_V0_Z},
+        {GTE_REG_V1_XY, GTE_REG_V1_Z},
+        {GTE_REG_V2_XY, GTE_REG_V2_Z},
+    };
+    for (int i = 0; i < 3; i++) {
+        int16_t v[3];
+        v[0] = (int16_t)gte->data[regs[i][0]];
+        v[1] = (int16_t)(gte->data[regs[i][0]] >> 16);
+        v[2] = (int16_t)gte->data[regs[i][1]];
+        gte_nccs_core(gte, v, shift, lm);
+    }
 }
 
 // --- CC (0x1C): Color Color ---
 void gte_cc(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
-    LOG_GTE_DEBUG("GTE: CC (Color Color) - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: CC (Color Color) - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: similar to NCS but using IR
     gte_ncs(gte, instruction);
@@ -932,7 +1021,7 @@ void gte_cc(Gte* gte, uint32_t instruction) {
 void gte_cdp(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
     bool lm = (instruction >> 10) & 1;
-    LOG_GTE_DEBUG("GTE: CDP (Color Depth Cueing) - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: CDP (Color Depth Cueing) - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: use CC pattern
     gte_cc(gte, instruction);
@@ -940,7 +1029,7 @@ void gte_cdp(Gte* gte, uint32_t instruction) {
 
 // --- NCDS (0x13): Normal Color Depth Cue Single ---
 void gte_ncds(Gte* gte, uint32_t instruction) {
-    LOG_GTE_DEBUG("GTE: NCDS - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: NCDS - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: use NCS
     gte_ncs(gte, instruction);
@@ -948,7 +1037,7 @@ void gte_ncds(Gte* gte, uint32_t instruction) {
 
 // --- NCDT (0x16): Normal Color Depth Cue Triple ---
 void gte_ncdt(Gte* gte, uint32_t instruction) {
-    LOG_GTE_DEBUG("GTE: NCDT - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: NCDT - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: use NCT
     gte_nct(gte, instruction);
@@ -956,7 +1045,7 @@ void gte_ncdt(Gte* gte, uint32_t instruction) {
 
 // --- DPCS (0x10): Depth Cueing Single ---
 void gte_dpcs(Gte* gte, uint32_t instruction) {
-    LOG_GTE_DEBUG("GTE: DPCS - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: DPCS - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: use NCS
     gte_ncs(gte, instruction);
@@ -964,20 +1053,50 @@ void gte_dpcs(Gte* gte, uint32_t instruction) {
 
 // ---DPCT (0x2A): Depth Cueing Triple ---
 void gte_dpct(Gte* gte, uint32_t instruction) {
-    LOG_GTE_DEBUG("GTE: DPCT - SIMPLIFIED IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: DPCT - SIMPLIFIED IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
     // Simplified: use NCT
     gte_nct(gte, instruction);
 }
 
-void gte_dcpl(Gte* gte) {
-    (void)gte;
-    LOG_GTE_DEBUG("GTE: DCPL (Depth Cueing) - TODO: Implement\n");
-    // TODO: Implement depth cueing
+/* DCPL (0x29): Depth Cueing with Pattern
+   DuckStation: (R*IR1, G*IR2, B*IR3)<<4 then InterpolateColor with FC and IR0 */
+void gte_dcpl(Gte* gte, uint32_t instruction) {
+    int shift = ((instruction >> 19) & 1) ? 12 : 0;
+    bool lm   = (instruction >> 10) & 1;
+    LOG_GTE_DEBUG("[GTE] DCPL sf=%d lm=%d", shift, lm);
+    gte->control[GTE_CTL_FLAG] = 0;
+
+    int16_t ir0 = (int16_t)gte->data[GTE_REG_IR0];
+    int16_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
+    int16_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
+    int16_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
+
+    uint8_t r = (uint8_t)gte->data[GTE_REG_RGBC];
+    uint8_t g = (uint8_t)(gte->data[GTE_REG_RGBC] >> 8);
+    uint8_t b = (uint8_t)(gte->data[GTE_REG_RGBC] >> 16);
+
+    int32_t in_mac1 = (int32_t)(((int64_t)r * ir1) << 4);
+    int32_t in_mac2 = (int32_t)(((int64_t)g * ir2) << 4);
+    int32_t in_mac3 = (int32_t)(((int64_t)b * ir3) << 4);
+
+    /* InterpolateColor: (FC*4096 - in_MAC)*IR0 + in_MAC*4096 >> (shift+12) */
+    int64_t mac1 = ((int64_t)gte->control[GTE_CTL_RFC] * 4096 - in_mac1) * ir0 + (int64_t)in_mac1 * 4096;
+    int64_t mac2 = ((int64_t)gte->control[GTE_CTL_GFC] * 4096 - in_mac2) * ir0 + (int64_t)in_mac2 * 4096;
+    int64_t mac3 = ((int64_t)gte->control[GTE_CTL_BFC] * 4096 - in_mac3) * ir0 + (int64_t)in_mac3 * 4096;
+
+    truncate_and_set_mac(gte, 1, mac1, shift + 12);
+    truncate_and_set_mac(gte, 2, mac2, shift + 12);
+    truncate_and_set_mac(gte, 3, mac3, shift + 12);
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
+
+    push_rgb_from_mac(gte);
 }
 
 void gte_intpl(Gte* gte) {
-    LOG_GTE_DEBUG("GTE: INTPL (Interpolation) - BASIC IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: INTPL (Interpolation) - BASIC IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
 
     // INTPL: [MAC1,2,3] = [IR1,IR2,IR3] * IR0 + [MAC1,MAC2,MAC3]
@@ -1008,7 +1127,7 @@ void gte_intpl(Gte* gte) {
 
 void gte_gpf(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
-    LOG_GTE_DEBUG("GTE: GPF (General Purpose Interpolation) - BASIC IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: GPF (General Purpose Interpolation) - BASIC IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
 
     // GPF: [MAC] = ([IR1,IR2,IR3] * IR0 + [MAC1,MAC2,MAC3]) >> (sf*12)
@@ -1039,7 +1158,7 @@ void gte_gpf(Gte* gte, uint32_t instruction) {
 
 void gte_gpl(Gte* gte, uint32_t instruction) {
     int shift = (instruction >> 19) & 1;
-    LOG_GTE_DEBUG("GTE: GPL (General Purpose Interpolation with Base) - BASIC IMPL\n");
+    LOG_GTE_DEBUG("[GTE] GTE: GPL (General Purpose Interpolation with Base) - BASIC IMPL");
     gte->control[GTE_CTL_FLAG] = 0;
 
     // GPL: Similar to GPF, uses previous MAC as base
@@ -1047,7 +1166,7 @@ void gte_gpl(Gte* gte, uint32_t instruction) {
 }
 
 void gte_avsz3(Gte* gte) {
-    LOG_GTE_DEBUG("GTE: AVSZ3\n");
+    LOG_GTE_DEBUG("[GTE] GTE: AVSZ3");
     int32_t zsf3 = (int16_t)gte->control[GTE_CTL_ZSF3];
     uint32_t sz1 = (uint16_t)gte->data[GTE_REG_SZ1];
     uint32_t sz2 = (uint16_t)gte->data[GTE_REG_SZ2];
@@ -1064,7 +1183,7 @@ void gte_avsz3(Gte* gte) {
 }
 
 void gte_avsz4(Gte* gte) {
-    LOG_GTE_DEBUG("GTE: AVSZ4\n");
+    LOG_GTE_DEBUG("[GTE] GTE: AVSZ4");
     int32_t zsf4 = (int16_t)gte->control[GTE_CTL_ZSF4];
     uint32_t sz0 = (uint16_t)gte->data[GTE_REG_SZ0];
     uint32_t sz1 = (uint16_t)gte->data[GTE_REG_SZ1];

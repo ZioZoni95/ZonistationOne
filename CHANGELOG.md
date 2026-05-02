@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Performance Overhead**: Removed all `TRACE` logs globally and stripped `DEBUG` logs from hot paths (`bus.c`, `timers.c`, `cpu_instructions.c`, `dma.c`) which caused massive slowdowns when the debug build was active.
+- **CDROM Command Dropping**: Removed the strict `interrupt_flag != 0` check in `cdrom_write8` when processing new commands (e.g. `SeekL`), resolving game load hangs (e.g. Ace Combat 2).
+- **BIOS Syscall Spam**: Expanded B0 table in `cpu_bios.c` to `0x5D` and ignored out-of-bounds B0 calls, stopping the `[BIOS] B0(unknown)` console spam during game load.
+- **Log Formatting**: Standardized log strings codebase-wide to `[CATEGORY] msg @ 0xPC` and stripped trailing newlines for ImGui compatibility.
+
 ### Added
 - **CPU Disassembler**: PCSX-Redux-style disassembly window with 128-row virtual list (`ImGuiListClipper`), row highlights for PC (yellow) and breakpoints (dark red), clickable breakpoint dots, Go-To-Address footer.
 - **Run / Pause / Step controls**: F5 (run/pause toggle) and F11 (single step) wired through `debug_ui_step_requested()` edge-triggered flag into the main emulation loop.

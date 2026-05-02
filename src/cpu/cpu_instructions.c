@@ -25,8 +25,7 @@ void op_sw(Cpu* cpu, uint32_t instruction) {
         // Rate-limit cache isolation logs
         static uint32_t cache_iso_count = 0;
         if (++cache_iso_count % 1000 == 0) {
-            LOG_TRACE("~ SW Ignored (Cache Isolated) #%u", cache_iso_count);
-        }
+}
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -36,7 +35,7 @@ void op_sw(Cpu* cpu, uint32_t instruction) {
     uint32_t value = cpu_reg(cpu, rt); // Use input register set
     // Enforce word alignment for SW
     if ((address & 3) != 0) {
-        LOG_ERROR("SW Address Error: Unaligned address 0x%08x = 0x%08x (PC=0x%08x)\n", address, value, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] SW Address Error: Unaligned address 0x%08x = 0x%08x @ 0x%08x", address, value, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         return;
@@ -87,7 +86,7 @@ void op_cop0(Cpu* cpu, uint32_t instruction) {
             }
             break;
         default:
-             LOG_WARN("Warning: Unhandled COP0 instruction: 0x%08x (CopOp=%u) at PC=0x%08x\n", instruction, cop_opcode, cpu->current_pc);
+             LOG_CPU_WARN("[CPU] Unhandled COP0 instruction: 0x%08x (CopOp=%u) at @ 0x%08x", instruction, cop_opcode, cpu->current_pc);
              cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION); // Or maybe COPROCESSOR_ERROR? Illegal seems better.
             break;
     }
@@ -100,12 +99,11 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 
     switch (cop_r) {
         case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_CPU_WARN("MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
+             if (value != 0) LOG_CPU_WARN("[CPU] MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at @ 0x%08x", cop_r, value, cpu->current_pc);
              // No state change for now
              break;
         case 12: // SR (Status Register)
-            LOG_CPU_DEBUG("MTC0 write to SR: 0x%08x (PC=0x%08x)", value, cpu->current_pc);
-            // Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
+// Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
             cpu->sr = (cpu->sr & ~0xF27FFFFF) | (value & 0xF27FFFFF);
             break;
         case 13: // CAUSE
@@ -113,15 +111,15 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
              // Mask other bits.
              cpu->cause = (cpu->cause & ~0x300) | (value & 0x300);
              if ((value & ~0x300) != 0) {
-                 LOG_CPU_WARN("MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at PC=0x%08x", value, cpu->current_pc);
+                 LOG_CPU_WARN("[CPU] MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at @ 0x%08x", value, cpu->current_pc);
              }
              break;
         case 8:  // BadVaddr (COP0 reg 8) — read-only, writes silently ignored (DuckStation)
         case 14: // EPC (COP0 reg 14) — read-only, writes silently ignored (DuckStation)
-            LOG_CPU_WARN("MTC0 to read-only COP0 Register %u = 0x%08x at PC=0x%08x (ignored)", cop_r, value, cpu->current_pc);
+            LOG_CPU_WARN("[CPU] MTC0 to read-only COP0 Register %u = 0x%08x at (ignored) @ 0x%08x", cop_r, value, cpu->current_pc);
             break;
         default:
-            LOG_CPU_WARN("MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at PC=0x%08x", cop_r, value, cpu->current_pc);
+            LOG_CPU_WARN("[CPU] MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at @ 0x%08x", cop_r, value, cpu->current_pc);
             cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
             break;
     }
@@ -137,7 +135,6 @@ void op_rfe(Cpu* cpu, uint32_t instruction) {
     uint32_t mode = old_sr & 0x3F;
     // Keep bits 4-5 (IEo/KUo) as-is. Shift right by 2 fills bits 0-3.
     cpu->sr = (old_sr & ~0x3F) | ((mode & 0x30) | (mode >> 2));
-    LOG_CPU_DEBUG("RFE: SR changed from 0x%08x to 0x%08x", old_sr, cpu->sr);
 }
 
 void op_bne(Cpu* cpu, uint32_t instruction) {
@@ -158,7 +155,7 @@ void op_addi(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed addition
     if (__builtin_add_overflow(rs_value, imm_se, &result)) {
-        LOG_ERROR("ADDI Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, imm_se, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] ADDI Signed Overflow: %d + %d @ 0x%08x", rs_value, imm_se, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); // Trigger overflow exception
     } else {
         cpu_set_reg(cpu, rt, (uint32_t)result);
@@ -167,7 +164,7 @@ void op_addi(Cpu* cpu, uint32_t instruction) {
 
 void op_lw(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) { // Check cache isolation
-        LOG_DEBUG("~ LW Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -177,7 +174,7 @@ void op_lw(Cpu* cpu, uint32_t instruction) {
 
     // Enforce word alignment per PSX spec: word accesses must be 4-byte aligned.
     if ((address & 3) != 0) {
-        LOG_ERROR("LW Address Error: Unaligned address 0x%08x (PC=0x%08x)\n", address, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] LW Address Error: Unaligned address 0x%08x @ 0x%08x", address, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         return;
@@ -205,7 +202,7 @@ void op_addu(Cpu* cpu, uint32_t instruction) {
 
 void op_sh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ SH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -214,7 +211,7 @@ void op_sh(Cpu* cpu, uint32_t instruction) {
     uint32_t address = cpu_reg(cpu, rs) + offset;
     // Enforce halfword alignment for SH
     if ((address & 1) != 0) {
-        LOG_ERROR("SH Address Error: Unaligned address 0x%08x (PC=0x%08x)\n", address, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] SH Address Error: Unaligned address 0x%08x @ 0x%08x", address, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         return;
@@ -240,7 +237,7 @@ void op_andi(Cpu* cpu, uint32_t instruction) {
 
 void op_sb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ SB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -267,9 +264,7 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
                                   (target_address == 0xB0) ? "B" : "C";
         // Suppress B0(0x2C) spam (error handler called frequently)
         if (!(target_address == 0xB0 && func_num == 0x2C)) {
-            LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
-                          cpu->current_pc, vector_name, func_num);
-        }
+}
 
         if (target_address == 0x000000A0)
             handle_a0_syscall(cpu);
@@ -279,15 +274,12 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     }
     // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
     else if ((target_address & 0x3) != 0) {
-        LOG_CPU_DEBUG("@SUSPICIOUS_JR from PC=0x%08x: $%d=0x%08x -> unaligned target 0x%08x",
-                         cpu->current_pc, rs, target_address, target_address);
-    }
+}
     
     // Dedicated log for suspicious infinite loop at 0x00001010
     if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
         // Suppressed full CPU state dump for 0x1010 loop to avoid excessive logs
-        LOG_CPU_DEBUG("[0x1010_LOOP] JR $26 to 0x00001010 detected (full dump suppressed)");
-    }
+}
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
     // Alignment check will happen on fetch in the next cycle
@@ -295,7 +287,7 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
 
 void op_lb(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LB Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -338,7 +330,7 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
         case 14: value_read = cpu->epc; break; // EPC
         case 15: value_read = cpu->prid; break; // PRID
         default:
-            LOG_CPU_WARN("MFC0 read from unhandled COP0 Register %u (PC=0x%08x)", cop_r_src, cpu->current_pc);
+            LOG_CPU_WARN("[CPU] MFC0 read from unhandled COP0 Register %u @ 0x%08x", cop_r_src, cpu->current_pc);
             cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
             return;
     }
@@ -363,7 +355,7 @@ void op_add(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed addition
     if (__builtin_add_overflow(rs_value, rt_value, &result)) {
-        LOG_ERROR("ADD Signed Overflow: %d + %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] ADD Signed Overflow: %d + %d @ 0x%08x", rs_value, rt_value, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); // Trigger overflow exception
     } else {
         cpu_set_reg(cpu, rd, (uint32_t)result);
@@ -392,7 +384,7 @@ void op_blez(Cpu* cpu, uint32_t instruction) {
 
 void op_lbu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LBU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -424,10 +416,7 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
         }
         const char* vector_name = (target_address == 0xA0) ? "A" :
                                   (target_address == 0xB0) ? "B" : "C";
-        LOG_CPU_DEBUG("@BIOS_CALL from PC=0x%08x: %s(%02Xh)",
-                     cpu->current_pc, vector_name, func_num);
-
-        if (target_address == 0xA0)
+if (target_address == 0xA0)
             handle_a0_syscall(cpu);
         else if (target_address == 0xB0)
             handle_b0_syscall(cpu);
@@ -435,9 +424,7 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
     */
     // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
     if ((target_address & 0x3) != 0) {
-        LOG_CPU_DEBUG("@SUSPICIOUS_JALR from PC=0x%08x: $%d=0x%08x -> unaligned target 0x%08x, return to $%d=0x%08x",
-                         cpu->current_pc, rs, target_address, target_address, rd, return_addr);
-    }
+}
 
     // Store return address in rd
     cpu_set_reg(cpu, rd, return_addr);
@@ -623,7 +610,7 @@ void op_mthi(Cpu* cpu, uint32_t instruction) {
 // Load Halfword Unsigned
 void op_lhu(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LHU Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -632,7 +619,7 @@ void op_lhu(Cpu* cpu, uint32_t instruction) {
     uint32_t address = cpu_reg(cpu, rs) + offset;
     // Enforce halfword alignment: addresses must be 2-byte aligned
     if ((address & 1) != 0) {
-        LOG_ERROR("LHU Address Error: Unaligned address 0x%08x (PC=0x%08x)\n", address, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] LHU Address Error: Unaligned address 0x%08x @ 0x%08x", address, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         return;
@@ -648,7 +635,7 @@ void op_lhu(Cpu* cpu, uint32_t instruction) {
 // Load Halfword (Signed)
 void op_lh(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LH Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); // Keep debug print
+// Keep debug print
         return;
     }
     uint32_t offset = instr_imm_se(instruction);
@@ -657,7 +644,7 @@ void op_lh(Cpu* cpu, uint32_t instruction) {
     uint32_t address = cpu_reg(cpu, rs) + offset;
     // Enforce halfword alignment: addresses must be 2-byte aligned
     if ((address & 1) != 0) {
-        LOG_ERROR("LH Address Error: Unaligned address 0x%08x (PC=0x%08x)\n", address, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] LH Address Error: Unaligned address 0x%08x @ 0x%08x", address, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
         return;
@@ -724,7 +711,7 @@ void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 void op_break(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    LOG_CPU_INFO("@nocash BREAK OPCODE: EPC=0x%08x PC=0x%08x", cpu->epc, cpu->current_pc);
+    LOG_CPU_INFO("[CPU] @nocash BREAK OPCODE: E @ 0x%08x", cpu->epc, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_BREAK); //
 }
 
@@ -750,7 +737,7 @@ void op_sub(Cpu* cpu, uint32_t instruction) {
     int32_t result;
     // Use GCC/Clang builtin for checked signed subtraction
     if (__builtin_sub_overflow(rs_value, rt_value, &result)) {
-        LOG_ERROR("SUB Signed Overflow: %d - %d (PC=0x%08x)\n", rs_value, rt_value, cpu->current_pc);
+        LOG_CPU_ERROR("[CPU] SUB Signed Overflow: %d - %d @ 0x%08x", rs_value, rt_value, cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_OVERFLOW); //
     } else {
         cpu_set_reg(cpu, rd, (uint32_t)result);
@@ -767,7 +754,7 @@ void op_xori(Cpu* cpu, uint32_t instruction) {
 
 // Coprocessor 1 (FPU) Opcode - Triggers exception
 void op_cop1(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported COP1 (FPU) instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported COP1 (FPU) instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
@@ -777,7 +764,7 @@ void op_cop2(Cpu* cpu, uint32_t instruction) {
     // If bit 30 = 0, COP2 is disabled and should raise an exception
     bool cop2_enabled = (cpu->sr & (1u << 30)) != 0;
     if (!cop2_enabled) {
-        LOG_WARN("COP2 (GTE) access attempted with SR.CU2=0, raising exception\n");
+        LOG_CPU_WARN("[CPU] COP2 (GTE) access attempted with SR.CU2=0, raising exception");
         cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
         return;
     }
@@ -850,22 +837,21 @@ void op_cop2(Cpu* cpu, uint32_t instruction) {
             // Pass to GTE execution with full instruction word
             uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
             (void)cycles;
-            LOG_TRACE("GTE: Executing instruction 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
-            break;
+break;
         }
     }
 }
 
 // Coprocessor 3 Opcode - Triggers exception
 void op_cop3(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported COP3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported COP3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Left (Handles unaligned loads)
 void op_lwl(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
@@ -895,7 +881,7 @@ void op_lwl(Cpu* cpu, uint32_t instruction) {
 // Load Word Right (Handles unaligned loads)
 void op_lwr(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ LWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
@@ -925,7 +911,7 @@ void op_lwr(Cpu* cpu, uint32_t instruction) {
 // Store Word Left (Handles unaligned stores)
 void op_swl(Cpu* cpu, uint32_t instruction) {
      if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ SWL Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction); // Register containing data to store
@@ -952,7 +938,7 @@ void op_swl(Cpu* cpu, uint32_t instruction) {
 // Store Word Right (Handles unaligned stores)
 void op_swr(Cpu* cpu, uint32_t instruction) {
     if ((cpu->sr & 0x10000) != 0) {
-        LOG_DEBUG("~ SWR Ignored (Cache Isolated, SR=0x%08x)\n", cpu->sr); return;
+return;
     }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction); // Register containing data to store
@@ -978,13 +964,13 @@ void op_swr(Cpu* cpu, uint32_t instruction) {
 
 // Load Word Coprocessor 0 - Not supported
 void op_lwc0(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported LWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported LWC0 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Load Word Coprocessor 1 (FPU) - Not supported
 void op_lwc1(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported LWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported LWC1 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
@@ -1000,19 +986,19 @@ void op_lwc2(Cpu* cpu, uint32_t instruction) {
 
 // Load Word Coprocessor 3 - Not supported
 void op_lwc3(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported LWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported LWC3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 0 - Not supported
 void op_swc0(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported SWC0 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported SWC0 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Store Word Coprocessor 1 (FPU) - Not supported
 void op_swc1(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported SWC1 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported SWC1 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
@@ -1028,18 +1014,18 @@ void op_swc2(Cpu* cpu, uint32_t instruction) {
 
 // Store Word Coprocessor 3 - Not supported
 void op_swc3(Cpu* cpu, uint32_t instruction) {
-    LOG_WARN("Warning: Unsupported SWC3 instruction: 0x%08x (PC=0x%08x)\n", instruction, cpu->current_pc);
+    LOG_CPU_WARN("[CPU] Unsupported SWC3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
 }
 
 // Illegal/Unhandled Instruction Handler
 void op_illegal(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_INFO("@ILLEGAL_INSTRUCTION: 0x%08x at PC=0x%08x", instruction, cpu->current_pc);
-    LOG_ERROR("Error: Illegal/Unhandled instruction 0x%08x encountered at PC=0x%08x\n", instruction, cpu->current_pc);
+    LOG_CPU_INFO("[CPU] @ILLEGAL_INSTRUCTION: 0x%08x at @ 0x%08x", instruction, cpu->current_pc);
+    LOG_CPU_ERROR("[CPU] Error: Illegal/Unhandled instruction 0x%08x encountered at @ 0x%08x", instruction, cpu->current_pc);
     
     // Read nearby instructions for context
     if (cpu->inter) {
-        LOG_CPU_INFO("@CONTEXT: [PC-8]=0x%08x [PC-4]=0x%08x [PC]=0x%08x [PC+4]=0x%08x", 
+        LOG_CPU_INFO("[CPU] @CONTEXT: [PC-8]=0x%08x [PC-4]=0x%08x [PC]=0x%08x [PC+4]=0x%08x @ 0x%08x", 
                          interconnect_load32(cpu->inter, cpu->current_pc - 8),
                          interconnect_load32(cpu->inter, cpu->current_pc - 4),
                          instruction,

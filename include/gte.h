@@ -119,7 +119,7 @@ void gte_sqr(Gte* gte, uint32_t instruction);
 void gte_op(Gte* gte, uint32_t instruction);
 
 // DCPL - Depth Cueing
-void gte_dcpl(Gte* gte);
+void gte_dcpl(Gte* gte, uint32_t instruction);
 
 // INTPL - Interpolation
 void gte_intpl(Gte* gte);

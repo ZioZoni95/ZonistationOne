@@ -38,7 +38,7 @@ bool gpu_validate_texture_coords(uint8_t page_x, uint8_t page_y, uint8_t depth,
     // Texture coordinates are 8-bit, so 0-255 is max valid range
     // Check if U,V are within the page boundaries
     if (u >= page_width || v >= page_height) {
-        LOG_GPU_WARN("Texture coordinate out of bounds: U=%d (max %d), V=%d (max %d)",
+        LOG_GPU_WARN("[GPU] Texture coordinate out of bounds: U=%d (max %d), V=%d (max %d)",
                      u, page_width - 1, v, page_height - 1);
         return false;
     }
@@ -72,7 +72,7 @@ bool gpu_validate_clut_coords(uint16_t clut_packed, uint8_t depth) {
 
     // Check bounds: VRAM is 1024x512
     if (clut_x + clut_width > 1024 || clut_y + clut_height > 512) {
-        LOG_GPU_WARN("CLUT out of VRAM bounds: X=%d..%d, Y=%d..%d (VRAM: 1024x512)",
+        LOG_GPU_WARN("[GPU] CLUT out of VRAM bounds: X=%d..%d, Y=%d..%d (VRAM: 1024x512)",
                      clut_x, clut_x + clut_width - 1,
                      clut_y, clut_y + clut_height - 1);
         return false;
@@ -120,7 +120,7 @@ bool gpu_check_vertices_in_draw_area(int16_t vertices[][2], int vertex_count,
         if (x < (int16_t)draw_left || x > (int16_t)draw_right ||
             y < (int16_t)draw_top || y > (int16_t)draw_bottom) {
             // Vertex is outside drawing area
-            LOG_GPU_DEBUG("Vertex %d at (%d, %d) outside draw area [%u..%u, %u..%u]",
+            LOG_GPU_DEBUG("[GPU] Vertex %d at (%d, %d) outside draw area [%u..%u, %u..%u]",
                 i, x, y, draw_left, draw_right, draw_top, draw_bottom);
             return false;
         }

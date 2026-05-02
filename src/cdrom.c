@@ -34,13 +34,13 @@ uint8_t cdrom_pop_param(Cdrom *cdrom) {
 
 void cdrom_send_ack(Cdrom *cdrom) {
     cdrom->interrupt_flag = CDROM_INT_ACK;
-    LOG_CDROM_DEBUG("[CDROM] INT3 ACK\n");
+    LOG_CDROM_DEBUG("[CDROM] INT3 ACK");
     if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
 }
 
 void cdrom_send_complete(Cdrom *cdrom) {
     cdrom->interrupt_flag = CDROM_INT_COMPLETE;
-    LOG_CDROM_DEBUG("[CDROM] INT2 Complete\n");
+    LOG_CDROM_DEBUG("[CDROM] INT2 Complete");
     if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
 }
 
@@ -49,7 +49,7 @@ void cdrom_send_error(Cdrom *cdrom, uint8_t err, uint8_t reason) {
     cdrom_push_response(cdrom, err);
     cdrom_push_response(cdrom, reason);
     cdrom->interrupt_flag = CDROM_INT_ERROR;
-    LOG_CDROM_DEBUG("[CDROM] INT5 Error err=0x%02X reason=0x%02X\n", err, reason);
+    LOG_CDROM_DEBUG("[CDROM] INT5 Error err=0x%02X reason=0x%02X", err, reason);
     if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
 }
 
@@ -62,6 +62,8 @@ static void drive_event_callback(void *ctx, uint32_t cycles_late);
 static void second_response_callback(void *ctx, uint32_t cycles_late);
 
 void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
+    if (cdrom->cmd_event_pending) return;
+    cdrom->cmd_event_pending = true;
     if (cdrom->inter)
         interconnect_schedule_event(cdrom->inter, cycles,
                                     command_event_callback, cdrom, "CDROM_CMD");
@@ -74,6 +76,8 @@ void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
+    if (cdrom->second_event_pending) return;
+    cdrom->second_event_pending = true;
     if (cdrom->inter)
         interconnect_schedule_event(cdrom->inter, cycles,
                                     second_response_callback, cdrom, "CDROM_INT2");
@@ -82,10 +86,12 @@ void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
 static void command_event_callback(void *ctx, uint32_t cycles_late) {
     (void)cycles_late;
     Cdrom *cdrom = (Cdrom *)ctx;
+    cdrom->cmd_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_command_event(cdrom, CDROM_ACK_DELAY);
+        cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
         return;
     }
+    if (cdrom->pending_command == CDC_NONE) return;
     cdrom_execute_command(cdrom);
 }
 
@@ -107,8 +113,9 @@ static void drive_event_callback(void *ctx, uint32_t cycles_late) {
 static void second_response_callback(void *ctx, uint32_t cycles_late) {
     (void)cycles_late;
     Cdrom *cdrom = (Cdrom *)ctx;
+    cdrom->second_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_second_response_event(cdrom, CDROM_ACK_DELAY);
+        cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
         return;
     }
     cdrom_execute_second_response(cdrom);
@@ -197,7 +204,7 @@ bool cdrom_load_disc(Cdrom *cdrom, const char *cue_path) {
     /* Start async reader */
     cdrom_async_reader_init(&cdrom->async_reader, &cdrom->disc);
 
-    LOG_CDROM_INFO("[CDROM] Disc loaded: %u tracks, %u sectors\n",
+    LOG_CDROM_INFO("[CDROM] Disc loaded: %u tracks, %u sectors",
                    cdrom->disc.last_track, cdrom->disc.total_sectors);
     return true;
 }
@@ -265,12 +272,7 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
         case 0: {
             /* Command register */
             if (cdrom->pending_command != CDC_NONE) {
-                LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (busy)\n", value);
-                return;
-            }
-            if (cdrom->interrupt_flag != 0) {
-                LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (INT%d pending)\n",
-                               value, cdrom->interrupt_flag);
+                LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (busy)", value);
                 return;
             }
             cdrom->pending_command       = (CdromCommand)value;
@@ -316,7 +318,7 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             cdrom->interrupt_flag &= ~ack;
             if (value & 0x40) fifo_clear(&cdrom->param_fifo);
 
-            LOG_CDROM_DEBUG("[CDROM] INT ACK 0x%02X remaining=%d\n", ack, cdrom->interrupt_flag);
+            LOG_CDROM_DEBUG("[CDROM] INT ACK 0x%02X remaining=%d", ack, cdrom->interrupt_flag);
 
             if (cdrom->interrupt_flag == 0) {
                 /* Second response pending */
@@ -326,6 +328,10 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
                 /* Reading: schedule next sector delivery */
                 if (cdrom->drive_state == DRIVE_READING)
                     cdrom_schedule_drive_event(cdrom, CDROM_READ_DELAY_1X / (cdrom->double_speed ? 2 : 1));
+
+                /* Unblock a command that arrived while INT was pending */
+                if (cdrom->pending_command != CDC_NONE)
+                    cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
             }
             break;
         }
@@ -354,4 +360,30 @@ bool cdrom_has_pending_interrupt(Cdrom *cdrom) {
 
 void cdrom_get_audio_frame(Cdrom *cdrom, int16_t *left, int16_t *right) {
     cdrom_audio_get_frame(&cdrom->audio_fifo, left, right);
+}
+
+/* =========================================================================
+ * DMA Read (channel 3: CDROM → RAM)
+ * ========================================================================= */
+
+uint32_t cdrom_dma_read_word(Cdrom *cdrom) {
+    if (!cdrom->data_buffer_armed) return 0;
+
+    SectorBuffer *sb = &cdrom->sector_buffers[cdrom->current_read_buffer];
+    if (!sb->valid || sb->position + 4 > sb->data_size) return 0;
+
+    uint32_t off = sb->data_start + sb->position;
+    uint32_t word = (uint32_t)sb->raw[off]
+                  | ((uint32_t)sb->raw[off + 1] << 8)
+                  | ((uint32_t)sb->raw[off + 2] << 16)
+                  | ((uint32_t)sb->raw[off + 3] << 24);
+    sb->position += 4;
+
+    if (sb->position >= sb->data_size) {
+        cdrom->data_buffer_armed = false;
+        sb->valid = false;
+        sb->position = 0;
+        LOG_CDROM_DEBUG("[CDROM] DMA sector buffer exhausted lba=%u", sb->lba);
+    }
+    return word;
 }

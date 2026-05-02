@@ -40,7 +40,7 @@ void channel_set_control(DmaChannel* ch, uint32_t value) {
         case 1: ch->sync = REQUEST; break;
         case 2: ch->sync = LINKED_LIST; break;
         default:
-            LOG_DMA_WARN("Warning: Invalid DMA Sync mode %d written to CHCR\n", (value >> 9) & 3);
+            LOG_DMA_WARN("[DMA] Invalid DMA Sync mode %d written to CHCR", (value >> 9) & 3);
             break;
     }
     // ch->chopping_dma_sz = (value >> 16) & 7; // Not implemented
@@ -65,7 +65,6 @@ bool dma_channel_is_active(DmaChannel* ch) {
 void dma_channel_done(DmaChannel* ch) {
     ch->enable = false;
     ch->trigger = false;
-    // TODO: Handle setting/clearing interrupt flags in DICR here later
 }
 
 // Helper: Estimate cycles for a DMA transfer (very rough, tune as needed)
@@ -78,8 +77,7 @@ static uint32_t estimate_dma_cycles(DmaChannel* ch) {
 
 // Initializes the DMA state to reset values.
 void dma_init(Dma* dma, struct Interconnect* inter) {
-    LOG_DMA_DEBUG("DMA initialized");
-    dma->inter = inter; // Store pointer to Interconnect
+dma->inter = inter; // Store pointer to Interconnect
     // DPCR reset value
     dma->control = 0x07654321;
 
@@ -103,7 +101,7 @@ void dma_init(Dma* dma, struct Interconnect* inter) {
         dma->channels[i].block_count = 0;
     }
 
-    LOG_DMA_INFO("DMA Initialized. DPCR=0x%08x, Channels initialized.", dma->control);
+    LOG_DMA_INFO("[DMA] DMA Initialized. DPCR=0x%08x, Channels initialized.", dma->control);
 }
 
 // Reads a 32-bit value from a DMA register address (relative offset).
@@ -121,7 +119,7 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
             case 0x8: // CHCR
                 return channel_get_control(ch);
             default:
-                LOG_DMA_WARN("Warning: Unhandled DMA Channel read at offset 0x%x (Channel %d, Reg %x)\n", offset, channel_index, register_offset);
+                LOG_DMA_WARN("[DMA] Unhandled DMA Channel read at offset 0x%x (Channel %d, Reg %x)", offset, channel_index, register_offset);
                 return 0;
         }
     } else { // Main DMA Register Access
@@ -141,7 +139,7 @@ uint32_t dma_read(Dma* dma, uint32_t offset) {
                     return dicr;
                 }
             default:
-                LOG_DMA_ERROR("Error: Unhandled DMA Main register read at offset 0x%x\n", offset);
+                LOG_DMA_ERROR("[DMA] Error: Unhandled DMA Main register read at offset 0x%x", offset);
                 return 0;
         }
     }
@@ -172,13 +170,12 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                     static uint32_t dma_activate_count = 0;
                     dma_activate_count++;
                     if (dma_activate_count <= 10 || dma_activate_count % 100 == 0) {
-                        LOG_DMA_DEBUG("[DMA] Channel %d activated #%u", channel_index, dma_activate_count);
-                    }
+}
                 }
                 break;
             default:
                 if (log_get_level() >= LOG_LEVEL_WARN) {
-                    LOG_DMA_WARN("Warning: Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)", offset, value, channel_index, register_offset);
+                    LOG_DMA_WARN("[DMA] Unhandled DMA Channel write at offset 0x%x = 0x%08x (Channel %d, Reg %x)", offset, value, channel_index, register_offset);
                 }
                 break;
         }
@@ -192,8 +189,7 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 dma->force_irq = (value >> 15) & 1;
                 dma->channel_irq_enable = (uint8_t)((value >> 16) & 0x7F);
                 dma->master_irq_enable = (value >> 23) & 1;
-                LOG_DMA_DEBUG("[DMA] DICR write: value=0x%08x, channel_irq_enable=0x%02x, master_irq_enable=%d", value, dma->channel_irq_enable, dma->master_irq_enable);
-                // --- DMA IRQ acknowledge logic ---
+// --- DMA IRQ acknowledge logic ---
                 // The PCSX ReARMed "re-raise on write" hack has been removed: with proper
                 // edge-triggered DMA completion IRQ, re-raising here causes infinite loops
                 // when the BIOS ACKs the wrong channel (e.g. ack_flags=0x08 for ch3 while
@@ -212,15 +208,14 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 }
                 break;
             default:
-                LOG_DMA_ERROR("Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);
+                LOG_DMA_ERROR("[DMA] Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);
                 break;
         }
     }
 
     // For frequent DMA region accesses, only log at TRACE level:
     #if LOG_DMA_TRACE_ENABLED
-        LOG_DMA_TRACE("Write32 to DMA region: Addr=0x%08x Offset=0x%02x = 0x%08x", offset, register_offset, value);
-    #endif
+#endif
 
     return channel_became_active;
 }

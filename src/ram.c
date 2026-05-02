@@ -6,17 +6,15 @@
 // Initializes the RAM memory, filling it with a recognizable pattern.
 // Based on Guide Section 2.34 [cite: 460]
 void ram_init(Ram* ram) {
-    LOG_RAM_DEBUG("RAM initialized");
-    // Fill RAM with zeros to match real PS1 power-on state
+// Fill RAM with zeros to match real PS1 power-on state
     memset(ram->data, 0x00, RAM_SIZE);
-    LOG_DEBUG("RAM Initialized (%d bytes, filled with 0x00).", RAM_SIZE);
 }
 
 // Helper for bounds checking
 static inline int is_out_of_bounds(uint32_t offset, uint32_t access_size) {
     int oob = (offset + access_size > RAM_SIZE);
     if (oob && log_get_level() >= LOG_LEVEL_WARN) {
-        LOG_RAM_WARN("[RAM] Out-of-bounds access: offset=0x%08x, size=%u", offset, access_size);
+        LOG_RAM_WARN("[INTERCONNECT] Out-of-bounds access: offset=0x%08x, size=%u", offset, access_size);
     }
     return oob;
 }
@@ -26,7 +24,7 @@ static inline int is_out_of_bounds(uint32_t offset, uint32_t access_size) {
 // Based on Guide Section 2.34 load32 [cite: 461]
 uint32_t ram_load32(Ram* ram, uint32_t offset) {
     if (is_out_of_bounds(offset, 4)) {
-        LOG_WARN("RAM Load32 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Load32 out of bounds: offset 0x%x", offset);
         return 0; // Or handle error appropriately
     }
     uint32_t b0 = ram->data[offset + 0];
@@ -42,7 +40,7 @@ uint32_t ram_load32(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.34 store32 [cite: 462]
 void ram_store32(Ram* ram, uint32_t offset, uint32_t value) {
      if (is_out_of_bounds(offset, 4)) {
-        LOG_WARN("RAM Store32 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Store32 out of bounds: offset 0x%x", offset);
         return; // Or handle error appropriately
     }
     ram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -55,7 +53,7 @@ void ram_store32(Ram* ram, uint32_t offset, uint32_t value) {
 // Based on Guide Section 2.80 store16 (adapted for load) / 2.82 LHU [cite: 1011, 1045]
 uint16_t ram_load16(Ram* ram, uint32_t offset) {
     if (is_out_of_bounds(offset, 2)) {
-        LOG_WARN("RAM Load16 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Load16 out of bounds: offset 0x%x", offset);
         return 0;
     }
     uint16_t b0 = ram->data[offset + 0];
@@ -69,7 +67,7 @@ uint16_t ram_load16(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.80 store16 [cite: 1011]
 void ram_store16(Ram* ram, uint32_t offset, uint16_t value) {
     if (is_out_of_bounds(offset, 2)) {
-        LOG_WARN("RAM Store16 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Store16 out of bounds: offset 0x%x", offset);
         return;
     }
     ram->data[offset + 0] = (uint8_t)(value & 0xFF);
@@ -80,7 +78,7 @@ void ram_store16(Ram* ram, uint32_t offset, uint16_t value) {
 // Based on Guide Section 2.49 load8 [cite: 593]
 uint8_t ram_load8(Ram* ram, uint32_t offset) {
     if (is_out_of_bounds(offset, 1)) {
-        LOG_WARN("RAM Load8 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Load8 out of bounds: offset 0x%x", offset);
         return 0;
     }
     uint8_t value = ram->data[offset];
@@ -92,7 +90,7 @@ uint8_t ram_load8(Ram* ram, uint32_t offset) {
 // Based on Guide Section 2.49 store8 [cite: 591]
 void ram_store8(Ram* ram, uint32_t offset, uint8_t value) {
     if (is_out_of_bounds(offset, 1)) {
-        LOG_WARN("RAM Store8 out of bounds: offset 0x%x", offset);
+        LOG_INTERCONNECT_WARN("[INTERCONNECT] RAM Store8 out of bounds: offset 0x%x", offset);
         return;
     }
     ram->data[offset] = value;

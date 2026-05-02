@@ -159,7 +159,7 @@ void sio_init(Sio* sio) {
     sio->button_state = sio_internal.button_state;
     sio->controller_connected = sio_internal.controller_connected;
 
-    LOG_INFO("SIO initialized (DuckStation-style implementation)");
+    LOG_SYSTEM_INFO("[SYSTEM] SIO initialized (DuckStation-style implementation)");
 }
 
 // ============================================================================
@@ -224,7 +224,7 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
             SIO_DBG("[SIO] Write JOY_DATA = 0x%02x", value);
             
             if (sio_internal.transmit_buffer_full) {
-                LOG_WARN("SIO TX FIFO overrun");
+                LOG_SYSTEM_WARN("[SYSTEM] SIO TX FIFO overrun");
             }
 
             sio_internal.transmit_buffer = value;
@@ -332,7 +332,7 @@ void sio_set_button_state(Sio* sio, uint16_t buttons) {
 void sio_set_controller_connected(Sio* sio, bool connected) {
     sio_internal.controller_connected = connected;
     sio->controller_connected = connected;
-    LOG_INFO("SIO: Controller %s", connected ? "connected" : "disconnected");
+    LOG_SYSTEM_INFO("[SYSTEM] SIO: Controller %s", connected ? "connected" : "disconnected");
 }
 
 // ============================================================================
@@ -565,15 +565,15 @@ static uint8_t sio_controller_transfer(uint8_t tx_byte) {
 // ============================================================================
 
 bool sio_load_memcard(MemoryCard* card, const char* filepath) {
-    LOG_WARN("Memory card loading not implemented");
+    LOG_SYSTEM_WARN("[SYSTEM] Memory card loading not implemented");
     return false;
 }
 
 bool sio_save_memcard(MemoryCard* card) {
-    LOG_WARN("Memory card saving not implemented");
+    LOG_SYSTEM_WARN("[SYSTEM] Memory card saving not implemented");
     return false;
 }
 
 void sio_create_memcard(MemoryCard* card, const char* filepath) {
-    LOG_WARN("Memory card creation not implemented");
+    LOG_SYSTEM_WARN("[SYSTEM] Memory card creation not implemented");
 }

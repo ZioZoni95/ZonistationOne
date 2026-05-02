@@ -24,8 +24,7 @@
 void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
     // TODO: Implement SetRCnt logic based on BIOS arguments in cpu registers
     // Example: uint32_t timer_id = cpu_reg(cpu, 4); uint32_t mode = cpu_reg(cpu, 5);
-    LOG_DEBUG("[TIMER] SetRCnt handler entered: timer_id=%u, mode=%u", cpu_reg(cpu, 4), cpu_reg(cpu, 5));
-    // For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
+// For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
 }
 
 // Add this prototype at the top of the file
@@ -63,8 +62,7 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
         (timer->irq_on_ffff && timer->counter == 0xFFFF && (timer->mode & 0x100))) {
         timer->interrupt_requested = true;
         timer->mode |= (1 << 10);
-        LOG_TIMER_DEBUG("[TIMER] Timer%d re-asserting IRQ%d after mode write (mode=0x%04x, counter=0x%04x, target=0x%04x)", timer_index, timer->irq, timer->mode, timer->counter, timer->target);
-        interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
+interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
     }
 }
 
@@ -74,8 +72,7 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
  * @param inter Pointer to the Interconnect (needed for requesting interrupts).
  */
 void timers_init(Timers* timers, struct Interconnect* inter) {
-    LOG_TIMER_DEBUG("Timers initialized");
-    timers->inter = inter; // Store interconnect pointer
+timers->inter = inter; // Store interconnect pointer
 
     // Initialize all three timers
     for (int i = 0; i < 3; ++i) {
@@ -108,7 +105,7 @@ void timers_init(Timers* timers, struct Interconnect* inter) {
  */
 uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
     if (timer_index < 0 || timer_index > 2) {
-        LOG_TIMER_ERROR("Timer Read Error: Invalid timer index %d\n", timer_index);
+        LOG_TIMER_ERROR("[TIMER] Timer Read Error: Invalid timer index %d", timer_index);
         return 0;
     }
     Timer* t = &timers->timers[timer_index];
@@ -138,7 +135,7 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
         case TMR_REG_TARGET: // 0x8: Target Value
             return t->target;
         default:
-            LOG_TIMER_ERROR("Timer Read Error: Unhandled timer%d offset 0x%x\n", timer_index, offset);
+            LOG_TIMER_ERROR("[TIMER] Timer Read Error: Unhandled timer%d offset 0x%x", timer_index, offset);
             return 0;
     }
 }
@@ -166,8 +163,7 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
  */
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
     Timer* t = &timers->timers[timer_index];
-    LOG_TIMER_DEBUG("[Timer%d] Write16: offset=0x%x value=0x%04x", timer_index, offset, value);
-    if (offset == TIMER_MODE_OFFSET) {
+if (offset == TIMER_MODE_OFFSET) {
         t->mode = value;
         t->counter = 0;  // CRITICAL FIX: PSX-SPEX mandates reset to 0000h on mode write
         t->interrupt_requested = false; // Clear IRQ state on mode write
@@ -193,14 +189,12 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
         case TMR_REG_MODE:
             t->mode = value;
             timer_update_internal_state(timers, t, timer_index);
-            LOG_TIMER_DEBUG("[Timer%d] Mode register written: 0x%04x", timer_index, value);
-            break;
+break;
         case TMR_REG_TARGET:
             t->target = value;
-            LOG_TIMER_DEBUG("[Timer%d] Target set: 0x%04x", timer_index, value);
-            break;
+break;
         default:
-            LOG_TIMER_ERROR("Timer Write Error: Unhandled timer%d offset 0x%x", timer_index, offset);
+            LOG_TIMER_ERROR("[TIMER] Timer Write Error: Unhandled timer%d offset 0x%x", timer_index, offset);
             break;
     }
 }
@@ -297,13 +291,9 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
                 if (t->irq_on_target && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ TRIGGERED on target (mode=0x%04x, counter=%u, target=%u)", 
-                                    i, t->mode, t->counter, t->target);
-                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
+interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
                 } else if (t->irq_on_target) {
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d WOULD trigger IRQ on target but interrupt enable bit not set in mode (mode=0x%04x)", 
-                                    i, t->mode);
-                }
+}
                 t->counter = 0; // Reset on target
                 continue;
             }
@@ -313,8 +303,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
                 if (t->irq_on_ffff && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ TRIGGERED on overflow (mode=0x%04x)", i, t->mode);
-                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
+interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
                 }
                 t->counter = 0; // Always reset on overflow
             }
@@ -324,8 +313,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
 
 // --- Event scheduling for timers ---
 void timers_schedule_next_event(Timers* timers, int timer_index) {
-    LOG_TIMER_TRACE("[TIMER] timers_schedule_next_event for Timer%d", timer_index);
-    Timer* t = &timers->timers[timer_index];
+Timer* t = &timers->timers[timer_index];
     
     // Special handling for Timer0 (VBlank) - schedule every frame, not every cycle
     if (timer_index == 0) {
@@ -378,7 +366,7 @@ static void timer_force_bios_boot_config(Timers* timers) {
     // Force configuration if Timer0 is not properly configured for VBlank IRQ0
     // (mode doesn't have IRQ enable bit set, or target is zero)
     if ((t0->mode & 0x0100) == 0 || t0->target == 0x0000) {
-        LOG_TIMER_INFO("[Timer0] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0");
+        LOG_TIMER_INFO("[TIMER] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0");
         
         // Configure Timer0 for VBlank IRQ0 (NTSC timing)
         // Mode: Enable counting, enable IRQ, IRQ on target
@@ -389,7 +377,7 @@ static void timer_force_bios_boot_config(Timers* timers) {
         // Update internal state
         timer_update_internal_state(timers, t0, 0);
         
-        LOG_TIMER_INFO("[Timer0] Forced config: mode=0x%04x, target=0x%04x [PSX-Spex: VBlank IRQ0 enabled]", t0->mode, t0->target);
+        LOG_TIMER_INFO("[TIMER] Forced config: mode=0x%04x, target=0x%04x [PSX-Spex: VBlank IRQ0 enabled]", t0->mode, t0->target);
     }
 }
 
@@ -411,11 +399,7 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     
     // Only log every 100 timer events to reduce spam
     if (timer_event_count[timer_index] % 100 == 1) {
-        LOG_TIMER_DEBUG("[Timer%d] Event #%u (counter=0x%04x, target=0x%04x)", 
-                       timer_index, timer_event_count[timer_index],
-                       timers->timers[timer_index].counter, 
-                       timers->timers[timer_index].target);
-    }
+}
     Timer* t = &timers->timers[timer_index];
     // Set sticky flag for target or overflow
     if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
@@ -429,8 +413,7 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     if (irq_enabled && !t->interrupt_requested && (t->mode & 0x100)) {
         t->interrupt_requested = true;
         t->mode |= (1 << 10); // Set IRQ request bit
-        LOG_TIMER_DEBUG("[TIMER] Timer%d requesting IRQ%d (mode=0x%04x, counter=0x%04x, target=0x%04x)", timer_index, t->irq, t->mode, t->counter, t->target);
-        interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
+interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
     }
     // Reset counter if needed
     if (t->reset_on_target && t->reached_target_flag) {
@@ -458,8 +441,7 @@ void timers_on_vblank(Timers* timers) {
     
     // Only log every 300 frames (~5 seconds at 60fps)
     if (vblank_count % 300 == 1) {
-        LOG_TIMER_DEBUG("[VBlank] Frame %u - VBlank running normally", vblank_count);
-    }
+}
     
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
@@ -475,7 +457,7 @@ void timers_on_vblank(Timers* timers) {
         if (timers->inter) {
             interconnect_request_irq(timers->inter, 0, "VBlank");
         } else {
-            LOG_ERROR("[VBlank] ERROR: timers->inter is NULL!");
+            LOG_TIMER_ERROR("[TIMER] ERROR: timers->inter is NULL!");
         }
         t0->interrupt_requested = true;
         t0->reached_target_flag = true;

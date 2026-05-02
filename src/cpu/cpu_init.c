@@ -8,8 +8,8 @@
  * @brief Initializes the CPU state to power-on defaults.
  */
 void cpu_init(Cpu* cpu, Interconnect* inter) {
-    LOG_CPU_INFO("CPU initialization started");
-    LOG_SYSTEM_INFO("Initializing CPU...");
+    LOG_CPU_INFO("[CPU] CPU initialization started");
+    LOG_SYSTEM_INFO("[CPU] Initializing CPU...");
 
     cpu->pc = 0xbfc00000;         // Reset vector: Start of BIOS
     cpu->next_pc = cpu->pc + 4;   // Initial next PC
@@ -47,7 +47,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     // Initialize boot stage tracking
     cpu->boot_stage = BOOT_STAGE_POWER_ON;
 
-    LOG_CPU_DEBUG("Initializing I-Cache...");
+    LOG_CPU_DEBUG("[CPU] Initializing I-Cache...");
     for (int i = 0; i < ICACHE_NUM_LINES; ++i) {
         cpu->icache[i].tag = 0xFFFFFFFF; // Initialize tag to an invalid pattern
         for (int j = 0; j < ICACHE_LINE_WORDS; ++j) {
@@ -57,7 +57,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     }
 
     // Initialize GTE
-    LOG_CPU_DEBUG("Initializing GTE...");
+    LOG_CPU_DEBUG("[CPU] Initializing GTE...");
     gte_init(&cpu->gte);
 
     // Initialize GTE Load Delay (Phase B5)
@@ -70,6 +70,6 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->downcount = 1;              // fire dispatch immediately on first cycle
     cpu->muldiv_completion_tick = 0; // no pending MulDiv
 
-    LOG_CPU_INFO("CPU initialized, PC=0x%08x", cpu->pc);
+    LOG_CPU_INFO("[CPU] CPU initialized, @ 0x%08x", cpu->pc);
     // (Optional) Consider masking interrupts at startup until BIOS sets up its handler.
 }

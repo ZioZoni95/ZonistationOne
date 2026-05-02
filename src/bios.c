@@ -17,7 +17,7 @@ bool bios_load(Bios* bios, const char* path) {
     FILE *file = fopen(path, "rb");
     // Check if the file was opened successfully.
     if (!file) {
-        LOG_BIOS_ERROR("Error opening BIOS file: %s", path);
+        LOG_BIOS_ERROR("[BIOS] Error opening BIOS file: %s", path);
         return false; // Indicate failure.
     }
 
@@ -34,7 +34,7 @@ bool bios_load(Bios* bios, const char* path) {
 
     // Check if the number of bytes read matches the expected BIOS size.
     if (bytes_read != BIOS_SIZE) {
-        LOG_BIOS_ERROR("Error reading BIOS file: Read %zu bytes, expected %d", bytes_read, BIOS_SIZE);
+        LOG_BIOS_ERROR("[BIOS] Error reading BIOS file: Read %zu bytes, expected %d", bytes_read, BIOS_SIZE);
         return false; // Indicate failure.
     }
 
@@ -42,7 +42,7 @@ bool bios_load(Bios* bios, const char* path) {
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
     // Print a success message including the path and size.
-    LOG_BIOS_WARN("BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
+    LOG_BIOS_WARN("[BIOS] BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
     // Return true to indicate success.
     return true;
 }
@@ -53,7 +53,7 @@ bool bios_load(Bios* bios, const char* path) {
 uint32_t bios_load32(Bios* bios, uint32_t offset) {
     // Basic bounds check: Ensure reading 4 bytes starting at 'offset' stays within the BIOS_SIZE.
     if (offset > BIOS_SIZE - 4) { // Check if offset + 3 would exceed bounds
-         LOG_BIOS_ERROR("BIOS read out of bounds: offset 0x%x\n", offset);
+         LOG_BIOS_ERROR("[BIOS] BIOS read out of bounds: offset 0x%x", offset);
          // A real emulator might trigger an exception here. For now, return 0.
          return 0; // Placeholder error value
     }
@@ -68,8 +68,7 @@ uint32_t bios_load32(Bios* bios, uint32_t offset) {
     // Per-access logging is TRACE level - rate limited to every 1000th access
     static uint32_t bios_trace_count = 0;
     if (++bios_trace_count % 1000 == 0) {
-        LOG_BIOS_TRACE("bios_load32: #%u offset=0x%X value=0x%08X", bios_trace_count, offset, value);
-    }
+}
     return value;
 }
 
@@ -96,14 +95,14 @@ static void print_strings_at_offset(const Bios* bios, uint32_t start) {
         if (b == 0) {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                LOG_BIOS_INFO("%s", line);
+                LOG_BIOS_INFO("[BIOS] %s", line);
                 line_len = 0;
             }
             null_run++;
         } else if (b == '\n' || b == '\r') {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                LOG_BIOS_INFO("%s", line);
+                LOG_BIOS_INFO("[BIOS] %s", line);
                 line_len = 0;
             }
             null_run = 0;
@@ -114,7 +113,7 @@ static void print_strings_at_offset(const Bios* bios, uint32_t start) {
         } else {
             if (line_len > 0) {
                 line[line_len] = '\0';
-                LOG_BIOS_INFO("%s", line);
+                LOG_BIOS_INFO("[BIOS] %s", line);
                 line_len = 0;
             }
             null_run++;
@@ -142,7 +141,7 @@ void bios_print_bootstrap_strings(const Bios* bios) {
     if (!found) return;
 
     print_strings_at_offset(bios, start);
-    LOG_BIOS_INFO(" ");
+    LOG_BIOS_INFO("[BIOS]  ");
 }
 
 // Dumps all TCRF-documented hidden string blocks from the BIOS ROM to stderr.
@@ -175,9 +174,9 @@ void bios_print_all_hidden_strings(const Bios* bios) {
             }
         }
         if (found) {
-            LOG_BIOS_INFO("=== %s ===", blocks[0].label);
+            LOG_BIOS_INFO("[BIOS] === %s ===", blocks[0].label);
             print_strings_at_offset(bios, start);
-            LOG_BIOS_INFO(" ");
+            LOG_BIOS_INFO("[BIOS]  ");
         }
     }
 
@@ -185,8 +184,8 @@ void bios_print_all_hidden_strings(const Bios* bios) {
     for (int b = 1; b < block_count; b++) {
         uint32_t off = blocks[b].offset;
         if (off >= BIOS_SIZE) continue;
-        LOG_BIOS_INFO("=== %s ===", blocks[b].label);
+        LOG_BIOS_INFO("[BIOS] === %s ===", blocks[b].label);
         print_strings_at_offset(bios, off);
-        LOG_BIOS_INFO(" ");
+        LOG_BIOS_INFO("[BIOS]  ");
     }
 }

@@ -104,7 +104,7 @@ void gpu_clear_cmd_buf(Gpu* gpu) {
 
 void gpu_push_cmd_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_command_buffer.count >= MAX_GPU_COMMAND_WORDS) {
-        LOG_GPU_ERROR("FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x",
+        LOG_GPU_ERROR("[GPU] FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x @ 0x%08x",
                       gpu->gp0_current_opcode);
         exit(EXIT_FAILURE);
     }
@@ -166,7 +166,7 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
                 c[i].g = 128;
                 c[i].b = 128;
             }
-            LOG_GPU_DEBUG("GP0 rect: Raw texture mode enabled");
+            LOG_GPU_DEBUG("[GPU] GP0 rect: Raw texture mode enabled");
         }
 
         t[0].u = tex->u;       t[0].v = tex->v;
@@ -205,7 +205,7 @@ static inline uint16_t make_tpage(Gpu* gpu) {
 static void gp0_nop(Gpu* gpu) { (void)gpu; }
 
 static void gp0_clear_cache(Gpu* gpu) {
-    LOG_GPU_DEBUG("GP0(0x01): Clear Cache (no-op)");
+    LOG_GPU_DEBUG("[GPU] GP0(0x01): Clear Cache (no-op)");
     (void)gpu;
 }
 
@@ -214,7 +214,7 @@ static void gp0_clear_cache(Gpu* gpu) {
 // ---------------------------------------------------------------------------
 static void gp0_fill_rectangle(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 3) {
-        LOG_GPU_ERROR("GP0(0x02) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
+        LOG_GPU_ERROR("[GPU] GP0(0x02) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
         return;
     }
 
@@ -241,7 +241,7 @@ static void gp0_fill_rectangle(Gpu* gpu) {
     int16_t adj_x = x - gpu->drawing_x_offset;
     int16_t adj_y = y - gpu->drawing_y_offset;
 
-    LOG_GPU_DEBUG("GP0(0x02): Fill Rect (%d,%d) %dx%d Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
+    LOG_GPU_DEBUG("[GPU] GP0(0x02): Fill Rect (%d,%d) %dx%d Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
 
     // Render via OpenGL (opaque, no semi-trans, no texture)
     draw_rectangle(gpu, adj_x, adj_y, w, h, col, false, false, NULL, 0, 0, false);
@@ -285,14 +285,14 @@ static void gp0_draw_mode(Gpu* gpu) {
         case 0: gpu->texture_depth = T4Bit;  break;
         case 1: gpu->texture_depth = T8Bit;  break;
         case 2: gpu->texture_depth = T15Bit; break;
-        default: LOG_GPU_WARN("GP0(E1) unknown texture depth %d", (value >> 7) & 3); break;
+        default: LOG_GPU_WARN("[GPU] GP0(E1) unknown texture depth %d", (value >> 7) & 3); break;
     }
     gpu->dithering                  = ((value >> 9) & 1) != 0;
     gpu->draw_to_display            = ((value >> 10) & 1) != 0;
     gpu->texture_disable            = ((value >> 11) & 1) != 0;
     gpu->rectangle_texture_x_flip   = ((value >> 12) & 1) != 0;
     gpu->rectangle_texture_y_flip   = ((value >> 13) & 1) != 0;
-    LOG_GPU_DEBUG("GP0(0xE1): Draw Mode page=(%u,%u) depth=%d semi=%u draw_to_disp=%u tex_disable=%u flip=(%u,%u)",
+    LOG_GPU_DEBUG("[GPU] GP0(0xE1): Draw Mode page=(%u,%u) depth=%d semi=%u draw_to_disp=%u tex_disable=%u flip=(%u,%u)",
                  gpu->page_base_x, gpu->page_base_y, (int)gpu->texture_depth,
                  gpu->semi_transparency, (int)gpu->draw_to_display,
                  (int)gpu->texture_disable,
@@ -308,7 +308,7 @@ static void gp0_texture_window(Gpu* gpu) {
     renderer_set_texture_window(&gpu->renderer,
         gpu->texture_window_x_mask, gpu->texture_window_y_mask,
         gpu->texture_window_x_offset, gpu->texture_window_y_offset);
-    LOG_GPU_DEBUG("GP0(0xE2): Texture Window -> Mask(%u,%u) Offset(%u,%u)",
+    LOG_GPU_DEBUG("[GPU] GP0(0xE2): Texture Window -> Mask(%u,%u) Offset(%u,%u)",
         gpu->texture_window_x_mask, gpu->texture_window_y_mask,
         gpu->texture_window_x_offset, gpu->texture_window_y_offset);
 }
@@ -317,7 +317,7 @@ static void gp0_drawing_area_top_left(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
     gpu->drawing_area_left = (uint16_t)(value & 0x3FF);
     gpu->drawing_area_top  = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_GPU_DEBUG("GP0(0xE3): Drawing Area TL=(%u, %u)", gpu->drawing_area_left, gpu->drawing_area_top);
+    LOG_GPU_DEBUG("[GPU] GP0(0xE3): Drawing Area TL=(%u, %u)", gpu->drawing_area_left, gpu->drawing_area_top);
     renderer_set_drawing_area(&gpu->renderer,
         gpu->drawing_area_left, gpu->drawing_area_top,
         gpu->drawing_area_right, gpu->drawing_area_bottom);
@@ -327,7 +327,7 @@ static void gp0_drawing_area_bottom_right(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
     gpu->drawing_area_right  = (uint16_t)(value & 0x3FF);
     gpu->drawing_area_bottom = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_GPU_DEBUG("GP0(0xE4): Drawing Area BR=(%u, %u), Full bounds: [%u..%u, %u..%u]",
+    LOG_GPU_DEBUG("[GPU] GP0(0xE4): Drawing Area BR=(%u, %u), Full bounds: [%u..%u, %u..%u]",
         gpu->drawing_area_right, gpu->drawing_area_bottom,
         gpu->drawing_area_left, gpu->drawing_area_right,
         gpu->drawing_area_top, gpu->drawing_area_bottom);
@@ -342,7 +342,7 @@ static void gp0_drawing_offset(Gpu* gpu) {
     uint16_t y_raw = (uint16_t)((value >> 11) & 0x7FF);
     gpu->drawing_x_offset = (int16_t)(x_raw << 5) >> 5;
     gpu->drawing_y_offset = (int16_t)(y_raw << 5) >> 5;
-    LOG_GPU_DEBUG("GP0(0xE5): Drawing Offset (%d, %d)", gpu->drawing_x_offset, gpu->drawing_y_offset);
+    LOG_GPU_DEBUG("[GPU] GP0(0xE5): Drawing Offset (%d, %d)", gpu->drawing_x_offset, gpu->drawing_y_offset);
     renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
     gpu_update_display_mapping(gpu);
 }
@@ -351,7 +351,7 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
     gpu->force_set_mask_bit      = (value & 1) != 0;
     gpu->preserve_masked_pixels  = ((value >> 1) & 1) != 0;
-    LOG_GPU_DEBUG("GP0(0xE6): Mask Bit force=%d preserve=%d",
+    LOG_GPU_DEBUG("[GPU] GP0(0xE6): Mask Bit force=%d preserve=%d",
                   gpu->force_set_mask_bit, gpu->preserve_masked_pixels);
 }
 
@@ -360,7 +360,7 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
 // ---------------------------------------------------------------------------
 static void gp0_interrupt_request(Gpu* gpu) {
     gpu->interrupt = true;
-    LOG_GPU_DEBUG("GP0(0x1F): Interrupt Request");
+    LOG_GPU_DEBUG("[GPU] GP0(0x1F): Interrupt Request");
 }
 
 // ---------------------------------------------------------------------------
@@ -440,14 +440,14 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
 
     for (int i = 0; i < 3; i++) {
         if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
-            LOG_GPU_WARN("Textured triangle vertex %d UV out of bounds", i);
+            LOG_GPU_WARN("[GPU] Textured triangle vertex %d UV out of bounds", i);
         }
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Textured triangle CLUT out of bounds");
+            LOG_GPU_WARN("[GPU] Textured triangle CLUT out of bounds");
         }
     }
 
@@ -458,7 +458,7 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
             colors[i].g = 128;
             colors[i].b = 128;
         }
-        LOG_GPU_DEBUG("GP0 tri: Raw texture mode enabled");
+        LOG_GPU_DEBUG("[GPU] GP0 tri: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
@@ -538,14 +538,14 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
 
     for (int i = 0; i < 3; i++) {
         if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
-            LOG_GPU_WARN("Shaded textured triangle vertex %d UV out of bounds", i);
+            LOG_GPU_WARN("[GPU] Shaded textured triangle vertex %d UV out of bounds", i);
         }
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Shaded textured triangle CLUT out of bounds");
+            LOG_GPU_WARN("[GPU] Shaded textured triangle CLUT out of bounds");
         }
     }
 
@@ -556,7 +556,7 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("GP0 shaded tri: Raw texture mode enabled");
+        LOG_GPU_DEBUG("[GPU] GP0 shaded tri: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
@@ -636,14 +636,14 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
 
     for (int i = 0; i < 4; i++) {
         if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
-            LOG_GPU_WARN("Textured quad vertex %d UV out of bounds", i);
+            LOG_GPU_WARN("[GPU] Textured quad vertex %d UV out of bounds", i);
         }
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Textured quad CLUT out of bounds");
+            LOG_GPU_WARN("[GPU] Textured quad CLUT out of bounds");
         }
     }
 
@@ -654,12 +654,12 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("GP0 quad: Raw texture mode enabled");
+        LOG_GPU_DEBUG("[GPU] GP0 quad: Raw texture mode enabled");
     }
 
     static int log_limiter = 0;
     if (log_limiter < 10) {
-        LOG_GPU_DEBUG("GP0 textured quad V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x",
+        LOG_GPU_DEBUG("[GPU] GP0 textured quad V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x",
             p[0].x, p[0].y, t[0].u, t[0].v, clut, texpage);
         log_limiter++;
     }
@@ -727,14 +727,14 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     // Validate texture coordinates
     for (int i = 0; i < 4; i++) {
         if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
-            LOG_GPU_WARN("Shaded textured quad vertex %d UV out of bounds", i);
+            LOG_GPU_WARN("[GPU] Shaded textured quad vertex %d UV out of bounds", i);
         }
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Shaded textured quad CLUT out of bounds");
+            LOG_GPU_WARN("[GPU] Shaded textured quad CLUT out of bounds");
         }
     }
 
@@ -745,7 +745,7 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("GP0 shaded quad: Raw texture mode enabled");
+        LOG_GPU_DEBUG("[GPU] GP0 shaded quad: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
@@ -925,13 +925,13 @@ static void gp0_rect_var_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
-        LOG_GPU_WARN("Variable textured rect UV (%d,%d) out of bounds", tex.u, tex.v);
+        LOG_GPU_WARN("[GPU] Variable textured rect UV (%d,%d) out of bounds", tex.u, tex.v);
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Variable textured rect CLUT out of bounds");
+            LOG_GPU_WARN("[GPU] Variable textured rect CLUT out of bounds");
         }
     }
 
@@ -979,13 +979,13 @@ static void gp0_rect_fixed_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture,
     gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
-        LOG_GPU_WARN("Fixed %ux%u textured rect UV (%d,%d) out of bounds", size, size, tex.u, tex.v);
+        LOG_GPU_WARN("[GPU] Fixed %ux%u textured rect UV (%d,%d) out of bounds", size, size, tex.u, tex.v);
     }
 
     // Validate CLUT if using paletted texture
     if (depth != 2) {  // not 15-bit direct color
         if (!gpu_validate_clut_coords(clut, depth)) {
-            LOG_GPU_WARN("Fixed %ux%u textured rect CLUT out of bounds", size, size);
+            LOG_GPU_WARN("[GPU] Fixed %ux%u textured rect CLUT out of bounds", size, size);
         }
     }
 
@@ -1013,7 +1013,7 @@ static void gp0_rect_tex_16x16_raw_semi(Gpu* gpu){ gp0_rect_fixed_tex_impl(gpu, 
 /** GP0(0x80): Copy Rectangle (VRAM to VRAM) */
 static void gp0_copy_rectangle(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 4) {
-        LOG_GPU_ERROR("GP0(0x80) Error: Expected 4 words, got %u", gpu->gp0_command_buffer.count);
+        LOG_GPU_ERROR("[GPU] GP0(0x80) Error: Expected 4 words, got %u", gpu->gp0_command_buffer.count);
         return;
     }
     uint32_t src_val = gpu->gp0_command_buffer.buffer[1];
@@ -1029,7 +1029,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     if (w == 0) w = 1024;
     if (h == 0) h = 512;
 
-    LOG_GPU_DEBUG("GP0(0x80): VRAM Copy (%u,%u)->(%u,%u) %ux%u", src_x, src_y, dst_x, dst_y, w, h);
+    LOG_GPU_DEBUG("[GPU] GP0(0x80): VRAM Copy (%u,%u)->(%u,%u) %ux%u", src_x, src_y, dst_x, dst_y, w, h);
 
     // Overlap-safe directional copy
     int16_t step_x = 1, step_y = 1;
@@ -1057,7 +1057,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
 /** GP0(0xA0): Copy Rectangle CPU/DMA → VRAM (setup) */
 static void gp0_image_load(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 3) {
-        LOG_GPU_ERROR("GP0(0xA0) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
+        LOG_GPU_ERROR("[GPU] GP0(0xA0) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
         return;
     }
     uint32_t pos = gpu->gp0_command_buffer.buffer[1];
@@ -1074,7 +1074,7 @@ static void gp0_image_load(Gpu* gpu) {
     uint32_t pixels = (uint32_t)gpu->vram_load_w * gpu->vram_load_h;
     uint32_t words  = (pixels + 1) & ~1; words >>= 1;
 
-    LOG_GPU_DEBUG("GP0(0xA0): VRAM UPLOAD START (%u,%u) %ux%u = %u words",
+    LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD START (%u,%u) %ux%u = %u words",
                  gpu->vram_load_x, gpu->vram_load_y,
                  gpu->vram_load_w, gpu->vram_load_h, words);
 
@@ -1091,7 +1091,7 @@ static void gp0_image_load(Gpu* gpu) {
 /** GP0(0xC0): Copy Rectangle VRAM → CPU (setup) */
 static void gp0_image_store(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 3) {
-        LOG_GPU_ERROR("GP0(0xC0) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
+        LOG_GPU_ERROR("[GPU] GP0(0xC0) Error: Expected 3 words, got %u", gpu->gp0_command_buffer.count);
         return;
     }
     uint32_t val1 = gpu->gp0_command_buffer.buffer[1];
@@ -1110,7 +1110,7 @@ static void gp0_image_store(Gpu* gpu) {
     gpu->gp0_words_remaining = words;
     gpu->vram_load_count = 0;
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
-    LOG_GPU_DEBUG("GP0(0xC0): VRAM\xE2\x86\x92CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
+    LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM\xE2\x86\x92CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
 }
 
 // ---------------------------------------------------------------------------
@@ -1334,7 +1334,7 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
                                       gpu->vram_load_x, gpu->vram_load_y,
                                       gpu->vram_load_w, gpu->vram_load_h);
             gpu->vram_dirty = false;
-            LOG_GPU_DEBUG("GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
+            LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
                          gpu->vram_load_x, gpu->vram_load_y,
                          gpu->vram_load_w, gpu->vram_load_h);
         }
@@ -1352,7 +1352,7 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
         if (entry.handler == NULL) {
             // Unhandled — NOP and consume 1 word
             if (gp0_cmd_count <= 20 || gp0_cmd_count % 5000 == 0)
-                LOG_GPU_WARN("Unhandled GP0 opcode 0x%02x (cmd 0x%08x) #%u", opcode, word, gp0_cmd_count);
+                LOG_GPU_WARN("[GPU] Unhandled GP0 opcode 0x%02x (cmd 0x%08x) #%u @ 0x%08x", opcode, word, gp0_cmd_count);
             gpu_push_cmd_word(gpu, word);
             return;
         }

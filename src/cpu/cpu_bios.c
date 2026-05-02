@@ -46,11 +46,21 @@ static const char* get_bios_b_function_name(uint32_t func_num) {
         "alloc_kernel_memory", "free_kernel_memory", "init_timer", "get_timer",
         "enable_timer_irq", "disable_timer_irq", "restart_timer", "DeliverEvent",
         "OpenEvent", "CloseEvent", "WaitEvent", "TestEvent", "EnableEvent", "DisableEvent",
-        "OpenTh", "CloseTh", "ChangeTh", "jump_to_00000000h", "InitPAD2", "StartPAD2",
+        "OpenTh", "CloseTh", "ChangeTh", "psx_stub (jump_to_00)", "InitPAD2", "StartPAD2",
         "StopPAD2", "PAD_init2", "PAD_dr", "ReturnFromException", "ResetEntryInt",
-        "HookEntryInt"
+        "HookEntryInt", "SystemError", "SystemError", "SystemError", "SystemError", 
+        "SystemError", "SystemError", "UnDeliverEvent", "SystemError", "SystemError", 
+        "SystemError", "psx_stub", "psx_stub", "psx_stub", "psx_stub", "psx_stub", 
+        "psx_stub", "SystemError", "SystemError", "psx_stub", "psx_stub", "psx_stub", 
+        "psx_stub", "psx_stub", "psx_stub", "open", "lseek", "read", "write", "close", 
+        "ioctl", "exit", "isatty", "getc", "putc", "getchar", "putchar", "gets", "puts", 
+        "cd", "format", "firstfile2", "nextfile", "rename", "erase", "undelete", 
+        "AddDrv", "DelDrv", "PrintInstalledDevices", "InitCARD2", "StartCARD2", "StopCARD2", 
+        "_card_info_subfunc", "_card_write", "_card_read", "_new_card", "Krom2RawAdd", 
+        "SystemError", "Krom2Offset", "_get_errno", "_get_error", "GetC0Table", "GetB0Table", 
+        "_card_chan", "testdevice", "SystemError", "ChangeClearPAD", "_card_status", "_card_wait"
     };
-    if (func_num < 0x1A) return names[func_num];
+    if (func_num <= 0x5D) return names[func_num];
     return "unknown";
 }
 
@@ -62,9 +72,7 @@ static void tty_add_char(Interconnect* inter, char ch) {
     if (ch == '\n' || ch == '\r') {
         if (inter->tty_line_len > 0) {
             inter->tty_line_buf[inter->tty_line_len] = '\0';
-            LOG_BIOS_INFO("[TTY] [%s:0x%02X] %s",
-                    bios_last_syscall.table == 0 ? "A0" : "B0",
-                    bios_last_syscall.func,
+            LOG_BIOS_INFO("[TTY] %s",
                     inter->tty_line_buf);
         }
         inter->tty_line_len = 0;    } else if (b >= 0x20 && b < 0x7F) {
@@ -136,7 +144,7 @@ void handle_a0_syscall(Cpu* cpu) {
     bios_last_syscall.func = call;
     bios_last_syscall.name = get_bios_a_function_name(call);
     
-    LOG_CPU_DEBUG("[BIOS] A0(%s / 0x%02X)", bios_last_syscall.name, call);
+    LOG_CPU_DEBUG("[CPU] A0(%s / 0x%02X)", bios_last_syscall.name, call);
 
     switch (call) {
         case 0x03: capture_bios_write(cpu);  break;  // write()
@@ -153,6 +161,9 @@ void handle_a0_syscall(Cpu* cpu) {
 // Called from op_jr when target == 0xB0
 void handle_b0_syscall(Cpu* cpu) {
     uint32_t call = cpu->regs[9]; // $t1
+    
+    // Massive hex values mean this is an internal jump/hook, not a syscall
+    if (call > 0x5D) return;
 
     bios_last_syscall.table = 1;
     bios_last_syscall.func = call;
@@ -160,7 +171,7 @@ void handle_b0_syscall(Cpu* cpu) {
     
     // Suppress noise for high-frequency polling calls (GetC = 0x32, B0(0x2C), etc.)
     if (call != 0x32 && call != 0x2C) {
-        LOG_CPU_DEBUG("[BIOS] B0(%s / 0x%02X)", bios_last_syscall.name, call);
+        LOG_BIOS_DEBUG("[BIOS] B0(%s / 0x%02X)", bios_last_syscall.name, call);
     }
 
     switch (call) {

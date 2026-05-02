@@ -8,7 +8,7 @@
 uint32_t cpu_reg(Cpu* cpu, RegisterIndex index) {
     // No need to check index 0 specifically, as cpu->regs[0] is always 0.
     if (index >= 32) {
-        LOG_ERROR("GPR read index out of bounds: %u\n", index);
+        LOG_CPU_ERROR("[CPU] GPR read index out of bounds: %u", index);
         return 0; // Or trigger an internal error
     }
     return cpu->regs[index];
@@ -19,7 +19,7 @@ uint32_t cpu_reg(Cpu* cpu, RegisterIndex index) {
  */
 void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value) {
     if (index >= 32) {
-        LOG_ERROR("GPR write index out of bounds: %u\n", index);
+        LOG_CPU_ERROR("[CPU] GPR write index out of bounds: %u", index);
         return;
     }
     // Write to output register file, *except* for R0

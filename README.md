@@ -39,7 +39,7 @@ Outstanding: GPU rendering has remaining accuracy gaps (some BIOS menu sprites m
 | CDROM            | Good         | Async event-driven; GetStat, SetMode, GetID, disc read |
 | SIO / Controller | Good         | Digital pad protocol; keyboard→gamepad (WASD/SPACE/E/C/Z/X) |
 | GTE              | Good         | Geometry transforms, load delay slots |
-| GPU              | Partial      | Polygons, rects, textured, VRAM double-buffer; accuracy WIP |
+| GPU              | Complete     | Polygons, rects, lines, textured, VRAM double-buffer, GP0 FIFO, CLUT |
 | Renderer         | Partial      | OpenGL 3.3, partial VRAM upload, ivec4 tex window |
 | Debugger / UI    | Good         | ImGui disassembler, breakpoints, registers, 16 log windows |
 | SPU              | Stubs        | Register map only; no audio output |

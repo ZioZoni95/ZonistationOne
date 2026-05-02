@@ -45,7 +45,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
     size_t plen = strlen(cue_path);
     if (plen >= 4 && strcmp(cue_path + plen - 4, ".bin") == 0) {
         FILE *bin = fopen(cue_path, "rb");
-        if (!bin) { LOG_CDROM_ERROR("[DISC] Cannot open BIN: %s\n", cue_path); return false; }
+        if (!bin) { LOG_CDROM_ERROR("[CDROM] Cannot open BIN: %s", cue_path); return false; }
         fseek(bin, 0, SEEK_END);
         long fsz = ftell(bin);
         fseek(bin, 0, SEEK_SET);
@@ -58,12 +58,12 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
         disc->tracks[1].start_lba         = 0;
         disc->tracks[1].file              = bin;
         disc->tracks[1].file_offset_bytes = 0;
-        LOG_CDROM_INFO("[DISC] Loaded BIN: %s (%u sectors)\n", cue_path, disc->total_sectors);
+        LOG_CDROM_INFO("[CDROM] Loaded BIN: %s (%u sectors)", cue_path, disc->total_sectors);
         return true;
     }
 
     FILE *cue = fopen(cue_path, "r");
-    if (!cue) { LOG_CDROM_ERROR("[DISC] Cannot open CUE: %s\n", cue_path); return false; }
+    if (!cue) { LOG_CDROM_ERROR("[CDROM] Cannot open CUE: %s", cue_path); return false; }
 
     /* --- Parse CUE --- */
     char    line[512];
@@ -100,11 +100,11 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
 
             cur_file = fopen(full_path, "rb");
             if (!cur_file) {
-                LOG_CDROM_ERROR("[DISC] Cannot open BIN: %s\n", full_path);
+                LOG_CDROM_ERROR("[CDROM] Cannot open BIN: %s", full_path);
                 fclose(cue);
                 return false;
             }
-            LOG_CDROM_DEBUG("[DISC] File: %s\n", full_path);
+            LOG_CDROM_DEBUG("[CDROM] File: %s", full_path);
 
         } else if (strncmp(p, "TRACK", 5) == 0) {
             unsigned tnum = 0;
@@ -134,7 +134,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
     fclose(cue);
 
     if (disc->last_track == 0) {
-        LOG_CDROM_ERROR("[DISC] CUE parse failed: no tracks found\n");
+        LOG_CDROM_ERROR("[CDROM] CUE parse failed: no tracks found");
         return false;
     }
 
@@ -176,10 +176,10 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
         (void)prev_file_end_lba;
     }
 
-    LOG_CDROM_INFO("[DISC] Loaded: %u tracks, %u sectors (multi=%d)\n",
+    LOG_CDROM_INFO("[CDROM] Loaded: %u tracks, %u sectors (multi=%d)",
                    disc->last_track, disc->total_sectors, multi_file);
     for (int i = disc->first_track; i <= disc->last_track; i++) {
-        LOG_CDROM_DEBUG("[DISC]  Track %02u: LBA=%u audio=%d offset=%u\n",
+        LOG_CDROM_DEBUG("[CDROM] Track %02u: LBA=%u audio=%d offset=%u",
                         i, disc->tracks[i].start_lba,
                         disc->tracks[i].is_audio,
                         disc->tracks[i].file_offset_bytes);

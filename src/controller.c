@@ -7,7 +7,7 @@ void controller_init(Controller* ctrl) {
     memset(ctrl, 0, sizeof(Controller));
     ctrl->button_state = 0xFFFF;  // All buttons released
     ctrl->connected = true;       // Controller enabled by default
-    LOG_INFO("Controller initialized (keyboard input enabled)");
+    LOG_SYSTEM_INFO("[SYSTEM] Controller initialized (keyboard input enabled)");
 }
 
 /**
@@ -76,8 +76,7 @@ uint16_t controller_update_from_keyboard(Controller* ctrl) {
                 bool was_released = (ctrl->button_state >> i) & 1;
                 bool now_pressed = !((buttons >> i) & 1);
                 if (was_released && now_pressed) {
-                    LOG_TRACE("[Controller] Button pressed: %s (0x%04x)", pressed_buttons[i], buttons);
-                }
+}
             }
             last_logged_state = buttons;
         }
@@ -89,7 +88,7 @@ uint16_t controller_update_from_keyboard(Controller* ctrl) {
 
 void controller_set_button(Controller* ctrl, int button_bit, bool pressed) {
     if (button_bit < 0 || button_bit > 15) {
-        LOG_WARN("Invalid button bit: %d", button_bit);
+        LOG_SYSTEM_WARN("[SYSTEM] Invalid button bit: %d", button_bit);
         return;
     }
 
@@ -109,5 +108,5 @@ void controller_set_connected(Controller* ctrl, bool connected) {
     if (!connected) {
         ctrl->button_state = 0xFFFF;  // All released
     }
-    LOG_INFO("Controller %s", connected ? "connected" : "disconnected");
+    LOG_SYSTEM_INFO("[SYSTEM] Controller %s", connected ? "connected" : "disconnected");
 }

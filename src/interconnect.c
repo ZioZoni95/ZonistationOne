@@ -19,7 +19,7 @@
  * @param ram Pointer to the initialized Ram struct.
  */
 void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
-    LOG_INTERCONNECT_DEBUG("Interconnect initialized");
+    LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect initialized");
     inter->bios = bios;
     inter->ram = ram;
     inter->cpu = NULL; // Will be set later via interconnect_set_cpu()
@@ -54,7 +54,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 
     debugger_init(&inter->debugger);
 
-    LOG_INTERCONNECT_DEBUG("Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
+    LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
 
 /**
@@ -65,7 +65,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
  */
 void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
     inter->cpu = cpu;
-    LOG_INTERCONNECT_DEBUG("Interconnect CPU pointer set (exception triggering enabled).");
+    LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect CPU pointer set (exception triggering enabled).");
 }
 
 // --- CDROM Event Scheduler ---
@@ -96,13 +96,13 @@ void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
             cdrom_events[i].name = name;
             static uint32_t evt_sched_count = 0;
             if (++evt_sched_count <= 10 || evt_sched_count % 50 == 0) {
-                LOG_CDROM_DEBUG("[EVT] Scheduled #%u: %s for cycle %u (now=%u, delay=%u)",
+                LOG_CDROM_DEBUG("[SYSTEM] Scheduled #%u: %s for cycle %u (now=%u, delay=%u)",
                          evt_sched_count, name, target, inter->cpu_cycle_counter, cycles);
             }
             return;
         }
     }
-    LOG_CDROM_ERROR("[EVT] No free event slots for %s!\n", name);
+    LOG_CDROM_ERROR("[SYSTEM] No free event slots for %s!", name);
 }
 
 // Called by main loop to check/fire CDROM events
@@ -114,7 +114,7 @@ void interconnect_check_cdrom_events(Interconnect* inter) {
                 uint32_t cycles_late = inter->cpu_cycle_counter - cdrom_events[i].target_cycle;
                 static uint32_t evt_fire_count = 0;
                 if (++evt_fire_count <= 10 || evt_fire_count % 50 == 0) {
-                    LOG_DEBUG("[EVT] Firing #%u: %s (late=%u, target=%u, now=%u)",
+                    LOG_SYSTEM_DEBUG("[SYSTEM] Firing #%u: %s (late=%u, target=%u, now=%u)",
                              evt_fire_count, cdrom_events[i].name, cycles_late,
                              cdrom_events[i].target_cycle, inter->cpu_cycle_counter);
                 }
@@ -139,7 +139,6 @@ void interconnect_tty_input_add(Interconnect* inter, char ch) {
     }
     inter->tty_input_buf[inter->tty_input_write_idx] = ch;
     inter->tty_input_write_idx = next_write;
-    LOG_SYSTEM_TRACE("TTY input: added char '%c' (0x%02x)", (ch >= 32 && ch < 127) ? ch : '?', (unsigned char)ch);
 }
 
 /**
@@ -154,6 +153,5 @@ int interconnect_tty_input_get(Interconnect* inter) {
     }
     int ch = (unsigned char)inter->tty_input_buf[inter->tty_input_read_idx];
     inter->tty_input_read_idx = (inter->tty_input_read_idx + 1) % sizeof(inter->tty_input_buf);
-    LOG_SYSTEM_TRACE("TTY getc: retrieved char '%c' (0x%02x)", (ch >= 32 && ch < 127) ? ch : '?', ch);
-    return ch;
+return ch;
 }

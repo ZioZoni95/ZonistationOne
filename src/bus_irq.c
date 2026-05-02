@@ -28,7 +28,7 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
         inter->irq_status |= bit;
         static uint32_t irq_edge_count = 0;
         if (++irq_edge_count % 100 == 0) {
-            LOG_IRQ_DEBUG("[IRQ] Rising edge #%u: line=%u I_STAT=0x%04x, I_MASK=0x%04x", irq_edge_count, irq_line, inter->irq_status, inter->irq_mask);
+            LOG_IRQ_DEBUG("[INTERCONNECT] Rising edge #%u: line=%u I_STAT=0x%04x, I_MASK=0x%04x", irq_edge_count, irq_line, inter->irq_status, inter->irq_mask);
         }
     }
 }
@@ -44,7 +44,7 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source) {
     static uint32_t irq_req_count = 0;
     if (++irq_req_count % 100 == 0) {
-        LOG_IRQ_DEBUG("[IRQ] Request #%u: line=%u by %s, I_STAT=0x%04x", irq_req_count, irq_line, source, inter->irq_status);
+        LOG_IRQ_DEBUG("[INTERCONNECT] Request #%u: line=%u by %s, I_STAT=0x%04x", irq_req_count, irq_line, source, inter->irq_status);
     }
     // Pulse the line (0->1->0) to trigger edge detection
     interconnect_set_irq_line(inter, irq_line, true);
@@ -61,13 +61,13 @@ void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* 
 
 void interconnect_trigger_cdrom_irq(Interconnect* inter) {
     if (!inter) {
-        LOG_CDROM_ERROR("[CDROM] trigger_cdrom_irq: inter is NULL!");
+        LOG_CDROM_ERROR("[INTERCONNECT] trigger_cdrom_irq: inter is NULL!");
         return;
     }
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
     static uint32_t cdrom_irq_count = 0;
     if (++cdrom_irq_count <= 10 || cdrom_irq_count % 50 == 0) {
-        LOG_CDROM_DEBUG("[CDROM] IRQ #%u triggered, I_STAT=0x%04x", cdrom_irq_count, inter->irq_status);
+        LOG_CDROM_DEBUG("[INTERCONNECT] IRQ #%u triggered, I_STAT=0x%04x", cdrom_irq_count, inter->irq_status);
     }
 }
 

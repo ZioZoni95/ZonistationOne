@@ -5,17 +5,14 @@
 
 // --- Exception Handling Helpers ---
 static void log_exception_details(Cpu* cpu, ExceptionCause cause) {
-    LOG_CPU_DEBUG("@PSX-Spex EXCEPTION: cause=0x%02x EPC=0x%08x PC=0x%08x SR=0x%08x BadVaddr=0x%08x InDelaySlot=%d", cause, cpu->epc, cpu->current_pc, cpu->sr, cpu->badvaddr, cpu->in_delay_slot);
-    LOG_CPU_DEBUG("Exception raised: Cause=0x%02x, PC=0x%08x, SR=0x%08x, EPC=0x%08x, BadVaddr=0x%08x", cause, cpu->pc, cpu->sr, cpu->epc, cpu->badvaddr);
+
     if (cpu->inter) {
         uint32_t fault_instr = interconnect_load32(cpu->inter, cpu->current_pc);
-        LOG_CPU_DEBUG("@FAULT_INSTRUCTION at PC=0x%08x: 0x%08x", cpu->current_pc, fault_instr);
-    }
+}
     if (cause == EXCEPTION_INTERRUPT) {
         static uint32_t irq_entry_count = 0;
         if (++irq_entry_count % 100 == 0) {
-            LOG_IRQ_DEBUG("[IRQ] Handler entered #%u", irq_entry_count);
-        }
+}
     }
 }
 
@@ -69,14 +66,13 @@ static void acknowledge_interrupts(Cpu* cpu) {
         uint16_t pending_interrupts = current_status & current_mask;
         static uint32_t irq_exc_count = 0;
         if (++irq_exc_count % 100 == 0) {
-            LOG_IRQ_DEBUG("[IRQ] Exception #%u: I_STAT=0x%04x, I_MASK=0x%04x, Pending=0x%04x", irq_exc_count, current_status, current_mask, pending_interrupts);
-        }
+}
         // DO NOT auto-clear! The BIOS exception handler will do this.
         
         // GTE interrupt quirk: if EPC points to a GTE instruction, advance past it
         uint32_t epc_instr = interconnect_load32(cpu->inter, cpu->epc);
         if ((epc_instr & 0xFE000000) == 0x4A000000) {
-            LOG_CPU_INFO("@PSX-Spex GTE interrupt quirk: EPC advanced to 0x%08x", cpu->epc + 4);
+            LOG_CPU_INFO("[CPU] @PSX-Spex GTE interrupt quirk: EPC advanced to 0x%08x @ 0x%08x", cpu->epc + 4);
             cpu->epc += 4;
         }
     }
@@ -95,12 +91,9 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause) {
         acknowledge_interrupts(cpu);
     }
     uint32_t handler_addr = get_exception_vector(cpu);
-    LOG_CPU_DEBUG("@EXCEPTION_VECTOR: BEV=%d, jumping to handler at 0x%08x", (cpu->sr & (1 << 22)) ? 1 : 0, handler_addr);
-    cpu->pc = handler_addr;
+cpu->pc = handler_addr;
     cpu->next_pc = cpu->pc + 4;
     if (cpu->inter) {
         uint32_t handler_instr = interconnect_load32(cpu->inter, handler_addr);
-        LOG_CPU_DEBUG("@EXCEPTION_HANDLER_CODE at 0x%08x: 0x%08x", handler_addr, handler_instr);
-    }
-    LOG_CPU_DEBUG("@After exception: PC=0x%08x, SR=0x%08x, EPC=0x%08x, Cause=0x%08x", cpu->pc, cpu->sr, cpu->epc, cpu->cause);
+}
 }

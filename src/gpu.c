@@ -92,7 +92,7 @@ void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
         gpu->field = gpu->crtc.interlaced_field ? Top : Bottom;
     }
 
-    LOG_GPU_DEBUG("[CRTC] tick: scanline=%u vblank=%d lsb=%u",
+    LOG_GPU_DEBUG("[GPU] tick: scanline=%u vblank=%d lsb=%u",
                   gpu->crtc.current_scanline, (int)gpu->crtc.in_vblank,
                   gpu->crtc.active_line_lsb);
 }
@@ -103,13 +103,13 @@ void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
 
 static void gp1_reset(Gpu* gpu, uint32_t value) {
     (void)value;
-    LOG_GPU_DEBUG("GPU: Soft Reset (GP1 0x00)");
+    LOG_GPU_DEBUG("[GPU] GPU: Soft Reset (GP1 0x00)");
     gpu_soft_reset(gpu);
 }
 
 static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
     (void)value;
-    LOG_GPU_DEBUG("GPU: Reset Command Buffer (GP1 0x01)");
+    LOG_GPU_DEBUG("[GPU] GPU: Reset Command Buffer (GP1 0x01)");
     gpu_clear_cmd_buf(gpu);
     gpu->gp0_words_remaining = 0;
     gpu->gp0_mode = GP0_MODE_COMMAND;
@@ -121,12 +121,12 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
 static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
     (void)value;
     gpu->interrupt = false;
-    LOG_GPU_DEBUG("GPU: Acknowledge IRQ (GP1 0x02)");
+    LOG_GPU_DEBUG("[GPU] GPU: Acknowledge IRQ (GP1 0x02)");
 }
 
 static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     gpu->display_disabled = (value & 1) != 0;
-    LOG_GPU_DEBUG("GPU: Display %s (GP1 0x03)", gpu->display_disabled ? "Disabled" : "Enabled");
+    LOG_GPU_DEBUG("[GPU] GPU: Display %s (GP1 0x03)", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
 static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
@@ -136,13 +136,13 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
         case 2: gpu->dma_setting = GPU_DMA_CpuToGp0;  break;
         case 3: gpu->dma_setting = GPU_DMA_VRamToCpu; break;
     }
-    LOG_GPU_DEBUG("GPU: DMA Direction = %d (GP1 0x04)", gpu->dma_setting);
+    LOG_GPU_DEBUG("[GPU] GPU: DMA Direction = %d (GP1 0x04)", gpu->dma_setting);
 }
 
 static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
     gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);        // even only
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
-    LOG_GPU_DEBUG("GPU: Display VRAM Start X=%u Y=%u (GP1 0x05)",
+    LOG_GPU_DEBUG("[GPU] GPU: Display VRAM Start X=%u Y=%u (GP1 0x05)",
                   gpu->display_vram_x_start, gpu->display_vram_y_start);
     gpu_update_display_mapping(gpu);
 }
@@ -150,7 +150,7 @@ static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
 static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
     gpu->display_horiz_start = (uint16_t)(value & 0xFFF);
     gpu->display_horiz_end   = (uint16_t)((value >> 12) & 0xFFF);
-    LOG_GPU_DEBUG("GPU: Display H-Range %u–%u (GP1 0x06)",
+    LOG_GPU_DEBUG("[GPU] GPU: Display H-Range %u–%u (GP1 0x06)",
                   gpu->display_horiz_start, gpu->display_horiz_end);
     gpu_update_display_mapping(gpu);
 }
@@ -158,7 +158,7 @@ static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
 static void gp1_display_vertical_range(Gpu* gpu, uint32_t value) {
     gpu->display_line_start = (uint16_t)(value & 0x3FF);
     gpu->display_line_end   = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_GPU_DEBUG("GPU: Display V-Range %u–%u (GP1 0x07)",
+    LOG_GPU_DEBUG("[GPU] GPU: Display V-Range %u–%u (GP1 0x07)",
                   gpu->display_line_start, gpu->display_line_end);
     gpu_update_display_mapping(gpu);
 }
@@ -171,7 +171,7 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     gpu->display_depth  = ((value >> 4) & 1) ? D24Bits : D15Bits;
     gpu->interlaced     = ((value >> 5) & 1) != 0;
     if ((value >> 7) & 1)
-        LOG_GPU_WARN("GP1(0x08): Reverseflag bit set (unsupported)");
+        LOG_GPU_WARN("[GPU] GP1(0x08): Reverseflag bit set (unsupported)");
 
     uint16_t width = 256;
     switch (gpu->hres_raw.hr1 | (gpu->hres_raw.hr2 << 2)) {
@@ -186,7 +186,7 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     gpu->display_width_hint  = width;
     gpu->display_height_hint = height;
     gpu_update_display_mapping(gpu);
-    LOG_GPU_DEBUG("GPU: Display Mode %ux%u interlaced=%d (GP1 0x08)", width, height, (int)gpu->interlaced);
+    LOG_GPU_DEBUG("[GPU] GPU: Display Mode %ux%u interlaced=%d (GP1 0x08)", width, height, (int)gpu->interlaced);
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ static void gp1_get_gpu_info(Gpu* gpu, uint32_t value) {
             break;
     }
     gpu->gpu_info_latch = result;
-    LOG_GPU_DEBUG("GP1(0x10): GetGPUInfo subfn=%u -> 0x%08x", subfn, result);
+    LOG_GPU_DEBUG("[GPU] GP1(0x10): GetGPUInfo subfn=%u -> 0x%08x", subfn, result);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ void gpu_gp1(Gpu* gpu, uint32_t command) {
         case 0x08: gp1_display_mode(gpu, command); break;
         case 0x09:
             // GP1(0x09): Allow texture disable (stored in texture_disable controlled via GP0(E1))
-            LOG_GPU_DEBUG("GP1(0x09): Allow texture disable (no-op in LLE)");
+            LOG_GPU_DEBUG("[GPU] GP1(0x09): Allow texture disable (no-op in LLE)");
             break;
         case 0x10: case 0x11: case 0x12: case 0x13: case 0x14: case 0x15:
         case 0x16: case 0x17: case 0x18: case 0x19: case 0x1A: case 0x1B:
@@ -266,7 +266,7 @@ void gpu_gp1(Gpu* gpu, uint32_t command) {
             gp1_get_gpu_info(gpu, command);
             break;
         default:
-            LOG_GPU_WARN("Unhandled GP1 opcode 0x%02x (cmd 0x%08x)", opcode, command);
+            LOG_GPU_WARN("[GPU] Unhandled GP1 opcode 0x%02x (cmd 0x%08x) @ 0x%08x", opcode, command);
             break;
     }
 }
@@ -317,7 +317,7 @@ uint32_t gpu_read_data(Gpu* gpu) {
     // IMAGE_STORE: pack two 16-bit VRAM pixels per 32-bit word
     if (gpu->gp0_mode == GP0_MODE_IMAGE_STORE) {
         if (gpu->gp0_words_remaining == 0) {
-            LOG_GPU_WARN("GPUREAD: No words remaining in Image Store transfer");
+            LOG_GPU_WARN("[GPU] GPUREAD: No words remaining in Image Store transfer");
             return 0xFFFFFFFF;
         }
         uint32_t idx = gpu->vram_load_count;
@@ -342,7 +342,7 @@ uint32_t gpu_read_data(Gpu* gpu) {
         gpu->gp0_words_remaining--;
         if (gpu->gp0_words_remaining == 0) {
             gpu->gp0_mode = GP0_MODE_COMMAND;
-            LOG_GPU_INFO("GP0(0xC0): VRAM→CPU transfer COMPLETE");
+            LOG_GPU_INFO("[GPU] GP0(0xC0): VRAM→CPU transfer COMPLETE");
         }
         return (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
     }
@@ -428,17 +428,17 @@ static void gpu_reset_state(Gpu* gpu) {
 }
 
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {
-    LOG_GPU_DEBUG("GPU full initialization (with VRAM)");
+    LOG_GPU_DEBUG("[GPU] GPU full initialization (with VRAM)");
     vram_init(&gpu->vram);
     gpu->inter = inter;
     gpu_reset_state(gpu);
-    LOG_GPU_DEBUG("GPU Initialized.");
+    LOG_GPU_DEBUG("[GPU] GPU Initialized.");
 }
 
 void gpu_soft_reset(Gpu* gpu) {
-    LOG_GPU_DEBUG("GPU soft reset (VRAM preserved)");
+    LOG_GPU_DEBUG("[GPU] GPU soft reset (VRAM preserved)");
     gpu_reset_state(gpu);
-    LOG_GPU_DEBUG("GPU Soft Reset complete.");
+    LOG_GPU_DEBUG("[GPU] GPU Soft Reset complete.");
 }
 
 // gpu_init (legacy alias used by some callers)

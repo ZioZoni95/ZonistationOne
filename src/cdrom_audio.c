@@ -312,11 +312,11 @@ bool cdrom_audio_sdl_open(AudioFifo *fifo) {
 
     s_sdl_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (s_sdl_dev == 0) {
-        LOG_CDROM_ERROR("[AUDIO] SDL_OpenAudioDevice: %s\n", SDL_GetError());
+        LOG_CDROM_ERROR("[CDROM] SDL_OpenAudioDevice: %s", SDL_GetError());
         return false;
     }
     SDL_PauseAudioDevice(s_sdl_dev, 0);
-    LOG_CDROM_INFO("[AUDIO] SDL audio opened: %u Hz, %u ch\n", have.freq, have.channels);
+    LOG_CDROM_INFO("[CDROM] SDL audio opened: %u Hz, %u ch", have.freq, have.channels);
     return true;
 }
 

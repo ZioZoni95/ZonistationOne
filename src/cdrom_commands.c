@@ -81,7 +81,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
     for (int i = 0; i < cdrom->pending_param_count; i++)
         fifo_push(&cdrom->param_fifo, cdrom->pending_params[i]);
 
-    LOG_CDROM_DEBUG("[CDROM] Exec cmd=0x%02X\n", cmd);
+    LOG_CDROM_DEBUG("[CDROM] Exec cmd=0x%02X", cmd);
     fifo_clear(&cdrom->response_fifo);
 
     switch (cmd) {
@@ -108,7 +108,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         uint8_t f  = cdrom_from_bcd(ff);
         cdrom->setloc_lba    = (uint32_t)((m*60 + s)*75 + f) - 150;
         cdrom->setloc_pending = true;
-        LOG_CDROM_DEBUG("[CDROM] Setloc %02u:%02u:%02u -> LBA %u\n", m, s, f, cdrom->setloc_lba);
+        LOG_CDROM_DEBUG("[CDROM] Setloc %02u:%02u:%02u -> LBA %u", m, s, f, cdrom->setloc_lba);
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         break;
@@ -220,7 +220,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         cdrom->report_enable  = (m & 0x04) != 0;
         cdrom->auto_pause     = (m & 0x02) != 0;
         cdrom->cdda_enable    = (m & 0x01) != 0;
-        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d)\n",
+        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d) @ 0x%08x",
                         m, cdrom->double_speed, cdrom->whole_sector, cdrom->xa_adpcm_enable);
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
@@ -423,7 +423,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         break;
 
     default:
-        LOG_CDROM_WARN("[CDROM] Unknown cmd 0x%02X\n", (unsigned)cmd);
+        LOG_CDROM_WARN("[CDROM] Unknown cmd 0x%02X", (unsigned)cmd);
         cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_INVALID_COMMAND);
         break;
     }
@@ -533,7 +533,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         uint8_t raw[2352];
         bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw);
         if (!ok) {
-            LOG_CDROM_ERROR("[CDROM] Async read failed at LBA %u\n", cdrom->current_lba);
+            LOG_CDROM_ERROR("[CDROM] Async read failed at LBA %u", cdrom->current_lba);
             cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x04);
             cdrom->drive_state = DRIVE_IDLE;
             return;
@@ -589,7 +589,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom->current_subq_lba = cdrom->current_lba;
             cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
 
-            LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1\n", cdrom->current_lba);
+            LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1", cdrom->current_lba);
 
             /* INT1: data ready — INT ACK handler will schedule next drive event */
             fifo_clear(&cdrom->response_fifo);
@@ -607,7 +607,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         uint8_t raw[2352];
         bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw);
         if (!ok) {
-            LOG_CDROM_ERROR("[CDROM] CDDA read failed at LBA %u\n", cdrom->current_lba);
+            LOG_CDROM_ERROR("[CDROM] CDDA read failed at LBA %u", cdrom->current_lba);
             cdrom->drive_state = DRIVE_IDLE;
             return;
         }
