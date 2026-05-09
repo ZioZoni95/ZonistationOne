@@ -21,7 +21,8 @@ EMU_C_SRCS = src/main.c src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_regi
              src/gpu.c src/gpu_helpers.c src/gpu_commands.c src/renderer.c src/vram.c \
              src/debugger.c src/timers.c src/cdrom.c src/cdrom_commands.c src/cdrom_disc.c \
              src/cdrom_audio.c src/gte.c src/log.c src/rxi_log.c src/event_scheduler.c \
-             src/sio.c src/controller.c src/spu.c src/pcdrv.c
+              src/sio.c src/controller.c src/spu.c src/spu_voice.c src/spu_adsr.c \
+              src/spu_mixing.c src/spu_dma.c src/spu_irq.c src/pcdrv.c
 
 # Emulator C++ sources
 EMU_CXX_SRCS = src/debug_ui.cpp \

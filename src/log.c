@@ -20,7 +20,7 @@ static int sink_count = 0;
 static const char* category_names[LOG_CAT_COUNT] = {
     "SYSTEM", "CPU", "IRQ", "DMA", "GPU", "CDROM",
     "TIMER", "BIOS", "BUS", "RENDERER", "EVENT",
-    "GTE", "VRAM", "RAM", "DEBUG", "MDEC"
+    "GTE", "VRAM", "RAM", "DEBUG", "MDEC", "SPU"
 };
 
 // Our LogLevel → rxi level (SILENT/SILENT never reaches rxi)

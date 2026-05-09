@@ -36,7 +36,8 @@ typedef enum {
     LOG_CAT_RAM = 13,       // RAM operations
     LOG_CAT_DEBUG = 14,     // Debugger operations
     LOG_CAT_MDEC = 15,      // MDEC (Macroblock Decoder)
-    LOG_CAT_COUNT = 16      // Total number of categories
+    LOG_CAT_SPU = 16,       // Sound Processing Unit
+    LOG_CAT_COUNT = 17      // Total number of categories
 } LogCategory;
 
 // --- Rate Limiting Structure ---
@@ -166,6 +167,12 @@ void log_print(LogCategory category, LogLevel level, const char* format, ...);
 #define LOG_MDEC_INFO(...) log_print(LOG_CAT_MDEC, LOG_LEVEL_INFO, __VA_ARGS__)
 #define LOG_MDEC_DEBUG(...) log_print(LOG_CAT_MDEC, LOG_LEVEL_DEBUG, __VA_ARGS__)
 #define LOG_MDEC_TRACE(...) log_print(LOG_CAT_MDEC, LOG_LEVEL_TRACE, __VA_ARGS__)
+
+#define LOG_SPU_ERROR(...) log_print(LOG_CAT_SPU, LOG_LEVEL_ERROR, __VA_ARGS__)
+#define LOG_SPU_WARN(...) log_print(LOG_CAT_SPU, LOG_LEVEL_WARN, __VA_ARGS__)
+#define LOG_SPU_INFO(...) log_print(LOG_CAT_SPU, LOG_LEVEL_INFO, __VA_ARGS__)
+#define LOG_SPU_DEBUG(...) log_print(LOG_CAT_SPU, LOG_LEVEL_DEBUG, __VA_ARGS__)
+#define LOG_SPU_TRACE(...) log_print(LOG_CAT_SPU, LOG_LEVEL_TRACE, __VA_ARGS__)
 
 // Legacy compatibility for custom macros
 #define LOG_TIMERS_ERROR(...) LOG_TIMER_ERROR(__VA_ARGS__)

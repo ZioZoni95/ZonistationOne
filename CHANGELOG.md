@@ -14,6 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Log Formatting**: Standardized log strings codebase-wide to `[CATEGORY] msg @ 0xPC` and stripped trailing newlines for ImGui compatibility.
 
 ### Added
+- **SPU (Sound Processing Unit)**: Complete implementation across 5 modular source files (`spu.c`, `spu_voice.c`, `spu_adsr.c`, `spu_mixing.c`, `spu_dma.c`, `spu_irq.c`). 24 voices with XA-ADPCM decoder (5 prediction filters, Gaussian 4-tap interpolation), ADSR envelope (Attack/Decay/Sustain/Release), noise generator, reverb (IIR/comb/allpass), capture buffer (4 channels), 512KB SPU RAM, DMA transfer (manual/DMA read/write), IRQ9 address boundary detection, circular sample buffer (4096 stereo frames) for SDL audio callback synchronization, `spu_step()` called in main emulation loop with CPU cycle timing.
+- **ImGui SPU Debug window**: Voice status table (24 voices, ADSR phase, pitch, volume), audio peak level meters (L/R), buffer fill indicator, global control/status registers, transfer/DMA state, reverb registers.
+- **SPU log category**: `LOG_SPU_*` macros for ERROR/WARN/INFO/DEBUG/TRACE levels; visible in ImGui SPU log viewer.
 - **CPU Disassembler**: PCSX-Redux-style disassembly window with 128-row virtual list (`ImGuiListClipper`), row highlights for PC (yellow) and breakpoints (dark red), clickable breakpoint dots, Go-To-Address footer.
 - **Run / Pause / Step controls**: F5 (run/pause toggle) and F11 (single step) wired through `debug_ui_step_requested()` edge-triggered flag into the main emulation loop.
 - **Breakpoint manager**: ImGui table (address / enable checkbox / delete button); click address to jump disassembly view; Add BP input field.
@@ -77,7 +80,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - CDROM: command handling, disc read, IRQ delivery
 - SIO/Controller: digital pad protocol, keyboard-to-gamepad mapping (WASD/SPACE/E/C/Z/X)
 - GTE: geometry transformation engine, load delay slots
-- SPU: register stubs (audio not rendered)
+- SPU: full implementation (24 voices, ADPCM, ADSR, reverb, DMA, IRQ, SDL audio output)
 - I-Cache: 256-line 4-word cache with tag/valid bits
 - Event scheduler: DuckStation-style downcount dispatch for VBlank, timers, CDROM
 

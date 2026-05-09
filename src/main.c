@@ -33,6 +33,7 @@
 #include "event_scheduler.h"
 #include "controller.h"
 #include "debugger.h"
+#include "spu.h"
 
 
 /*
@@ -199,8 +200,9 @@ int main(int argc, char *argv[]) {
     // 5. Load a game disc into the CD-ROM drive (OPTIONAL)
     // NOTE: The emulator can run BIOS-only without a game disc
     // If no disc is loaded, the emulator will just run the BIOS to its menu.
-    /* Open SDL audio device for CD audio output */
+    /* Open SDL audio device for CD audio + SPU output */
     cdrom_audio_sdl_open(&interconnect_state.cdrom.audio_fifo);
+    cdrom_audio_set_spu(&interconnect_state.spu);
 
     LOG_SYSTEM_INFO("[SYSTEM] Attempting to load game disc (optional)...");
     if (game_path != NULL) {
@@ -444,6 +446,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 timers_step(&interconnect_state.timers_state, run_chunk);
+                spu_step(&interconnect_state.spu, run_chunk);
                 cycles_run += run_chunk;
             }
         } else if (debug_ui_step_requested()) {

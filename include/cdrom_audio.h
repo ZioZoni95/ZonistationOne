@@ -43,4 +43,7 @@ void cdrom_audio_get_frame(AudioFifo *fifo, int16_t *left, int16_t *right);
 bool cdrom_audio_sdl_open(AudioFifo *fifo);
 void cdrom_audio_sdl_close(void);
 
+/* Set SPU pointer for mixing (call after init) */
+void cdrom_audio_set_spu(void *spu_ptr);
+
 #endif /* CDROM_AUDIO_H */

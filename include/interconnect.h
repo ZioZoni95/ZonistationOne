@@ -68,9 +68,7 @@ struct Cpu;
 #define TIMERS_END   (TIMERS_START + TIMERS_SIZE - 1)
 
 // SPU (Sound Processing Unit) Registers
-#define SPU_START 0x1f801C00
-#define SPU_SIZE  640 // From Nocash specs
-#define SPU_END   (SPU_START + SPU_SIZE - 1)
+/* SPU_START, SPU_SIZE, SPU_END defined in spu.h */
 
 // GPU Registers (GP0, GP1/GPUSTAT)
 #define GPU_START 0x1f801810
