@@ -10,6 +10,33 @@
 #include <stdlib.h>
 
 /* =========================================================================
+ * Name tables
+ * ========================================================================= */
+
+static const char* cdrom_cmd_name(uint8_t cmd) {
+    static const char* const names[32] = {
+        "Sync","Getstat","Setloc","Play","Forward","Backward","ReadN","MotorOn",
+        "Stop","Pause","Init","Mute","Demute","Setfilter","Setmode","Getparam",
+        "GetlocL","GetlocP","ReadT","GetTN","GetTD","SeekL","SeekP","SetClock",
+        "GetClock","Test","GetID","ReadS","Reset","GetQ","ReadTOC","VideoCD"
+    };
+    return (cmd < 32) ? names[cmd] : (cmd == 0xFF ? "None" : "Unknown");
+}
+
+static const char* cdrom_drive_state_name(int state) {
+    switch (state) {
+        case 0: return "IDLE";
+        case 1: return "SPINUP";
+        case 2: return "SEEKING";
+        case 3: return "READING";
+        case 4: return "PLAYING";
+        case 5: return "PAUSING";
+        case 6: return "STOPPING";
+        default: return "UNKNOWN";
+    }
+}
+
+/* =========================================================================
  * Internal helpers (shared with cdrom.c via extern)
  * ========================================================================= */
 
@@ -32,6 +59,8 @@ static void begin_reading(Cdrom *cdrom) {
         cdrom->current_lba    = cdrom->setloc_lba;
         cdrom->setloc_pending = false;
     }
+    LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> READING (LBA %u)",
+                    cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
     cdrom->drive_state = DRIVE_READING;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
     uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_1X / 2 : CDROM_READ_DELAY_1X;
@@ -48,6 +77,8 @@ static void begin_playing(Cdrom *cdrom, uint8_t track_param) {
         cdrom->current_lba    = cdrom->setloc_lba;
         cdrom->setloc_pending = false;
     }
+    LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> PLAYING (LBA %u)",
+                    cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
     cdrom->drive_state = DRIVE_PLAYING;
     cdrom->cdda_speed  = 1;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
@@ -62,6 +93,8 @@ static void begin_seeking(Cdrom *cdrom, bool read_after, bool play_after) {
         cdrom->target_lba     = cdrom->setloc_lba;
         cdrom->setloc_pending = false;
     }
+    LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> SEEKING (LBA %u -> %u)",
+                    cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba, cdrom->target_lba);
     cdrom->drive_state = DRIVE_SEEKING;
     uint32_t delay = cdrom_disc_get_seek_ticks(cdrom->current_lba, cdrom->target_lba);
     cdrom_schedule_second_response_event(cdrom, delay);
@@ -81,7 +114,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
     for (int i = 0; i < cdrom->pending_param_count; i++)
         fifo_push(&cdrom->param_fifo, cdrom->pending_params[i]);
 
-    LOG_CDROM_DEBUG("[CDROM] Exec cmd=0x%02X", cmd);
+    LOG_CDROM_DEBUG("[CDROM] Execute command %s (0x%02X)", cdrom_cmd_name((uint8_t)cmd), (uint8_t)cmd);
     fifo_clear(&cdrom->response_fifo);
 
     switch (cmd) {
@@ -423,7 +456,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         break;
 
     default:
-        LOG_CDROM_WARN("[CDROM] Unknown cmd 0x%02X", (unsigned)cmd);
+        LOG_CDROM_WARN("[CDROM] Unknown cmd 0x%02X (drive: %s)", (unsigned)cmd, cdrom_drive_state_name(cdrom->drive_state));
         cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_INVALID_COMMAND);
         break;
     }
@@ -440,6 +473,7 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     CdromCommand cmd = cdrom->second_response_cmd;
     cdrom->second_response_cmd = CDC_NONE;
     fifo_clear(&cdrom->response_fifo);
+    LOG_CDROM_DEBUG("[CDROM] Second response: %s (0x%02X)", cdrom_cmd_name((uint8_t)cmd), (uint8_t)cmd);
 
     switch (cmd) {
 

@@ -30,6 +30,10 @@ static inline bool CheckPendingInterrupt(Cpu* cpu) {
     bool has_interrupt = sr_iec && (sr_cause_masked != 0);
     
     if (has_interrupt) {
+        /* PSX-SPX: do not take IRQ if the next instruction is a GTE opcode (COP2 data op).
+           Defer until the GTE instruction completes to avoid EPC pointing into a GTE op. */
+        uint32_t next_instr = cpu_icache_fetch(cpu, cpu->current_pc);
+        if ((next_instr & 0xFE000000) == 0x4A000000) return false;
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return true;
     }

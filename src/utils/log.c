@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 // --- Global State ---
-LogLevel current_log_level = LOG_LEVEL_WARN;
+LogLevel current_log_level = LOG_LEVEL_INFO;
 static LogCategoryState category_states[LOG_CAT_COUNT];
 static bool log_initialized = false;
 static FILE* log_file_handle = NULL;

@@ -122,7 +122,7 @@ void gte_op(Gte* gte, uint32_t instruction);
 void gte_dcpl(Gte* gte, uint32_t instruction);
 
 // INTPL - Interpolation
-void gte_intpl(Gte* gte);
+void gte_intpl(Gte* gte, uint32_t instruction);
 
 // AVSZ3 - Average Z (3 points)
 void gte_avsz3(Gte* gte);

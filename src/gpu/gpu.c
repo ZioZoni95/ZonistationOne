@@ -140,26 +140,23 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
 }
 
 static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
-    gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);        // even only
+    gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
-    LOG_GPU_DEBUG("[GPU] GPU: Display VRAM Start X=%u Y=%u (GP1 0x05)",
-                  gpu->display_vram_x_start, gpu->display_vram_y_start);
+    LOG_GPU_DEBUG("[GPU] Display address start <- 0x%08x", value & 0x000FFFFF);
     gpu_update_display_mapping(gpu);
 }
 
 static void gp1_display_horizontal_range(Gpu* gpu, uint32_t value) {
     gpu->display_horiz_start = (uint16_t)(value & 0xFFF);
     gpu->display_horiz_end   = (uint16_t)((value >> 12) & 0xFFF);
-    LOG_GPU_DEBUG("[GPU] GPU: Display H-Range %u–%u (GP1 0x06)",
-                  gpu->display_horiz_start, gpu->display_horiz_end);
+    LOG_GPU_DEBUG("[GPU] Horizontal display range <- 0x%08x", value & 0x00FFFFFF);
     gpu_update_display_mapping(gpu);
 }
 
 static void gp1_display_vertical_range(Gpu* gpu, uint32_t value) {
     gpu->display_line_start = (uint16_t)(value & 0x3FF);
     gpu->display_line_end   = (uint16_t)((value >> 10) & 0x3FF);
-    LOG_GPU_DEBUG("[GPU] GPU: Display V-Range %u–%u (GP1 0x07)",
-                  gpu->display_line_start, gpu->display_line_end);
+    LOG_GPU_DEBUG("[GPU] Vertical display range <- 0x%08x", value & 0x000FFFFF);
     gpu_update_display_mapping(gpu);
 }
 
@@ -186,7 +183,7 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     gpu->display_width_hint  = width;
     gpu->display_height_hint = height;
     gpu_update_display_mapping(gpu);
-    LOG_GPU_DEBUG("[GPU] GPU: Display Mode %ux%u interlaced=%d (GP1 0x08)", width, height, (int)gpu->interlaced);
+    LOG_GPU_DEBUG("[GPU] Set display mode <- 0x%08x", value & 0xFF);
 }
 
 // ---------------------------------------------------------------------------

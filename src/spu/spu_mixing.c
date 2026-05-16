@@ -5,7 +5,6 @@
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);
-extern void spu_voice_generate_sample(Spu* spu, int voice_idx, int16_t* left_out, int16_t* right_out);
 extern void spu_adsr_process(SpuVoice* voice);
 
 /* =========================================================================
@@ -181,12 +180,7 @@ void spu_reverb_init(Spu* spu) {
  * Single Sample Generation
  * ========================================================================= */
 
-static void spu_generate_one_sample(Spu* spu, int16_t* left_out, int16_t* right_out) {
-    if (!spu->spu_initialized) {
-        *left_out = *right_out = 0;
-        return;
-    }
-
+static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_t* left_out, int16_t* right_out) {
     /* Process key on/off at start of batch */
     spu_process_key_on_off(spu);
 
@@ -196,7 +190,7 @@ static void spu_generate_one_sample(Spu* spu, int16_t* left_out, int16_t* right_
 
     for (int v = 0; v < NUM_VOICES; v++) {
         int16_t vl, vr;
-        spu_voice_generate_sample(spu, v, &vl, &vr);
+        spu_voice_generate_sample(spu, inter, v, &vl, &vr);
         mix_l += vl;
         mix_r += vr;
     }
@@ -239,6 +233,20 @@ static void spu_generate_one_sample(Spu* spu, int16_t* left_out, int16_t* right_
     int32_t final_l = clamp16((mix_l * mv_l) >> 15);
     int32_t final_r = clamp16((mix_r * mv_r) >> 15);
 
+    /* One-shot diagnostics */
+    static bool mix_logged = false;
+    if (!mix_logged && (mix_l != 0 || mix_r != 0)) {
+        mix_logged = true;
+        LOG_SPU_INFO("[SPU] First non-zero voice mix: mix=(%d,%d) mvol=(%d,%d) muted=%d final=(%d,%d)",
+                     mix_l, mix_r, mv_l, mv_r, spu->muted ? 1 : 0, final_l, final_r);
+    }
+    static bool silent_warn_logged = false;
+    if (!silent_warn_logged && spu->total_samples_generated > 88200 && mix_l == 0 && mix_r == 0) {
+        silent_warn_logged = true;
+        LOG_SPU_WARN("[SPU] 2s of silence: mvol=(%d,%d) muted=%d total_keys=%u",
+                     mv_l, mv_r, spu->muted ? 1 : 0, spu->total_key_on_events);
+    }
+
     *left_out = (int16_t)final_l;
     *right_out = (int16_t)final_r;
 
@@ -253,7 +261,8 @@ static void spu_generate_one_sample(Spu* spu, int16_t* left_out, int16_t* right_
  * SPU Step (called from main loop with CPU cycles)
  * ========================================================================= */
 
-void spu_step(Spu* spu, uint32_t cpu_cycles) {
+void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
+    Spu* spu = &inter->spu;
     spu->spu_tick_counter += cpu_cycles;
 
     while (spu->spu_tick_counter >= CPU_TICKS_PER_SPU_TICK) {
@@ -261,7 +270,7 @@ void spu_step(Spu* spu, uint32_t cpu_cycles) {
 
         /* Generate one stereo sample */
         int16_t l, r;
-        spu_generate_one_sample(spu, &l, &r);
+        spu_generate_one_sample(spu, inter, &l, &r);
 
         /* Push to circular buffer */
         if (spu->sample_buf_count < SPU_SAMPLE_BUFFER_SIZE) {
@@ -317,7 +326,7 @@ void spu_fill_audio(Spu* spu, int16_t* stream, int num_stereo_samples) {
 void spu_generate_samples(Spu* spu, int16_t* buffer, int num_samples) {
     for (int s = 0; s < num_samples; s++) {
         int16_t l, r;
-        spu_generate_one_sample(spu, &l, &r);
+        spu_generate_one_sample(spu, NULL, &l, &r);
         buffer[s * 2] = l;
         buffer[s * 2 + 1] = r;
     }

@@ -15,7 +15,6 @@ struct Interconnect;
 #define SAMPLE_RATE             44100       /* output sample rate */
 #define CPU_TICKS_PER_SPU_TICK  768         /* 0x300 at 33.8688MHz */
 #define TRANSFER_TICKS_PER_HALFWORD 16
-#define FIFO_SIZE_HALFWORDS     32
 #define CAPTURE_BUFFER_SIZE     0x400       /* halfwords per channel */
 #define NUM_CAPTURE_CHANNELS    4
 #define NUM_REVERB_REGS         32
@@ -210,10 +209,6 @@ typedef struct Spu {
     /* Transfer */
     uint16_t transfer_addr_reg;
     uint32_t transfer_addr;         /* byte address */
-    uint16_t transfer_fifo[FIFO_SIZE_HALFWORDS];
-    int      fifo_read_pos;
-    int      fifo_write_pos;
-    int      fifo_count;
 
     /* IRQ */
     uint16_t irq_addr;              /* halfword offset (×8 for byte) */
@@ -257,7 +252,6 @@ typedef struct Spu {
     int      sample_buf_tail;   /* write position (emulation) */
     int      sample_buf_count;  /* number of stereo frames in buffer */
     uint64_t spu_tick_counter;  /* accumulated CPU cycles for SPU timing */
-    bool     spu_initialized;   /* SPU was initialized by BIOS */
 
     /* Debug/logging */
     uint32_t total_samples_generated;
@@ -281,27 +275,31 @@ void     spu_write8(struct Interconnect* inter, uint32_t addr, uint8_t val);
 void     spu_generate_samples(Spu* spu, int16_t* buffer, int num_samples);
 
 /* DMA */
-void     spu_dma_write_halfwords(Spu* spu, const uint16_t* data, int count);
-void     spu_dma_read_halfwords(Spu* spu, uint16_t* data, int count);
+void     spu_dma_write_halfwords(Spu* spu, struct Interconnect* inter, const uint16_t* data, int count);
+void     spu_dma_read_halfwords(Spu* spu, struct Interconnect* inter, uint16_t* data, int count);
 bool     spu_dma_write_request(Spu* spu);
 bool     spu_dma_read_request(Spu* spu);
 
 /* IRQ */
-bool     spu_check_irq(Spu* spu, uint32_t address);
-void     spu_update_irq_addr(Spu* spu);
+bool     spu_check_irq(Spu* spu, struct Interconnect* inter, uint32_t address);
+void     spu_update_irq_addr(Spu* spu, struct Interconnect* inter);
 
 /* Key on/off processing (called once per sample batch) */
 void     spu_process_key_on_off(Spu* spu);
 
 /* SPU RAM transfer (manual mode) */
-void     spu_transfer_write(Spu* spu, uint16_t value);
-uint16_t spu_transfer_read(Spu* spu);
+void     spu_transfer_write(Spu* spu, struct Interconnect* inter, uint16_t value);
+uint16_t spu_transfer_read(Spu* spu, struct Interconnect* inter);
 
 /* SPU control register handling */
 void     spu_set_control(Spu* spu, uint16_t value);
 
-/* SPU sample buffer management (called from main loop) */
-void     spu_step(Spu* spu, uint32_t cpu_cycles);
+/* Voice sample generation (called from spu_mixing.c) */
+void     spu_voice_generate_sample(Spu* spu, struct Interconnect* inter,
+                                   int voice_idx, int16_t* left_out, int16_t* right_out);
+
+/* SPU sample buffer management (driven by EVQ_SPU event scheduler) */
+void     spu_step(struct Interconnect* inter, uint32_t cpu_cycles);
 int      spu_get_samples(Spu* spu, int16_t* buffer, int max_samples);
 
 /* SDL audio callback helper (fills output buffer from SPU sample buffer) */

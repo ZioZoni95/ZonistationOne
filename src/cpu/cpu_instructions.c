@@ -21,13 +21,8 @@ void op_ori(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_sw(Cpu* cpu, uint32_t instruction) {
-    if ((cpu->sr & 0x10000) != 0) { // Check cache isolation bit
-        // Rate-limit cache isolation logs
-        static uint32_t cache_iso_count = 0;
-        if (++cache_iso_count % 1000 == 0) {
-}
+    if ((cpu->sr & 0x10000) != 0) // Cache isolated — writes go to I-cache, not RAM
         return;
-    }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
@@ -99,8 +94,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
 
     switch (cop_r) {
         case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_CPU_WARN("[CPU] MTC0 to unhandled Breakpoint/DCIC Reg %u = 0x%08x at @ 0x%08x", cop_r, value, cpu->current_pc);
-             // No state change for now
+             if (value != 0) LOG_CPU_DEBUG("[CPU] MTC0 breakpoint/DCIC reg %u <- 0x%08x", cop_r, value);
              break;
         case 12: // SR (Status Register)
 // Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
@@ -114,12 +108,12 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
                  LOG_CPU_WARN("[CPU] MTC0 to CAUSE attempting to write non-SW bits: 0x%08x at @ 0x%08x", value, cpu->current_pc);
              }
              break;
-        case 8:  // BadVaddr (COP0 reg 8) — read-only, writes silently ignored (DuckStation)
-        case 14: // EPC (COP0 reg 14) — read-only, writes silently ignored (DuckStation)
-            LOG_CPU_WARN("[CPU] MTC0 to read-only COP0 Register %u = 0x%08x at (ignored) @ 0x%08x", cop_r, value, cpu->current_pc);
+        case 8:  // BadVaddr — read-only
+        case 14: // EPC — read-only
+            LOG_CPU_DEBUG("[CPU] MTC0 to read-only reg %u <- 0x%08x (ignored)", cop_r, value);
             break;
         default:
-            LOG_CPU_WARN("[CPU] MTC0 to unhandled/read-only COP0 Register %u = 0x%08x at @ 0x%08x", cop_r, value, cpu->current_pc);
+            LOG_CPU_WARN("[CPU] MTC0 unhandled COP0 reg %u <- 0x%08x at 0x%08x", cop_r, value, cpu->current_pc);
             cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
             break;
     }
@@ -330,7 +324,7 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
         case 14: value_read = cpu->epc; break; // EPC
         case 15: value_read = cpu->prid; break; // PRID
         default:
-            LOG_CPU_WARN("[CPU] MFC0 read from unhandled COP0 Register %u @ 0x%08x", cop_r_src, cpu->current_pc);
+            LOG_CPU_DEBUG("[CPU] MFC0 unhandled reg %u at 0x%08x", cop_r_src, cpu->current_pc);
             cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
             return;
     }
@@ -711,8 +705,8 @@ void op_xor(Cpu* cpu, uint32_t instruction) {
 // Breakpoint
 void op_break(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    LOG_CPU_INFO("[CPU] @nocash BREAK OPCODE: E @ 0x%08x", cpu->epc, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_BREAK); //
+    LOG_CPU_DEBUG("[CPU] BREAK opcode at 0x%08x", cpu->current_pc);
+    cpu_exception(cpu, EXCEPTION_BREAK);
 }
 
 // Multiply (Signed)
@@ -754,8 +748,8 @@ void op_xori(Cpu* cpu, uint32_t instruction) {
 
 // Coprocessor 1 (FPU) Opcode - Triggers exception
 void op_cop1(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported COP1 (FPU) instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Coprocessor 2 (GTE) Opcode - Handles MFC2/MTC2/CFC2/CTC2 and GTE instructions
@@ -764,7 +758,7 @@ void op_cop2(Cpu* cpu, uint32_t instruction) {
     // If bit 30 = 0, COP2 is disabled and should raise an exception
     bool cop2_enabled = (cpu->sr & (1u << 30)) != 0;
     if (!cop2_enabled) {
-        LOG_CPU_WARN("[CPU] COP2 (GTE) access attempted with SR.CU2=0, raising exception");
+        LOG_CPU_DEBUG("[CPU] COP2 access with SR.CU2=0 at 0x%08x", cpu->current_pc);
         cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
         return;
     }
@@ -844,8 +838,8 @@ break;
 
 // Coprocessor 3 Opcode - Triggers exception
 void op_cop3(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported COP3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Load Word Left (Handles unaligned loads)
@@ -964,14 +958,14 @@ return;
 
 // Load Word Coprocessor 0 - Not supported
 void op_lwc0(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported LWC0 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Load Word Coprocessor 1 (FPU) - Not supported
 void op_lwc1(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported LWC1 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Load Word Coprocessor 2 (GTE): [RS + imm_se] -> GTE data register RT
@@ -986,20 +980,20 @@ void op_lwc2(Cpu* cpu, uint32_t instruction) {
 
 // Load Word Coprocessor 3 - Not supported
 void op_lwc3(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported LWC3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Store Word Coprocessor 0 - Not supported
 void op_swc0(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported SWC0 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Store Word Coprocessor 1 (FPU) - Not supported
 void op_swc1(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported SWC1 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Store Word Coprocessor 2 (GTE): GTE data register RT -> [RS + imm_se]
@@ -1014,23 +1008,12 @@ void op_swc2(Cpu* cpu, uint32_t instruction) {
 
 // Store Word Coprocessor 3 - Not supported
 void op_swc3(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_WARN("[CPU] Unsupported SWC3 instruction: 0x%08x @ 0x%08x", instruction, cpu->current_pc);
-    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR); //
+    (void)instruction;
+    cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
 }
 
 // Illegal/Unhandled Instruction Handler
 void op_illegal(Cpu* cpu, uint32_t instruction) {
-    LOG_CPU_INFO("[CPU] @ILLEGAL_INSTRUCTION: 0x%08x at @ 0x%08x", instruction, cpu->current_pc);
-    LOG_CPU_ERROR("[CPU] Error: Illegal/Unhandled instruction 0x%08x encountered at @ 0x%08x", instruction, cpu->current_pc);
-    
-    // Read nearby instructions for context
-    if (cpu->inter) {
-        LOG_CPU_INFO("[CPU] @CONTEXT: [PC-8]=0x%08x [PC-4]=0x%08x [PC]=0x%08x [PC+4]=0x%08x @ 0x%08x", 
-                         interconnect_load32(cpu->inter, cpu->current_pc - 8),
-                         interconnect_load32(cpu->inter, cpu->current_pc - 4),
-                         instruction,
-                         interconnect_load32(cpu->inter, cpu->current_pc + 4));
-    }
-    
+    LOG_CPU_ERROR("[CPU] Illegal instruction 0x%08x at 0x%08x", instruction, cpu->current_pc);
     cpu_exception(cpu, EXCEPTION_ILLEGAL_INSTRUCTION);
 }

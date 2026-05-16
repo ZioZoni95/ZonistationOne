@@ -88,7 +88,7 @@ void spu_adsr_process(SpuVoice* voice) {
 
     switch (voice->adsr_phase) {
         case ADSR_PHASE_ATTACK: {
-            bool exp = !!(voice->adsr_low & (1 << 7));
+            bool exp = !!(voice->adsr_low & (1u << 15));
             uint8_t rate = (voice->adsr_low >> 8) & 0x7F;
             adsr_tick_step(voice, false, exp, rate, &current);
             if (voice->adsr_volume >= 32767) {
@@ -110,9 +110,9 @@ void spu_adsr_process(SpuVoice* voice) {
             break;
         }
         case ADSR_PHASE_SUSTAIN: {
-            bool dec = !!(voice->adsr_high & (1 << 6));
-            bool exp = !!(voice->adsr_high & (1 << 7));
-            uint8_t rate = voice->adsr_high & 0x7F;
+            bool dec = !!(voice->adsr_high & (1u << 13));
+            bool exp = !!(voice->adsr_high & (1u << 14));
+            uint8_t rate = (voice->adsr_high >> 6) & 0x7F;
             adsr_tick_step(voice, dec, exp, rate, &current);
             if (voice->adsr_volume <= 0) {
                 voice->adsr_phase = ADSR_PHASE_RELEASE;
@@ -122,8 +122,8 @@ void spu_adsr_process(SpuVoice* voice) {
             break;
         }
         case ADSR_PHASE_RELEASE: {
-            bool exp = !!(voice->adsr_high & (1 << 5));
-            uint8_t rate = ((voice->adsr_high >> 16) & 0x1F) << 2;
+            bool exp = !!(voice->adsr_high & (1u << 5));
+            uint8_t rate = (voice->adsr_high & 0x1F) << 2;
             adsr_tick_step(voice, true, exp, rate, &current);
             break;
         }

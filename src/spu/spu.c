@@ -6,7 +6,6 @@
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);
-extern void spu_voice_generate_sample(Spu* spu, int voice_idx, int16_t* left_out, int16_t* right_out);
 extern void spu_adsr_process(SpuVoice* voice);
 
 /* =========================================================================
@@ -18,9 +17,6 @@ static int spu_offset_for_addr(uint32_t addr) {
     return (int)(addr - SPU_START);
 }
 
-static int offset_to_reg_idx(int offset) {
-    return offset / 2;
-}
 
 /* =========================================================================
  * Init / Reset
@@ -85,8 +81,10 @@ void spu_process_key_on_off(Spu* spu) {
             spu->total_key_on_events++;
             voice->left_sweep_counter = 0;
             voice->right_sweep_counter = 0;
-            LOG_SPU_TRACE("[SPU] Voice %d Key On (start=0x%04X, pitch=%u)",
-                          v, voice->start_address, voice->pitch);
+            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X pitch=%u volL=0x%04X volR=0x%04X adsr=%04X/%04X",
+                         v, voice->start_address, voice->pitch,
+                         voice->volume_left, voice->volume_right,
+                         voice->adsr_low, voice->adsr_high);
         }
     }
 
@@ -124,12 +122,17 @@ void spu_set_control(Spu* spu, uint16_t value) {
     /* Update status mode bits */
     spu->status = (spu->status & ~SPU_STATUS_MODE) | (value & SPU_CTRL_TRANSFER_MODE);
 
-    LOG_SPU_DEBUG("[SPU] Control=0x%04X (enable=%d, mute=%d, irq=%d, mode=%d)",
-                  value,
-                  (value & SPU_CTRL_ENABLE) ? 1 : 0,
-                  (value & SPU_CTRL_MUTE) ? 0 : 1,
-                  (value & SPU_CTRL_IRQ9_ENABLE) ? 1 : 0,
-                  (value >> 4) & 0x03);
+    if (value != old) {
+        LOG_SPU_INFO("[SPU] Control=0x%04X (enable=%d, muted=%d, irq=%d, mode=%d)",
+                     value,
+                     (value & SPU_CTRL_ENABLE) ? 1 : 0,
+                     spu->muted ? 1 : 0,
+                     (value & SPU_CTRL_IRQ9_ENABLE) ? 1 : 0,
+                     (value >> 4) & 0x03);
+        if (spu->muted) {
+            LOG_SPU_WARN("[SPU] SPU muted (SPUCNT bit14=0)");
+        }
+    }
 }
 
 /* =========================================================================
@@ -256,8 +259,14 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
 
     /* Control registers */
     switch (reg) {
-        case SPU_REG_MVOL_L: spu->main_vol_left = value; break;
-        case SPU_REG_MVOL_R: spu->main_vol_right = value; break;
+        case SPU_REG_MVOL_L:
+            spu->main_vol_left = value;
+            LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (%d)", value, (int16_t)value);
+            break;
+        case SPU_REG_MVOL_R:
+            spu->main_vol_right = value;
+            LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (%d)", value, (int16_t)value);
+            break;
         case SPU_REG_RVOL_L: spu->reverb_vol_left = (int16_t)value; break;
         case SPU_REG_RVOL_R: spu->reverb_vol_right = (int16_t)value; break;
         case SPU_REG_KEY_ON_L: spu->key_on |= value; break;
@@ -273,17 +282,17 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
         case SPU_REG_REVERB_BASE: spu->reverb_base = value & 0x3FFF; break;
         case SPU_REG_IRQ_ADDR:
             spu->irq_addr = value;
-            spu_update_irq_addr(spu);
+            spu_update_irq_addr(spu, inter);
             break;
         case SPU_REG_TRANSFER_ADDR:
             spu->transfer_addr_reg = value;
             spu->transfer_addr = (uint32_t)value * 8;
-            spu_check_irq(spu, spu->transfer_addr);
+            spu_check_irq(spu, inter, spu->transfer_addr);
             break;
         case SPU_REG_TRANSFER_DATA: {
             int mode = (spu->control >> 4) & 0x03;
             if (mode == TRANSFER_MANUAL_WRITE || mode == TRANSFER_DMA_WRITE) {
-                spu_transfer_write(spu, value);
+                spu_transfer_write(spu, inter, value);
             } else if (mode == TRANSFER_DMA_READ) {
                 /* Write to FIFO during DMA read */
             }

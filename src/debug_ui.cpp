@@ -10,6 +10,7 @@
 #include <map>
 #include <cstdio>
 #include <cstring>
+#include <sys/stat.h>
 
 extern "C" {
 #include "cpu.h"
@@ -41,23 +42,23 @@ struct LogComponent {
 };
 
 static std::map<LogCategory, LogComponent> g_log_components = {
-    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       false, true, true, {}, {}}},
-    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          false, true, true, {}, {}}},
-    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          false, true, true, {}, {}}},
-    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          false, true, true, {}, {}}},
-    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          false, true, true, {}, {}}},
-    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        false, true, true, {}, {}}},
-    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        false, true, true, {}, {}}},
-    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true,  true, true, {}, {}}},
-    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, false, true, true, {}, {}}},
-    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     false, true, true, {}, {}}},
-    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        false, true, true, {}, {}}},
-    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          false, true, true, {}, {}}},
-    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         false, true, true, {}, {}}},
-    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          false, true, true, {}, {}}},
-    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        false, true, true, {}, {}}},
-    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         false, true, true, {}, {}}},
-    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          false, true, true, {}, {}}}
+    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       true, true, true, {}, {}}},
+    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          true, true, true, {}, {}}},
+    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          true, true, true, {}, {}}},
+    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          true, true, true, {}, {}}},
+    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          true, true, true, {}, {}}},
+    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        true, true, true, {}, {}}},
+    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        true, true, true, {}, {}}},
+    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true, true, true, {}, {}}},
+    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, true, true, true, {}, {}}},
+    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     true, true, true, {}, {}}},
+    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        true, true, true, {}, {}}},
+    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          true, true, true, {}, {}}},
+    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         true, true, true, {}, {}}},
+    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          true, true, true, {}, {}}},
+    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        true, true, true, {}, {}}},
+    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         true, true, true, {}, {}}},
+    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          true, true, true, {}, {}}}
 };
 
 static std::mutex g_log_mutex;
@@ -139,6 +140,37 @@ static void dbg_toggle_bp(Debugger* dbg, uint32_t addr) {
 }
 
 // ---------------------------------------------------------------------------
+// Log export
+// ---------------------------------------------------------------------------
+
+static const char* level_name(int level) {
+    switch (level) {
+        case LOG_LEVEL_ERROR: return "ERROR";
+        case LOG_LEVEL_WARN:  return "WARN ";
+        case LOG_LEVEL_INFO:  return "INFO ";
+        case LOG_LEVEL_DEBUG: return "DEBUG";
+        case LOG_LEVEL_TRACE: return "TRACE";
+        default:              return "?????";
+    }
+}
+
+static void export_component_log(const LogComponent& comp) {
+    mkdir("logs", 0755);
+    char path[128];
+    snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+    for (const auto& e : comp.buffer)
+        fprintf(f, "[%s] %s\n", level_name(e.level), e.message.c_str());
+    fclose(f);
+}
+
+static void export_all_logs() {
+    for (const auto& pair : g_log_components)
+        export_component_log(pair.second);
+}
+
 // Log window
 // ---------------------------------------------------------------------------
 
@@ -152,6 +184,8 @@ static void draw_component_log_window(LogComponent& comp) {
         std::lock_guard<std::mutex> lock(g_log_mutex);
         comp.buffer.clear();
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Export")) export_component_log(comp);
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &comp.auto_scroll);
     ImGui::SameLine();
@@ -559,7 +593,6 @@ static void draw_spu_debug_window(Spu* spu) {
         int mode = (spu->control >> 4) & 0x03;
         ImGui::Text("Transfer mode: %s", mode_names[mode]);
         ImGui::Text("Transfer addr: 0x%04X (reg)  0x%06X (byte)", spu->transfer_addr_reg, spu->transfer_addr);
-        ImGui::Text("FIFO: %d / %d", spu->fifo_count, FIFO_SIZE_HALFWORDS);
         ImGui::Text("IRQ addr: 0x%04X  IRQ flag: %s", spu->irq_addr, spu->irq9_flag ? "Yes" : "No");
     }
 
@@ -698,6 +731,9 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             }
             if (ImGui::MenuItem("Close All")) {
                 for (auto& p : g_log_components) p.second.is_open = false;
+            }
+            if (ImGui::MenuItem("Export All to logs/")) {
+                export_all_logs();
             }
             ImGui::Separator();
             for (auto& pair : g_log_components)

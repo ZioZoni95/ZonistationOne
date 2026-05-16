@@ -14,33 +14,6 @@
 
 // Using new PCSX ReARMed-style logging system
 
-// Rate limiting for frequent register accesses
-
-// DMA and GPU region access logs are extremely frequent and only useful for deep debugging.
-// Suppress at INFO/DEBUG, only log at TRACE, and rate-limit. Keep summary/activation logs at INFO/DEBUG.
-static uint64_t dma_read32_count = 0;
-static uint32_t last_dma_read32_addr = 0;
-static uint32_t last_dma_read32_offset = 0;
-static uint64_t dma_write32_count = 0;
-static uint32_t last_dma_write32_addr = 0;
-static uint32_t last_dma_write32_offset = 0;
-static uint32_t last_dma_write32_value = 0;
-
-// BIOS instrumentation cap: avoid huge log spam during tight loops
-static int bios_instrument_count = 0;
-#define BIOS_INSTRUMENT_MAX 200
-
-// --- Rate-limited log counters for IO accesses ---
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-static int io_read32_count = 0;
-static int io_read16_count = 0;
-static int io_read8_count = 0;
-static int io_write32_count = 0;
-static int io_write16_count = 0;
-static int io_write8_count = 0;
-static int cdrom_read8_count = 0;
-static int cdrom_write8_count = 0;
-#endif
 
 // --- Memory Region Masking ---
 // Array mapping the top 3 bits of a virtual address to a mask
@@ -58,49 +31,13 @@ const uint32_t REGION_MASK[8] = {
 // Copyright (c) PCSX ReARMed authors. Used under open source license for compatibility.
 static uint8_t hwregs[0x1000] = {0};
 
-/**
- * @brief Maps a CPU virtual address to a physical address by masking region bits.
- * KSEG2 addresses are returned unchanged.
- * @param addr The 32-bit virtual address.
- * @return The 32-bit physical address.
- */
-static int mask_debug_count = 0;
 uint32_t mask_region(uint32_t addr) {
     size_t index = (addr >> 29) & 0x7;
-    uint32_t paddr = addr & REGION_MASK[index];
-    if (log_get_level() >= LOG_LEVEL_TRACE && mask_debug_count < 10) {
-mask_debug_count++;
-    }
-    return paddr;
-}
-
-// Rate-limited logging for hot registers (must be at the very top, before any use)
-static uint32_t last_hot_addr = 0;
-static uint32_t hot_addr_count = 0;
-#define HOT_REG_RATE_LIMIT 1000
-static void log_hot_reg(const char* rw, uint32_t addr, uint32_t value, int is_write) {
-    if (addr == last_hot_addr) {
-        hot_addr_count++;
-    } else {
-        last_hot_addr = addr;
-        hot_addr_count = 1;
-    }
-    if (hot_addr_count == 1 || hot_addr_count % HOT_REG_RATE_LIMIT == 0) {
-        if (is_write)
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] %s at 0x%08x = 0x%08x (count=%u)", rw, addr, value, hot_addr_count);
-        else
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] %s at 0x%08x (count=%u)", rw, addr, hot_addr_count);
-    }
+    return addr & REGION_MASK[index];
 }
 
 static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index);
 
-// Helper macro to check if address is a key hardware register
-#define IS_KEY_HW_REG(addr) \
-    ((addr) == 0x1f801070 /* IRQ_STATUS */ || \
-     (addr) == 0x1f801074 /* IRQ_MASK */ || \
-     ((addr) >= 0x1f801800 && (addr) <= 0x1f80180F) /* CDROM */ || \
-     ((addr) >= 0x1f801810 && (addr) <= 0x1f801817) /* GPU */)
 
 // --- Forward Declarations ---
 static void interconnect_force_bios_boot_config(Interconnect* inter);
@@ -114,71 +51,10 @@ static void interconnect_force_bios_boot_config(Interconnect* inter);
  */
 uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    // Debug traces removed - BIOS now works correctly
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        /* Low-overhead whitelist instrumentation: only log accesses to
-           the two suspicious physical addresses observed during debugging.
-           These map from virtual 0x801ffd5c -> phys 0x001ffd5c and
-           0x80079d9c -> phys 0x00079d9c. Keep per-address caps. */
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU; // was 0x801ffd5c virtual
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU; // was 0x80079d9c virtual
-        static int phys_a_count = 0;
-        static int phys_b_count = 0;
-        const int PHYS_ADDR_MAX = 500; /* generous cap but still bounded */
 
-        if (physical_addr == PHYS_ADDR_A) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load32(inter->ram, ram_offset);
-            if (phys_a_count < PHYS_ADDR_MAX) {
-                phys_a_count++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load32(inter->ram, ram_offset);
-            if (phys_b_count < PHYS_ADDR_MAX) {
-                phys_b_count++;
-            }
-        }
-
-        /* Capped CPU snapshot: when the CPU fetches instruction at the
-           known branch location 0x80059dcc, log a small register snapshot.
-           This is triggered on instruction fetch (address == curpc). */
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count < CPU_SNAPSHOT_MAX) {
-            /* Log a minimal set of registers that the disassembly indicates are
-               used in the branch/tests (t0, v0, s0, t2, a1). */
-            uint32_t t0 = inter->cpu->regs[8];  /* t0 = $8 */
-            uint32_t v0 = inter->cpu->regs[2];  /* v0 = $2 */
-            uint32_t s0 = inter->cpu->regs[16]; /* s0 = $16 */
-            uint32_t t2 = inter->cpu->regs[10]; /* t2 = $10 */
-            uint32_t a1 = inter->cpu->regs[5];  /* a1 = $5 */
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count++;
-            if (cpu_snapshot_count == CPU_SNAPSHOT_MAX) LOG_INTERCONNECT_INFO("[INTERCONNECT] Reached max CPU snapshots (%d)", CPU_SNAPSHOT_MAX);
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO READ32", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        // Rate-limit to every 500th access
-        static uint32_t io_read32_trace = 0;
-        if (++io_read32_trace % 500 == 0) {
-}
-    }
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-        if (++io_read32_count % 10000 == 0) {
-}
-    }
-#endif
-    // CDROM 32-bit access logging
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_CDROM_WARN("[INTERCONNECT] CDROM register READ32 at 0x%08x (UNEXPECTED SIZE)", physical_addr);
     }
-    // Check for 32-bit alignment (Word access)
     if (address % 4 != 0) {
         LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unaligned load32 address: 0x%08x", address);
         // Trigger Address Error Load exception directly if CPU pointer is set
@@ -274,13 +150,7 @@ return 0;
     // DMA Region (0x1f801080 - 0x1f8010FF)
     if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
         uint32_t offset = physical_addr - DMA_START;
-        dma_read32_count++;
-        if (log_get_level() >= LOG_LEVEL_TRACE) {
-            // Rate-limit to every 5000th access
-            if (dma_read32_count % 5000 == 0) {
-}
-        }
-        return dma_read(&inter->dma, offset); // Delegate to DMA module
+        return dma_read(&inter->dma, offset);
     }
 
     // --- Scratchpad Region (0x1F800000–0x1F8003FF, mirrored in KUSEG/KSEG0 only) ---
@@ -328,25 +198,13 @@ bios_load32_debug_count++;
         // deterministic zeros keeps the BIOS from turning garbage data into bogus jump targets
         // (observed crash at PC=0x00000068).
         if (is_expansion3) {
-        static uint32_t exp3_read_count = 0;
-        exp3_read_count++;
-        if (exp3_read_count <= 5) {
-}
-            return 0x00000000; // Return 0: matches behaviour of idle POST3 latch on retail units
+            return 0x00000000;
         }
 
-        // Unused memory region between RAM and Expansion regions (0x00200000 - 0x1FA00000)
-    // PSX-SPX: This region causes Bus Error exceptions
-    // Returning 0xFFFFFFFF (open bus / unpopulated memory)
-    // NOTE: Expansion 3 (0x1FA00000-0x1FBFFFFF) is handled above
     if (physical_addr >= 0x00200000 && physical_addr < 0x1FA00000) {
-        static uint32_t unmapped_read_count = 0;
-        unmapped_read_count++;
-        if (unmapped_read_count <= 10 || (unmapped_read_count % 1000 == 0)) {
-            LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)",
-                    physical_addr, address);
-        }
-        return 0xFFFFFFFF; // Return all 1s for open bus / unpopulated memory
+        LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)",
+                physical_addr, address);
+        return 0xFFFFFFFF;
     }
 
     // Timer Region (General Check - 0x1f801100 - 0x1f80112F)
@@ -360,13 +218,8 @@ bios_load32_debug_count++;
             return spu_read32(inter, physical_addr);
         }
 
-    // Expansion 1 Region (0x1f000000 - 0x1f7fffff)
     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-         static uint32_t exp1_read32_count = 0;
-         exp1_read32_count++;
-         if (exp1_read32_count <= 10) {
-}
-         return 0x00000000; // Return 0 to prevent BIOS from misinterpreting as jump target
+        return 0x00000000;
     }
 
     // VRAM Region (0x1F000000 - 0x1F7FFFFF)
@@ -473,16 +326,10 @@ return 0;
 return 0;
      }
      
-     // Handle the 0xf0000000 range that's causing the infinite loop
-     if (physical_addr >= 0xf0000000 && physical_addr <= 0xffffffff) {
-         // Only log the first few times to avoid spam
-         static uint32_t f000_read32_count = 0;
-         f000_read32_count++;
-         if (f000_read32_count <= 5) {
-             LOG_INTERCONNECT_WARN("[INTERCONNECT] Unmapped memory read (32-bit): 0x%08x (returning 0, count=%u)", physical_addr, f000_read32_count);
-         }
-         return 0; // Return 0 for unmapped memory
-     }
+    if (physical_addr >= 0xf0000000) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] Unmapped memory read32 0x%08x", physical_addr);
+        return 0;
+    }
     
     // Only log as error if we reach here (truly unhandled)
     LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unhandled physical memory read32 at address: 0x%08x (Mapped from 0x%08x)",
@@ -498,59 +345,11 @@ return 0;
  */
 uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
-        static int phys_a_count16 = 0;
-        static int phys_b_count16 = 0;
-        const int PHYS_ADDR_MAX = 500;
-        if (physical_addr == PHYS_ADDR_A) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load16(inter->ram, ram_offset);
-            if (phys_a_count16 < PHYS_ADDR_MAX) {
-phys_a_count16++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load16(inter->ram, ram_offset);
-            if (phys_b_count16 < PHYS_ADDR_MAX) {
-phys_b_count16++;
-            }
-        }
-        /* Snapshot on branch PC as in LOAD32 */
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count16 = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count16 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count16++;
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO READ16", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        static uint32_t io_read16_trace = 0;
-        if (++io_read16_trace % 500 == 0) {
-}
-    }
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-        if (++io_read16_count % 10000 == 0) {
-}
-    }
-#endif
-    // CDROM 16-bit access logging
+
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ16 at 0x%08x (UNEXPECTED SIZE)", physical_addr);
     }
-     // Check for 16-bit alignment (Halfword access)
-     if (address % 2 != 0) {
+    if (address % 2 != 0) {
         LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unaligned load16 address: 0x%08x", address);
         if (inter->cpu) {
             inter->cpu->badvaddr = address;
@@ -622,7 +421,7 @@ return inter->irq_mask;
 
     // DMA Region (Unlikely 16-bit reads)
      if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
-        LOG_INTERCONNECT_WARN("[INTERCONNECT] Unhandled DMA read16 at 0x%08x", physical_addr);
+        LOG_DMA_WARN("[DMA] Unhandled read16 at 0x%08x", physical_addr);
         return 0;
     }
 
@@ -676,17 +475,11 @@ return 0;
 return 0;
      }
      
-     // Handle the 0xf0000000 range that's causing the infinite loop
-     if (physical_addr >= 0xf0000000 && physical_addr <= 0xffffffff) {
-         // Only log the first few times to avoid spam
-         static uint32_t f000_read_count = 0;
-         f000_read_count++;
-         if (f000_read_count <= 5) {
-             LOG_INTERCONNECT_WARN("[INTERCONNECT] Unmapped memory read (16-bit): 0x%08x (returning 0, count=%u)", physical_addr, f000_read_count);
-         }
-         return 0; // Return 0 for unmapped memory
-     }
-    
+    if (physical_addr >= 0xf0000000) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] Unmapped memory read16 0x%08x", physical_addr);
+        return 0;
+    }
+
     LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unhandled physical memory read16 at address: 0x%08x (Mapped from 0x%08x)", physical_addr, address);
     return 0;
 }
@@ -699,53 +492,8 @@ return 0;
  */
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     uint32_t physical_addr = mask_region(address);
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
-        static int phys_a_count8 = 0;
-        static int phys_b_count8 = 0;
-        const int PHYS_ADDR_MAX = 500;
-        if (physical_addr == PHYS_ADDR_A) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load8(inter->ram, ram_offset);
-            if (phys_a_count8 < PHYS_ADDR_MAX) {
-phys_a_count8++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            uint32_t ram_offset = physical_addr % (RAM_END + 1);
-            uint32_t val = ram_load8(inter->ram, ram_offset);
-            if (phys_b_count8 < PHYS_ADDR_MAX) {
-phys_b_count8++;
-            }
-        }
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count8 = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count8 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count8++;
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO READ8", physical_addr, 0, 0);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        static uint32_t io_read8_trace = 0;
-        if (++io_read8_trace % 500 == 0) {
-}
-    }
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-    if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-        if (++io_read8_count % 10000 == 0) {
-}
-    }
-#endif
-    // --- Check Timer Range --- <<< ADD THIS BLOCK
+
+    // --- Check Timer Range ---
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         // 8-bit reads from timers are generally undefined or read partial registers.
         LOG_INTERCONNECT_WARN("[INTERCONNECT] Unhandled 8-bit read from Timer range: 0x%08x", physical_addr);
@@ -766,14 +514,7 @@ phys_b_count8++;
         return 0x00; // Return 0 for now to see if BIOS continues
     }
     
-    // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8 at 0x%08x", physical_addr);
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-        if (++cdrom_read8_count % 10000 == 0) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register READ8: %d accesses, last at 0x%08x", cdrom_read8_count, physical_addr);
-        }
-#endif
         return cdrom_read8(&inter->cdrom, physical_addr);
     }
 
@@ -782,20 +523,10 @@ phys_b_count8++;
         (physical_addr >= 0x0FA00000 && physical_addr < 0x0FC00000);
 
     if (is_expansion3) {
-        static uint32_t exp3_read8_count = 0;
-        exp3_read8_count++;
-        if (exp3_read8_count <= 5) {
-}
         return 0x00;
     }
 
-    // Expansion 1 Region
-     if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
-         // Expansion 1 is used for parallel port devices. Return 0 when empty to prevent BIOS misinterpreting as jump target.
-         static uint32_t exp1_read8_count = 0;
-         exp1_read8_count++;
-         if (exp1_read8_count <= 10) {
-}
+    if (physical_addr >= EXPANSION_1_START && physical_addr <= EXPANSION_1_END) {
          return 0x00;
      }
 
@@ -847,17 +578,11 @@ return 0;
 return 0;
      }
      
-     // Handle the 0xf0000000 range that's causing the infinite loop
-     if (physical_addr >= 0xf0000000 && physical_addr <= 0xffffffff) {
-         // Only log the first few times to avoid spam
-         static uint32_t f000_read8_count = 0;
-         f000_read8_count++;
-         if (f000_read8_count <= 5) {
-             LOG_INTERCONNECT_WARN("[INTERCONNECT] Unmapped memory read (8-bit): 0x%08x (returning 0, count=%u)", physical_addr, f000_read8_count);
-         }
-         return 0; // Return 0 for unmapped memory
-     }
-    
+    if (physical_addr >= 0xf0000000) {
+        LOG_INTERCONNECT_TRACE("[INTERCONNECT] Unmapped memory read8 0x%08x", physical_addr);
+        return 0;
+    }
+
     LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unhandled physical memory read8 at address: 0x%08x (Mapped from 0x%08x)", physical_addr, address);
     return 0;
 }
@@ -873,55 +598,10 @@ return 0;
  */
 void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value) {
     uint32_t physical_addr = mask_region(address);
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
-        static int phys_a_count_s32 = 0;
-        static int phys_b_count_s32 = 0;
-        const int PHYS_ADDR_MAX = 500;
-        if (physical_addr == PHYS_ADDR_A) {
-            if (phys_a_count_s32 < PHYS_ADDR_MAX) {
-phys_a_count_s32++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            if (phys_b_count_s32 < PHYS_ADDR_MAX) {
-phys_b_count_s32++;
-            }
-        }
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count_store32 = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store32 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count_store32++;
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO WRITE32", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        static uint32_t io_write32_trace = 0;
-        if (++io_write32_trace % 500 == 0) {
-}
-    }
-    // Remove or comment out noisy IO write logs for general IO region
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-    // Suppress general IO write logs for 0x1f801000 - 0x1f802000
-    // if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-    //     if (++io_write32_count % 10000 == 0) {
-    //     }
-    // }
-#endif
-    // CDROM 32-bit access logging
+
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_CDROM_WARN("[INTERCONNECT] CDROM register WRITE32 at 0x%08x = 0x%08x (UNEXPECTED SIZE)", physical_addr, value);
     }
-    // Check alignment
     if (address % 4 != 0) {
         LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unaligned store32 address: 0x%08x = 0x%08x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
@@ -945,58 +625,30 @@ phys_b_count_s32++;
 
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        // Trace PC for debugging I_STAT writes
-        uint32_t caller_pc = inter->cpu ? inter->cpu->current_pc : 0;
-        LOG_IRQ_DEBUG("[INTERCONNECT] Write to I_STAT: Value=0x%08x, Before=0x%04x, @ 0x%08x", value, inter->irq_status, caller_pc);
-        // PSX-SPX: "Acknowledge: Write I_STAT (0=Clear Bit, 1=No change)"
-        // Direct AND: bits set to 0 in the written value are cleared in I_STAT.
-        uint16_t write_value = (uint16_t)(value & 0x7FF);
-        inter->irq_status &= write_value;       // 0=Clear, 1=Keep
-        // Also clear the line state for cleared IRQs (so they can trigger again on next edge)
+        static const char* const irq_names[] = {
+            "VBLANK","GPU","CDROM","DMA","TMR0","TMR1","TMR2","PAD","SIO","SPU","IRQ10"
+        };
+        const uint16_t write_value = (uint16_t)(value & 0x7FF);
+        const uint16_t cleared_bits = (uint16_t)(inter->irq_status & ~write_value);
+        for (uint32_t i = 0; i < 11; i++) {
+            if (cleared_bits & (1u << i))
+                LOG_IRQ_DEBUG("%s IRQ cleared", irq_names[i]);
+        }
+        inter->irq_status &= write_value;
         inter->irq_line_state &= write_value;
+        if ((cleared_bits & (1u << IRQ_SPU)) && inter->spu.irq9_flag) {
+            inter->spu.irq9_flag = false;
+            inter->spu.status &= ~SPU_STATUS_IRQ9_FLAG;
+            interconnect_set_irq_line(inter, IRQ_SPU, false);
+            LOG_IRQ_DEBUG("SPU IRQ9 edge-trigger reset (I_STAT[9] cleared)");
+        }
+        if (inter->cpu) inter->cpu->downcount = 0;
         return;
     }
     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        uint16_t old_mask = inter->irq_mask;
-        // Writing sets the interrupt mask
-        inter->irq_mask = (uint16_t)(value & 0x7FF); // Only bits 0-10 matter
-        
-        // FIX: BIOS Boot Bypass - If BIOS is stuck in critical section loop, force enable interrupts
-        static uint32_t critical_section_count = 0;
-        static uint32_t last_irq_mask = 0xFFFF;
-
-        // Only fire hack when CPU is in RAM (not BIOS ROM 0xBFC0xxxx).
-        // Tight init loops in ROM are normal; don't hijack them before the kernel is live.
-        uint32_t current_cpu_pc = inter->cpu ? inter->cpu->current_pc : 0;
-        bool in_bios_rom = (current_cpu_pc & 0xFF000000) == 0xBFC00000;
-
-        if (value == 0x0000 && last_irq_mask == 0x0000 && !in_bios_rom) {
-            critical_section_count++;
-            // If BIOS has been stuck for too long, force enable VBlank and Timer0 interrupts
-            if (critical_section_count > 1000) {
-                LOG_INTERCONNECT_WARN("[INTERCONNECT] Detected stuck BIOS in critical section loop. Forcing interrupt enable.");
-                inter->irq_mask = 0x0003; // Enable IRQ0 (Timer0) and IRQ1 (VBlank)
-                critical_section_count = 0;
-                // Also ensure the CPU has both IEc (bit 0) and IEp (bit 2) set in SR
-                // so that the idle-loop RFE (which pops IEp→IEc) doesn't drain IEc to 0.
-                if (inter->cpu) {
-                    inter->cpu->sr |= 0x05; // IEc | IEp
-                }
-                LOG_INTERCONNECT_INFO("[INTERCONNECT] Forced I_MASK=0x%04x to bypass stuck state", inter->irq_mask);
-            }
-        } else {
-            critical_section_count = 0;
-        }
-        last_irq_mask = value;
-        
-        // Detect when BIOS is disabling IRQ0
-        if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
-        } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
-        }
-        
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] Write to I_MASK (IRQ_MASK_ADDR): Value=0x%04x, New I_MASK=0x%04x, IRQ0 enabled=%d", value, inter->irq_mask, (inter->irq_mask & 0x1) ? 1 : 0);
+        inter->irq_mask = (uint16_t)(value & 0x7FF);
+        LOG_IRQ_DEBUG("I_MASK <- 0x%03x", value & 0x7FF);
+        if (inter->cpu) inter->cpu->downcount = 0;
         return;
     }
 
@@ -1052,19 +704,11 @@ phys_b_count_s32++;
     // DMA Region
     if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
         uint32_t offset = physical_addr - DMA_START;
-        dma_write32_count++;
-        if (log_get_level() >= LOG_LEVEL_TRACE) {
-            // Rate-limit to every 5000th access
-            if (dma_write32_count % 5000 == 0) {
-}
-        }
-bool channel_became_active = dma_write(&inter->dma, offset, value); // Delegate
-
-        // If the write activated a channel control register, start the DMA transfer
+        bool channel_became_active = dma_write(&inter->dma, offset, value);
         if (channel_became_active) {
-             uint32_t channel_index = (offset >> 4) & 0x7;
-             LOG_DMA_DEBUG("[INTERCONNECT]   DMA Channel %d activated by write to offset 0x%x.", channel_index, offset);
-             interconnect_perform_dma(inter, channel_index);
+            uint32_t channel_index = (offset >> 4) & 0x7;
+            LOG_DMA_DEBUG("[DMA] Channel %d activated (offset=0x%x)", channel_index, offset);
+            interconnect_perform_dma(inter, channel_index);
         }
         return;
     }
@@ -1225,73 +869,15 @@ return; // Ignore writes to unmapped memory
             physical_addr, value, address);
 }
 
-// Add static counters and last-value tracking for rate-limiting noisy IO WRITE16 logs
-// 0x1f801da8 is an SPU register polled/written in tight BIOS/game loops. Logging is only useful for SPU debugging.
-// Suppress all logs for this address except at TRACE level, and even then, rate-limit.
-static uint64_t write16_da8_count = 0;
-static uint16_t last_write16_da8_value = 0;
-
-/**
- * @brief Handles 16-bit memory writes from the CPU.
- * @param inter The Interconnect instance.
- * @param address Virtual address to write to.
- * @param value The 16-bit value to write.
- */
 void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value) {
     uint32_t physical_addr = mask_region(address);
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
-        static int phys_a_count_s16 = 0;
-        static int phys_b_count_s16 = 0;
-        const int PHYS_ADDR_MAX = 500;
-        if (physical_addr == PHYS_ADDR_A) {
-            if (phys_a_count_s16 < PHYS_ADDR_MAX) {
-phys_a_count_s16++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            if (phys_b_count_s16 < PHYS_ADDR_MAX) {
-phys_b_count_s16++;
-            }
-        }
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count_store16 = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store16 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count_store16++;
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO WRITE16", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        static uint32_t io_write16_trace = 0;
-        if (++io_write16_trace % 500 == 0) {
-}
-    }
-    // Remove or comment out noisy IO write logs for general IO region
+
     if (physical_addr == 0x1f801da8) {
-        write16_da8_count++;
-        if (log_get_level() >= LOG_LEVEL_TRACE) {
-            // Rate-limit SPU FIFO to every 10000th access
-            if (write16_da8_count % 10000 == 0) {
-}
-        }
-        // Suppress at all other log levels
-    } else {
-        // Remove redundant per-access log - already rate-limited above
+        /* SPU transfer data — handled by SPU write below */
     }
-    // CDROM 16-bit access logging
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
         LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE16 at 0x%08x = 0x%04x (UNEXPECTED SIZE)", physical_addr, value);
     }
-    // Check alignment
     if (address % 2 != 0) {
         LOG_INTERCONNECT_ERROR("[INTERCONNECT] Unaligned store16 address: 0x%08x = 0x%04x", address, value);
         // Trigger Address Error Store exception directly if CPU pointer is set
@@ -1301,18 +887,12 @@ phys_b_count_s16++;
         }
         return;
     }
-    // --- Check Timer Range --- <<< ADD THIS BLOCK
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         uint32_t timer_base_offset = physical_addr - TIMERS_START;
         int timer_index = timer_base_offset / 0x10;
         uint32_t register_offset = physical_addr & 0xF;
-        // Only log timer writes occasionally to reduce noise
-        static uint32_t timer_write_count = 0;
-        timer_write_count++;
-        if (timer_write_count % 100 == 0) {
-}
         timer_write16(&inter->timers_state, timer_index, register_offset, value);
-        return; // Handled
+        return;
      }
      
      // TEST: Add missing hardware register write handlers for 16-bit access
@@ -1331,24 +911,23 @@ phys_b_count_s16++;
      
     // Interrupt Controller Registers
     if (physical_addr == IRQ_STATUS_ADDR) { // 0x1f801070 (I_STAT)
-        static uint32_t irq_status_write_count = 0;
-        static uint16_t last_irq_status_value = 0xFFFF;
-        irq_status_write_count++;
-        // Only log every 1000th write or when value changes significantly
-        if (irq_status_write_count == 1 || irq_status_write_count % 1000 == 0 || (value != last_irq_status_value && (value ^ last_irq_status_value) > 0xFF)) {
-}
-        last_irq_status_value = value;
-        uint16_t prev_status = inter->irq_status;
-        // Reduce debug logging frequency
-        if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] I_STAT before clear: 0x%04x", inter->irq_status);
+        static const char* const irq_names[] = {
+            "VBLANK","GPU","CDROM","DMA","TMR0","TMR1","TMR2","PAD","SIO","SPU","IRQ10"
+        };
+        const uint16_t cleared_bits = (uint16_t)(inter->irq_status & ~value);
+        for (uint32_t i = 0; i < 11; i++) {
+            if (cleared_bits & (1u << i))
+                LOG_IRQ_DEBUG("%s IRQ cleared", irq_names[i]);
         }
-        inter->irq_status &= value;  // 0=Clear, 1=Keep (PSX-SPX spec)
-        inter->irq_line_state &= value;  // Also clear line state for cleared IRQs
-        if (log_get_level() >= LOG_LEVEL_DEBUG && (irq_status_write_count % 100 == 0)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] I_STAT after clear: 0x%04x", inter->irq_status);
+        inter->irq_status &= value;
+        inter->irq_line_state &= value;
+        if ((cleared_bits & (1u << IRQ_SPU)) && inter->spu.irq9_flag) {
+            inter->spu.irq9_flag = false;
+            inter->spu.status &= ~SPU_STATUS_IRQ9_FLAG;
+            interconnect_set_irq_line(inter, IRQ_SPU, false);
+            LOG_IRQ_DEBUG("SPU IRQ9 edge-trigger reset (I_STAT[9] cleared)");
         }
-        // Also clear timer interrupt_requested flags and mode[10] for Timer0, Timer1, Timer2
+        if (inter->cpu) inter->cpu->downcount = 0;
         if ((value & (1 << TIMER0_IRQ)) == 0) {
             inter->timers_state.timers[0].interrupt_requested = false;
             inter->timers_state.timers[0].mode &= ~(1 << 10);
@@ -1361,24 +940,14 @@ phys_b_count_s16++;
             inter->timers_state.timers[2].interrupt_requested = false;
             inter->timers_state.timers[2].mode &= ~(1 << 10);
         }
-        // Keep the existing detailed log for the first write only
-        if (irq_status_write_count == 1) {
-}
         return;
     }
-     if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
-        uint16_t old_mask = inter->irq_mask;
+    if (physical_addr == IRQ_MASK_ADDR) { // 0x1f801074 (I_MASK)
         inter->irq_mask = value & 0x7FF;
-        
-        // Detect when BIOS is disabling IRQ0
-        if ((old_mask & 0x0001) && !(inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS disabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts disabled)", old_mask, inter->irq_mask);
-        } else if (!(old_mask & 0x0001) && (inter->irq_mask & 0x0001)) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] BIOS enabled IRQ0: I_MASK 0x%04x -> 0x%04x (VBlank interrupts enabled)", old_mask, inter->irq_mask);
-        }
-        
-return;
-     }
+        LOG_IRQ_DEBUG("I_MASK <- 0x%03x", value & 0x7FF);
+        if (inter->cpu) inter->cpu->downcount = 0;
+        return;
+    }
 
     // SPU Region
         if (physical_addr >= SPU_START && physical_addr <= SPU_END) {
@@ -1447,7 +1016,7 @@ return;
 
     // DMA Region (Unlikely 16-bit writes)
      if (physical_addr >= DMA_START && physical_addr <= DMA_END) {
-        LOG_INTERCONNECT_WARN("[INTERCONNECT] Unhandled DMA write16 at 0x%08x = 0x%04x", physical_addr, value);
+        LOG_DMA_WARN("[DMA] Unhandled write16 at 0x%08x = 0x%04x", physical_addr, value);
         return;
     }
 
@@ -1503,46 +1072,8 @@ break;
  */
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     uint32_t physical_addr = mask_region(address);
-    if (inter->cpu) {
-        uint32_t curpc = inter->cpu->pc;
-        const uint32_t PHYS_ADDR_A = 0x001ffd5cU;
-        const uint32_t PHYS_ADDR_B = 0x00079d9cU;
-        static int phys_a_count_s8 = 0;
-        static int phys_b_count_s8 = 0;
-        const int PHYS_ADDR_MAX = 500;
-        if (physical_addr == PHYS_ADDR_A) {
-            if (phys_a_count_s8 < PHYS_ADDR_MAX) {
-phys_a_count_s8++;
-            }
-        } else if (physical_addr == PHYS_ADDR_B) {
-            if (phys_b_count_s8 < PHYS_ADDR_MAX) {
-phys_b_count_s8++;
-            }
-        }
-        const uint32_t BRANCH_PC = 0x80059DCCU;
-        static int cpu_snapshot_count_store8 = 0;
-        const int CPU_SNAPSHOT_MAX = 64;
-        if (address == curpc && curpc == BRANCH_PC && cpu_snapshot_count_store8 < CPU_SNAPSHOT_MAX) {
-            uint32_t t0 = inter->cpu->regs[8];
-            uint32_t v0 = inter->cpu->regs[2];
-            uint32_t s0 = inter->cpu->regs[16];
-            uint32_t t2 = inter->cpu->regs[10];
-            uint32_t a1 = inter->cpu->regs[5];
-            LOG_INTERCONNECT_INFO("[INTERCONNECT]  t0=0x%08x v0=0x%08x s0=0x%08x t2=0x%08x a1=0x%08x @ 0x%08x", curpc, t0, v0, s0, t2, a1);
-            cpu_snapshot_count_store8++;
-        }
-    }
-    if (IS_KEY_HW_REG(physical_addr)) {
-        log_hot_reg("IO WRITE8", physical_addr, value, 1);
-    } else if (log_get_level() >= LOG_LEVEL_TRACE) {
-        static uint32_t io_write8_trace = 0;
-        if (++io_write8_trace % 500 == 0) {
-}
-    }
-    // Remove or comment out noisy IO write logs for general IO region
-    // if (physical_addr >= 0x1f801000 && physical_addr < 0x1f802000) {
-    // }
-    // --- Check Timer Range --- <<< ADD THIS BLOCK
+
+    // --- Check Timer Range ---
     if (physical_addr >= TIMERS_START && physical_addr <= TIMERS_END) {
         // 8-bit writes to timers are generally undefined or write partial registers.
         LOG_INTERCONNECT_WARN("[INTERCONNECT] Unhandled 8-bit write to Timer range: 0x%08x = 0x%02x", physical_addr, value);
@@ -1564,14 +1095,7 @@ phys_b_count_s8++;
         return; // Don't store, just log
     }
     
-    // --- CDROM Register Access (Strict PSX-Spex) ---
     if (physical_addr >= 0x1f801800 && physical_addr <= 0x1f801803) {
-        LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8 at 0x%08x = 0x%02x", physical_addr, value);
-#if LOG_LEVEL >= LOG_LEVEL_INFO
-        if (++cdrom_write8_count % 10000 == 0) {
-            LOG_INTERCONNECT_DEBUG("[INTERCONNECT] CDROM register WRITE8: %d accesses, last at 0x%08x = 0x%02x", cdrom_write8_count, physical_addr, value);
-        }
-#endif
         cdrom_write8(&inter->cdrom, physical_addr, value);
         return;
     }
@@ -1687,7 +1211,7 @@ static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
     // In Request mode (Sync=1), size is BlockCount * BlockSize
     uint32_t bc = (uint32_t)ch->block_count;
     if (bs == 0 || bc == 0) {
-        LOG_INTERCONNECT_WARN("[INTERCONNECT] DMA Request sync with zero size/count (BS=%u, BC=%u)", bs, bc);
+        LOG_DMA_WARN("[DMA] Request sync zero size (BS=%u BC=%u)", bs, bc);
         return 0; // Invalid size for Request mode
     }
     return bs * bc;
@@ -1702,15 +1226,15 @@ static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
  */
 static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index) {
     if (channel_index >= 7) {
-        LOG_INTERCONNECT_ERROR("[INTERCONNECT] Error: interconnect_perform_dma called with invalid channel index %u", channel_index);
+        LOG_DMA_ERROR("[DMA] Invalid channel index %u", channel_index);
         return;
     }
 
-    LOG_DMA_DEBUG("[INTERCONNECT] --- Starting DMA Transfer for Channel %d ---", channel_index);
+    LOG_DMA_DEBUG("[DMA] ch%d start", channel_index);
     DmaChannel* ch = &inter->dma.channels[channel_index];
     DmaSync sync_mode = ch->sync;
 
-    LOG_DMA_DEBUG("[INTERCONNECT] DMA Channel %d: sync_mode=%d, direction=%d, base_addr=0x%08x", 
+    LOG_DMA_DEBUG("[DMA] ch%d sync=%d dir=%d base=0x%08x",
                   channel_index, sync_mode, ch->direction, ch->base_addr);
 
     switch (sync_mode) {
@@ -1718,11 +1242,11 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             // Primarily used for GPU Channel 2
             if (channel_index == 2 && ch->direction == FROM_RAM) {
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address from MADR
-                LOG_DMA_DEBUG("[INTERCONNECT] DMA GPU Linked List: Starting at 0x%08x", addr);
+                LOG_DMA_DEBUG("[DMA] GPU LL start at 0x%08x", addr);
                 while(1) {
                     // Check address bounds before reading header
                     if (addr >= RAM_SIZE) {
-                        LOG_DMA_ERROR("[INTERCONNECT] DMA GPU LL Error: Header address 0x%08x out of RAM bounds.", addr);
+                        LOG_DMA_ERROR("[DMA] GPU LL: header 0x%08x out of bounds", addr);
                         break;
                     }
                     // Read header: size in high byte, next address in low 24 bits
@@ -1735,21 +1259,13 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                          for (uint32_t i = 0; i < num_words; ++i) {
                             addr = (addr + 4) & 0x00FFFFFC; // Advance address for command word
                             if (addr >= RAM_SIZE) { // Check bounds before reading command
-                                LOG_DMA_ERROR("[INTERCONNECT] DMA GPU LL Error: Command address 0x%08x out of RAM bounds.", addr);
+                                LOG_DMA_ERROR("[DMA] GPU LL: command addr 0x%08x out of bounds", addr);
                                 next_addr = 0xFFFFFF; // Force stop after this packet
                                 break; // Exit inner loop
                             }
-                            uint32_t command_word = interconnect_load32(inter, addr); // Read command
-                            
-                            // LOG WHAT BIOS IS ACTUALLY SENDING - Critical for debugging menu rendering
-                            uint8_t cmd_opcode_from_word = (command_word >> 24) & 0xFF;
-                            static uint32_t dma_cmd_log_count = 0;
-                            if (dma_cmd_log_count < 200 || (cmd_opcode_from_word >= 0x60 && cmd_opcode_from_word <= 0x7F) || cmd_opcode_from_word == 0xA0) {
-                                LOG_GPU_INFO("[INTERCONNECT] #%u: Word Value=0x%08x (Interpreted Opcode=0x%02x) at addr=0x%08x, word %u/%u of packet @ 0x%08x",
-                                           dma_cmd_log_count, command_word, cmd_opcode_from_word, addr, i+1, num_words);
-                                dma_cmd_log_count++;
-                            }
-                            
+                            uint32_t command_word = interconnect_load32(inter, addr);
+                            LOG_DMA_TRACE("[DMA] GPU LL word=0x%08x addr=0x%08x", command_word, addr);
+
                             // Respect GPU STAT[26] (GP0 ready) to avoid overflowing the GP0 FIFO
                             {
                                 int wait_cycles = 0;
@@ -1757,7 +1273,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                     // Let pending events (timers/VBlank) run so the GPU can drain
                                     eventq_dispatch_due(inter);
                                     if (++wait_cycles > 10000) {
-                                        LOG_DMA_WARN("[INTERCONNECT] DMA GPU LL: waited too long for GP0 ready, proceeding to avoid deadlock");
+                                        LOG_DMA_WARN("[DMA] GPU LL: GP0 ready timeout, proceeding");
                                         break;
                                     }
                                 }
@@ -1769,26 +1285,26 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
                     // Check for end-of-list marker (Top bit of next_addr usually, or 0xFFFFFF) [cite: 1808]
                     if ((header & 0x800000) != 0) { // Check MSB of address field as per Mednafen comment
-                        LOG_DMA_DEBUG("[INTERCONNECT] DMA GPU Linked List: End marker (0x800000)");
+                        LOG_DMA_TRACE("[DMA] GPU LL end (0x800000)");
                         break;
                     }
                     // Check for explicit 0xFFFFFF marker (safer)
                     if (next_addr == 0xFFFFFF) {
-                        LOG_DMA_DEBUG("[INTERCONNECT] DMA GPU Linked List: End marker (0xFFFFFF)");
+                        LOG_DMA_TRACE("[DMA] GPU LL end (0xFFFFFF)");
                          break;
                     }
 
                     // Check next address validity before proceeding
                      if (next_addr >= RAM_SIZE) {
-                         LOG_DMA_ERROR("[INTERCONNECT] DMA GPU LL Error: Next header address 0x%08x out of RAM bounds.", next_addr);
+                         LOG_DMA_ERROR("[DMA] GPU LL: next header 0x%08x out of bounds", next_addr);
                          break;
                      }
                     // Move to the next header address
                     addr = next_addr;
                 }
-                LOG_DMA_DEBUG("[INTERCONNECT] DMA GPU Linked List: Finished");
+                LOG_DMA_DEBUG("[DMA] GPU LL done");
             } else {
-                 LOG_DMA_ERROR("[INTERCONNECT] Error: Linked List DMA mode attempted on unsupported channel (%d) or direction (%d).", channel_index, ch->direction);
+                 LOG_DMA_ERROR("[DMA] Linked list on unsupported ch=%d dir=%d", channel_index, ch->direction);
             }
             break;
 
@@ -1797,13 +1313,13 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             {
                 uint32_t words_to_transfer = dma_get_transfer_size_words(ch);
                 if (words_to_transfer == 0) {
-                    LOG_DMA_WARN("[INTERCONNECT] DMA Block/Request transfer started with zero size for channel %d.", channel_index);
+                    LOG_DMA_WARN("[DMA] ch%d block/request with zero size", channel_index);
                     break; // Nothing to do
                 }
 
                 uint32_t addr = ch->base_addr & 0x00FFFFFC; // Start address
                 int32_t step = (ch->step == INCREMENT) ? 4 : -4;
-                LOG_DMA_INFO("[INTERCONNECT] DMA Block/Request: Chan=%d, Dir=%s, Sync=%s, Step=%d, Addr=0x%08x, Size=%u words",
+                LOG_DMA_DEBUG("[DMA] ch%d %s %s step=%d addr=0x%08x words=%u",
                        channel_index, (ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM"),
                        (sync_mode == MANUAL ? "MANUAL" : "REQUEST"), step, addr, words_to_transfer);
 
@@ -1811,7 +1327,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Ensure address stays within RAM bounds (mask low bits, check high bits)
                     uint32_t current_addr_masked = addr & 0x001FFFFC; // Mask address to stay within 2MB and word aligned
                     if (current_addr_masked >= RAM_SIZE) {
-                         LOG_DMA_ERROR("[INTERCONNECT] DMA Block Error: Address 0x%08x (masked 0x%08x) out of RAM bounds on channel %d.", addr, current_addr_masked, channel_index);
+                         LOG_DMA_ERROR("[DMA] ch%d addr 0x%08x (masked 0x%08x) out of RAM bounds", channel_index, addr, current_addr_masked);
                          break; // Stop transfer if address goes out of bounds
                     }
 
@@ -1826,37 +1342,45 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                     while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
                                         eventq_dispatch_due(inter);
                                         if (++wait_cycles > 10000) {
-                                            LOG_DMA_WARN("[INTERCONNECT] DMA GPU: waited too long for GP0 ready while sending data, proceeding");
+                                            LOG_DMA_WARN("[DMA] GPU GP0 ready timeout in block transfer, proceeding");
                                             break;
                                         }
                                     }
                                 }
                                 gpu_gp0(&inter->gpu, data_word); // Send data word to GP0 (for Image Load etc.)
                                 break;
-                            // Add cases for other peripherals (CDROM, SPU, MDEC) here
+                            case 4: { /* SPU: 32-bit word → two halfwords into SPU RAM */
+                                uint16_t hw[2] = { (uint16_t)(data_word & 0xFFFF), (uint16_t)(data_word >> 16) };
+                                spu_dma_write_halfwords(&inter->spu, inter, hw, 2);
+                                break;
+                            }
                             default:
-                                LOG_DMA_WARN("[INTERCONNECT] Unhandled DMA Block FROM_RAM transfer for channel %d, Addr=0x%08x, Data=0x%08x",
+                                LOG_DMA_WARN("[DMA] Unhandled FROM_RAM ch%d addr=0x%08x data=0x%08x",
                                        channel_index, current_addr_masked, data_word);
                                 break;
                         }
                     } else { // TO_RAM
-                        // Peripheral -> RAM
-                        uint32_t data_word = 0; // Default value if peripheral not handled
+                        uint32_t data_word = 0;
                         switch (channel_index) {
-                            case 6: // OTC - Ordering Table Clear
-                                // Value depends on position in transfer
-                                data_word = (i == (words_to_transfer - 1)) // Is it the last word?
-                                            ? 0x00FFFFFF                  // Yes: End marker
-                                            : ((addr - 4) & 0x00FFFFFC); // No: Pointer to previous entry
+                            case 6: /* OTC */
+                                data_word = (i == (words_to_transfer - 1))
+                                            ? 0x00FFFFFF
+                                            : ((addr - 4) & 0x00FFFFFC);
                                 break;
-                            case 2: // GPU (GPUREAD)
+                            case 2: /* GPU GPUREAD */
                                 data_word = gpu_read_data(&inter->gpu);
                                 break;
-                            case 3: // CDROM → RAM
+                            case 3: /* CDROM → RAM */
                                 data_word = cdrom_dma_read_word(&inter->cdrom);
                                 break;
+                            case 4: { /* SPU → RAM */
+                                uint16_t hw[2];
+                                spu_dma_read_halfwords(&inter->spu, inter, hw, 2);
+                                data_word = (uint32_t)hw[0] | ((uint32_t)hw[1] << 16);
+                                break;
+                            }
                             default:
-                                LOG_DMA_INFO("[INTERCONNECT] Unhandled DMA TO_RAM for channel %d, Addr=0x%08x (needs implementation)",
+                                LOG_DMA_WARN("[DMA] Unhandled TO_RAM ch%d addr=0x%08x",
                                        channel_index, current_addr_masked);
                                 break;
                         }
@@ -1866,18 +1390,18 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Advance address for next word
                     addr = (uint32_t)((int32_t)addr + step); // Apply step
                 }
-                 LOG_DMA_DEBUG("[INTERCONNECT] DMA Block/Request: Finished for channel %d", channel_index);
+                 LOG_DMA_DEBUG("[DMA] Channel %d transfer complete: %u words", channel_index, words_to_transfer);
             }
             break;
 
         default: // Should not happen if sync enum is correct
-            LOG_DMA_ERROR("[INTERCONNECT] Error: Unknown DMA Sync mode %d encountered for channel %d.", sync_mode, channel_index);
+            LOG_DMA_ERROR("[DMA] Unknown sync mode %d on ch%d", sync_mode, channel_index);
             break;
     }
 
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
-    LOG_DMA_DEBUG("[INTERCONNECT] --- Finished DMA Transfer for Channel %d ---", channel_index);
+    LOG_DMA_DEBUG("[DMA] ch%d done", channel_index);
 
     // Signal DMA completion IRQ (IRQ3) if the channel has IRQ enabled in DICR.
     // Edge-triggered on I_STAT[3]: only raise IRQ3 when I_STAT bit 3 transitions 0→1.
@@ -1952,7 +1476,7 @@ void interconnect_check_bios_boot(Interconnect* inter) {
 
 // Helper: Perform the actual GPU DMA transfer for channel 2
 void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
-    LOG_DMA_INFO("[INTERCONNECT] Performing GPU DMA transfer (mode=%d, direction=%d)", ch->sync, ch->direction);
+    LOG_DMA_DEBUG("[DMA] GPU transfer sync=%d dir=%d", ch->sync, ch->direction);
     // FROM_RAM: RAM -> GPU (Image Load)
     if (ch->direction == FROM_RAM) {
         uint32_t addr = ch->base_addr & 0x001FFFFC; // 2MB RAM, word aligned
@@ -1960,7 +1484,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         if (words == 0) words = 1;
         
         // Log source address for debugging menu graphics
-        LOG_DMA_INFO("[INTERCONNECT] GPU DMA FROM_RAM: base_addr=0x%08X, words=%u", ch->base_addr, words);
+        LOG_DMA_DEBUG("[DMA] GPU FROM_RAM base=0x%08x words=%u", ch->base_addr, words);
         
         // This function is only called for Linked List DMA (logo), not Block/Request (menu)
         for (uint32_t i = 0; i < words; ++i) {
@@ -1973,11 +1497,11 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
                 waited++;
                 if (waited > 1000) break; // safety cap to avoid infinite hang in broken cases
             }
-            if (waited > 0) LOG_DMA_INFO("[INTERCONNECT] GPU DMA: waited %d iterations for GPU ready", waited);
+            if (waited > 0) LOG_DMA_DEBUG("[DMA] GPU: waited %d iterations for ready", waited);
             gpu_gp0(&sys->gpu, data_word); // Send to GP0 (Image Load)
             addr += 4;
         }
-        LOG_DMA_INFO("[INTERCONNECT] GPU DMA (FROM_RAM) transferred %u words from 0x%08X", words, ch->base_addr);
+        LOG_DMA_DEBUG("[DMA] GPU FROM_RAM done: %u words from 0x%08x", words, ch->base_addr);
     }
     // TO_RAM: GPU -> RAM (Image Read)
     else if (ch->direction == TO_RAM) {
@@ -1989,7 +1513,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
             ram_store32(sys->ram, addr, data_word);
             addr += 4;
         }
-        LOG_DMA_INFO("[INTERCONNECT] GPU DMA (TO_RAM) transferred %u words", words);
+        LOG_DMA_DEBUG("[DMA] GPU TO_RAM done: %u words", words);
     }
     // LINKED_LIST: GPU command list
     else if (ch->sync == LINKED_LIST) {
@@ -2006,10 +1530,10 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
             if (header & 0x800000) break; // End of list
             addr = header & 0x001FFFFC;
         }
-        LOG_DMA_INFO("[INTERCONNECT] GPU DMA (LINKED_LIST) processed command list");
+        LOG_DMA_DEBUG("[DMA] GPU LL processed");
     }
     else {
-        LOG_DMA_WARN("[INTERCONNECT] GPU DMA: Unknown mode or direction (sync=%d, dir=%d)", ch->sync, ch->direction);
+        LOG_DMA_WARN("[DMA] GPU: unknown sync=%d dir=%d", ch->sync, ch->direction);
     }
 
     // --- End of GPU DMA transfer logic ---

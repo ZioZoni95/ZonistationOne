@@ -381,6 +381,7 @@ static void gp0_tri_mono_opaque(Gpu* gpu) {
     }
     renderer_set_semi_trans_mode(&gpu->renderer, false, 0);
     renderer_set_texture_mode(&gpu->renderer, false);
+    LOG_GPU_TRACE("[GPU] Render three-point opaque mono polygon");
     renderer_push_triangle(&gpu->renderer, p, colors, NULL, 0, 0);
 }
 
@@ -399,6 +400,7 @@ static void gp0_tri_mono_semi(Gpu* gpu) {
     }
     renderer_set_semi_trans_mode(&gpu->renderer, true, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
+    LOG_GPU_TRACE("[GPU] Render three-point semi-transparent mono polygon");
     renderer_push_triangle(&gpu->renderer, p, colors, NULL, 0, 0);
 }
 
@@ -458,13 +460,15 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
             colors[i].g = 128;
             colors[i].b = 128;
         }
-        LOG_GPU_DEBUG("[GPU] GP0 tri: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
+    LOG_GPU_TRACE("[GPU] Render three-point %s textured-%s polygon",
+                  semi_trans ? "semi-transparent" : "opaque",
+                  raw_texture ? "raw" : "blend");
     renderer_push_triangle(&gpu->renderer, p, colors, t, clut, texpage);
 }
 
@@ -490,6 +494,7 @@ static void gp0_tri_shaded_impl(Gpu* gpu, bool semi_trans) {
     }
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
+    LOG_GPU_TRACE("[GPU] Render three-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_triangle(&gpu->renderer, p, c, NULL, 0, 0);
 }
 
@@ -556,13 +561,15 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("[GPU] GP0 shaded tri: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
+    LOG_GPU_TRACE("[GPU] Render three-point %s shaded-textured-%s polygon",
+                  semi_trans ? "semi-transparent" : "opaque",
+                  raw_texture ? "raw" : "blend");
     renderer_push_triangle(&gpu->renderer, p, c, t, clut, texpage);
 }
 
@@ -587,6 +594,7 @@ static void gp0_quad_mono_impl(Gpu* gpu, bool semi_trans) {
     }
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
+    LOG_GPU_TRACE("[GPU] Render four-point %s mono polygon", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_quad(&gpu->renderer, p, colors, NULL, 0, 0);
 }
 
@@ -654,20 +662,15 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("[GPU] GP0 quad: Raw texture mode enabled");
-    }
-
-    static int log_limiter = 0;
-    if (log_limiter < 10) {
-        LOG_GPU_DEBUG("[GPU] GP0 textured quad V0(%d,%d) UV(%d,%d) CLUT=%04x TPage=%04x",
-            p[0].x, p[0].y, t[0].u, t[0].v, clut, texpage);
-        log_limiter++;
     }
 
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
+    LOG_GPU_TRACE("[GPU] Render four-point %s textured-%s polygon",
+                  semi_trans ? "semi-transparent" : "opaque",
+                  raw_texture ? "raw" : "blend");
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
 
@@ -693,6 +696,7 @@ static void gp0_quad_shaded_impl(Gpu* gpu, bool semi_trans) {
     }
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
+    LOG_GPU_TRACE("[GPU] Render four-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
 }
 
@@ -745,13 +749,14 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
             c[i].g = 128;
             c[i].b = 128;
         }
-        LOG_GPU_DEBUG("[GPU] GP0 shaded quad: Raw texture mode enabled");
     }
 
     upload_vram_if_dirty(gpu);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
+    LOG_GPU_TRACE("[GPU] Render four-point %s shaded-textured polygon",
+                  semi_trans ? "semi-transparent" : "opaque");
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
 
@@ -776,6 +781,7 @@ static void gp0_line_mono_impl(Gpu* gpu, bool semi_trans) {
     p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFFFF);
     p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
+    LOG_GPU_TRACE("[GPU] Render %s mono line", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_line(&gpu->renderer, p, c);
 }
 
@@ -798,6 +804,7 @@ static void gp0_line_shaded_impl(Gpu* gpu, bool semi_trans) {
     p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
     p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
+    LOG_GPU_TRACE("[GPU] Render %s shaded line", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_line(&gpu->renderer, p, c);
 }
 
@@ -837,6 +844,7 @@ static void flush_polyline(Gpu* gpu) {
         gpu->gp0_mode = GP0_MODE_COMMAND;
         return;
     }
+    LOG_GPU_TRACE("[GPU] Polyline: flush with %u entries", gpu->polyline_count);
 
     renderer_set_semi_trans_mode(&gpu->renderer, gpu->polyline_semi_trans,
                                   gpu->semi_transparency);
@@ -1300,8 +1308,10 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
             flush_polyline(gpu);
             return;
         }
-        if (gpu->polyline_count < 256)
+        if (gpu->polyline_count < 256) {
+            LOG_GPU_TRACE("[GPU] Polyline: add word 0x%08x (entry %u)", word, gpu->polyline_count);
             gpu->polyline_buffer[gpu->polyline_count++] = word;
+        }
         return;
     }
 

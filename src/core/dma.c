@@ -4,14 +4,6 @@
 #include "event_scheduler.h" // For eventq_schedule
 #include "interconnect.h"   // For Interconnect struct (needed for event system)
 
-// Logging: Only use LOG_DMA_ERROR for DMA hardware faults. No per-transfer logs.
-
-// Example: Replace LOG_DMA_INFO or LOG_DMA_DEBUG for frequent register accesses with LOG_DMA_TRACE or wrap in a higher debug level check.
-#ifdef LOG_DMA_TRACE
-#define LOG_DMA_TRACE_ENABLED 1
-#else
-#define LOG_DMA_TRACE_ENABLED 0
-#endif
 
 // Helper function to get channel control register value
 // REMOVED 'static'
@@ -166,11 +158,11 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 channel_set_control(ch, value);
                 channel_became_active = dma_channel_is_active(ch);
                 if (channel_became_active) {
-                    // Rate-limit DMA activation logs
-                    static uint32_t dma_activate_count = 0;
-                    dma_activate_count++;
-                    if (dma_activate_count <= 10 || dma_activate_count % 100 == 0) {
-}
+                    static const char* const sync_names[] = {"MANUAL","REQUEST","LINKED_LIST","?"};
+                    LOG_DMA_DEBUG("[DMA] Channel %u activated: sync=%s blockSize=%u blockCount=%u addr=0x%08x",
+                                  channel_index,
+                                  sync_names[ch->sync < 3 ? ch->sync : 3],
+                                  ch->block_size, ch->block_count, ch->base_addr);
                 }
                 break;
             default:
@@ -196,6 +188,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 // ch2 flag is set), trapping the CPU in the interrupt handler forever.
                 uint8_t ack_flags = (uint8_t)((value >> 24) & 0x7F);
                 if (ack_flags) {
+                    LOG_DMA_DEBUG("[DMA] DICR IRQ ack: channels 0x%02x cleared, flags now 0x%02x",
+                                  ack_flags, (uint8_t)(dma->channel_irq_flags & ~ack_flags));
                     dma->channel_irq_flags &= ~ack_flags;
                     // Recompute master_irq_flag after ACK
                     dma->master_irq_flag = dma->force_irq ||
@@ -213,14 +207,5 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
         }
     }
 
-    // For frequent DMA region accesses, only log at TRACE level:
-    #if LOG_DMA_TRACE_ENABLED
-#endif
-
     return channel_became_active;
 }
-
-// At the end of interconnect_perform_dma (or equivalent), after marking the channel as done:
-// if (dma->channel_irq_enable & (1 << channel_index)) {
-//     interconnect_request_irq(dma->inter, IRQ_DMA, "DMA");
-// }

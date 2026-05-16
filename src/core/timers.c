@@ -164,9 +164,13 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
     Timer* t = &timers->timers[timer_index];
 if (offset == TIMER_MODE_OFFSET) {
+        LOG_TIMER_DEBUG("[TIMER] Timer%d mode <- 0x%04x (sync=%d clkSrc=%d irqTarget=%d irqOverflow=%d)",
+                        timer_index, value,
+                        (value & 1) != 0, (value >> 8) & 3,
+                        (value >> 4) & 1, (value >> 5) & 1);
         t->mode = value;
-        t->counter = 0;  // CRITICAL FIX: PSX-SPEX mandates reset to 0000h on mode write
-        t->interrupt_requested = false; // Clear IRQ state on mode write
+        t->counter = 0;
+        t->interrupt_requested = false;
         t->reached_target_flag = false;
         t->reached_ffff_flag = false;
         t->mode &= ~(1 << 10); // Clear IRQ request bit
@@ -291,10 +295,10 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
                 if (t->irq_on_target && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
-interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
-                } else if (t->irq_on_target) {
-}
-                t->counter = 0; // Reset on target
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ: target reached (counter=%u, target=%u)", i, t->counter, t->target);
+                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
+                }
+                t->counter = 0;
                 continue;
             }
             // Overflow?
@@ -303,9 +307,10 @@ interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
                 if (t->irq_on_ffff && (t->mode & 0x100)) {
                     t->interrupt_requested = true;
                     t->mode |= (1 << 10);
-interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ: overflow", i);
+                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
                 }
-                t->counter = 0; // Always reset on overflow
+                t->counter = 0;
             }
         }
     }
@@ -394,12 +399,6 @@ int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
-    static uint32_t timer_event_count[3] = {0, 0, 0};
-    timer_event_count[timer_index]++;
-    
-    // Only log every 100 timer events to reduce spam
-    if (timer_event_count[timer_index] % 100 == 1) {
-}
     Timer* t = &timers->timers[timer_index];
     // Set sticky flag for target or overflow
     if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
@@ -412,8 +411,9 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     bool irq_enabled = (t->irq_on_target && t->reached_target_flag) || (t->irq_on_ffff && t->reached_ffff_flag);
     if (irq_enabled && !t->interrupt_requested && (t->mode & 0x100)) {
         t->interrupt_requested = true;
-        t->mode |= (1 << 10); // Set IRQ request bit
-interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
+        t->mode |= (1 << 10);
+        LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ triggered by event handler", timer_index);
+        interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
     }
     // Reset counter if needed
     if (t->reset_on_target && t->reached_target_flag) {
@@ -436,13 +436,7 @@ void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->
 
 // VBlank event handler for event_scheduler.c
 void timers_on_vblank(Timers* timers) {
-    static uint32_t vblank_count = 0;
-    vblank_count++;
-    
-    // Only log every 300 frames (~5 seconds at 60fps)
-    if (vblank_count % 300 == 1) {
-}
-    
+
     Timer* t0 = &timers->timers[0];
     t0->counter = 0;
     t0->reached_target_flag = false;

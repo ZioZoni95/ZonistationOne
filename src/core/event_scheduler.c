@@ -7,7 +7,8 @@
 #include "log.h"
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
-#include "timers.h"        // Add this include for timer event handler prototypes
+#include "timers.h"        // For timer event handler prototypes
+#include "spu.h"           // For spu_step / CPU_TICKS_PER_SPU_TICK
 
 // ===============================
 // Event Scheduler Implementation
@@ -27,7 +28,7 @@ static void evq_handle_timer2(struct Interconnect* sys); // Timer2 event
 static void evq_handle_dma_gpu(struct Interconnect* sys);   // GPU DMA event
 static void evq_handle_dma_cdrom(struct Interconnect* sys); // CDROM DMA event
 static void evq_handle_cdrom(struct Interconnect* sys); // CDROM event
-// ... add more as needed for other event types
+static void evq_handle_spu(struct Interconnect* sys);   // SPU sample generation
 
 // Table of event handlers, indexed by EventQueueType
 typedef EventQueueHandler EventHandlerTable[EVQ_EVENT_COUNT];
@@ -44,7 +45,7 @@ static EventHandlerTable evq_handlers = {
     evq_handle_cdrom,    // EVQ_CDROM (non-DMA)
     NULL,                // EVQ_GPU (non-DMA)
     NULL,                // EVQ_MDEC
-    NULL                 // EVQ_SPU
+    evq_handle_spu       // EVQ_SPU
 };
 
 // --- Event Scheduling ---
@@ -213,4 +214,9 @@ static void evq_handle_cdrom(struct Interconnect* sys) {
     // CDROM events are now handled via interconnect_check_cdrom_events()
     // This handler is kept for legacy event system compatibility
     (void)sys;
+}
+
+static void evq_handle_spu(struct Interconnect* sys) {
+    spu_step(sys, CPU_TICKS_PER_SPU_TICK);
+    eventq_schedule(sys, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
 } 

@@ -3,45 +3,14 @@
 #include <string.h>
 
 /* =========================================================================
- * FIFO helpers
- * ========================================================================= */
-
-static void fifo_reset(Spu* spu) {
-    spu->fifo_read_pos = 0;
-    spu->fifo_write_pos = 0;
-    spu->fifo_count = 0;
-}
-
-static bool fifo_is_full(Spu* spu) {
-    return spu->fifo_count >= FIFO_SIZE_HALFWORDS;
-}
-
-static bool fifo_is_empty(Spu* spu) {
-    return spu->fifo_count == 0;
-}
-
-static void fifo_push(Spu* spu, uint16_t value) {
-    if (fifo_is_full(spu)) return;
-    spu->transfer_fifo[spu->fifo_write_pos] = value;
-    spu->fifo_write_pos = (spu->fifo_write_pos + 1) % FIFO_SIZE_HALFWORDS;
-    spu->fifo_count++;
-}
-
-static uint16_t fifo_pop(Spu* spu) {
-    if (fifo_is_empty(spu)) return spu->transfer_fifo[spu->fifo_read_pos > 0 ? spu->fifo_read_pos - 1 : FIFO_SIZE_HALFWORDS - 1];
-    uint16_t val = spu->transfer_fifo[spu->fifo_read_pos];
-    spu->fifo_read_pos = (spu->fifo_read_pos + 1) % FIFO_SIZE_HALFWORDS;
-    spu->fifo_count--;
-    return val;
-}
-
-/* =========================================================================
  * DMA Transfer
  * ========================================================================= */
 
-void spu_dma_write_halfwords(Spu* spu, const uint16_t* data, int count) {
+void spu_dma_write_halfwords(Spu* spu, struct Interconnect* inter, const uint16_t* data, int count) {
     int mode = (spu->control >> 4) & 0x03;
-    if (mode != TRANSFER_DMA_WRITE) return;
+    if (mode != TRANSFER_DMA_WRITE) {
+        LOG_SPU_WARN("[SPU] DMA write but SPUCNT mode=%d (expected 2), proceeding", mode);
+    }
 
     spu->status |= SPU_STATUS_TRANSFER_BUSY;
 
@@ -51,8 +20,7 @@ void spu_dma_write_halfwords(Spu* spu, const uint16_t* data, int count) {
         }
         spu->ram[spu->transfer_addr / 2] = data[i];
 
-        /* IRQ check */
-        spu_check_irq(spu, spu->transfer_addr);
+        spu_check_irq(spu, inter, spu->transfer_addr);
 
         spu->transfer_addr += 2;
         if (spu->transfer_addr >= SPU_RAM_SIZE) {
@@ -64,9 +32,11 @@ void spu_dma_write_halfwords(Spu* spu, const uint16_t* data, int count) {
     spu->status &= ~SPU_STATUS_TRANSFER_BUSY;
 }
 
-void spu_dma_read_halfwords(Spu* spu, uint16_t* data, int count) {
+void spu_dma_read_halfwords(Spu* spu, struct Interconnect* inter, uint16_t* data, int count) {
     int mode = (spu->control >> 4) & 0x03;
-    if (mode != TRANSFER_DMA_READ) return;
+    if (mode != TRANSFER_DMA_READ) {
+        LOG_SPU_WARN("[SPU] DMA read but SPUCNT mode=%d (expected 3), proceeding", mode);
+    }
 
     spu->status |= SPU_STATUS_TRANSFER_BUSY;
 
@@ -80,8 +50,7 @@ void spu_dma_read_halfwords(Spu* spu, uint16_t* data, int count) {
             last_val = spu->ram[spu->transfer_addr / 2];
         }
 
-        /* IRQ check */
-        spu_check_irq(spu, spu->transfer_addr);
+        spu_check_irq(spu, inter, spu->transfer_addr);
 
         data[i] = last_val;
 
@@ -97,21 +66,19 @@ void spu_dma_read_halfwords(Spu* spu, uint16_t* data, int count) {
 
 bool spu_dma_write_request(Spu* spu) {
     int mode = (spu->control >> 4) & 0x03;
-    if (mode != TRANSFER_DMA_WRITE) return false;
-    return !fifo_is_full(spu);
+    return mode == TRANSFER_DMA_WRITE;
 }
 
 bool spu_dma_read_request(Spu* spu) {
     int mode = (spu->control >> 4) & 0x03;
-    if (mode != TRANSFER_DMA_READ) return false;
-    return !fifo_is_empty(spu);
+    return mode == TRANSFER_DMA_READ;
 }
 
 /* =========================================================================
  * Manual Transfer
  * ========================================================================= */
 
-void spu_transfer_write(Spu* spu, uint16_t value) {
+void spu_transfer_write(Spu* spu, struct Interconnect* inter, uint16_t value) {
     int mode = (spu->control >> 4) & 0x03;
     if (mode != TRANSFER_MANUAL_WRITE && mode != TRANSFER_DMA_WRITE) return;
 
@@ -119,8 +86,15 @@ void spu_transfer_write(Spu* spu, uint16_t value) {
         spu->transfer_addr &= (SPU_RAM_SIZE - 1);
     }
 
+    static uint32_t xfer_count = 0;
+    uint32_t cur_addr = spu->transfer_addr;
+    xfer_count++;
+    if (xfer_count <= 8 || xfer_count % 256 == 0) {
+        LOG_SPU_DEBUG("[SPU] Manual xfer #%u: addr=0x%05X val=0x%04X", xfer_count, cur_addr, value);
+    }
+
     spu->ram[spu->transfer_addr / 2] = value;
-    spu_check_irq(spu, spu->transfer_addr);
+    spu_check_irq(spu, inter, spu->transfer_addr);
 
     spu->transfer_addr += 2;
     if (spu->transfer_addr >= SPU_RAM_SIZE) {
@@ -130,7 +104,7 @@ void spu_transfer_write(Spu* spu, uint16_t value) {
     spu->transfer_addr_reg = (uint16_t)(spu->transfer_addr / 8);
 }
 
-uint16_t spu_transfer_read(Spu* spu) {
+uint16_t spu_transfer_read(Spu* spu, struct Interconnect* inter) {
     int mode = (spu->control >> 4) & 0x03;
     if (mode != TRANSFER_DMA_READ) return 0;
 
@@ -139,7 +113,7 @@ uint16_t spu_transfer_read(Spu* spu) {
     }
 
     uint16_t val = spu->ram[spu->transfer_addr / 2];
-    spu_check_irq(spu, spu->transfer_addr);
+    spu_check_irq(spu, inter, spu->transfer_addr);
 
     spu->transfer_addr += 2;
     if (spu->transfer_addr >= SPU_RAM_SIZE) {

@@ -13,18 +13,47 @@ SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 CFLAGS = -std=c99 -g -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
 CXXFLAGS = -std=c++11 -g -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
 
-# Emulator C sources
-EMU_C_SRCS = src/main.c src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c \
-             src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c \
-             src/cpu/cpu_decode.c src/cpu/cpu_execution.c src/cpu/cpu_instructions.c \
-             src/bios.c src/interconnect.c src/bus.c src/bus_irq.c src/ram.c src/dma.c \
-             src/gpu.c src/gpu_helpers.c src/gpu_commands.c src/renderer.c src/vram.c \
-             src/debugger.c src/timers.c src/cdrom.c src/cdrom_commands.c src/cdrom_disc.c \
-             src/cdrom_audio.c src/gte.c src/log.c src/rxi_log.c src/event_scheduler.c \
-              src/sio.c src/controller.c src/spu.c src/spu_voice.c src/spu_adsr.c \
-              src/spu_mixing.c src/spu_dma.c src/spu_irq.c src/pcdrv.c
+# --- Core / CPU ---
+EMU_CPU_SRCS = \
+    src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c \
+    src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c \
+    src/cpu/cpu_decode.c src/cpu/cpu_execution.c src/cpu/cpu_instructions.c
 
-# Emulator C++ sources
+# --- System Core ---
+EMU_CORE_SRCS = \
+    src/core/bios.c src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
+    src/core/ram.c src/core/dma.c src/core/timers.c src/core/sio.c \
+    src/core/controller.c src/core/event_scheduler.c src/core/pcdrv.c
+
+# --- GPU ---
+EMU_GPU_SRCS = \
+    src/gpu/gpu.c src/gpu/gpu_helpers.c src/gpu/gpu_commands.c \
+    src/gpu/renderer.c src/gpu/vram.c src/gpu/debugger.c
+
+# --- GTE ---
+EMU_GTE_SRCS = \
+    src/gte/gte.c src/gte/gte_ops.c
+
+# --- CDROM ---
+EMU_CDROM_SRCS = \
+    src/cdrom/cdrom.c src/cdrom/cdrom_commands.c \
+    src/cdrom/cdrom_disc.c src/cdrom/cdrom_audio.c
+
+# --- SPU ---
+EMU_SPU_SRCS = \
+    src/spu/spu.c src/spu/spu_voice.c src/spu/spu_adsr.c \
+    src/spu/spu_mixing.c src/spu/spu_dma.c src/spu/spu_irq.c
+
+# --- Utils ---
+EMU_UTIL_SRCS = \
+    src/utils/log.c src/utils/rxi_log.c
+
+# --- Emulator C sources (aggregated) ---
+EMU_C_SRCS = src/main.c \
+    $(EMU_CPU_SRCS) $(EMU_CORE_SRCS) $(EMU_GPU_SRCS) \
+    $(EMU_GTE_SRCS) $(EMU_CDROM_SRCS) $(EMU_SPU_SRCS) $(EMU_UTIL_SRCS)
+
+# --- Emulator C++ sources ---
 EMU_CXX_SRCS = src/debug_ui.cpp \
                third_party/imgui/imgui.cpp \
                third_party/imgui/imgui_draw.cpp \
@@ -36,13 +65,13 @@ EMU_CXX_SRCS = src/debug_ui.cpp \
 EMU_OBJS = $(EMU_C_SRCS:.c=.o) $(EMU_CXX_SRCS:.cpp=.o)
 EMU_BIN = myps1_emu
 
-# Test files
-TEST_SRCS = tests/cpu_minimal_test.c src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c \
-            src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c src/cpu/cpu_decode.c \
-            src/cpu/cpu_execution.c src/cpu/cpu_instructions.c src/interconnect.c src/bus.c \
-            src/bus_irq.c src/ram.c src/dma.c src/gpu.c src/timers.c src/cdrom.c \
-            src/cdrom_commands.c src/cdrom_disc.c src/cdrom_audio.c src/bios.c src/gte.c \
-            src/log.c src/event_scheduler.c src/renderer.c src/vram.c src/spu.c src/rxi_log.c
+# --- Test files ---
+TEST_SRCS = tests/cpu_minimal_test.c \
+    $(EMU_CPU_SRCS) src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
+    src/core/ram.c src/core/dma.c src/core/timers.c src/core/bios.c \
+    src/gte/gte.c src/gte/gte_ops.c src/utils/log.c \
+    src/gpu/gpu.c src/gpu/renderer.c src/gpu/vram.c \
+    src/spu/spu.c src/utils/rxi_log.c src/core/event_scheduler.c
 TEST_BIN = cpu_test
 
 all: $(EMU_BIN)
@@ -66,5 +95,8 @@ split_log: split_log.c
 	$(CC) -o split_log split_log.c
 
 clean:
-	rm -f $(EMU_BIN) $(TEST_BIN) split_log src/*.o src/cpu/*.o third_party/imgui/*.o third_party/imgui/backends/*.o *.txt \
-	logs/*.txt logs/*_old.txt
+	rm -f $(EMU_BIN) $(TEST_BIN) split_log \
+	    src/*.o src/cpu/*.o src/core/*.o src/gpu/*.o src/gte/*.o \
+	    src/cdrom/*.o src/spu/*.o src/utils/*.o \
+	    third_party/imgui/*.o third_party/imgui/backends/*.o \
+	    *.txt logs/*.txt logs/*_old.txt

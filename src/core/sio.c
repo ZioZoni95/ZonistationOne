@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#define SIO_DBG(...) LOG_TRACE(__VA_ARGS__)
+#define SIO_DBG(...) LOG_SYSTEM_TRACE(__VA_ARGS__)
 
 // ============================================================================
 // STATE MACHINE
@@ -256,11 +256,11 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
 
         case 0x08:  // JOY_MODE (1F801048h)
             sio_internal.mode = value;
-            SIO_DBG("[SIO] Write JOY_MODE = 0x%04x", value);
+            LOG_SYSTEM_DEBUG("[SIO] JOY_MODE <- 0x%04x", value);
             break;
 
         case 0x0A: {  // JOY_CTRL (1F80104Ah)
-            SIO_DBG("[SIO] Write JOY_CTRL = 0x%04x (SELECT=%d, TXEN=%d, RESET=%d, ACK=%d)",
+            LOG_SYSTEM_DEBUG("[SIO] JOY_CTRL <- 0x%04x (SELECT=%d, TXEN=%d, RESET=%d, ACK=%d)",
                     value, !!(value & CTRL_SELECT), !!(value & CTRL_TXEN),
                     !!(value & CTRL_RESET), !!(value & CTRL_ACK));
 

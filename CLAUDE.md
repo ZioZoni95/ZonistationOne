@@ -75,11 +75,23 @@ src/log.c               — logging: 16 categories, 6 levels, per-category filte
 
 16 categories: SYSTEM CPU IRQ DMA GPU CDROM TIMER BIOS INTERCONNECT RENDERER EVENT GTE VRAM RAM DEBUG MDEC  
 6 levels: SILENT ERROR WARN INFO DEBUG TRACE  
-Default runtime level: WARN. Debug build: `--debug` or `--trace`.
+Default runtime level: **INFO** (`src/log.c:8`). All ImGui component windows open at startup.
 
 Macro pattern: `LOG_<CATEGORY>_<LEVEL>(fmt, ...)` e.g. `LOG_GPU_DEBUG("gp0=0x%08x", v)`
 
-Rate-limiting: `log_set_rate_limit(category, first_n, every_n)` — structure exists, needs enforcement.
+**DuckStation log philosophy (1:1 alignment — completed)**:
+- ERROR: hardware faults, invalid state
+- WARN: recoverable anomalies, dropped commands
+- INFO: init, major state changes only
+- DEBUG: register writes, IRQ events, command dispatch (e.g. `"VBLANK IRQ triggered"`, `"Interrupt mask <- 0x%08x"`, `"Execute command SeekL (0x15)"`)
+- TRACE: per-instruction, per-transfer, per-primitive (hot path — never in default builds)
+- No counter-based rate-limiting — use level gating
+
+Key format conventions:
+- IRQ: `"{name} IRQ triggered/cleared"`, `"Interrupt mask <- 0x%08x"`
+- GP1: `"Display address start <- 0x%08x"`, `"Set display mode <- 0x%08x"`
+- CDROM: `"Execute command {name} (0x%02X)"`, `"Drive state: OLD -> NEW (LBA N)"`
+- GTE unhandled: fires once per unique opcode via bitmask seen-set (`seen_opcodes`)
 
 ---
 
@@ -98,7 +110,7 @@ Rate-limiting: `log_set_rate_limit(category, first_n, every_n)` — structure ex
 ## Active Plans
 
 - **UI FBO Refactor**: ✅ Complete. Main SDL window acts as an ImGui host/DockSpace. The PS1 display is rendered to an FBO and shown in an ImGui window. All components have their own log windows. CLI logging removed.
-- **Comprehensive Logging Overhaul**: Systematic upgrade of all `LOG_*` calls across all components to match DuckStation/PCSX-Redux accuracy and formatting. Phase 1 (Core System & Memory Bus) completed. Phase 2 (CPU & Execution) is next. See `.claude/plans/kernel_logging.md` (or equivalent plan file) for details.
+- **Comprehensive Logging Overhaul**: ✅ Complete. All components (CPU, GPU, CDROM, Timers, GTE, SIO, DMA, bus_irq) refactored to 1:1 DuckStation log philosophy. Default level INFO, all windows open at startup.
 
 ---
 
