@@ -129,51 +129,69 @@ typedef enum {
     TRANSFER_DMA_READ = 3
 } SpuTransferMode;
 
-/* --- ADSR Phases --- */
-typedef enum {
-    ADSR_PHASE_OFF = 0,
-    ADSR_PHASE_ATTACK,
-    ADSR_PHASE_DECAY,
-    ADSR_PHASE_SUSTAIN,
-    ADSR_PHASE_RELEASE
-} SpuAdsrPhase;
+/* --- ADSR state (pcsx-redux model: Attack=0 Decay=1 Sustain=2 Release=3 Stopped=4) --- */
+#define ADSR_STATE_ATTACK   0
+#define ADSR_STATE_DECAY    1
+#define ADSR_STATE_SUSTAIN  2
+#define ADSR_STATE_RELEASE  3
+#define ADSR_STATE_STOPPED  4
 
-/* --- Voice state --- */
+/* --- Voice state (pcsx-redux 1:1 port) --- */
 typedef struct SpuVoice {
-    uint16_t current_address;        /* current ADPCM block pointer (halfword units) */
-    uint16_t volume_left;            /* register 0x00 */
-    uint16_t volume_right;           /* register 0x02 */
-    uint16_t pitch;                  /* register 0x04 (VxPitch) */
-    uint16_t start_address;          /* register 0x06 (×8 for byte addr) */
-    uint16_t adsr_low;               /* register 0x08 */
-    uint16_t adsr_high;              /* register 0x0A */
-    int16_t  adsr_volume;            /* register 0x0C (current envelope) */
-    uint16_t repeat_address;         /* register 0x0E (loop point, ×8) */
+    /* PSX MMIO register shadows */
+    uint16_t volume_left;           /* reg 0x00 */
+    uint16_t volume_right;          /* reg 0x02 */
+    uint16_t pitch;                 /* reg 0x04 (0-0x3FFF) */
+    uint16_t start_address;         /* reg 0x06 (×8 = byte addr) */
+    uint16_t adsr_low;              /* reg 0x08 */
+    uint16_t adsr_high;             /* reg 0x0A */
+    int16_t  adsr_volume;           /* reg 0x0C read-back (= EnvelopeVol, 0-32767) */
+    uint16_t repeat_address;        /* reg 0x0E (×8 = byte addr) */
 
-    /* Runtime state */
-    uint8_t  counter_index;          /* 8-bit interpolation index */
-    uint8_t  counter_sample;         /* 5-bit sample index within block (0-27) */
-    bool     is_first_block;
-    bool     has_samples;
-    bool     ignore_loop_address;
+    /* Computed L/R volume (0-0x3FFF) */
+    int vol_left;
+    int vol_right;
 
-    int16_t  block_samples[28 + NUM_ADPCM_TRAILING]; /* 3 trailing + 28 decoded */
-    int16_t  adpcm_last_samples[2];  /* last 2 decoded samples */
-    int32_t  last_volume;            /* last output for pitch modulation */
+    /* Pitch stepping (pcsx-redux spos/sinc model) */
+    int sinc;                       /* = pitch << 4 */
+    int spos;                       /* 16-bit fractional position (0-0xFFFF between steps) */
 
-    /* ADSR runtime */
-    SpuAdsrPhase adsr_phase;
-    int16_t  adsr_target;
-    uint32_t adsr_counter;
+    /* ADPCM decode state */
+    uint32_t curr_addr;             /* current block byte address in SPU RAM */
+    uint32_t start_addr;            /* start byte address */
+    uint32_t loop_addr;             /* loop byte address (set by ADPCM flag 4) */
+    bool     loop_addr_set;         /* loop_addr is valid */
+    bool     ignore_loop;           /* ignore flag-4 loop point (external set) */
+    bool     reach_end;             /* one-shot end reached */
+    int      SBPos;                 /* 0-27: current sample index; 28: triggers decode */
+    int      SB[28];                /* decoded PCM samples for current block */
+    int      s_1, s_2;             /* ADPCM predictor carry */
 
-    /* Volume sweep */
-    int32_t  left_sweep_level;
-    int32_t  right_sweep_level;
-    uint32_t left_sweep_counter;
-    uint32_t right_sweep_counter;
-    bool     left_sweep_active;
-    bool     right_sweep_active;
-    bool     endx_mask;            /* set when block has loop_end flag */
+    /* Gauss interpolation ring (4 samples, pcsx-redux model) */
+    int      gpos;                  /* ring write index 0-3 */
+    int16_t  gauss_ring[4];        /* 4-sample interpolation ring */
+
+    /* ADSR (pcsx-redux denominator/numerator table model) */
+    int adsr_state;                 /* ADSR_STATE_* */
+    int attack_mode_exp;            /* 0=linear, 1=exp */
+    int attack_rate;                /* 7-bit raw from reg (0-127) */
+    int decay_rate;                 /* 4-bit raw from reg (0-15) */
+    int sustain_level;              /* 4-bit raw from reg (0-15) */
+    int sustain_mode_exp;           /* 0=linear, 1=exp */
+    int sustain_increase;           /* 1=increase, 0=decrease */
+    int sustain_rate;               /* 7-bit raw from reg (0-127) */
+    int release_mode_exp;           /* 0=linear, 1=exp */
+    int release_rate;               /* 5-bit raw from reg (0-31) */
+    int EnvelopeVol;                /* 0-32767, internal envelope level */
+    int EnvelopeVolF;               /* fractional tick counter */
+
+    /* Channel flags */
+    bool on;                        /* voice active */
+    bool stop;                      /* key-off pending: transition to Release */
+    bool endx_mask;                 /* end-of-block flag (written to ENDX register) */
+
+    /* Mixed sample output (after ADSR, before vol; stored for fmod source) */
+    int sval;
 } SpuVoice;
 
 /* --- SPU global state --- */
@@ -294,9 +312,11 @@ uint16_t spu_transfer_read(Spu* spu, struct Interconnect* inter);
 /* SPU control register handling */
 void     spu_set_control(Spu* spu, uint16_t value);
 
-/* Voice sample generation (called from spu_mixing.c) */
-void     spu_voice_generate_sample(Spu* spu, struct Interconnect* inter,
-                                   int voice_idx, int16_t* left_out, int16_t* right_out);
+/* Voice sample generation — returns ADSR-mixed sample (pre-L/R volume) */
+int32_t  spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx);
+
+/* ADSR mix — called from spu_voice.c; returns 0-1023 */
+int      spu_adsr_mix(SpuVoice* voice);
 
 /* SPU sample buffer management (driven by EVQ_SPU event scheduler) */
 void     spu_step(struct Interconnect* inter, uint32_t cpu_cycles);

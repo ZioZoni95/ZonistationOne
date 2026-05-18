@@ -1,134 +1,166 @@
+/*
+ * SPU ADSR envelope — ported 1:1 from pcsx-redux (Pete Bernert / PCSX-Redux authors)
+ * Original: pcsx-redux/src/spu/adsr.cc  (GPL-2.0+)
+ * Adapted to C for ZonistationOne.
+ */
+
 #include "spu.h"
-#include "log.h"
+#include <stdint.h>
 
 /* =========================================================================
- * ADSR Envelope Implementation
+ * ADSR envelope tables (128 entries each)
+ * denominator[n]   = (n<48) ? 1 : (1 << ((n>>2)-11))
+ * numerator_inc[n] = (n<48) ? (7-(n&3))<<(11-(n>>2)) : (7-(n&3))
+ * numerator_dec[n] = (n<48) ? (-8+(n&3))<<(11-(n>>2)) : (-8+(n&3))
  * ========================================================================= */
 
-static int32_t clamp16(int32_t v) {
-    if (v > 32767) return 32767;
-    if (v < -32768) return -32768;
-    return v;
+static int32_t adsr_denominator[128];
+static int32_t adsr_numerator_inc[128];
+static int32_t adsr_numerator_dec[128];
+static int adsr_tables_ready = 0;
+
+static void adsr_init_tables(void) {
+    if (adsr_tables_ready) return;
+    for (int n = 0; n < 128; n++) {
+        adsr_denominator[n]   = (n < 48) ? 1 : (1 << ((n >> 2) - 11));
+        adsr_numerator_inc[n] = (n < 48) ? (7 - (n & 3)) << (11 - (n >> 2)) : (7 - (n & 3));
+        adsr_numerator_dec[n] = (n < 48) ? (-8 + (n & 3)) << (11 - (n >> 2)) : (-8 + (n & 3));
+    }
+    adsr_tables_ready = 1;
 }
 
-static bool adsr_tick_step(SpuVoice* voice, bool decreasing, bool exponential, uint8_t rate,
-                           int32_t* current) {
-    if (rate >= 0x7F) return true;
+static inline int clamp_rate(int rate) {
+    return (rate > 127) ? 127 : rate;
+}
 
-    int rate_shift = rate >> 2;
-    int rate_mode = rate & 0x03;
+/* --- Attack --- */
+static int adsr_attack(SpuVoice* voice) {
+    int rate            = voice->attack_rate;
+    int32_t EnvelopeVol  = voice->EnvelopeVol;
+    int32_t EnvelopeVolF = voice->EnvelopeVolF;
 
-    int32_t increment;
-    if (rate_shift < 0x10) {
-        increment = 1 << (11 - rate_shift + 3);
+    if (voice->attack_mode_exp && EnvelopeVol >= 0x6000)
+        rate += 8;
+    rate = clamp_rate(rate);
+
+    EnvelopeVolF++;
+    if (EnvelopeVolF >= adsr_denominator[rate]) {
+        EnvelopeVolF = 0;
+        EnvelopeVol += adsr_numerator_inc[rate];
+    }
+
+    if (EnvelopeVol >= 32767) {
+        EnvelopeVol = 32767;
+        voice->adsr_state = ADSR_STATE_DECAY;
+    }
+
+    voice->EnvelopeVol  = EnvelopeVol;
+    voice->EnvelopeVolF = EnvelopeVolF;
+    voice->adsr_volume  = (int16_t)EnvelopeVol;
+    return EnvelopeVol >> 5;
+}
+
+/* --- Decay (exponential; pcsx-redux uses release_mode_exp flag for the exp check) --- */
+static int adsr_decay(SpuVoice* voice) {
+    const int rate       = clamp_rate(voice->decay_rate * 4);
+    int32_t EnvelopeVol  = voice->EnvelopeVol;
+    int32_t EnvelopeVolF = voice->EnvelopeVolF;
+
+    EnvelopeVolF++;
+    if (EnvelopeVolF >= adsr_denominator[rate]) {
+        EnvelopeVolF = 0;
+        if (voice->release_mode_exp)
+            EnvelopeVol += (adsr_numerator_dec[rate] * EnvelopeVol) >> 15;
+        else
+            EnvelopeVol += adsr_numerator_dec[rate];
+    }
+
+    if (EnvelopeVol < 0) EnvelopeVol = 0;
+
+    if (((EnvelopeVol >> 11) & 0xF) <= voice->sustain_level)
+        voice->adsr_state = ADSR_STATE_SUSTAIN;
+
+    voice->EnvelopeVol  = EnvelopeVol;
+    voice->EnvelopeVolF = EnvelopeVolF;
+    voice->adsr_volume  = (int16_t)EnvelopeVol;
+    return EnvelopeVol >> 5;
+}
+
+/* --- Sustain --- */
+static int adsr_sustain(SpuVoice* voice) {
+    int rate            = voice->sustain_rate;
+    int32_t EnvelopeVol  = voice->EnvelopeVol;
+    int32_t EnvelopeVolF = voice->EnvelopeVolF;
+
+    if (voice->sustain_increase) {
+        if (voice->sustain_mode_exp && EnvelopeVol >= 0x6000)
+            rate += 8;
+        rate = clamp_rate(rate);
+
+        EnvelopeVolF++;
+        if (EnvelopeVolF >= adsr_denominator[rate]) {
+            EnvelopeVolF = 0;
+            EnvelopeVol += adsr_numerator_inc[rate];
+        }
+        if (EnvelopeVol > 32767) EnvelopeVol = 32767;
     } else {
-        increment = 0x8000 >> (rate_shift - 11);
-    }
-
-    voice->adsr_counter += increment;
-    if (!(voice->adsr_counter & 0x8000)) {
-        return false;
-    }
-    voice->adsr_counter = 0;
-
-    int shift_base = 11 - (rate_shift > 10 ? 10 : rate_shift);
-    int32_t step = (int32_t)(7 - rate_mode) << (shift_base + 3);
-
-    int32_t new_level;
-    if (decreasing) {
-        if (exponential) {
-            new_level = *current - (((*current) * (int64_t)step) >> 15);
-        } else {
-            new_level = *current - step;
+        rate = clamp_rate(rate);
+        EnvelopeVolF++;
+        if (EnvelopeVolF >= adsr_denominator[rate]) {
+            EnvelopeVolF = 0;
+            if (voice->sustain_mode_exp)
+                EnvelopeVol += (adsr_numerator_dec[rate] * EnvelopeVol) >> 15;
+            else
+                EnvelopeVol += adsr_numerator_dec[rate];
         }
-        if (new_level < 0) new_level = 0;
-    } else {
-        if (exponential && *current > 0x6000) {
-            step >>= 2;
-        }
-        new_level = *current + step;
-        if (new_level > 32767) new_level = 32767;
+        if (EnvelopeVol < 0) EnvelopeVol = 0;
     }
 
-    *current = new_level;
-    voice->adsr_volume = (int16_t)new_level;
-    return true;
+    voice->EnvelopeVol  = EnvelopeVol;
+    voice->EnvelopeVolF = EnvelopeVolF;
+    voice->adsr_volume  = (int16_t)EnvelopeVol;
+    return EnvelopeVol >> 5;
 }
 
-static void adsr_update_target(SpuVoice* voice) {
-    switch (voice->adsr_phase) {
-        case ADSR_PHASE_ATTACK:
-            voice->adsr_target = 32767;
-            break;
-        case ADSR_PHASE_DECAY: {
-            int sustain_level = voice->adsr_low & 0x0F;
-            voice->adsr_target = (sustain_level + 1) * 0x800;
-            break;
-        }
-        case ADSR_PHASE_SUSTAIN:
-            voice->adsr_target = 0;
-            break;
-        case ADSR_PHASE_RELEASE:
-            voice->adsr_target = 0;
-            break;
-        case ADSR_PHASE_OFF:
-        default:
-            voice->adsr_target = 0;
-            break;
+/* --- Release --- */
+static int adsr_release(SpuVoice* voice) {
+    const int rate       = clamp_rate(voice->release_rate * 4);
+    int32_t EnvelopeVol  = voice->EnvelopeVol;
+    int32_t EnvelopeVolF = voice->EnvelopeVolF;
+
+    EnvelopeVolF++;
+    if (EnvelopeVolF >= adsr_denominator[rate]) {
+        EnvelopeVolF = 0;
+        if (voice->release_mode_exp)
+            EnvelopeVol += (adsr_numerator_dec[rate] * EnvelopeVol) >> 15;
+        else
+            EnvelopeVol += adsr_numerator_dec[rate];
     }
+
+    if (EnvelopeVol < 0) {
+        voice->adsr_state = ADSR_STATE_STOPPED;
+        EnvelopeVol = 0;
+        voice->on   = false;
+    }
+
+    voice->EnvelopeVol  = EnvelopeVol;
+    voice->EnvelopeVolF = EnvelopeVolF;
+    voice->adsr_volume  = (int16_t)EnvelopeVol;
+    return EnvelopeVol >> 5;
 }
 
-void spu_adsr_process(SpuVoice* voice) {
-    if (voice->adsr_phase == ADSR_PHASE_OFF) {
-        voice->adsr_volume = 0;
-        return;
-    }
+/* =========================================================================
+ * Public: spu_adsr_mix — called once per sample from spu_voice_get_sample
+ * Returns mixing volume 0-1023 (= EnvelopeVol >> 5)
+ * ========================================================================= */
+int spu_adsr_mix(SpuVoice* voice) {
+    adsr_init_tables();
 
-    int32_t current = voice->adsr_volume;
-
-    switch (voice->adsr_phase) {
-        case ADSR_PHASE_ATTACK: {
-            bool exp = !!(voice->adsr_low & (1u << 15));
-            uint8_t rate = (voice->adsr_low >> 8) & 0x7F;
-            adsr_tick_step(voice, false, exp, rate, &current);
-            if (voice->adsr_volume >= 32767) {
-                voice->adsr_volume = 32767;
-                voice->adsr_phase = ADSR_PHASE_DECAY;
-                adsr_update_target(voice);
-                voice->adsr_counter = 0;
-            }
-            break;
-        }
-        case ADSR_PHASE_DECAY: {
-            uint8_t rate = ((voice->adsr_low >> 4) & 0x0F) << 2;
-            adsr_tick_step(voice, true, true, rate, &current);
-            if (voice->adsr_volume <= voice->adsr_target) {
-                voice->adsr_phase = ADSR_PHASE_SUSTAIN;
-                adsr_update_target(voice);
-                voice->adsr_counter = 0;
-            }
-            break;
-        }
-        case ADSR_PHASE_SUSTAIN: {
-            bool dec = !!(voice->adsr_high & (1u << 13));
-            bool exp = !!(voice->adsr_high & (1u << 14));
-            uint8_t rate = (voice->adsr_high >> 6) & 0x7F;
-            adsr_tick_step(voice, dec, exp, rate, &current);
-            if (voice->adsr_volume <= 0) {
-                voice->adsr_phase = ADSR_PHASE_RELEASE;
-                adsr_update_target(voice);
-                voice->adsr_counter = 0;
-            }
-            break;
-        }
-        case ADSR_PHASE_RELEASE: {
-            bool exp = !!(voice->adsr_high & (1u << 5));
-            uint8_t rate = (voice->adsr_high & 0x1F) << 2;
-            adsr_tick_step(voice, true, exp, rate, &current);
-            break;
-        }
-        case ADSR_PHASE_OFF:
-            voice->adsr_volume = 0;
-            break;
+    switch (voice->adsr_state) {
+        case ADSR_STATE_ATTACK:  return adsr_attack(voice);
+        case ADSR_STATE_DECAY:   return adsr_decay(voice);
+        case ADSR_STATE_SUSTAIN: return adsr_sustain(voice);
+        case ADSR_STATE_RELEASE: return adsr_release(voice);
+        default:                 return 0;
     }
 }

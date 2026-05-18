@@ -37,40 +37,54 @@ struct LogComponent {
     bool is_open;
     bool auto_scroll;
     bool monospace;
+    int  display_level;          /* min level shown in ImGui (default INFO) */
     std::vector<LogEntry> buffer;
     ImGuiTextFilter filter;
+    FILE* file;                  /* always-open file in logs/<Name>.log */
+    uint32_t writes_since_flush;
 };
 
 static std::map<LogCategory, LogComponent> g_log_components = {
-    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       true, true, true, {}, {}}},
-    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          true, true, true, {}, {}}},
-    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          true, true, true, {}, {}}},
-    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          true, true, true, {}, {}}},
-    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          true, true, true, {}, {}}},
-    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        true, true, true, {}, {}}},
-    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        true, true, true, {}, {}}},
-    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true, true, true, {}, {}}},
-    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, true, true, true, {}, {}}},
-    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     true, true, true, {}, {}}},
-    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        true, true, true, {}, {}}},
-    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          true, true, true, {}, {}}},
-    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         true, true, true, {}, {}}},
-    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          true, true, true, {}, {}}},
-    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        true, true, true, {}, {}}},
-    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         true, true, true, {}, {}}},
-    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          true, true, true, {}, {}}}
+    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
+    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}}
 };
 
 static std::mutex g_log_mutex;
+
+static const char* level_name(int level);  /* fwd */
 
 static void log_sink_callback(int category, int level, const char* msg, void* udata) {
     (void)udata;
     std::lock_guard<std::mutex> lock(g_log_mutex);
     auto it = g_log_components.find((LogCategory)category);
-    if (it != g_log_components.end()) {
-        it->second.buffer.push_back({level, msg});
-        if (it->second.buffer.size() > 5000)
-            it->second.buffer.erase(it->second.buffer.begin());
+    if (it == g_log_components.end()) return;
+
+    LogComponent& comp = it->second;
+    comp.buffer.push_back({level, msg});
+    if (comp.buffer.size() > 5000)
+        comp.buffer.erase(comp.buffer.begin());
+
+    if (comp.file) {
+        fprintf(comp.file, "[%s] %s\n", level_name(level), msg);
+        if (++comp.writes_since_flush >= 64) {
+            fflush(comp.file);
+            comp.writes_since_flush = 0;
+        }
     }
 }
 
@@ -185,13 +199,22 @@ static void draw_component_log_window(LogComponent& comp) {
         comp.buffer.clear();
     }
     ImGui::SameLine();
-    if (ImGui::Button("Export")) export_component_log(comp);
+    if (ImGui::Button("Flush")) {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        if (comp.file) { fflush(comp.file); comp.writes_since_flush = 0; }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Snapshot")) export_component_log(comp);
     ImGui::SameLine();
     ImGui::Checkbox("Auto-scroll", &comp.auto_scroll);
     ImGui::SameLine();
     ImGui::Checkbox("Mono", &comp.monospace);
     ImGui::SameLine();
     bool copy = ImGui::Button("Copy");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);
+    const char* lvl_items[] = { "Silent", "Error", "Warn", "Info", "Debug", "Trace" };
+    ImGui::Combo("UI Lvl", &comp.display_level, lvl_items, IM_ARRAYSIZE(lvl_items));
     ImGui::SameLine();
     comp.filter.Draw("Filter", -100.0f);
 
@@ -204,9 +227,11 @@ static void draw_component_log_window(LogComponent& comp) {
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
         std::vector<int> indices;
-        for (int i = 0; i < (int)comp.buffer.size(); i++)
-            if (comp.filter.PassFilter(comp.buffer[i].message.c_str()))
-                indices.push_back(i);
+        for (int i = 0; i < (int)comp.buffer.size(); i++) {
+            if (comp.buffer[i].level > comp.display_level) continue;
+            if (!comp.filter.PassFilter(comp.buffer[i].message.c_str())) continue;
+            indices.push_back(i);
+        }
 
         ImGuiListClipper clipper;
         clipper.Begin((int)indices.size());
@@ -501,8 +526,8 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
 // SPU Debug window
 // ---------------------------------------------------------------------------
 
-static const char* s_adsr_phase_names[] = {
-    "Off", "Attack", "Decay", "Sustain", "Release"
+static const char* s_adsr_state_names[] = {
+    "Attack", "Decay", "Sustain", "Release", "Stopped"
 };
 
 static void draw_spu_debug_window(Spu* spu) {
@@ -554,7 +579,7 @@ static void draw_spu_debug_window(Spu* spu) {
 
             for (int v = 0; v < NUM_VOICES; v++) {
                 SpuVoice* voice = &spu->voices[v];
-                bool active = (voice->adsr_phase != ADSR_PHASE_OFF);
+                bool active = voice->on;
 
                 if (!active && !ImGui::GetIO().KeyShift) continue;
 
@@ -564,7 +589,7 @@ static void draw_spu_debug_window(Spu* spu) {
 
                 ImGui::TableNextColumn();
                 if (active)
-                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", s_adsr_phase_names[voice->adsr_phase]);
+                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", s_adsr_state_names[voice->adsr_state & 0x7]);
                 else
                     ImGui::TextDisabled("Off");
 
@@ -683,6 +708,17 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    /* Open per-component log files (one file per category, lives for whole session) */
+    mkdir("logs", 0755);
+    for (auto& pair : g_log_components) {
+        char path[160];
+        snprintf(path, sizeof(path), "logs/%s.log", pair.second.name);
+        pair.second.file = fopen(path, "w");
+        if (pair.second.file) {
+            setvbuf(pair.second.file, NULL, _IOLBF, 4096);
+        }
+    }
+
     log_add_sink(log_sink_callback, nullptr);
 }
 
@@ -732,8 +768,14 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             if (ImGui::MenuItem("Close All")) {
                 for (auto& p : g_log_components) p.second.is_open = false;
             }
-            if (ImGui::MenuItem("Export All to logs/")) {
+            if (ImGui::MenuItem("Snapshot All to logs/")) {
                 export_all_logs();
+            }
+            if (ImGui::MenuItem("Flush All Files")) {
+                std::lock_guard<std::mutex> lock(g_log_mutex);
+                for (auto& p : g_log_components) {
+                    if (p.second.file) { fflush(p.second.file); p.second.writes_since_flush = 0; }
+                }
             }
             ImGui::Separator();
             for (auto& pair : g_log_components)
@@ -826,6 +868,16 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
 }
 
 extern "C" void debug_ui_shutdown(void) {
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        for (auto& pair : g_log_components) {
+            if (pair.second.file) {
+                fflush(pair.second.file);
+                fclose(pair.second.file);
+                pair.second.file = nullptr;
+            }
+        }
+    }
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();

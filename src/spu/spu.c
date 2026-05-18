@@ -6,7 +6,6 @@
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);
-extern void spu_adsr_process(SpuVoice* voice);
 
 /* =========================================================================
  * Helpers
@@ -50,39 +49,41 @@ void spu_process_key_on_off(Spu* spu) {
     for (int v = 0; v < NUM_VOICES; v++) {
         if (spu->key_off & (1u << v)) {
             SpuVoice* voice = &spu->voices[v];
-            if (voice->adsr_phase != ADSR_PHASE_OFF &&
-                voice->adsr_phase != ADSR_PHASE_RELEASE) {
-                voice->adsr_phase = ADSR_PHASE_RELEASE;
-                voice->adsr_counter = 0;
+            if (voice->on) {
+                voice->stop = true;
                 LOG_SPU_TRACE("[SPU] Voice %d Key Off", v);
             }
         }
     }
 
-    /* Process key on */
+    /* Process key on — pcsx-redux 1:1 init */
     for (int v = 0; v < NUM_VOICES; v++) {
         if (spu->key_on & (1u << v)) {
             SpuVoice* voice = &spu->voices[v];
             spu->endx &= ~(1u << v);
-            voice->current_address = voice->start_address & ~1;
-            voice->counter_index = 0;
-            voice->counter_sample = 0;
-            voice->adsr_volume = 0;
-            voice->adpcm_last_samples[0] = 0;
-            voice->adpcm_last_samples[1] = 0;
-            memset(voice->block_samples, 0, sizeof(voice->block_samples));
-            voice->has_samples = false;
-            voice->is_first_block = true;
-            voice->ignore_loop_address = false;
-            voice->endx_mask = false;
-            voice->adsr_phase = ADSR_PHASE_ATTACK;
-            voice->adsr_counter = 0;
-            voice->adsr_target = 32767;
+            voice->SBPos        = 28;           /* trigger decode on first sample */
+            voice->spos         = 0x30000;      /* prime gauss ring with 3 samples */
+            voice->sinc         = (int)voice->pitch << 4;
+            voice->s_1          = 0;
+            voice->s_2          = 0;
+            memset(voice->gauss_ring, 0, sizeof(voice->gauss_ring));
+            voice->gpos         = 0;
+            voice->loop_addr_set = false;
+            voice->ignore_loop  = false;
+            voice->reach_end    = false;
+            voice->curr_addr    = (uint32_t)voice->start_address * 8;
+            voice->start_addr   = voice->curr_addr;
+            voice->on           = true;
+            voice->stop         = false;
+            voice->endx_mask    = false;
+            voice->adsr_state   = ADSR_STATE_ATTACK;
+            voice->EnvelopeVol  = 0;
+            voice->EnvelopeVolF = 0;
+            voice->adsr_volume  = 0;
+            voice->sval         = 0;
             spu->total_key_on_events++;
-            voice->left_sweep_counter = 0;
-            voice->right_sweep_counter = 0;
-            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X pitch=%u volL=0x%04X volR=0x%04X adsr=%04X/%04X",
-                         v, voice->start_address, voice->pitch,
+            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X sinc=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
+                         v, voice->start_address, voice->sinc,
                          voice->volume_left, voice->volume_right,
                          voice->adsr_low, voice->adsr_high);
         }
@@ -112,10 +113,8 @@ void spu_set_control(Spu* spu, uint16_t value) {
     /* SPU disable: force all voices off */
     if (!(value & SPU_CTRL_ENABLE)) {
         for (int v = 0; v < NUM_VOICES; v++) {
-            if (spu->voices[v].adsr_phase != ADSR_PHASE_OFF) {
-                spu->voices[v].adsr_phase = ADSR_PHASE_OFF;
-                spu->voices[v].adsr_volume = 0;
-            }
+            spu->voices[v].on          = false;
+            spu->voices[v].adsr_volume = 0;
         }
     }
 
@@ -146,14 +145,11 @@ uint16_t spu_read16(struct Interconnect* inter, uint32_t addr) {
 
     uint32_t reg = (uint32_t)off;
 
-    /* Extended read-only: current voice volume (0x1E00-0x1E5F) */
+    /* Extended read-only: current envelope volume (0x1E00-0x1E5F) */
     if (reg >= 0x200 && reg < 0x260) {
         int voice = (reg - 0x200) / 4;
-        int sub = (reg - 0x200) % 4;
-        if (voice >= 0 && voice < NUM_VOICES) {
-            if (sub == 0) return (uint16_t)spu->voices[voice].left_sweep_level;
-            if (sub == 2) return (uint16_t)spu->voices[voice].right_sweep_level;
-        }
+        if (voice >= 0 && voice < NUM_VOICES)
+            return (uint16_t)spu->voices[voice].EnvelopeVol;
         return 0;
     }
 
@@ -197,6 +193,7 @@ uint16_t spu_read16(struct Interconnect* inter, uint32_t addr) {
         case SPU_REG_REVERB_BASE: return spu->reverb_base;
         case SPU_REG_IRQ_ADDR: return spu->irq_addr;
         case SPU_REG_TRANSFER_ADDR: return spu->transfer_addr_reg;
+        case 0x1AC: return 0x0004; /* SPU_DATA_TRANSFER_CONTROL */
         case SPU_REG_CONTROL: return spu->control;
         case SPU_REG_STATUS: return spu->status;
         case SPU_REG_CD_VOL_L: return (uint16_t)spu->cd_vol_left;
@@ -231,14 +228,45 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
     SpuVoice* v = &spu->voices[voice];
 
     switch (sub) {
-        case 0x00: v->volume_left = value; break;
-        case 0x02: v->volume_right = value; break;
-        case 0x04: v->pitch = value & 0x3FFF; break;
-        case 0x06: v->start_address = value; break;
-        case 0x08: v->adsr_low = value; break;
-        case 0x0A: v->adsr_high = value; break;
-        case 0x0C: v->adsr_volume = (int16_t)value; break;
-        case 0x0E: v->repeat_address = value; break;
+        case 0x00:
+            v->volume_left = value;
+            v->vol_left = (int)(value & 0x3FFF);  /* pcsx-redux: vol &= 0x3fff */
+            break;
+        case 0x02:
+            v->volume_right = value;
+            v->vol_right = (int)(value & 0x3FFF);
+            break;
+        case 0x04:
+            v->pitch = value & 0x3FFF;
+            v->sinc  = (int)(value & 0x3FFF) << 4;
+            break;
+        case 0x06:
+            v->start_address = value;
+            break;
+        case 0x08:
+            v->adsr_low      = value;
+            v->attack_mode_exp = (value >> 15) & 1;
+            v->attack_rate     = (value >> 8) & 0x7F;
+            v->decay_rate      = (value >> 4) & 0x0F;
+            v->sustain_level   = value & 0x0F;
+            break;
+        case 0x0A:
+            v->adsr_high        = value;
+            v->sustain_mode_exp = (value >> 15) & 1;
+            v->sustain_increase = ((value >> 14) & 1) ? 0 : 1;  /* bit14=0: inc, 1: dec */
+            v->sustain_rate     = (int)(value & (0x1f00u | 0xc0u)) >> 6;
+            v->release_mode_exp = (value >> 5) & 1;
+            v->release_rate     = value & 0x1F;
+            break;
+        case 0x0C:
+            v->adsr_volume = (int16_t)value;
+            break;
+        case 0x0E:
+            v->repeat_address = value;
+            v->loop_addr      = (uint32_t)value * 8;
+            v->loop_addr_set  = true;
+            v->ignore_loop    = true;  /* external write overrides ADPCM flag-4 */
+            break;
     }
 }
 
@@ -289,6 +317,7 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
             spu->transfer_addr = (uint32_t)value * 8;
             spu_check_irq(spu, inter, spu->transfer_addr);
             break;
+        case 0x1AC: /* SPU_DATA_TRANSFER_CONTROL — ignore write */ break;
         case SPU_REG_TRANSFER_DATA: {
             int mode = (spu->control >> 4) & 0x03;
             if (mode == TRANSFER_MANUAL_WRITE || mode == TRANSFER_DMA_WRITE) {

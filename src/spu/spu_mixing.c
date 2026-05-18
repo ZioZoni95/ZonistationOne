@@ -5,7 +5,6 @@
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);
-extern void spu_adsr_process(SpuVoice* voice);
 
 /* =========================================================================
  * Internal helpers
@@ -184,18 +183,18 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     /* Process key on/off at start of batch */
     spu_process_key_on_off(spu);
 
-    /* Mix all 24 voices */
+    /* Mix all 24 voices — accumulate int32, apply L/R vol, clamp once (pcsx-redux model) */
     int32_t mix_l = 0;
     int32_t mix_r = 0;
 
     for (int v = 0; v < NUM_VOICES; v++) {
-        int16_t vl, vr;
-        spu_voice_generate_sample(spu, inter, v, &vl, &vr);
-        mix_l += vl;
-        mix_r += vr;
+        int32_t sval = spu_voice_get_sample(spu, inter, v);
+        SpuVoice* voice = &spu->voices[v];
+        mix_l += (sval * voice->vol_left)  / 0x4000L;
+        mix_r += (sval * voice->vol_right) / 0x4000L;
     }
 
-    /* Clamp voice sum */
+    /* Clamp accumulated sum */
     mix_l = clamp16(mix_l);
     mix_r = clamp16(mix_r);
 
@@ -210,8 +209,8 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     /* Write capture buffer */
     capture_write(spu, 0, spu->cd_audio_left);
     capture_write(spu, 1, spu->cd_audio_right);
-    capture_write(spu, 2, (int16_t)spu->voices[1].last_volume);
-    capture_write(spu, 3, (int16_t)spu->voices[3].last_volume);
+    capture_write(spu, 2, (int16_t)spu->voices[1].sval);
+    capture_write(spu, 3, (int16_t)spu->voices[3].sval);
     capture_increment(spu);
 
     /* Noise tick */

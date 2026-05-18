@@ -32,7 +32,7 @@ void spu_update_irq_addr(Spu* spu, struct Interconnect* inter) {
     }
 
     for (int v = 0; v < NUM_VOICES; v++) {
-        uint32_t voice_addr = (uint32_t)spu->voices[v].current_address * 8;
+        uint32_t voice_addr = spu->voices[v].curr_addr;
         if (voice_addr == irq_byte_addr && !spu->irq9_flag) {
             spu->irq9_flag = true;
             spu->status |= SPU_STATUS_IRQ9_FLAG;
