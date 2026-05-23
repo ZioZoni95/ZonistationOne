@@ -190,8 +190,9 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     for (int v = 0; v < NUM_VOICES; v++) {
         int32_t sval = spu_voice_get_sample(spu, inter, v);
         SpuVoice* voice = &spu->voices[v];
-        mix_l += (sval * voice->vol_left)  / 0x4000L;
-        mix_r += (sval * voice->vol_right) / 0x4000L;
+        spu_voice_sweep_tick(voice);
+        mix_l += ((int32_t)sval * voice->vol_left)  >> 15;
+        mix_r += ((int32_t)sval * voice->vol_right) >> 15;
     }
 
     /* Clamp accumulated sum */
@@ -221,13 +222,13 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     reverb_process(spu, mix_l, mix_r, &rev_l, &rev_r);
 
     if (spu->control & SPU_CTRL_REVERB_ENABLE) {
-        mix_l = clamp16(mix_l + (rev_l >> 2));
-        mix_r = clamp16(mix_r + (rev_r >> 2));
+        mix_l = clamp16(mix_l + rev_l);
+        mix_r = clamp16(mix_r + rev_r);
     }
 
-    /* Apply main volume */
-    int32_t mv_l = (spu->muted) ? 0 : (int32_t)(int16_t)spu->main_vol_left;
-    int32_t mv_r = (spu->muted) ? 0 : (int32_t)(int16_t)spu->main_vol_right;
+    /* Apply main volume — use main_vol_left/right_cur (already << 1 scaled, 0..32766 for full vol) */
+    int32_t mv_l = spu->muted ? 0 : spu->main_vol_left_cur;
+    int32_t mv_r = spu->muted ? 0 : spu->main_vol_right_cur;
 
     int32_t final_l = clamp16((mix_l * mv_l) >> 15);
     int32_t final_r = clamp16((mix_r * mv_r) >> 15);
@@ -266,6 +267,22 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
 
     while (spu->spu_tick_counter >= CPU_TICKS_PER_SPU_TICK) {
         spu->spu_tick_counter -= CPU_TICKS_PER_SPU_TICK;
+
+        /* Feed one CDROM audio sample into SPU CD inputs.
+         * The CDROM audio FIFO holds XA/CDDA at 44100 Hz stereo.
+         * cd_vol_left/right are PSX-standard 15-bit signed scale factors. */
+        {
+            int16_t cl = 0, cr = 0;
+            if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo))
+                cdrom_audio_fifo_pop(&inter->cdrom.audio_fifo, &cl, &cr);
+            /* Apply CD input volume (cd_vol default 0x7FFF = full) */
+            int32_t cv_l = (int32_t)(int16_t)spu->cd_vol_left;
+            int32_t cv_r = (int32_t)(int16_t)spu->cd_vol_right;
+            /* If cd_vol is 0 (uninitialised), treat as full volume so CDDA is audible */
+            if (cv_l == 0 && cv_r == 0) { cv_l = 0x7FFF; cv_r = 0x7FFF; }
+            spu->cd_audio_left  = (int16_t)(((int32_t)cl * cv_l) >> 15);
+            spu->cd_audio_right = (int16_t)(((int32_t)cr * cv_r) >> 15);
+        }
 
         /* Generate one stereo sample */
         int16_t l, r;

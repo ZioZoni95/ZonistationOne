@@ -18,6 +18,7 @@ struct Cpu;
 #include "cdrom.h"
 #include "sio.h"
 #include "spu.h"
+#include "mdec.h"
 
 
 /* --- Memory Map Definitions (Physical Addresses) ---
@@ -132,6 +133,7 @@ typedef struct Interconnect {
     Cdrom cdrom;
     Sio sio;  // Serial I/O (Controller and Memory Card)
     Spu spu;  // Sound Processing Unit state (minimal)
+    Mdec mdec; // Macroblock Decoder
 
     // --- Event System State (for event_scheduler) ---
     // These fields are used by the central event/timing system to schedule and dispatch hardware events.

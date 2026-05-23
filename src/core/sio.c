@@ -100,6 +100,16 @@ typedef struct {
     bool card_slot1_present;
     bool card_slot2_present;
 
+    // Memory card transfer state machine
+    uint8_t mc_step;           // step index (0xFF = sequence done)
+    uint8_t mc_cmd;            // 0x52=Read 0x57=Write 0x53=GetID
+    uint16_t mc_sector;        // sector address (0..0x3FF)
+    uint8_t mc_byte_pos;       // position within 128-byte data block
+    uint8_t mc_write_buf[128]; // accumulate write data
+    uint8_t mc_checksum;       // running XOR over addr + data
+    uint8_t mc_flag;           // FLAG byte: 0x08 on powerup, bit3 = unread-dir
+    bool mc_write_ok;          // write checksum matched
+
     // Pending events
     bool pending_irq;
     uint32_t pending_irq_type;  // 0=none, 1=TX, 2=RX, 3=ACK
@@ -119,6 +129,7 @@ static void sio_end_transfer(void);
 static void sio_update_joystat(void);
 static void sio_trigger_irq(const char* type);
 static uint8_t sio_controller_transfer(uint8_t tx_byte);
+static uint8_t sio_memcard_transfer(uint8_t tx_byte);
 static bool sio_can_transfer(void);
 static void sio_reset_device_transfer_state(void);
 
@@ -150,6 +161,9 @@ void sio_init(Sio* sio) {
     // Initialize memory cards
     sio_internal.card_slot1_present = false;
     sio_internal.card_slot2_present = false;
+    sio_internal.mc_step  = 0;
+    sio_internal.mc_flag  = 0x08;  // "directory not read" on powerup
+    sio_internal.mc_write_ok = false;
 
     // Copy to public structure
     sio->stat = sio_internal.stat;
@@ -388,12 +402,17 @@ static void sio_do_transfer(void) {
 
     // Try to transfer to active device
     if (sio_internal.active_device == ACTIVE_DEVICE_NONE) {
-        // Autodetect connected device
-        if (sio_internal.controller_connected) {
+        if (data_out == 0x81 && sio_internal.card_slot1_present) {
+            // Memory card device select
+            sio_internal.active_device = ACTIVE_DEVICE_MEMCARD;
+            sio_internal.mc_step = 0;
+            data_in = 0xFF;  // N/A per PSX-SPX spec
+            ack = true;
+            SIO_DBG("[SIO] Memory card detected (0x81)");
+        } else if (sio_internal.controller_connected) {
             const uint8_t prev_step = sio_internal.controller_transfer_step;
             data_in = sio_controller_transfer(data_out);
-            // ACK is based on protocol progress, not data value.
-            // Button bytes can legitimately be 0xFF when no buttons are pressed.
+            // Button bytes can legitimately be 0xFF — ACK on step advance only
             ack = (sio_internal.controller_transfer_step != prev_step);
             if (ack) {
                 sio_internal.active_device = ACTIVE_DEVICE_CONTROLLER;
@@ -405,8 +424,10 @@ static void sio_do_transfer(void) {
     } else if (sio_internal.active_device == ACTIVE_DEVICE_CONTROLLER) {
         const uint8_t prev_step = sio_internal.controller_transfer_step;
         data_in = sio_controller_transfer(data_out);
-        // Continue ACKing while controller exchange advances through steps 0..3.
         ack = (sio_internal.controller_transfer_step != prev_step);
+    } else if (sio_internal.active_device == ACTIVE_DEVICE_MEMCARD) {
+        data_in = sio_memcard_transfer(data_out);
+        ack = (sio_internal.mc_step != 0xFF);
     }
 
     // Store response
@@ -561,19 +582,161 @@ static uint8_t sio_controller_transfer(uint8_t tx_byte) {
 }
 
 // ============================================================================
-// MEMORY CARD STUBS (Not implemented yet)
+// MEMORY CARD SPI TRANSFER PROTOCOL
+// Implements PSX-SPX "Memory Card Read/Write Commands" byte-by-byte state machine
+// ============================================================================
+
+static uint8_t sio_memcard_transfer(uint8_t tx) {
+    SioInternal* s = &sio_internal;
+    MemoryCard* card = &s->card_slot1;
+    uint8_t resp = 0xFF;
+
+    switch (s->mc_step) {
+        case 0:  // Command byte: 0x52=Read, 0x57=Write, 0x53=GetID
+            s->mc_cmd = tx;
+            s->mc_checksum = 0;
+            s->mc_byte_pos = 0;
+            resp = s->mc_flag;
+            s->mc_step++;
+            break;
+
+        case 1: resp = 0x5A; s->mc_step++; break;  // ID1
+        case 2: resp = 0x5D; s->mc_step++; break;  // ID2
+
+        case 3:  // Addr MSB
+            s->mc_sector = (uint16_t)(tx << 8);
+            s->mc_checksum = tx;
+            resp = 0x00;
+            s->mc_step++;
+            break;
+
+        case 4:  // Addr LSB
+            s->mc_sector |= tx;
+            s->mc_checksum ^= tx;
+            resp = 0x00;
+            s->mc_step++;
+            break;
+
+        default: {
+            if (s->mc_cmd == 0x52) {
+                // READ: steps 5..139
+                int pos = (int)s->mc_step - 5;
+                if (pos == 0) { resp = 0x5C; s->mc_step++; }          // CMD ack1
+                else if (pos == 1) { resp = 0x5D; s->mc_step++; }     // CMD ack2
+                else if (pos == 2) {                                    // confirmed MSB
+                    resp = (s->mc_sector >> 8) & 0xFF;
+                    s->mc_checksum = resp;
+                    s->mc_step++;
+                } else if (pos == 3) {                                  // confirmed LSB
+                    resp = s->mc_sector & 0xFF;
+                    s->mc_checksum ^= resp;
+                    s->mc_step++;
+                } else if (pos >= 4 && pos < 132) {                    // 128 data bytes
+                    uint32_t off = (uint32_t)s->mc_sector * MEMCARD_SECTOR_SIZE + (pos - 4);
+                    resp = (off < MEMCARD_SIZE) ? card->data[off] : 0xFF;
+                    s->mc_checksum ^= resp;
+                    s->mc_step++;
+                } else if (pos == 132) {                                // checksum
+                    resp = s->mc_checksum;
+                    s->mc_step++;
+                } else if (pos == 133) {                                // end byte 'G'
+                    resp = 0x47;
+                    s->mc_step = 0xFF;
+                }
+            } else if (s->mc_cmd == 0x57) {
+                // WRITE: steps 5..136
+                int pos = (int)s->mc_step - 5;
+                if (pos >= 0 && pos < 128) {                            // 128 data bytes
+                    s->mc_write_buf[pos] = tx;
+                    s->mc_checksum ^= tx;
+                    s->mc_step++;
+                    resp = 0x00;
+                } else if (pos == 128) {                                // host checksum
+                    s->mc_write_ok = (tx == s->mc_checksum) &&
+                                     (s->mc_sector < MEMCARD_SECTORS);
+                    if (s->mc_write_ok) {
+                        uint32_t off = (uint32_t)s->mc_sector * MEMCARD_SECTOR_SIZE;
+                        memcpy(card->data + off, s->mc_write_buf, MEMCARD_SECTOR_SIZE);
+                        card->dirty = true;
+                        s->mc_flag &= ~0x08;  // clear "unread dir" flag on write
+                    }
+                    resp = 0x00;
+                    s->mc_step++;
+                } else if (pos == 129) { resp = 0x5C; s->mc_step++; } // ack1
+                else if (pos == 130) { resp = 0x5D; s->mc_step++; }   // ack2
+                else if (pos == 131) {                                  // end byte
+                    resp = s->mc_write_ok ? 0x47 : 0x4E;
+                    s->mc_step = 0xFF;
+                    if (card->dirty) sio_save_memcard(card);
+                }
+            } else if (s->mc_cmd == 0x53) {
+                // GET ID
+                static const uint8_t id_resp[] = {0x5C, 0x5D, 0x04, 0x00, 0x00, 0x80};
+                int pos = (int)s->mc_step - 5;
+                if (pos >= 0 && pos < 6) {
+                    resp = id_resp[pos];
+                    s->mc_step = (pos == 5) ? 0xFF : s->mc_step + 1;
+                }
+            }
+            break;
+        }
+    }
+
+    SIO_DBG("[MC] step=%d cmd=0x%02x tx=0x%02x resp=0x%02x sector=%u",
+            s->mc_step, s->mc_cmd, tx, resp, s->mc_sector);
+    return resp;
+}
+
+// ============================================================================
+// MEMORY CARD FILE I/O
 // ============================================================================
 
 bool sio_load_memcard(MemoryCard* card, const char* filepath) {
-    LOG_SYSTEM_WARN("[SYSTEM] Memory card loading not implemented");
-    return false;
+    strncpy(card->filepath, filepath, sizeof(card->filepath) - 1);
+    FILE* f = fopen(filepath, "rb");
+    if (!f) {
+        LOG_SYSTEM_INFO("[SIO] Memory card not found, creating: %s", filepath);
+        sio_create_memcard(card, filepath);
+        return true;
+    }
+    size_t n = fread(card->data, 1, MEMCARD_SIZE, f);
+    fclose(f);
+    if (n != MEMCARD_SIZE)
+        memset(card->data + n, 0xFF, MEMCARD_SIZE - n);
+    card->present = true;
+    card->dirty = false;
+    sio_internal.card_slot1_present = true;
+    LOG_SYSTEM_INFO("[SIO] Memory card loaded: %s (%zu bytes)", filepath, n);
+    return true;
 }
 
 bool sio_save_memcard(MemoryCard* card) {
-    LOG_SYSTEM_WARN("[SYSTEM] Memory card saving not implemented");
-    return false;
+    if (!card->present || !card->dirty) return true;
+    FILE* f = fopen(card->filepath, "wb");
+    if (!f) {
+        LOG_SYSTEM_ERROR("[SIO] Memory card save failed: %s", card->filepath);
+        return false;
+    }
+    fwrite(card->data, 1, MEMCARD_SIZE, f);
+    fclose(f);
+    card->dirty = false;
+    LOG_SYSTEM_INFO("[SIO] Memory card saved: %s", card->filepath);
+    return true;
 }
 
 void sio_create_memcard(MemoryCard* card, const char* filepath) {
-    LOG_SYSTEM_WARN("[SYSTEM] Memory card creation not implemented");
+    strncpy(card->filepath, filepath, sizeof(card->filepath) - 1);
+    memset(card->data, 0xFF, MEMCARD_SIZE);
+    // Sony MC header frame: "MC" + 0x00 padding + XOR checksum at byte 127
+    card->data[0] = 'M';
+    card->data[1] = 'C';
+    memset(card->data + 2, 0x00, 125);
+    uint8_t xor = 0;
+    for (int i = 0; i < 127; i++) xor ^= card->data[i];
+    card->data[127] = xor;
+    card->present = true;
+    card->dirty = true;
+    sio_internal.card_slot1_present = true;
+    sio_save_memcard(card);
+    LOG_SYSTEM_INFO("[SIO] Memory card created: %s", filepath);
 }

@@ -29,12 +29,11 @@ typedef struct {
     bool enable;                 // Bit 24: Channel Enable
     DmaDirection direction;      // Bit 0: Transfer Direction
     DmaStep step;                // Bit 1: Address Step (Inc/Dec)
-    // Bit 8: Chopping Enable (Not implemented yet)
+    bool chopping;               // Bit 8: Chopping Enable
     DmaSync sync;                // Bits 9-10: Sync Mode (Manual, Request, Linked List)
     bool trigger;                // Bit 28: Manual Trigger (for Manual Sync)
-    // uint8_t chopping_dma_sz; // Bits 16-18 (Not implemented)
-    // uint8_t chopping_cpu_sz; // Bits 20-22 (Not implemented)
-    // uint8_t chcr_unknown_rw; // Bits 29-30 (Not implemented/stored yet)
+    uint8_t chopping_dma_sz;    // Bits 16-18: DMA window size exponent (1 << n words)
+    uint8_t chopping_cpu_sz;    // Bits 20-22: CPU window size exponent (1 << n cycles)
 
     // MADR - Base Address Register (Offset 0xX0)
     uint32_t base_addr;          // Effective address (lower 24 bits)

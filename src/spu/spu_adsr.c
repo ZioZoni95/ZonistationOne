@@ -57,10 +57,10 @@ static int adsr_attack(SpuVoice* voice) {
     voice->EnvelopeVol  = EnvelopeVol;
     voice->EnvelopeVolF = EnvelopeVolF;
     voice->adsr_volume  = (int16_t)EnvelopeVol;
-    return EnvelopeVol >> 5;
+    return EnvelopeVol;
 }
 
-/* --- Decay (exponential; pcsx-redux uses release_mode_exp flag for the exp check) --- */
+/* --- Decay (always exponential per PSX hardware) --- */
 static int adsr_decay(SpuVoice* voice) {
     const int rate       = clamp_rate(voice->decay_rate * 4);
     int32_t EnvelopeVol  = voice->EnvelopeVol;
@@ -69,10 +69,7 @@ static int adsr_decay(SpuVoice* voice) {
     EnvelopeVolF++;
     if (EnvelopeVolF >= adsr_denominator[rate]) {
         EnvelopeVolF = 0;
-        if (voice->release_mode_exp)
-            EnvelopeVol += (adsr_numerator_dec[rate] * EnvelopeVol) >> 15;
-        else
-            EnvelopeVol += adsr_numerator_dec[rate];
+        EnvelopeVol += (adsr_numerator_dec[rate] * EnvelopeVol) >> 15;
     }
 
     if (EnvelopeVol < 0) EnvelopeVol = 0;
@@ -83,7 +80,7 @@ static int adsr_decay(SpuVoice* voice) {
     voice->EnvelopeVol  = EnvelopeVol;
     voice->EnvelopeVolF = EnvelopeVolF;
     voice->adsr_volume  = (int16_t)EnvelopeVol;
-    return EnvelopeVol >> 5;
+    return EnvelopeVol;
 }
 
 /* --- Sustain --- */
@@ -119,7 +116,7 @@ static int adsr_sustain(SpuVoice* voice) {
     voice->EnvelopeVol  = EnvelopeVol;
     voice->EnvelopeVolF = EnvelopeVolF;
     voice->adsr_volume  = (int16_t)EnvelopeVol;
-    return EnvelopeVol >> 5;
+    return EnvelopeVol;
 }
 
 /* --- Release --- */
@@ -146,12 +143,12 @@ static int adsr_release(SpuVoice* voice) {
     voice->EnvelopeVol  = EnvelopeVol;
     voice->EnvelopeVolF = EnvelopeVolF;
     voice->adsr_volume  = (int16_t)EnvelopeVol;
-    return EnvelopeVol >> 5;
+    return EnvelopeVol;
 }
 
 /* =========================================================================
  * Public: spu_adsr_mix — called once per sample from spu_voice_get_sample
- * Returns mixing volume 0-1023 (= EnvelopeVol >> 5)
+ * Returns mixing volume 0-32767 (15-bit, DuckStation-compatible precision)
  * ========================================================================= */
 int spu_adsr_mix(SpuVoice* voice) {
     adsr_init_tables();

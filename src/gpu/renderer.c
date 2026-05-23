@@ -90,6 +90,7 @@ const char* fragment_shader_source =
     "uniform int use_texture;\n"
     "uniform ivec4 u_texWindow; // (and_x, and_y, or_x, or_y) pre-computed masks\n"
     "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
+    "uniform int u_dither_enable; // 1 = apply PSX 4x4 dither before 15-bit quantization\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
@@ -166,6 +167,24 @@ const char* fragment_shader_source =
     "        } else {\n"
     "            final_color = vec4(tex_rgb * color * 2.0, 1.0);\n"
     "        }\n"
+    "    }\n"
+    // PSX 4x4 dithering matrix (applied before 24-to-15bit quantization).
+    // Per PSX-SPX: offsets added to 8-bit channel, result clamped [0,255], then >>3 to 5-bit.
+    // Applied to: gouraud-shaded polygons, textured-blend polygons, all lines.
+    // NOT applied to: mono polygons, raw-texture polygons, rectangles.
+    "    if (u_dither_enable == 1) {\n"
+    "        const int dither_table[16] = int[16](\n"
+    "            -4,  0, -3,  1,\n"
+    "             2, -2,  3, -1,\n"
+    "            -3,  1, -4,  0,\n"
+    "             3, -1,  2, -2\n"
+    "        );\n"
+    "        int dx = int(mod(gl_FragCoord.x, 4.0));\n"
+    "        int dy = int(mod(gl_FragCoord.y, 4.0));\n"
+    "        float doff = float(dither_table[dy * 4 + dx]) / 255.0;\n"
+    "        // Clamp after adding dither offset, then quantize to 5-bit and normalize back\n"
+    "        vec3 c_d = clamp(final_color.rgb + vec3(doff), 0.0, 1.0);\n"
+    "        final_color.rgb = floor(c_d * 255.0 / 8.0) / 31.0;\n"
     "    }\n"
     "    frag_color = final_color;\n"
     "}\n";
@@ -459,16 +478,19 @@ bool renderer_init(Renderer* renderer) {
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
     renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
     renderer->uniform_tex_window_loc = glGetUniformLocation(renderer->shader_program, "u_texWindow");
+    renderer->uniform_dither_loc = glGetUniformLocation(renderer->shader_program, "u_dither_enable");
 
     LOG_RENDERER_DEBUG("[RENDERER] Found uniform 'use_texture' at location: %d", renderer->uniform_use_texture_loc);
     LOG_RENDERER_DEBUG("[RENDERER] Found uniform 'raw_texture' at location: %d", renderer->uniform_raw_texture_loc);
     LOG_RENDERER_DEBUG("[RENDERER] Found uniform 'vram_texture' at location: %d", renderer->uniform_vram_texture_loc);
     LOG_RENDERER_DEBUG("[RENDERER] Found uniform 'u_texWindow' at location: %d", renderer->uniform_tex_window_loc);
+    LOG_RENDERER_DEBUG("[RENDERER] Found uniform 'u_dither_enable' at location: %d", renderer->uniform_dither_loc);
 
     // Default texture window: no masking (and_x=0xFF, and_y=0xFF, or_x=0, or_y=0)
     glUseProgram(renderer->shader_program);
     if (renderer->uniform_tex_window_loc >= 0) glUniform4i(renderer->uniform_tex_window_loc, 0xFF, 0xFF, 0, 0);
     if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
+    if (renderer->uniform_dither_loc >= 0) glUniform1i(renderer->uniform_dither_loc, 0);
     glUseProgram(0);
 
     // --- Unbind ---
@@ -713,6 +735,9 @@ void renderer_draw(Renderer* renderer) {
         glUniform1i(renderer->uniform_raw_texture_loc, renderer->raw_texture_enabled ? 1 : 0);
     }
     glUniform1i(renderer->uniform_vram_texture_loc, 0); // Texture unit 0
+    if (renderer->uniform_dither_loc >= 0) {
+        glUniform1i(renderer->uniform_dither_loc, renderer->dither_enabled ? 1 : 0);
+    }
 
     if (renderer->texture_enabled) {
         glActiveTexture(GL_TEXTURE0);
@@ -876,6 +901,18 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
 }
 
 // ---------------------------------------------------------------------------
+// renderer_set_dither_mode — enable/disable PSX 4x4 dithering in fragment shader
+// ---------------------------------------------------------------------------
+void renderer_set_dither_mode(Renderer* renderer, bool enabled)
+{
+    if (!renderer->initialized) return;
+    if (renderer->dither_enabled == enabled) return;
+
+    renderer_draw(renderer); // flush before changing dither state
+    renderer->dither_enabled = enabled;
+    // Uniform is set per-draw in renderer_draw(); no immediate GL call needed.
+}
+
 // renderer_set_semi_trans_mode — enable/disable GL blending for semi-trans
 // ---------------------------------------------------------------------------
 void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode)

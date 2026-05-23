@@ -148,9 +148,11 @@ typedef struct SpuVoice {
     int16_t  adsr_volume;           /* reg 0x0C read-back (= EnvelopeVol, 0-32767) */
     uint16_t repeat_address;        /* reg 0x0E (×8 = byte addr) */
 
-    /* Computed L/R volume (0-0x3FFF) */
+    /* Current L/R volume (signed 16-bit range, updated by sweep each sample) */
     int vol_left;
     int vol_right;
+    int vol_left_count;   // sweep counter for left channel
+    int vol_right_count;  // sweep counter for right channel
 
     /* Pitch stepping (pcsx-redux spos/sinc model) */
     int sinc;                       /* = pitch << 4 */
@@ -314,6 +316,7 @@ void     spu_set_control(Spu* spu, uint16_t value);
 
 /* Voice sample generation — returns ADSR-mixed sample (pre-L/R volume) */
 int32_t  spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx);
+void     spu_voice_sweep_tick(SpuVoice* voice);
 
 /* ADSR mix — called from spu_voice.c; returns 0-1023 */
 int      spu_adsr_mix(SpuVoice* voice);

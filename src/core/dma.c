@@ -11,10 +11,10 @@ uint32_t channel_get_control(DmaChannel* ch) {
     uint32_t r = 0;
     r |= (uint32_t)ch->direction;      // Bit 0
     r |= ((uint32_t)ch->step << 1);    // Bit 1
-    // r |= ((uint32_t)ch->chopping << 8); // Bit 8 - Not implemented yet
-    r |= ((uint32_t)ch->sync << 9);    // Bits 9-10
-    // r |= ((uint32_t)ch->chopping_dma_sz << 16); // Bits 16-18 - Not implemented
-    // r |= ((uint32_t)ch->chopping_cpu_sz << 20); // Bits 20-22 - Not implemented
+    r |= ((uint32_t)ch->chopping << 8);          // Bit 8
+    r |= ((uint32_t)ch->sync << 9);              // Bits 9-10
+    r |= ((uint32_t)ch->chopping_dma_sz << 16);  // Bits 16-18
+    r |= ((uint32_t)ch->chopping_cpu_sz << 20);  // Bits 20-22
     r |= ((uint32_t)ch->enable << 24); // Bit 24
     r |= ((uint32_t)ch->trigger << 28);// Bit 28
     // r |= ((uint32_t)ch->chcr_unknown_rw << 29); // Bits 29-30 - Not implemented
@@ -26,7 +26,7 @@ uint32_t channel_get_control(DmaChannel* ch) {
 void channel_set_control(DmaChannel* ch, uint32_t value) {
     ch->direction = (value & 1) ? FROM_RAM : TO_RAM;
     ch->step = ((value >> 1) & 1) ? DECREMENT : INCREMENT;
-    // ch->chopping = (value >> 8) & 1; // Not implemented
+    ch->chopping = (value >> 8) & 1;
     switch ((value >> 9) & 3) {
         case 0: ch->sync = MANUAL; break;
         case 1: ch->sync = REQUEST; break;
@@ -35,8 +35,8 @@ void channel_set_control(DmaChannel* ch, uint32_t value) {
             LOG_DMA_WARN("[DMA] Invalid DMA Sync mode %d written to CHCR", (value >> 9) & 3);
             break;
     }
-    // ch->chopping_dma_sz = (value >> 16) & 7; // Not implemented
-    // ch->chopping_cpu_sz = (value >> 20) & 7; // Not implemented
+    ch->chopping_dma_sz = (value >> 16) & 7;
+    ch->chopping_cpu_sz = (value >> 20) & 7;
     ch->enable = (value >> 24) & 1;
     ch->trigger = (value >> 28) & 1;
     // ch->chcr_unknown_rw = (value >> 29) & 3; // Not implemented

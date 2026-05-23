@@ -246,9 +246,9 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
         fa = voice_interpolate(voice);
     }
 
-    /* ADSR envelope mix — returns 0-1023 */
-    int adsr_vol = spu_adsr_mix(voice);
-    int32_t mixed = (adsr_vol * fa) / 1023;
+    /* ADSR envelope mix — returns 0-32767 (15-bit, matches DuckStation precision) */
+    int32_t adsr_vol = spu_adsr_mix(voice);
+    int32_t mixed = ((int32_t)fa * adsr_vol) >> 15;
 
     /* Clamp (pcsx-redux clamps to ±0xFFFF for capture/fmod) */
     if (mixed >  0xFFFF) mixed =  0xFFFF;
@@ -266,4 +266,54 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
     }
 
     return mixed;
+}
+
+/* =========================================================================
+ * Volume sweep tick — called once per sample per voice from spu_mixing.c
+ * Implements PSX-SPX "Sweep Volume Control" algorithm.
+ * Only runs when bit15 of the volume register is set (sweep mode).
+ * ========================================================================= */
+void spu_voice_sweep_tick(SpuVoice* voice) {
+    /* Left channel — sweep mode (bit15=1).
+     * PSX-SPX: bit7=Direction(0=inc,1=dec), bit14=Exp(0=lin,1=exp),
+     * bits6-2=Shift(0-31), bits1-0=Step(0-3). */
+    if (voice->volume_left & 0x8000) {
+        uint16_t reg = voice->volume_left;
+        int shift     = (reg >> 2) & 0x1F;
+        int step_idx  = reg & 0x03;
+        int decrease  = (reg >> 7) & 1;   /* bit7=direction (was wrongly bit13) */
+        int exp_mode  = (reg >> 14) & 1;
+        int threshold = (shift >= 11) ? (1 << (shift - 11)) : 1;
+        if (++voice->vol_left_count >= threshold) {
+            voice->vol_left_count = 0;
+            int step = decrease ? (-8 + step_idx) : (7 - step_idx);
+            if (shift < 11) step <<= (11 - shift);
+            int32_t v;
+            if (exp_mode && (decrease || voice->vol_left >= 0x6000))
+                v = voice->vol_left + ((step * voice->vol_left) >> 15);
+            else
+                v = voice->vol_left + step;
+            voice->vol_left = (v > 0x7FFF) ? 0x7FFF : (v < -0x8000) ? -0x8000 : (int)v;
+        }
+    }
+    /* Right channel */
+    if (voice->volume_right & 0x8000) {
+        uint16_t reg = voice->volume_right;
+        int shift     = (reg >> 2) & 0x1F;
+        int step_idx  = reg & 0x03;
+        int decrease  = (reg >> 7) & 1;   /* bit7=direction */
+        int exp_mode  = (reg >> 14) & 1;
+        int threshold = (shift >= 11) ? (1 << (shift - 11)) : 1;
+        if (++voice->vol_right_count >= threshold) {
+            voice->vol_right_count = 0;
+            int step = decrease ? (-8 + step_idx) : (7 - step_idx);
+            if (shift < 11) step <<= (11 - shift);
+            int32_t v;
+            if (exp_mode && (decrease || voice->vol_right >= 0x6000))
+                v = voice->vol_right + ((step * voice->vol_right) >> 15);
+            else
+                v = voice->vol_right + step;
+            voice->vol_right = (v > 0x7FFF) ? 0x7FFF : (v < -0x8000) ? -0x8000 : (int)v;
+        }
+    }
 }

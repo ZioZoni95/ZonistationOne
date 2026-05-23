@@ -279,7 +279,7 @@ bool cdrom_audio_sdl_open(AudioFifo *fifo) {
     want.freq     = 44100;
     want.format   = AUDIO_S16LSB;
     want.channels = 2;
-    want.samples  = 1024;
+    want.samples  = 4096;
     want.callback = sdl_audio_callback;
 
     s_sdl_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);

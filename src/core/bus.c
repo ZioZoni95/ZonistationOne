@@ -6,7 +6,8 @@
 #include "dma.h"
 #include "gpu.h"
 #include "ram.h"
-#include "cpu.h"  // For cpu_exception() and ExceptionCause
+#include "cpu.h"
+#include "mdec.h"
 
 // Instrumentation: BIOS patch-check monitoring range
 #define BIOS_PATCH_START 0x80059DC0U
@@ -281,9 +282,7 @@ return 0xFFFFFFFF; // Open bus for unimplemented VRAM
             if (physical_addr == GPU_GPUSTAT_ADDR) return gpu_read_status(&inter->gpu);
         }
         if (physical_addr >= 0x1f801820 && physical_addr <= 0x1f801827) {
-            // MDEC (Macroblock Decoder) - Not yet implemented
-            LOG_INTERCONNECT_WARN("[INTERCONNECT] MDEC read at 0x%08x (stub)", physical_addr);
-            return 0;
+            return mdec_read(&inter->mdec, physical_addr);
         }
         if (physical_addr >= 0x1f801c00 && physical_addr <= 0x1f801e7f) {
             // SPU
@@ -695,9 +694,9 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     // --- Region Checks (Broader Ranges) ---
 
-    // MDEC Region (0x1f801820 - 0x1f801827) - Not yet implemented
+    // MDEC Region (0x1f801820 - 0x1f801827)
     if (physical_addr >= 0x1f801820 && physical_addr <= 0x1f801827) {
-        LOG_INTERCONNECT_WARN("[INTERCONNECT] MDEC write at 0x%08x = 0x%08x (stub)", physical_addr, value);
+        mdec_write(&inter->mdec, physical_addr, value);
         return;
     }
 
@@ -707,8 +706,26 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         bool channel_became_active = dma_write(&inter->dma, offset, value);
         if (channel_became_active) {
             uint32_t channel_index = (offset >> 4) & 0x7;
-            LOG_DMA_DEBUG("[DMA] Channel %d activated (offset=0x%x)", channel_index, offset);
-            interconnect_perform_dma(inter, channel_index);
+            // DMA-2 FIX: Check DPCR master enable before starting transfer.
+            // Per PSX-SPX DPCR docs: bit(ch*4+3) must be 1 for DMA to operate on that channel.
+            bool dpcr_enabled = (inter->dma.control >> (channel_index * 4 + 3)) & 1u;
+            if (dpcr_enabled) {
+                LOG_DMA_DEBUG("[DMA] ch%u activated (DPCR enabled, offset=0x%x)", channel_index, offset);
+                interconnect_perform_dma(inter, channel_index);
+            } else {
+                LOG_DMA_DEBUG("[DMA] ch%u blocked by DPCR (bit%u=0)", channel_index, channel_index*4+3);
+            }
+        } else if (offset == 0x70) {
+            // DMA-4 FIX: DPCR write — scan all channels that may now be unblocked.
+            // Any channel that is active (CHCR.enable=1, trigger/request) AND DPCR.enable=1
+            // should start transferring immediately.
+            for (uint32_t i = 0; i < 7; i++) {
+                bool dpcr_en = (inter->dma.control >> (i * 4 + 3)) & 1u;
+                if (dpcr_en && dma_channel_is_active(&inter->dma.channels[i])) {
+                    LOG_DMA_DEBUG("[DMA] DPCR write: ch%u unblocked, starting transfer", i);
+                    interconnect_perform_dma(inter, i);
+                }
+            }
         }
         return;
     }
@@ -1209,11 +1226,9 @@ static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
     }
 
     // In Request mode (Sync=1), size is BlockCount * BlockSize
-    uint32_t bc = (uint32_t)ch->block_count;
-    if (bs == 0 || bc == 0) {
-        LOG_DMA_WARN("[DMA] Request sync zero size (BS=%u BC=%u)", bs, bc);
-        return 0; // Invalid size for Request mode
-    }
+    // DMA-3 FIX: Per PSX-SPX docs, BS=0 and BA=0 each mean 0x10000 (not zero)
+    uint32_t bc = (ch->block_count == 0) ? 0x10000u : (uint32_t)ch->block_count;
+    bs = (bs == 0) ? 0x10000u : bs; // bs already extracted above, re-apply zero rule
     return bs * bc;
 }
 
@@ -1252,53 +1267,57 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // Read header: size in high byte, next address in low 24 bits
                     uint32_t header = interconnect_load32(inter, addr); // Use interconnect load
                     uint32_t num_words = header >> 24;
-                    uint32_t next_addr = header & 0x00FFFFFC; // Mask to word boundary
+                    // DMA-1 FIX: extract raw 24-bit address BEFORE masking for correct terminator check
+                    // Per PSX-SPX: bit23 set = end-of-list (any CPU revision); 0xFFFFFF = canonical marker
+                    uint32_t raw_next = header & 0x00FFFFFF;
+                    uint32_t next_addr = raw_next & 0x00FFFFFC; // word-align for traversal
 
                     // Transfer packet words (if any)
+                    bool force_stop = false;
                     if (num_words > 0) {
                          for (uint32_t i = 0; i < num_words; ++i) {
                             addr = (addr + 4) & 0x00FFFFFC; // Advance address for command word
                             if (addr >= RAM_SIZE) { // Check bounds before reading command
                                 LOG_DMA_ERROR("[DMA] GPU LL: command addr 0x%08x out of bounds", addr);
-                                next_addr = 0xFFFFFF; // Force stop after this packet
+                                force_stop = true;
                                 break; // Exit inner loop
                             }
                             uint32_t command_word = interconnect_load32(inter, addr);
                             LOG_DMA_TRACE("[DMA] GPU LL word=0x%08x addr=0x%08x", command_word, addr);
 
-                            // Respect GPU STAT[26] (GP0 ready) to avoid overflowing the GP0 FIFO
+                            /* Wait for GPU bit28 (DMA-ready) — stays set in all GP0 modes (COMMAND,
+                             * IMAGE_LOAD, POLYLINE) as long as FIFO isn't full. Bit26 is 0 during
+                             * IMAGE_LOAD, so using bit28 avoids 10K-spin timeouts. */
                             {
                                 int wait_cycles = 0;
-                                while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
-                                    // Let pending events (timers/VBlank) run so the GPU can drain
+                                while ((gpu_read_status(&inter->gpu) & (1u << 28)) == 0) {
                                     eventq_dispatch_due(inter);
                                     if (++wait_cycles > 10000) {
-                                        LOG_DMA_WARN("[DMA] GPU LL: GP0 ready timeout, proceeding");
+                                        LOG_DMA_WARN("[DMA] GPU LL: DMA-ready timeout, proceeding");
                                         break;
                                     }
                                 }
                             }
                             gpu_gp0(&inter->gpu, command_word); // Send command to GPU GP0 port
                         }
-                        if (next_addr == 0xFFFFFF) break; // Break outer loop if error occurred
+                        if (force_stop) break; // Out-of-bounds during packet — stop list
                     }
 
-                    // Check for end-of-list marker (Top bit of next_addr usually, or 0xFFFFFF) [cite: 1808]
-                    if ((header & 0x800000) != 0) { // Check MSB of address field as per Mednafen comment
-                        LOG_DMA_TRACE("[DMA] GPU LL end (0x800000)");
+                    // DMA-1 FIX: Correct terminator check using raw 24-bit address (before word-align mask).
+                    // Old code: next_addr = header & 0x00FFFFFC, then checked == 0xFFFFFF → NEVER fired
+                    //           because 0xFFFFFF & 0xFFFFFC = 0xFFFFFC ≠ 0xFFFFFF.
+                    // Per PSX-SPX docs: bit23 of next-address field = end-of-list marker (all CPU revisions).
+                    // 0xFFFFFF (the canonical marker) has bit23 set so is covered by this check.
+                    if (raw_next & 0x800000u) {
+                        LOG_DMA_TRACE("[DMA] GPU LL end (bit23=1, raw_next=0x%06x)", raw_next);
                         break;
-                    }
-                    // Check for explicit 0xFFFFFF marker (safer)
-                    if (next_addr == 0xFFFFFF) {
-                        LOG_DMA_TRACE("[DMA] GPU LL end (0xFFFFFF)");
-                         break;
                     }
 
                     // Check next address validity before proceeding
-                     if (next_addr >= RAM_SIZE) {
-                         LOG_DMA_ERROR("[DMA] GPU LL: next header 0x%08x out of bounds", next_addr);
-                         break;
-                     }
+                    if (next_addr >= RAM_SIZE) {
+                        LOG_DMA_ERROR("[DMA] GPU LL: next header 0x%08x out of bounds", next_addr);
+                        break;
+                    }
                     // Move to the next header address
                     addr = next_addr;
                 }
@@ -1325,7 +1344,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
                 for (uint32_t i = 0; i < words_to_transfer; ++i) {
                     // Ensure address stays within RAM bounds (mask low bits, check high bits)
-                    uint32_t current_addr_masked = addr & 0x001FFFFC; // Mask address to stay within 2MB and word aligned
+                    uint32_t current_addr_masked = addr & 0x00FFFFFC; // word-aligned, 16MB window
                     if (current_addr_masked >= RAM_SIZE) {
                          LOG_DMA_ERROR("[DMA] ch%d addr 0x%08x (masked 0x%08x) out of RAM bounds", channel_index, addr, current_addr_masked);
                          break; // Stop transfer if address goes out of bounds
@@ -1335,14 +1354,19 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     // RAM -> Peripheral
                     uint32_t data_word = interconnect_load32(inter, current_addr_masked); // Read from RAM
 
-                    switch (channel_index) {                            case 2: // GPU
-                                // Respect GP0 FIFO / GPUSTAT ready bit before sending data words
+                    switch (channel_index) {
+                            case 0: /* MDECin: RAM → MDEC */
+                                mdec_dma_in(&inter->mdec, data_word);
+                                break;
+                            case 2: // GPU
+                                /* Use bit28 (DMA-ready) not bit26 (cmd-ready) — bit26=0 during
+                                 * IMAGE_LOAD, but bit28 stays set whenever FIFO < 16. */
                                 {
                                     int wait_cycles = 0;
-                                    while ((gpu_read_status(&inter->gpu) & (1u << 26)) == 0) {
+                                    while ((gpu_read_status(&inter->gpu) & (1u << 28)) == 0) {
                                         eventq_dispatch_due(inter);
                                         if (++wait_cycles > 10000) {
-                                            LOG_DMA_WARN("[DMA] GPU GP0 ready timeout in block transfer, proceeding");
+                                            LOG_DMA_WARN("[DMA] GPU DMA-ready timeout in block transfer, proceeding");
                                             break;
                                         }
                                     }
@@ -1355,13 +1379,16 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break;
                             }
                             default:
-                                LOG_DMA_WARN("[DMA] Unhandled FROM_RAM ch%d addr=0x%08x data=0x%08x",
-                                       channel_index, current_addr_masked, data_word);
+                                LOG_DMA_DEBUG("[DMA] FROM_RAM ch%d unhandled (dev-kit/PIO), addr=0x%08x",
+                                       channel_index, current_addr_masked);
                                 break;
                         }
                     } else { // TO_RAM
                         uint32_t data_word = 0;
                         switch (channel_index) {
+                            case 1: /* MDECout: MDEC → RAM */
+                                data_word = mdec_dma_out(&inter->mdec);
+                                break;
                             case 6: /* OTC */
                                 data_word = (i == (words_to_transfer - 1))
                                             ? 0x00FFFFFF
@@ -1380,7 +1407,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                                 break;
                             }
                             default:
-                                LOG_DMA_WARN("[DMA] Unhandled TO_RAM ch%d addr=0x%08x",
+                                LOG_DMA_DEBUG("[DMA] TO_RAM ch%d unhandled (dev-kit/PIO), addr=0x%08x",
                                        channel_index, current_addr_masked);
                                 break;
                         }
@@ -1402,6 +1429,30 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     // Mark the channel as finished (clears enable/trigger bits)
     dma_channel_done(ch);
     LOG_DMA_DEBUG("[DMA] ch%d done", channel_index);
+
+    // DMA-6: Account for transfer time as CPU stall (DMA-bus contention).
+    // Per PSX-SPX DMA Transfer Rates: GPU/OTC/MDECin/MDECout = 1 clk/word,
+    // SPU = 4 clks/word, CDROM = 40 clks/word (game speed), PIO = 20 clks/word.
+    // RAM hyper-page adds ~17 clks per 16 words (~1 clk/word) overhead.
+    // We subtract from CPU downcount to stall the CPU proportionally.
+    if (inter->cpu) {
+        static const uint32_t dev_clks_per_word[7] = {1, 1, 1, 40, 4, 20, 1};
+        uint32_t dev_rate = dev_clks_per_word[channel_index < 7 ? channel_index : 0];
+        // Estimate word count: for LL we use a rough average; block/manual modes use exact count
+        uint32_t est_words = 0;
+        if (sync_mode == LINKED_LIST) {
+            // LL: rough estimate from BCR (not exact, but better than 0)
+            est_words = (ch->block_size > 0) ? ch->block_size : 64;
+        } else {
+            est_words = dma_get_transfer_size_words(ch);
+            if (est_words == 0) est_words = 1;
+        }
+        // RAM hyper-page overhead: ~17 clks per 16 words
+        uint32_t ram_clks  = ((est_words + 15u) / 16u) * 17u;
+        uint32_t dev_clks  = est_words * dev_rate;
+        uint32_t total_clks = dev_clks + ram_clks;
+        inter->cpu->downcount -= (int32_t)total_clks;
+    }
 
     // Signal DMA completion IRQ (IRQ3) if the channel has IRQ enabled in DICR.
     // Edge-triggered on I_STAT[3]: only raise IRQ3 when I_STAT bit 3 transitions 0→1.
@@ -1479,7 +1530,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
     LOG_DMA_DEBUG("[DMA] GPU transfer sync=%d dir=%d", ch->sync, ch->direction);
     // FROM_RAM: RAM -> GPU (Image Load)
     if (ch->direction == FROM_RAM) {
-        uint32_t addr = ch->base_addr & 0x001FFFFC; // 2MB RAM, word aligned
+        uint32_t addr = ch->base_addr & 0x00FFFFFC; // word-aligned, 16MB window
         uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
         if (words == 0) words = 1;
         
@@ -1489,15 +1540,13 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
         // This function is only called for Linked List DMA (logo), not Block/Request (menu)
         for (uint32_t i = 0; i < words; ++i) {
             uint32_t data_word = ram_load32(sys->ram, addr);
-            // Respect GPU STAT[26] (GP0 ready) to avoid overflowing hardware FIFO
+            /* Use bit28 (DMA-ready) — stays set in all GP0 modes */
             int waited = 0;
-            while ((gpu_read_status(&sys->gpu) & (1u << 26)) == 0) {
-                // Small busy-wait; log once when we actually wait to verify backpressure
-                if (waited == 0) 
+            while ((gpu_read_status(&sys->gpu) & (1u << 28)) == 0) {
                 waited++;
-                if (waited > 1000) break; // safety cap to avoid infinite hang in broken cases
+                if (waited > 1000) break;
             }
-            if (waited > 0) LOG_DMA_DEBUG("[DMA] GPU: waited %d iterations for ready", waited);
+            if (waited > 0) LOG_DMA_DEBUG("[DMA] GPU: waited %d iterations for DMA-ready", waited);
             gpu_gp0(&sys->gpu, data_word); // Send to GP0 (Image Load)
             addr += 4;
         }
@@ -1505,7 +1554,7 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
     }
     // TO_RAM: GPU -> RAM (Image Read)
     else if (ch->direction == TO_RAM) {
-        uint32_t addr = ch->base_addr & 0x001FFFFC;
+        uint32_t addr = ch->base_addr & 0x00FFFFFC;
         uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
         if (words == 0) words = 1;
         for (uint32_t i = 0; i < words; ++i) {
@@ -1517,18 +1566,18 @@ void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
     }
     // LINKED_LIST: GPU command list
     else if (ch->sync == LINKED_LIST) {
-        uint32_t addr = ch->base_addr & 0x001FFFFC;
+        uint32_t addr = ch->base_addr & 0x00FFFFFC;
         uint32_t safety = 0;
         while (safety++ < 0x10000) { // Safety limit to avoid infinite loops
             uint32_t header = ram_load32(sys->ram, addr);
             uint32_t count = (header >> 24) & 0xFF;
             for (uint32_t i = 0; i < count; ++i) {
-                addr = (addr + 4) & 0x001FFFFC;
+                addr = (addr + 4) & 0x00FFFFFC;
                 uint32_t cmd = ram_load32(sys->ram, addr);
                 gpu_gp0(&sys->gpu, cmd);
             }
             if (header & 0x800000) break; // End of list
-            addr = header & 0x001FFFFC;
+            addr = header & 0x00FFFFFC;
         }
         LOG_DMA_DEBUG("[DMA] GPU LL processed");
     }

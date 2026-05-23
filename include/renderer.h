@@ -59,7 +59,8 @@ typedef struct {
     GLint uniform_raw_texture_loc; // 1 = use raw texture color (no modulation)
     GLint uniform_vram_texture_loc;
     GLint uniform_screen_scale_loc; // Location for screen scaling uniform
-    GLint uniform_tex_window_loc;      // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
+    GLint uniform_tex_window_loc;   // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
+    GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -77,6 +78,7 @@ typedef struct {
     float screen_height;        // Target display height (in PSX pixels)
     bool semi_trans_enabled;    // Whether semi-transparency blending is active
     uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
+    bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
 } Renderer;
 
 // --- Function Prototypes ---
@@ -253,6 +255,15 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
  * @param mode      0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
  */
 void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode);
+
+/**
+ * @brief Enables or disables PSX 4x4 dithering in the fragment shader.
+ * Per PSX spec: applies to gouraud-shaded/textured polygons and lines only.
+ * Flush is forced before mode change.
+ * @param renderer  Pointer to the Renderer.
+ * @param enabled   True to enable dithering.
+ */
+void renderer_set_dither_mode(Renderer* renderer, bool enabled);
 
 
 #endif // RENDERER_H

@@ -76,11 +76,13 @@ void spu_process_key_on_off(Spu* spu) {
             voice->on           = true;
             voice->stop         = false;
             voice->endx_mask    = false;
-            voice->adsr_state   = ADSR_STATE_ATTACK;
-            voice->EnvelopeVol  = 0;
-            voice->EnvelopeVolF = 0;
-            voice->adsr_volume  = 0;
-            voice->sval         = 0;
+            voice->adsr_state     = ADSR_STATE_ATTACK;
+            voice->EnvelopeVol    = 0;
+            voice->EnvelopeVolF   = 0;
+            voice->adsr_volume    = 0;
+            voice->sval           = 0;
+            voice->vol_left_count  = 0;
+            voice->vol_right_count = 0;
             spu->total_key_on_events++;
             LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X sinc=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
                          v, voice->start_address, voice->sinc,
@@ -230,11 +232,17 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
     switch (sub) {
         case 0x00:
             v->volume_left = value;
-            v->vol_left = (int)(value & 0x3FFF);  /* pcsx-redux: vol &= 0x3fff */
+            if (value & 0x8000)
+                v->vol_left = (int)(int16_t)(value & 0x7FFF);  // sweep: placeholder
+            else
+                v->vol_left = (int)(int16_t)((value & 0x7FFF) << 1);  // fixed: Volume/2 × 2
             break;
         case 0x02:
             v->volume_right = value;
-            v->vol_right = (int)(value & 0x3FFF);
+            if (value & 0x8000)
+                v->vol_right = (int)(int16_t)(value & 0x7FFF);
+            else
+                v->vol_right = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x04:
             v->pitch = value & 0x3FFF;
@@ -289,11 +297,20 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
     switch (reg) {
         case SPU_REG_MVOL_L:
             spu->main_vol_left = value;
-            LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (%d)", value, (int16_t)value);
+            /* Same fixed/sweep treatment as voice volumes: fixed = (bits14-0)<<1 */
+            if (value & 0x8000)
+                spu->main_vol_left_cur = (int32_t)(int16_t)(value & 0x7FFF);
+            else
+                spu->main_vol_left_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
+            LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (working=%d)", value, spu->main_vol_left_cur);
             break;
         case SPU_REG_MVOL_R:
             spu->main_vol_right = value;
-            LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (%d)", value, (int16_t)value);
+            if (value & 0x8000)
+                spu->main_vol_right_cur = (int32_t)(int16_t)(value & 0x7FFF);
+            else
+                spu->main_vol_right_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
+            LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (working=%d)", value, spu->main_vol_right_cur);
             break;
         case SPU_REG_RVOL_L: spu->reverb_vol_left = (int16_t)value; break;
         case SPU_REG_RVOL_R: spu->reverb_vol_right = (int16_t)value; break;

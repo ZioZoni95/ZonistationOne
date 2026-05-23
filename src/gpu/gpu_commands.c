@@ -155,6 +155,8 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
     bool use_texture = textured && tex;
 
     if (use_texture) upload_vram_if_dirty(gpu);
+    // Rectangles NEVER dither (per PSX spec)
+    renderer_set_dither_mode(&gpu->renderer, false);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
 
     if (use_texture) {
@@ -228,46 +230,45 @@ static void gp0_fill_rectangle(Gpu* gpu) {
         .b = (GLubyte)((color_val >> 16) & 0xFF)
     };
 
-    int16_t x  = (int16_t)(pos_val & 0xFFFF);
-    int16_t y  = (int16_t)(pos_val >> 16);
-    uint16_t w = (uint16_t)(dim_val & 0xFFFF);
-    uint16_t h = (uint16_t)(dim_val >> 16);
+    // GPU-2 FIX: Fill rectangle coordinate masking per PSX-SPX docs:
+    //   Xpos = Xpos AND 3F0h  (16-aligned, 10-bit)
+    //   Ypos = Ypos AND 1FFh  (9-bit)
+    //   Xsiz = ((Xsiz AND 3FFh) + 0Fh) AND NOT 0Fh  (rounded up to 16, max 0x400)
+    //   Ysiz = Ysiz AND 1FFh  (max 511 — a Ysiz=0 means no fill)
+    // Fill does NOT apply draw offset, NOT clipped by drawing area, NOT affected by mask bits.
+    uint16_t x = (uint16_t)(pos_val & 0x3F0u);
+    uint16_t y = (uint16_t)((pos_val >> 16) & 0x1FFu);
+    uint16_t w = (uint16_t)(((dim_val & 0x3FFu) + 0x0Fu) & ~0x0Fu);
+    uint16_t h = (uint16_t)((dim_val >> 16) & 0x1FFu);
 
-    // Align to 16-pixel grid
-    x = x & ~0xF;
-    w = (w + 0xF) & ~0xF;
+    // Skip zero-size fills (docs: fill does NOT occur when Xsiz=0 or Ysiz=0)
+    if (w == 0 || h == 0) return;
 
-    // Fill ignores drawing offset — subtract it so the renderer's offset doesn't double-add
-    int16_t adj_x = x - gpu->drawing_x_offset;
-    int16_t adj_y = y - gpu->drawing_y_offset;
+    LOG_GPU_DEBUG("[GPU] GP0(0x02): Fill Rect (%u,%u) %ux%u Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
 
-    LOG_GPU_DEBUG("[GPU] GP0(0x02): Fill Rect (%d,%d) %dx%d Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
-
-    // Render via OpenGL (opaque, no semi-trans, no texture)
+    // OpenGL render: fill rect uses absolute VRAM coords, no drawing offset.
+    // Renderer shader adds drawing_x/y_offset to all vertex coords, so we compensate.
+    renderer_set_semi_trans_mode(&gpu->renderer, false, 0); // fill: no semi-trans
+    int16_t adj_x = (int16_t)x - gpu->drawing_x_offset;
+    int16_t adj_y = (int16_t)y - gpu->drawing_y_offset;
     draw_rectangle(gpu, adj_x, adj_y, w, h, col, false, false, NULL, 0, 0, false);
 
-    // Sync CPU-side VRAM (for future texture reads / VRAM→CPU)
-    uint16_t r5 = (col.r >> 3) & 0x1F;
-    uint16_t g5 = (col.g >> 3) & 0x1F;
-    uint16_t b5 = (col.b >> 3) & 0x1F;
-    uint16_t pixel = r5 | (g5 << 5) | (b5 << 10);
+    // Sync CPU-side VRAM. Fill:
+    //   - Absolute VRAM coords (no draw offset)
+    //   - Wraps at VRAM boundary (no carry between X and Y)
+    //   - Ignores drawing area clip
+    //   - Ignores mask bits (always writes bit15=0, regardless of force_set_mask_bit)
+    uint16_t r5 = (col.r >> 3) & 0x1Fu;
+    uint16_t g5 = (col.g >> 3) & 0x1Fu;
+    uint16_t b5 = (col.b >> 3) & 0x1Fu;
+    uint16_t pixel = r5 | (uint16_t)(g5 << 5) | (uint16_t)(b5 << 10); // bit15=0 (fill never sets mask)
 
-    int16_t clip_l = gpu->drawing_area_left;
-    int16_t clip_t = gpu->drawing_area_top;
-    int16_t clip_r = gpu->drawing_area_right;
-    int16_t clip_b = gpu->drawing_area_bottom;
-
-    int16_t sx = (x > clip_l) ? x : clip_l;
-    int16_t sy = (y > clip_t) ? y : clip_t;
-    int16_t ex = ((x + w) < (clip_r + 1)) ? (x + w) : (clip_r + 1);
-    int16_t ey = ((y + h) < (clip_b + 1)) ? (y + h) : (clip_b + 1);
-
-    for (int iy = sy; iy < ey; iy++) {
-        int vy = iy & 0x1FF;
-        for (int ix = sx; ix < ex; ix++) {
-            int vx = ix & 0x3FF;
-            uint32_t off = (uint32_t)vy * VRAM_WIDTH * VRAM_BPP + (uint32_t)vx * VRAM_BPP;
-            vram_write_masked(gpu, off, pixel);
+    for (uint32_t iy = 0; iy < (uint32_t)h; iy++) {
+        uint32_t vy = ((uint32_t)y + iy) & 0x1FFu;
+        for (uint32_t ix = 0; ix < (uint32_t)w; ix++) {
+            uint32_t vx = ((uint32_t)x + ix) & 0x3FFu;
+            uint32_t off = vy * VRAM_WIDTH * VRAM_BPP + vx * VRAM_BPP;
+            vram_store16(&gpu->vram, off, pixel); // Direct store — no mask bit check
         }
     }
     gpu->vram_dirty = true;
@@ -379,6 +380,7 @@ static void gp0_tri_mono_opaque(Gpu* gpu) {
         p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
         p[i].y = (GLshort)(int16_t)(v >> 16);
     }
+    renderer_set_dither_mode(&gpu->renderer, false); // mono: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, false, 0);
     renderer_set_texture_mode(&gpu->renderer, false);
     LOG_GPU_TRACE("[GPU] Render three-point opaque mono polygon");
@@ -398,6 +400,7 @@ static void gp0_tri_mono_semi(Gpu* gpu) {
         p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
         p[i].y = (GLshort)(int16_t)(v >> 16);
     }
+    renderer_set_dither_mode(&gpu->renderer, false); // mono: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, true, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
     LOG_GPU_TRACE("[GPU] Render three-point semi-transparent mono polygon");
@@ -463,6 +466,8 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     }
 
     upload_vram_if_dirty(gpu);
+    // Dither: textured+blend (modulation) uses dithering; raw texture does not
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering && !raw_texture);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
@@ -492,6 +497,8 @@ static void gp0_tri_shaded_impl(Gpu* gpu, bool semi_trans) {
         p[i].x = (GLshort)(int16_t)(vw & 0xFFFF);
         p[i].y = (GLshort)(int16_t)(vw >> 16);
     }
+    // Gouraud shaded: always dither when dithering enabled (per PSX spec)
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
     LOG_GPU_TRACE("[GPU] Render three-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
@@ -564,6 +571,8 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     }
 
     upload_vram_if_dirty(gpu);
+    // Shaded+textured blend: dither when enabled (gouraud + modulation)
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering && !raw_texture);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
@@ -592,6 +601,7 @@ static void gp0_quad_mono_impl(Gpu* gpu, bool semi_trans) {
         p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
         p[i].y = (GLshort)(int16_t)(v >> 16);
     }
+    renderer_set_dither_mode(&gpu->renderer, false); // mono quad: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
     LOG_GPU_TRACE("[GPU] Render four-point %s mono polygon", semi_trans ? "semi-transparent" : "opaque");
@@ -665,6 +675,8 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     }
 
     upload_vram_if_dirty(gpu);
+    // Dither: textured+blend (modulation) uses dithering; raw texture does not
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering && !raw_texture);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
@@ -694,6 +706,10 @@ static void gp0_quad_shaded_impl(Gpu* gpu, bool semi_trans) {
         p[i].x = (GLshort)(int16_t)(vw & 0xFFFF);
         p[i].y = (GLshort)(int16_t)(vw >> 16);
     }
+    // Gouraud shaded quad: dither when enabled
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
+    // Gouraud shaded quad: dither when enabled
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
     LOG_GPU_TRACE("[GPU] Render four-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
@@ -752,6 +768,8 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     }
 
     upload_vram_if_dirty(gpu);
+    // Shaded+textured quad: dither for blend mode (gouraud + modulation)
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering && !raw_texture);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
@@ -780,6 +798,8 @@ static void gp0_line_mono_impl(Gpu* gpu, bool semi_trans) {
     p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
     p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFFFF);
     p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
+    // Lines always dither (per PSX spec), regardless of mono/shaded
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     LOG_GPU_TRACE("[GPU] Render %s mono line", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_line(&gpu->renderer, p, c);
@@ -803,6 +823,8 @@ static void gp0_line_shaded_impl(Gpu* gpu, bool semi_trans) {
     c[1].b = (GLubyte)((gpu->gp0_command_buffer.buffer[2] >> 16) & 0xFF);
     p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
     p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
+    // Lines always dither
+    renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     LOG_GPU_TRACE("[GPU] Render %s shaded line", semi_trans ? "semi-transparent" : "opaque");
     renderer_push_line(&gpu->renderer, p, c);

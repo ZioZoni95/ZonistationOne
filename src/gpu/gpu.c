@@ -296,10 +296,41 @@ uint32_t gpu_read_status(Gpu* gpu) {
     r |= ((uint32_t)gpu->interrupt) << 24;
     // DMA request (bit 25)
     if (gpu->dma_setting != GPU_DMA_Off) r |= (1 << 25);
-    // Ready bits: bit 26 (cmd word), bit 27 (VRAM→CPU), bit 28 (DMA)
-    if (gpu->gp0_fifo_count < 16) r |= (1 << 26);
-    r |= (1 << 27);
-    r |= (1 << 28);
+    // GPU-1 FIX: Correct ready bits and DMA request per GPUSTAT spec.
+
+    // Bit 26: Ready to receive Cmd Word.
+    // Per docs: set when GPU wants to receive a command, cleared while receiving params or busy.
+    // We use: set when in COMMAND mode and FIFO not full.
+    bool ready_to_recv_cmd = (gpu->gp0_mode == GP0_MODE_COMMAND) && (gpu->gp0_fifo_count < 16);
+    if (ready_to_recv_cmd) r |= (1u << 26);
+
+    // Bit 27: Ready to send VRAM to CPU.
+    // Per docs: set after GP0(C0h) and stays set until all data words are received.
+    bool vram_send_ready = (gpu->gp0_mode == GP0_MODE_IMAGE_STORE && gpu->gp0_words_remaining > 0);
+    if (vram_send_ready) r |= (1u << 27);
+
+    // Bit 28: Ready to receive DMA Block.
+    // Per docs: cleared immediately after receiving polygon/line command word.
+    bool dma_recv_ready = (gpu->gp0_fifo_count < 16);
+    if (dma_recv_ready) r |= (1u << 28);
+
+    // Bit 25: DMA / Data Request — meaning depends on GP1(04h) DMA Direction:
+    //   Off       → Always 0
+    //   FIFO(1)   → FIFO state: 0=Full, 1=Not Full  (same as bit28)
+    //   CpuToGP0  → Same as GPUSTAT.28
+    //   VRamToCPU → Same as GPUSTAT.27
+    {
+        bool dma_request;
+        switch (gpu->dma_setting) {
+            case GPU_DMA_Off:       dma_request = false;           break;
+            case GPU_DMA_Fifo:      dma_request = dma_recv_ready;  break;
+            case GPU_DMA_CpuToGp0:  dma_request = dma_recv_ready;  break;
+            case GPU_DMA_VRamToCpu: dma_request = vram_send_ready; break;
+            default:                dma_request = false;           break;
+        }
+        if (dma_request) r |= (1u << 25);
+    }
+
     // DMA direction (bits 30:29)
     r |= ((uint32_t)gpu->dma_setting) << 29;
     // Bit 31: odd/even line — from CRTC scanline counter

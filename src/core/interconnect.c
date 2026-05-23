@@ -4,6 +4,7 @@
 #include <string.h>
 #include "log.h"
 #include "dma.h"
+#include "mdec.h"
 #include "gpu.h"
 #include "ram.h"
 #include "cpu.h"
@@ -40,6 +41,8 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
+    sio_load_memcard(&inter->sio.card_slot1, "memcard1.mcd");
+    mdec_init(&inter->mdec);
     // Initialize SPU
     spu_init(&inter->spu);
 
