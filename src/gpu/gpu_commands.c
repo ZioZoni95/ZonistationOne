@@ -168,8 +168,20 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
                 c[i].g = 128;
                 c[i].b = 128;
             }
-            LOG_GPU_DEBUG("[GPU] GP0 rect: Raw texture mode enabled");
         }
+
+        // Unpack tpage for diagnostic logging
+        uint8_t dbg_page_x = (tpage & 0xF) * 64;
+        uint8_t dbg_page_y = ((tpage >> 4) & 1) * 1;  // 0 or 1 (multiply by 256 for VRAM Y)
+        uint8_t dbg_depth  = (tpage >> 7) & 3;
+        uint16_t dbg_clut_x = (clut & 0x3F) * 16;
+        uint16_t dbg_clut_y = (clut >> 6) & 0x1FF;
+        LOG_GPU_DEBUG("[GPU] rect tex x=%d y=%d w=%u h=%u uv=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d flip=(%d,%d)",
+                      x, y, w, h, tex->u, tex->v,
+                      dbg_page_x, (uint16_t)(dbg_page_y * 256),
+                      dbg_depth, dbg_clut_x, dbg_clut_y,
+                      (int)semi_trans, (int)raw_texture,
+                      (int)gpu->rectangle_texture_x_flip, (int)gpu->rectangle_texture_y_flip);
 
         t[0].u = tex->u;       t[0].v = tex->v;
         t[1].u = tex->u + w;   t[1].v = tex->v;
@@ -680,9 +692,19 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
-    LOG_GPU_TRACE("[GPU] Render four-point %s textured-%s polygon",
-                  semi_trans ? "semi-transparent" : "opaque",
-                  raw_texture ? "raw" : "blend");
+    {
+        uint8_t dbg_page_x = (texpage & 0xF) * 64;
+        uint8_t dbg_page_y = ((texpage >> 4) & 1);
+        uint8_t dbg_depth  = (texpage >> 7) & 3;
+        uint16_t dbg_clut_x = (clut & 0x3F) * 16;
+        uint16_t dbg_clut_y = (clut >> 6) & 0x1FF;
+        LOG_GPU_DEBUG("[GPU] quad tex v0=(%d,%d) v3=(%d,%d) uv0=(%d,%d) uv3=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d",
+                      p[0].x, p[0].y, p[3].x, p[3].y,
+                      t[0].u, t[0].v, t[3].u, t[3].v,
+                      dbg_page_x, (uint16_t)(dbg_page_y * 256),
+                      dbg_depth, dbg_clut_x, dbg_clut_y,
+                      (int)semi_trans, (int)raw_texture);
+    }
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
 

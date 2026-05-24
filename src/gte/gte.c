@@ -66,7 +66,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
         case 0x1B: gte_nccs(gte, instruction);  cycles = 17; break;
         case 0x1C: gte_cc(gte, instruction);    cycles = 11; break;
         case 0x1E: gte_ncs(gte, instruction);   cycles = 14; break;
-        case 0x1F: gte_ncct(gte, instruction);  cycles = 39; break;
+        case 0x3F: gte_ncct(gte, instruction);  cycles = 39; break;
         case 0x20: gte_nct(gte, instruction);   cycles = 30; break;
         case 0x28: gte_sqr(gte, instruction);   cycles =  7; break;
         case 0x29: gte_dcpl(gte, instruction);  cycles =  5; break;
