@@ -117,15 +117,17 @@ static inline void check_mac_overflow(Gte* gte, int index, int64_t value) {
     else            { min_val = -(1LL << 43); max_val = (1LL << 43) - 1; }
 
     if (value < min_val) {
-        if (index == 0) set_flag(gte, 15);
-        else if (index == 1) set_flag(gte, 30);
-        else if (index == 2) set_flag(gte, 29);
-        else if (index == 3) set_flag(gte, 28);
-    } else if (value > max_val) {
-        if (index == 0) set_flag(gte, 16);
+        /* negative overflow */
+        if      (index == 0) set_flag(gte, 15);
         else if (index == 1) set_flag(gte, 27);
         else if (index == 2) set_flag(gte, 26);
         else if (index == 3) set_flag(gte, 25);
+    } else if (value > max_val) {
+        /* positive overflow */
+        if      (index == 0) set_flag(gte, 16);
+        else if (index == 1) set_flag(gte, 30);
+        else if (index == 2) set_flag(gte, 29);
+        else if (index == 3) set_flag(gte, 28);
     }
 }
 
@@ -135,7 +137,14 @@ static inline void truncate_and_set_mac(Gte* gte, int index, int64_t value, int 
     gte->data[GTE_REG_MAC0 + index] = (int32_t)value;
 }
 
+/* IR1/IR2/IR3: sat flag bits 24/23/22; IR0: flag bit 12, clamp [0,0x1000] */
 static inline void truncate_and_set_ir(Gte* gte, int index, int32_t value, bool lm) {
+    if (index == 0) {
+        if (value < 0)      { value = 0;      set_flag(gte, 12); }
+        else if (value > 0x1000) { value = 0x1000; set_flag(gte, 12); }
+        gte->data[GTE_REG_IR0] = (int16_t)value;
+        return;
+    }
     int32_t min_val = lm ? 0 : -32768;
     if (value < min_val) {
         value = min_val;
@@ -148,17 +157,16 @@ static inline void truncate_and_set_ir(Gte* gte, int index, int32_t value, bool 
 }
 
 static inline int32_t gte_clamp_ir_nolm(Gte* gte, int idx, int32_t value) {
-    if (value < -32768 || value > 32767) {
+    if (value < -32768 || value > 32767)
         set_flag(gte, 24 - (idx - 1));
-        set_flag(gte, 31);
-    }
     return value < -32768 ? -32768 : (value > 32767 ? 32767 : value);
 }
 
 static inline uint32_t truncate_rgb(Gte* gte, int index, int32_t value) {
     int32_t mac_val = value >> 4;
     if (mac_val < 0 || mac_val > 0xFF) {
-        set_flag(gte, 24 - index);
+        /* COLOR R→bit21, G→bit20, B→bit19 (index 1,2,3 → 22-index) */
+        set_flag(gte, 22 - index);
         return (mac_val < 0) ? 0 : 0xFF;
     }
     return (uint32_t)mac_val;
@@ -185,8 +193,8 @@ static inline void push_sz(Gte* gte, int32_t value) {
 }
 
 static inline void push_sxy(Gte* gte, int32_t x, int32_t y) {
-    if (x < -1024 || x > 1023 || y < -1024 || y > 1023)
-        set_flag(gte, 31);
+    if (x < -1024 || x > 1023) { set_flag(gte, 14); set_flag(gte, 31); }
+    if (y < -1024 || y > 1023) { set_flag(gte, 13); set_flag(gte, 31); }
     if (x < -1024) x = -1024; else if (x > 1023) x = 1023;
     if (y < -1024) y = -1024; else if (y > 1023) y = 1023;
     gte->data[GTE_REG_SXY0] = gte->data[GTE_REG_SXY1];
@@ -368,6 +376,13 @@ static inline void gte_depth_cue_color_step(Gte* gte, int shift, bool lm) {
                        ((int64_t)g * ir2) << 4,
                        ((int64_t)b * ir3) << 4,
                        shift, lm);
+}
+
+/* Recompute GTE_ERROR (bit 31) from all error bits after each operation */
+static inline void gte_update_error_flag(Gte* gte) {
+    uint32_t f = (uint32_t)gte->control[GTE_CTL_FLAG];
+    if (f & 0x7f87e000u) f |= (1u << 31);
+    gte->control[GTE_CTL_FLAG] = (int32_t)f;
 }
 
 #endif // GTE_INTERNAL_H

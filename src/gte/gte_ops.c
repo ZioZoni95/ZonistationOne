@@ -33,13 +33,18 @@ static void gte_rtps_core(Gte* gte, int16_t* v, int shift, bool lm, bool last) {
 
     truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
     truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
-    truncate_and_set_ir(gte, 3, (int32_t)(mac3 >> 12), false);
 
-    int32_t ir3_val = gte->data[GTE_REG_MAC3];
-    int32_t min_val = lm ? 0 : -32768;
-    if      (ir3_val < min_val) ir3_val = min_val;
-    else if (ir3_val > 32767)   ir3_val = 32767;
-    gte->data[GTE_REG_IR3] = (int16_t)ir3_val;
+    /* IR3 saturation check uses raw mac3>>12 always; stored value is MAC3 clamped */
+    {
+        int32_t raw12 = (int32_t)(mac3 >> 12);
+        int32_t min_val = lm ? 0 : -32768;
+        if (raw12 < min_val || raw12 > 32767)
+            set_flag(gte, 22); /* bit 22 = IR3 saturation */
+        int32_t ir3_val = gte->data[GTE_REG_MAC3];
+        if      (ir3_val < min_val) ir3_val = min_val;
+        else if (ir3_val > 32767)   ir3_val = 32767;
+        gte->data[GTE_REG_IR3] = (int16_t)ir3_val;
+    }
 
     push_sz(gte, (int32_t)(mac3 >> 12));
 
@@ -164,21 +169,19 @@ void gte_mvmva(Gte* gte, uint32_t instruction) {
 
 // --- SQR (0x28): Square ---
 void gte_sqr(Gte* gte, uint32_t instruction) {
-    int shift = (instruction >> 19) & 1;
+    int shift = (instruction >> 19) & 1 ? 12 : 0;
     bool lm   = (instruction >> 10) & 1;
     LOG_GTE_TRACE("[GTE] SQR (sf=%d, lm=%d)", shift, lm);
+    gte->control[GTE_CTL_FLAG] = 0;
     int32_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
     int32_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
     int32_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
-    int64_t mac1 = ((int64_t)ir1*ir1) >> (shift ? 12 : 0);
-    int64_t mac2 = ((int64_t)ir2*ir2) >> (shift ? 12 : 0);
-    int64_t mac3 = ((int64_t)ir3*ir3) >> (shift ? 12 : 0);
-    gte->data[GTE_REG_MAC1] = (int32_t)mac1;
-    gte->data[GTE_REG_MAC2] = (int32_t)mac2;
-    gte->data[GTE_REG_MAC3] = (int32_t)mac3;
-    truncate_and_set_ir(gte, 1, (int32_t)mac1, lm);
-    truncate_and_set_ir(gte, 2, (int32_t)mac2, lm);
-    truncate_and_set_ir(gte, 3, (int32_t)mac3, lm);
+    truncate_and_set_mac(gte, 1, (int64_t)ir1*ir1, shift);
+    truncate_and_set_mac(gte, 2, (int64_t)ir2*ir2, shift);
+    truncate_and_set_mac(gte, 3, (int64_t)ir3*ir3, shift);
+    truncate_and_set_ir(gte, 1, gte->data[GTE_REG_MAC1], lm);
+    truncate_and_set_ir(gte, 2, gte->data[GTE_REG_MAC2], lm);
+    truncate_and_set_ir(gte, 3, gte->data[GTE_REG_MAC3], lm);
 }
 
 // --- OP (0x0C): Outer Product ---
@@ -402,6 +405,7 @@ void gte_gpl(Gte* gte, uint32_t instruction) {
 // --- AVSZ3 (0x2D): Average Z — 3 points ---
 void gte_avsz3(Gte* gte) {
     LOG_GTE_TRACE("[GTE] AVSZ3");
+    gte->control[GTE_CTL_FLAG] = 0;
     int32_t  zsf3   = (int16_t)gte->control[GTE_CTL_ZSF3];
     uint32_t sz1    = (uint16_t)gte->data[GTE_REG_SZ1];
     uint32_t sz2    = (uint16_t)gte->data[GTE_REG_SZ2];
@@ -409,13 +413,17 @@ void gte_avsz3(Gte* gte) {
     int64_t  result = (int64_t)zsf3 * (sz1 + sz2 + sz3);
     truncate_and_set_mac(gte, 0, result, 0);
     int32_t otz = (int32_t)(result >> 12);
-    if (otz < 0) otz = 0; else if (otz > 65535) otz = 65535;
+    if (otz < 0 || otz > 65535) {
+        set_flag(gte, 18);
+        otz = (otz < 0) ? 0 : 65535;
+    }
     gte->data[GTE_REG_OTZ] = (uint16_t)otz;
 }
 
 // --- AVSZ4 (0x2E): Average Z — 4 points ---
 void gte_avsz4(Gte* gte) {
     LOG_GTE_TRACE("[GTE] AVSZ4");
+    gte->control[GTE_CTL_FLAG] = 0;
     int32_t  zsf4   = (int16_t)gte->control[GTE_CTL_ZSF4];
     uint32_t sz0    = (uint16_t)gte->data[GTE_REG_SZ0];
     uint32_t sz1    = (uint16_t)gte->data[GTE_REG_SZ1];
@@ -424,6 +432,9 @@ void gte_avsz4(Gte* gte) {
     int64_t  result = (int64_t)zsf4 * (sz0 + sz1 + sz2 + sz3);
     truncate_and_set_mac(gte, 0, result, 0);
     int32_t otz = (int32_t)(result >> 12);
-    if (otz < 0) otz = 0; else if (otz > 65535) otz = 65535;
+    if (otz < 0 || otz > 65535) {
+        set_flag(gte, 18);
+        otz = (otz < 0) ? 0 : 65535;
+    }
     gte->data[GTE_REG_OTZ] = (uint16_t)otz;
 }

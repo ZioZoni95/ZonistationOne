@@ -31,12 +31,60 @@ void gte_init(Gte* gte) {
 
 int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
     if (reg >= 32) { LOG_GTE_ERROR("[GTE] Invalid data reg read: %u", reg); return 0; }
-    return gte->data[reg];
+    switch (reg) {
+        case 1: case 3: case 5: case 8: case 9: case 10: case 11:
+            return (int32_t)(int16_t)gte->data[reg];
+        case 7: case 16: case 17: case 18: case 19:
+            return (int32_t)(uint32_t)(uint16_t)gte->data[reg];
+        case 15:
+            return gte->data[GTE_REG_SXY2];
+        case 28: case 29: {
+            int32_t ir1 = (int16_t)gte->data[GTE_REG_IR1];
+            int32_t ir2 = (int16_t)gte->data[GTE_REG_IR2];
+            int32_t ir3 = (int16_t)gte->data[GTE_REG_IR3];
+            uint32_t r = (uint32_t)((ir1 >> 7) < 0 ? 0 : (ir1 >> 7) > 31 ? 31 : (ir1 >> 7));
+            uint32_t g = (uint32_t)((ir2 >> 7) < 0 ? 0 : (ir2 >> 7) > 31 ? 31 : (ir2 >> 7));
+            uint32_t b = (uint32_t)((ir3 >> 7) < 0 ? 0 : (ir3 >> 7) > 31 ? 31 : (ir3 >> 7));
+            return (int32_t)(r | (g << 5) | (b << 10));
+        }
+        default:
+            return gte->data[reg];
+    }
+}
+
+static inline uint32_t count_leading_bits(uint32_t val) {
+    if (val == 0) return 32;
+    int32_t s = (int32_t)val;
+    return (s >= 0) ? (uint32_t)__builtin_clz((uint32_t)s)
+                    : (uint32_t)__builtin_clz((uint32_t)~s);
 }
 
 void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) { LOG_GTE_ERROR("[GTE] Invalid data reg write: %u = 0x%08x", reg, value); return; }
-    gte->data[reg] = value;
+    switch (reg) {
+        case 15:
+            gte->data[GTE_REG_SXY0] = gte->data[GTE_REG_SXY1];
+            gte->data[GTE_REG_SXY1] = gte->data[GTE_REG_SXY2];
+            gte->data[GTE_REG_SXY2] = value;
+            break;
+        case 28: {
+            uint32_t u = (uint32_t)value;
+            gte->data[GTE_REG_IR1] = (int32_t)(int16_t)((u & 0x1Fu) << 7);
+            gte->data[GTE_REG_IR2] = (int32_t)(int16_t)((u & 0x3E0u) << 2);
+            gte->data[GTE_REG_IR3] = (int32_t)(int16_t)((u & 0x7C00u) >> 3);
+            gte->data[reg] = value;
+            break;
+        }
+        case 30:
+            gte->data[reg] = value;
+            gte->data[GTE_REG_LZCR] = (int32_t)count_leading_bits((uint32_t)value);
+            break;
+        case 31:
+            break;
+        default:
+            gte->data[reg] = value;
+            break;
+    }
 }
 
 int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
@@ -46,7 +94,20 @@ int32_t gte_read_control_register(Gte* gte, uint32_t reg) {
 
 void gte_write_control_register(Gte* gte, uint32_t reg, int32_t value) {
     if (reg >= 32) { LOG_GTE_ERROR("[GTE] Invalid ctrl reg write: %u = 0x%08x", reg, value); return; }
-    gte->control[reg] = value;
+    switch (reg) {
+        case 4: case 12: case 20: case 26: case 27: case 29: case 30:
+            gte->control[reg] = (int32_t)(int16_t)value;
+            break;
+        case 31: {
+            uint32_t f = (uint32_t)value & 0x7ffff000u;
+            if (f & 0x7f87e000u) f |= (1u << 31);
+            gte->control[reg] = (int32_t)f;
+            break;
+        }
+        default:
+            gte->control[reg] = value;
+            break;
+    }
 }
 
 uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
@@ -88,6 +149,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
         }
     }
 
+    gte_update_error_flag(gte);
     gte->busy = true;
     gte->cycles_remaining = cycles;
     return cycles;
