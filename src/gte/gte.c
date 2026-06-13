@@ -119,7 +119,7 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
         case 0x06: gte_nclip(gte);              cycles =  8; break;
         case 0x0C: gte_op(gte, instruction);    cycles =  6; break;
         case 0x10: gte_dpcs(gte, instruction);  cycles =  8; break;
-        case 0x11: gte_intpl(gte, instruction); cycles =  5; break;
+        case 0x11: gte_intpl(gte, instruction); cycles =  8; break;
         case 0x12: gte_mvmva(gte, instruction); cycles =  8; break;
         case 0x13: gte_ncds(gte, instruction);  cycles = 19; break;
         case 0x14: gte_cdp(gte, instruction);   cycles = 13; break;
@@ -129,8 +129,8 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
         case 0x1E: gte_ncs(gte, instruction);   cycles = 14; break;
         case 0x3F: gte_ncct(gte, instruction);  cycles = 39; break;
         case 0x20: gte_nct(gte, instruction);   cycles = 30; break;
-        case 0x28: gte_sqr(gte, instruction);   cycles =  7; break;
-        case 0x29: gte_dcpl(gte, instruction);  cycles =  5; break;
+        case 0x28: gte_sqr(gte, instruction);   cycles =  5; break;
+        case 0x29: gte_dcpl(gte, instruction);  cycles =  8; break;
         case 0x2A: gte_dpct(gte, instruction);  cycles = 17; break;
         case 0x2D: gte_avsz3(gte);              cycles =  5; break;
         case 0x2E: gte_avsz4(gte);              cycles =  6; break;

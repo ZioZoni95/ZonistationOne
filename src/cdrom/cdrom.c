@@ -151,6 +151,7 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->pending_param_count = 0;
     cdrom->second_response_size = 0;
     cdrom->drive_state         = DRIVE_IDLE;
+    cdrom->disc_present        = disc_present;
     cdrom->motor_on            = disc_present;
     cdrom->shell_open          = false;
     cdrom->read_after_seek     = false;

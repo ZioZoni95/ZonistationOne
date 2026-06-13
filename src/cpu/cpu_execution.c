@@ -3,7 +3,6 @@
 #include "interconnect.h"
 #include "event_scheduler.h"
 #include "gte.h"
-#include "timers.h"
 #include "debugger.h"
 
 // ============================================================================
@@ -123,11 +122,6 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 8. Advance Cycle Counters ---
     cpu->inter->cpu_cycle_counter++;
     cpu->downcount--;
-
-    // Step timers every 64 cycles for BIOS busy-waits.
-    if ((cpu->inter->cpu_cycle_counter & 0x3F) == 0) {
-        timers_step(&cpu->inter->timers_state, 64);
-    }
 
     // --- 9. Dispatch Events (DuckStation-style downcount) ---
     if (cpu->downcount <= 0) {

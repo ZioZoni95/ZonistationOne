@@ -513,6 +513,8 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     switch (cmd) {
 
     case CDC_GETID:
+        LOG_CDROM_DEBUG("[CDROM] GetID second: disc_present=%d motor_on=%d shell_open=%d",
+                        cdrom->disc_present, cdrom->motor_on, cdrom->shell_open);
         if (!cdrom->disc_present) {
             cdrom_send_error(cdrom, 0x08, 0x40);
         } else {
