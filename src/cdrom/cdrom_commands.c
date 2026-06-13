@@ -55,7 +55,9 @@ void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles);
  * ========================================================================= */
 
 static void begin_reading(Cdrom *cdrom) {
+    bool location_changed = false;
     if (cdrom->setloc_pending) {
+        location_changed      = (cdrom->setloc_lba != cdrom->current_lba);
         cdrom->current_lba    = cdrom->setloc_lba;
         cdrom->setloc_pending = false;
     }
@@ -63,17 +65,22 @@ static void begin_reading(Cdrom *cdrom) {
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
     cdrom->drive_state = DRIVE_READING;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
-    uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_1X / 2 : CDROM_READ_DELAY_1X;
+    /* Location changed: head needs extra seek time before first sector */
+    uint32_t base = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
+    uint32_t delay = location_changed ? CDROM_SEEK_CHANGE_DELAY : base;
     cdrom_schedule_drive_event(cdrom, delay);
 }
 
 static void begin_playing(Cdrom *cdrom, uint8_t track_param) {
+    bool location_changed = false;
     if (track_param > 0 && cdrom->disc.last_track > 0) {
         uint8_t t = track_param;
         if (t > cdrom->disc.last_track) t = cdrom->disc.last_track;
+        location_changed      = (cdrom->disc.tracks[t].start_lba != cdrom->current_lba);
         cdrom->current_lba    = cdrom->disc.tracks[t].start_lba;
         cdrom->setloc_pending = false;
     } else if (cdrom->setloc_pending) {
+        location_changed      = (cdrom->setloc_lba != cdrom->current_lba);
         cdrom->current_lba    = cdrom->setloc_lba;
         cdrom->setloc_pending = false;
     }
@@ -82,7 +89,8 @@ static void begin_playing(Cdrom *cdrom, uint8_t track_param) {
     cdrom->drive_state = DRIVE_PLAYING;
     cdrom->cdda_speed  = 1;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
-    uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_1X / 2 : CDROM_READ_DELAY_1X;
+    uint32_t base = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
+    uint32_t delay = location_changed ? CDROM_SEEK_CHANGE_DELAY : base;
     cdrom_schedule_drive_event(cdrom, delay);
 }
 
@@ -96,7 +104,10 @@ static void begin_seeking(Cdrom *cdrom, bool read_after, bool play_after) {
     LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> SEEKING (LBA %u -> %u)",
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba, cdrom->target_lba);
     cdrom->drive_state = DRIVE_SEEKING;
-    uint32_t delay = cdrom_disc_get_seek_ticks(cdrom->current_lba, cdrom->target_lba);
+    /* Use fast delay when head is already at target (pcsx-redux: 0x800 cycles) */
+    uint32_t delay = (cdrom->target_lba == cdrom->current_lba)
+        ? CDROM_SEEK_FAST_DELAY
+        : cdrom_disc_get_seek_ticks(cdrom->current_lba, cdrom->target_lba);
     cdrom_schedule_second_response_event(cdrom, delay);
 }
 
@@ -116,6 +127,19 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     LOG_CDROM_DEBUG("[CDROM] Execute command %s (0x%02X)", cdrom_cmd_name((uint8_t)cmd), (uint8_t)cmd);
     fifo_clear(&cdrom->response_fifo);
+
+    /* Commands that need a disc: return NOT_READY immediately if none present */
+    if (!cdrom->disc_present) {
+        switch (cmd) {
+            case CDC_SETLOC:
+            case CDC_PLAY:
+            case CDC_READN: case CDC_READS:
+            case CDC_SEEKL: case CDC_SEEKP:
+                cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x80);
+                return;
+            default: break;
+        }
+    }
 
     switch (cmd) {
 
@@ -194,23 +218,34 @@ void cdrom_execute_command(Cdrom *cdrom) {
         break;
 
     /* --- 0x08 Stop --- */
-    case CDC_STOP:
+    case CDC_STOP: {
+        uint32_t stop_delay = (cdrom->motor_on && cdrom->drive_state != DRIVE_IDLE)
+            ? CDROM_STOP_SPIN_DELAY : CDROM_STOP_IDLE_DELAY;
         cdrom->drive_state = DRIVE_STOPPING;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_STOP;
-        cdrom_schedule_second_response_event(cdrom, CDROM_ACK_DELAY);
+        cdrom_schedule_second_response_event(cdrom, stop_delay);
         break;
+    }
 
     /* --- 0x09 Pause --- */
-    case CDC_PAUSE:
-        if (cdrom->drive_state == DRIVE_READING || cdrom->drive_state == DRIVE_PLAYING)
-            cdrom->drive_state = DRIVE_PAUSING;
+    case CDC_PAUSE: {
+        /* pcsx-redux hardware-tested: 7ms if already idle, else 1s/2s by speed */
+        uint32_t pause_delay;
+        if (cdrom->drive_state == DRIVE_IDLE) {
+            pause_delay = CDROM_PAUSE_IDLE_DELAY;
+        } else {
+            pause_delay = cdrom->double_speed ? CDROM_PAUSE_2X_DELAY : CDROM_PAUSE_1X_DELAY;
+            if (cdrom->drive_state == DRIVE_READING || cdrom->drive_state == DRIVE_PLAYING)
+                cdrom->drive_state = DRIVE_PAUSING;
+        }
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_PAUSE;
-        cdrom_schedule_second_response_event(cdrom, CDROM_ACK_DELAY);
+        cdrom_schedule_second_response_event(cdrom, pause_delay);
         break;
+    }
 
     /* --- 0x0A Init --- */
     case CDC_INIT:
@@ -567,8 +602,11 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         uint8_t raw[2352];
         bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw);
         if (!ok) {
-            LOG_CDROM_ERROR("[CDROM] Async read failed at LBA %u", cdrom->current_lba);
-            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x04);
+            /* No-disc → NOT_READY (0x80): BIOS retries. Disc error → SEEK_ERROR (0x04): BIOS aborts. */
+            uint8_t err_reason = cdrom->disc_present ? 0x04 : 0x80;
+            LOG_CDROM_DEBUG("[CDROM] Read failed at LBA %u (disc_present=%d, err=0x%02x)",
+                            cdrom->current_lba, cdrom->disc_present, err_reason);
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, err_reason);
             cdrom->drive_state = DRIVE_IDLE;
             return;
         }
@@ -602,16 +640,19 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             if (cdrom->drive_state == DRIVE_READING) {
                 cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
                 /* No INT1 → must self-schedule next drive event */
-                uint32_t delay = CDROM_READ_DELAY_1X / (cdrom->double_speed ? 2 : 1);
+                uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
                 cdrom_schedule_drive_event(cdrom, delay);
             }
         } else {
-            /* Data sector: set data range, produce INT1 */
-            if (cdrom->whole_sector) {
-                sb->data_start = 12;   /* bytes 12..2351 (2340 bytes) */
+            /* Data sector: sector size from mode bits 4-5 (nocash PSX-SPX) */
+            if (cdrom->mode & 0x20) {       /* bit5: 2340 bytes from sync header */
+                sb->data_start = 12;
                 sb->data_size  = 2340;
-            } else {
-                sb->data_start = 24;   /* bytes 24..2071 (2048 bytes) */
+            } else if (cdrom->mode & 0x10) { /* bit4: 2328 bytes (with subheader, no sync) */
+                sb->data_start = 24;
+                sb->data_size  = 2328;
+            } else {                         /* default: 2048 user data */
+                sb->data_start = 24;
                 sb->data_size  = 2048;
             }
             sb->position = 0;
@@ -688,6 +729,23 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         cdrom->current_subq_lba = cdrom->current_lba;
         cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
 
+        /* Report mode: send INT1 with position every sector (pcsx-redux) */
+        if (cdrom->report_enable && cdrom->interrupt_flag == CDROM_INT_NONE) {
+            SubQ *sq = &cdrom->last_subq;
+            fifo_clear(&cdrom->response_fifo);
+            cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
+            cdrom_push_response(cdrom, sq->track_bcd);
+            cdrom_push_response(cdrom, sq->index_bcd);
+            cdrom_push_response(cdrom, sq->rel_mm_bcd);
+            cdrom_push_response(cdrom, sq->rel_ss_bcd | 0x80); /* bit7 = audio */
+            cdrom_push_response(cdrom, sq->rel_ff_bcd);
+            cdrom_push_response(cdrom, sq->abs_mm_bcd);
+            cdrom_push_response(cdrom, sq->abs_ss_bcd);
+            cdrom_push_response(cdrom, sq->abs_ff_bcd);
+            cdrom->interrupt_flag = CDROM_INT_DATA_READY;
+            if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+        }
+
         cdrom->current_lba += cdrom->cdda_speed;
 
         /* Queue next */
@@ -695,7 +753,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
 
         /* Schedule next drive event */
-        uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_1X / 2 : CDROM_READ_DELAY_1X;
+        uint32_t delay = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
         cdrom_schedule_drive_event(cdrom, delay);
     }
 }

@@ -38,8 +38,10 @@ bool gpu_validate_texture_coords(uint8_t page_x, uint8_t page_y, uint8_t depth,
     // Texture coordinates are 8-bit, so 0-255 is max valid range
     // Check if U,V are within the page boundaries
     if (u >= page_width || v >= page_height) {
-        LOG_GPU_WARN("[GPU] Texture coordinate out of bounds: U=%d (max %d), V=%d (max %d)",
-                     u, page_width - 1, v, page_height - 1);
+        /* Not a hard error: UV can legitimately span adjacent VRAM regions.
+         * The shader handles it correctly. Log at DEBUG to avoid spam. */
+        LOG_GPU_DEBUG("[GPU] Texture UV out of page: U=%d (page_w=%d) V=%d depth=%d",
+                      u, page_width, v, depth);
         return false;
     }
 

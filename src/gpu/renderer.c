@@ -91,6 +91,7 @@ const char* fragment_shader_source =
     "uniform ivec4 u_texWindow; // (and_x, and_y, or_x, or_y) pre-computed masks\n"
     "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
     "uniform int u_dither_enable; // 1 = apply PSX 4x4 dither before 15-bit quantization\n"
+    "uniform int u_stp_mode;     // -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0)\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
@@ -127,31 +128,27 @@ const char* fragment_shader_source =
     "        if (depth == 0u) { // 4-bit paletted\n"
     "            uint tex_x = page_x + (u / 4u);\n"
     "            uint tex_y = page_y + v;\n"
-    "            \n"
     "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
     "            uint shift = (u & 3u) * 4u;\n"
     "            uint index = (raw_word >> shift) & 0xFu;\n"
-    "\n"
     "            uint clut_pos_x = clut_x + index;\n"
-    "            uint clut_pos_y = clut_y;\n"
-    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0).r;\n"
-    "\n"
+    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_y), 0).r;\n"
     "            if (raw_color == 0u) discard;\n"
+    "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"  /* pass1: discard STP=1 */
+    "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"  /* pass2: discard STP=0 */
     "            tex_rgb = psx_to_rgb(raw_color);\n"
     "\n"
     "        } else if (depth == 1u) { // 8-bit paletted\n"
     "            uint tex_x = page_x + (u / 2u);\n"
     "            uint tex_y = page_y + v;\n"
-    "            \n"
     "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
     "            uint shift = (u & 1u) * 8u;\n"
     "            uint index = (raw_word >> shift) & 0xFFu;\n"
-    "\n"
     "            uint clut_pos_x = clut_x + index;\n"
-    "            uint clut_pos_y = clut_y;\n"
-    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_pos_y), 0).r;\n"
-    "\n"
+    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_y), 0).r;\n"
     "            if (raw_color == 0u) discard;\n"
+    "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"
+    "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"
     "            tex_rgb = psx_to_rgb(raw_color);\n"
     "\n"
     "        } else { // 15-bit direct color (depth == 2 or 3)\n"
@@ -159,6 +156,8 @@ const char* fragment_shader_source =
     "            uint tex_y = page_y + v;\n"
     "            raw_color = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
     "            if (raw_color == 0u) discard;\n"
+    "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"
+    "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"
     "            tex_rgb = psx_to_rgb(raw_color);\n"
     "        }\n"
     "\n"
@@ -489,6 +488,8 @@ bool renderer_init(Renderer* renderer) {
     // Default texture window: no masking (and_x=0xFF, and_y=0xFF, or_x=0, or_y=0)
     glUseProgram(renderer->shader_program);
     if (renderer->uniform_tex_window_loc >= 0) glUniform4i(renderer->uniform_tex_window_loc, 0xFF, 0xFF, 0, 0);
+    renderer->uniform_stp_mode_loc = glGetUniformLocation(renderer->shader_program, "u_stp_mode");
+    if (renderer->uniform_stp_mode_loc >= 0) glUniform1i(renderer->uniform_stp_mode_loc, -1);
     if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
     if (renderer->uniform_dither_loc >= 0) glUniform1i(renderer->uniform_dither_loc, 0);
     glUseProgram(0);
@@ -764,11 +765,54 @@ glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer); check_gl_error("draw - gl
     glBindBuffer(GL_ARRAY_BUFFER, 0); // Unbind GL_ARRAY_BUFFER target
     // ------------------------------------------------------
 
-    // Draw the buffered primitives (interpreted as triangles)
-glDrawArrays(GL_TRIANGLES,      // Mode: interpret vertices as triangles
-                 0,                 // Starting index in the enabled arrays
-                 renderer->vertex_count); // Number of vertices to render
-    check_gl_error("draw - glDrawArrays");
+    /* Two-pass STP rendering for semi-transparent textured primitives.
+     * Pass 1: blend OFF, discard STP=1 pixels → opaque STP=0 drawn.
+     * Pass 2: blend ON,  discard STP=0 pixels → blended STP=1 drawn. */
+    if (renderer->semi_trans_enabled && renderer->texture_enabled) {
+        /* Pass 1 — opaque pixels (STP=0) */
+        glDisable(GL_BLEND);
+        if (renderer->uniform_stp_mode_loc >= 0)
+            glUniform1i(renderer->uniform_stp_mode_loc, 0);
+        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
+        check_gl_error("draw - pass1 STP=0");
+
+        /* Pass 2 — blended pixels (STP=1): restore blend state */
+        glEnable(GL_BLEND);
+        switch (renderer->semi_trans_mode) {
+            case 0:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
+                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
+                break;
+            case 1:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_ONE, GL_ONE);
+                break;
+            case 2:
+                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+                glBlendFunc(GL_ONE, GL_ONE);
+                break;
+            case 3:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+                break;
+        }
+        if (renderer->uniform_stp_mode_loc >= 0)
+            glUniform1i(renderer->uniform_stp_mode_loc, 1);
+        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
+        check_gl_error("draw - pass2 STP=1");
+
+        /* Reset for next batch */
+        if (renderer->uniform_stp_mode_loc >= 0)
+            glUniform1i(renderer->uniform_stp_mode_loc, -1);
+    } else {
+        /* Single pass: opaque draw or non-textured semi-trans */
+        if (renderer->uniform_stp_mode_loc >= 0)
+            glUniform1i(renderer->uniform_stp_mode_loc, -1);
+        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
+        check_gl_error("draw - glDrawArrays");
+    }
 
     // --- Unbind ---
     glBindVertexArray(0);

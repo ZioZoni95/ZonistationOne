@@ -171,17 +171,18 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
         }
 
         // Unpack tpage for diagnostic logging
-        uint8_t dbg_page_x = (tpage & 0xF) * 64;
-        uint8_t dbg_page_y = ((tpage >> 4) & 1) * 1;  // 0 or 1 (multiply by 256 for VRAM Y)
-        uint8_t dbg_depth  = (tpage >> 7) & 3;
+        uint16_t dbg_page_x = (uint16_t)((tpage & 0xF) * 64);   // 16-bit: no overflow
+        uint8_t  dbg_page_y = ((tpage >> 4) & 1);
+        uint8_t  dbg_depth  = (tpage >> 7) & 3;
         uint16_t dbg_clut_x = (clut & 0x3F) * 16;
         uint16_t dbg_clut_y = (clut >> 6) & 0x1FF;
-        LOG_GPU_DEBUG("[GPU] rect tex x=%d y=%d w=%u h=%u uv=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d flip=(%d,%d)",
+        LOG_GPU_DEBUG("[GPU] rect tex x=%d y=%d w=%u h=%u uv=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d flip=(%d,%d) tpage_raw=0x%04x",
                       x, y, w, h, tex->u, tex->v,
                       dbg_page_x, (uint16_t)(dbg_page_y * 256),
                       dbg_depth, dbg_clut_x, dbg_clut_y,
                       (int)semi_trans, (int)raw_texture,
-                      (int)gpu->rectangle_texture_x_flip, (int)gpu->rectangle_texture_y_flip);
+                      (int)gpu->rectangle_texture_x_flip, (int)gpu->rectangle_texture_y_flip,
+                      tpage);
 
         t[0].u = tex->u;       t[0].v = tex->v;
         t[1].u = tex->u + w;   t[1].v = tex->v;
@@ -257,6 +258,8 @@ static void gp0_fill_rectangle(Gpu* gpu) {
     if (w == 0 || h == 0) return;
 
     LOG_GPU_DEBUG("[GPU] GP0(0x02): Fill Rect (%u,%u) %ux%u Color=%06x", x, y, w, h, color_val & 0xFFFFFF);
+    LOG_VRAM_DEBUG("Fill VRAM rectangle offset=(%u,%u), size=(%u,%u) color=%06x",
+                   x, y, w, h, color_val & 0xFFFFFF);
 
     // OpenGL render: fill rect uses absolute VRAM coords, no drawing offset.
     // Renderer shader adds drawing_x/y_offset to all vertex coords, so we compensate.
@@ -693,17 +696,18 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     renderer_set_raw_texture_mode(&gpu->renderer, raw_texture);
     renderer_set_texture_mode(&gpu->renderer, true);
     {
-        uint8_t dbg_page_x = (texpage & 0xF) * 64;
-        uint8_t dbg_page_y = ((texpage >> 4) & 1);
-        uint8_t dbg_depth  = (texpage >> 7) & 3;
+        uint16_t dbg_page_x = (uint16_t)((texpage & 0xF) * 64);   // 16-bit: pages 0-15 → 0-960
+        uint8_t  dbg_page_y = ((texpage >> 4) & 1);
+        uint8_t  dbg_depth  = (texpage >> 7) & 3;
         uint16_t dbg_clut_x = (clut & 0x3F) * 16;
         uint16_t dbg_clut_y = (clut >> 6) & 0x1FF;
-        LOG_GPU_DEBUG("[GPU] quad tex v0=(%d,%d) v3=(%d,%d) uv0=(%d,%d) uv3=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d",
+        LOG_GPU_DEBUG("[GPU] quad tex v0=(%d,%d) v3=(%d,%d) uv0=(%d,%d) uv3=(%d,%d) page_x=%u page_y=%u depth=%u clut=(%u,%u) semi=%d raw=%d tpage_raw=0x%04x",
                       p[0].x, p[0].y, p[3].x, p[3].y,
                       t[0].u, t[0].v, t[3].u, t[3].v,
                       dbg_page_x, (uint16_t)(dbg_page_y * 256),
                       dbg_depth, dbg_clut_x, dbg_clut_y,
-                      (int)semi_trans, (int)raw_texture);
+                      (int)semi_trans, (int)raw_texture,
+                      texpage);
     }
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
@@ -1082,6 +1086,8 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     if (h == 0) h = 512;
 
     LOG_GPU_DEBUG("[GPU] GP0(0x80): VRAM Copy (%u,%u)->(%u,%u) %ux%u", src_x, src_y, dst_x, dst_y, w, h);
+    LOG_VRAM_DEBUG("Copy rectangle from VRAM to VRAM src=(%u,%u), dst=(%u,%u), size=(%u,%u) [%u pixels]",
+                   src_x, src_y, dst_x, dst_y, w, h, (uint32_t)w * h);
 
     // Overlap-safe directional copy
     int16_t step_x = 1, step_y = 1;
@@ -1129,6 +1135,11 @@ static void gp0_image_load(Gpu* gpu) {
     LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD START (%u,%u) %ux%u = %u words",
                  gpu->vram_load_x, gpu->vram_load_y,
                  gpu->vram_load_w, gpu->vram_load_h, words);
+    LOG_VRAM_DEBUG("Copy rectangle from CPU to VRAM offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
+                   gpu->vram_load_x, gpu->vram_load_y,
+                   gpu->vram_load_w, gpu->vram_load_h,
+                   (uint32_t)gpu->vram_load_w * gpu->vram_load_h, words,
+                   gpu->vram_load_x / 64);
 
     if (words == 0) {
         gpu->gp0_words_remaining = 0;
@@ -1163,6 +1174,8 @@ static void gp0_image_store(Gpu* gpu) {
     gpu->vram_load_count = 0;
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
     LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM\xE2\x86\x92CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
+    LOG_VRAM_DEBUG("Copy rectangle from VRAM to CPU offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
+                   x, y, w, h, (uint32_t)w * h, words, x / 64);
 }
 
 // ---------------------------------------------------------------------------
@@ -1391,6 +1404,11 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
             LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
                          gpu->vram_load_x, gpu->vram_load_y,
                          gpu->vram_load_w, gpu->vram_load_h);
+            LOG_VRAM_DEBUG("CPU to VRAM transfer complete: offset=(%u,%u), size=(%u,%u) [%u pixels] page=%u",
+                           gpu->vram_load_x, gpu->vram_load_y,
+                           gpu->vram_load_w, gpu->vram_load_h,
+                           (uint32_t)gpu->vram_load_w * gpu->vram_load_h,
+                           gpu->vram_load_x / 64);
         }
         return;
     }

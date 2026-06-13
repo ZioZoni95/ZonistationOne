@@ -177,6 +177,8 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->current_write_buffer = 0;
     cdrom->vol_ll = cdrom->vol_rr = 0x80;
     cdrom->vol_lr = cdrom->vol_rl = 0;
+    cdrom->vol_ll_t = cdrom->vol_rr_t = 0x80;
+    cdrom->vol_lr_t = cdrom->vol_rl_t = 0;
     memset(cdrom->sector_buffers, 0, sizeof(cdrom->sector_buffers));
     memset(&cdrom->last_subq, 0, sizeof(cdrom->last_subq));
 
@@ -292,8 +294,8 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
         switch (cdrom->index) {
         case 0: fifo_push(&cdrom->param_fifo, value); break;
         case 1: cdrom->interrupt_enable = value & 0x1F; break;
-        case 2: cdrom->vol_ll = value; break; /* L→L */
-        case 3: cdrom->vol_rl = value; break; /* R→L */
+        case 2: cdrom->vol_ll_t = value; break; /* L←CDL temp */
+        case 3: cdrom->vol_rl_t = value; break; /* R←CDL temp */
         }
         break;
 
@@ -327,7 +329,8 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
 
                 /* Reading: schedule next sector delivery */
                 if (cdrom->drive_state == DRIVE_READING)
-                    cdrom_schedule_drive_event(cdrom, CDROM_READ_DELAY_1X / (cdrom->double_speed ? 2 : 1));
+                    cdrom_schedule_drive_event(cdrom,
+                        cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X);
 
                 /* Unblock a command that arrived while INT was pending */
                 if (cdrom->pending_command != CDC_NONE)
@@ -335,8 +338,18 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             }
             break;
         }
-        case 2: cdrom->vol_lr = value; break; /* L→R */
-        case 3: cdrom->vol_rr = value; break; /* Apply (R→R, already stored) */
+        case 2: cdrom->vol_lr_t = value; break; /* L←CDR temp */
+        case 3:
+            cdrom->vol_rr_t = value; /* R←CDR temp */
+            if (value & 0x20) {       /* bit5 = commit all temp → working */
+                cdrom->vol_ll = cdrom->vol_ll_t;
+                cdrom->vol_lr = cdrom->vol_lr_t;
+                cdrom->vol_rl = cdrom->vol_rl_t;
+                cdrom->vol_rr = cdrom->vol_rr_t;
+                LOG_CDROM_DEBUG("[CDROM] Volume matrix committed: LL=%02x LR=%02x RL=%02x RR=%02x",
+                                cdrom->vol_ll, cdrom->vol_lr, cdrom->vol_rl, cdrom->vol_rr);
+            }
+            break;
         }
         break;
     }

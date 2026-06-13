@@ -635,7 +635,7 @@ static void draw_spu_debug_window(Spu* spu) {
 // PS1 Display window
 // ---------------------------------------------------------------------------
 
-static void draw_ps1_display(GLuint texture_id) {
+static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
     if (!g_show_display) return;
 
     ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
@@ -643,10 +643,35 @@ static void draw_ps1_display(GLuint texture_id) {
     if (ImGui::Begin("PS1 Display", &g_show_display,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImVec2 size = ImGui::GetContentRegionAvail();
-        if (texture_id)
+        if (texture_id && inter) {
+            // Crop FBO to the active display region only.
+            // FBO is 1024x512; vertex shader maps PSX y=0 → GL clip +1 → FBO top.
+            // GL texture v: v = 1.0 - psx_y / 512.0
+            uint16_t vx = inter->gpu.crtc.display_vram_x;
+            uint16_t vy = inter->gpu.crtc.display_vram_y;
+            uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
+            uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
+
+            float u0 =        (float)vx        / 1024.0f;
+            float u1 =        (float)(vx + vw) / 1024.0f;
+            float v0 = 1.0f - (float)vy        / 512.0f;   // top of display region
+            float v1 = 1.0f - (float)(vy + vh) / 512.0f;   // bottom of display region
+
+            // Debug: print UV values on first 5 frames to verify correct crop
+            static int dbg_frames = 0;
+            if (dbg_frames < 5) {
+                fprintf(stderr, "[DISPLAY] frame=%d vram=(%d,%d) size=%dx%d  UV: (%.3f,%.3f)→(%.3f,%.3f)\n",
+                        dbg_frames, vx, vy, vw, vh, u0, v0, u1, v1);
+                dbg_frames++;
+            }
+
+            ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(u0, v0), ImVec2(u1, v1));
+        } else if (texture_id) {
+            // Fallback: show entire FBO Y-flipped
             ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(0, 1), ImVec2(1, 0));
-        else
+        } else {
             ImGui::TextDisabled("Display not ready");
+        }
     }
     ImGui::End();
     ImGui::PopStyleVar();
@@ -839,7 +864,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
 
     GLuint tex_id = 0;
     if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
-    draw_ps1_display(tex_id);
+    draw_ps1_display(tex_id, inter);
 
     ImGui::End(); // DockHost
 

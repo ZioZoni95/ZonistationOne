@@ -61,6 +61,7 @@ typedef struct {
     GLint uniform_screen_scale_loc; // Location for screen scaling uniform
     GLint uniform_tex_window_loc;   // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
     GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
+    GLint uniform_stp_mode_loc;     /* -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0) */
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.

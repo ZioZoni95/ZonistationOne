@@ -57,12 +57,12 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
     timer->interrupt_requested = false;
     // Clear Mode[10] interrupt request flag in the actual hardware register value
     timer->mode &= ~(1 << 10);
-    // After clearing, if timer is still at target/overflow and IRQ enabled, re-assert IRQ
-    if ((timer->irq_on_target && timer->counter == timer->target && (timer->mode & 0x100)) ||
-        (timer->irq_on_ffff && timer->counter == 0xFFFF && (timer->mode & 0x100))) {
+    /* Re-assert if counter already at target/overflow when mode is written */
+    if ((timer->irq_on_target && timer->counter == timer->target) ||
+        (timer->irq_on_ffff   && timer->counter == 0xFFFF)) {
         timer->interrupt_requested = true;
         timer->mode |= (1 << 10);
-interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
+        interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
     }
 }
 
@@ -175,9 +175,9 @@ if (offset == TIMER_MODE_OFFSET) {
         t->reached_ffff_flag = false;
         t->mode &= ~(1 << 10); // Clear IRQ request bit
         timer_update_internal_state(timers, t, timer_index);
-        // Re-assert IRQ if condition is still true after mode write
-        if (((t->irq_on_target && t->counter == t->target) ||
-             (t->irq_on_ffff && t->counter == 0xFFFF)) && (t->mode & 0x100)) {
+        /* Re-assert if counter already at target/overflow when mode is written */
+        if ((t->irq_on_target && t->counter == t->target) ||
+            (t->irq_on_ffff   && t->counter == 0xFFFF)) {
             t->interrupt_requested = true;
             t->mode |= (1 << 10);
             interconnect_request_irq(timers->inter, t->irq, "Timer re-assert after mode write");
@@ -286,49 +286,57 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
         if (whole_ticks == 0)
             continue;
 
-        // --- Main counter increment and event logic ---
+        /* --- Main counter increment and event logic --- */
         for (uint32_t tick = 0; tick < whole_ticks; ++tick) {
             t->counter++;
-            // Target reached?
-            if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
-                t->reached_target_flag = true;
-                if (t->irq_on_target && (t->mode & 0x100)) {
-                    t->interrupt_requested = true;
+
+            bool hit_target   = t->reset_on_target && t->target != 0 && t->counter == t->target;
+            bool hit_overflow = !hit_target && (t->counter == 0);
+
+            if (hit_target) t->reached_target_flag = true;
+            if (hit_overflow) t->reached_ffff_flag = true;
+
+            bool should_irq = (hit_target && t->irq_on_target) ||
+                              (hit_overflow && t->irq_on_ffff);
+
+            if (should_irq) {
+                /* Only fire if not already pending in I_STAT (avoids duplicate edges) */
+                bool already_pending = timers->inter &&
+                    (timers->inter->irq_status & (1u << t->irq)) != 0;
+
+                if (t->irq_pulse) {
+                    /* Toggle mode: bit10 flips; IRQ only on 0→1 transition */
+                    if (t->mode & (1 << 10)) {
+                        t->mode &= ~(1 << 10); /* 1→0, no CPU interrupt */
+                    } else {
+                        t->mode |= (1 << 10);  /* 0→1, fire CPU interrupt */
+                        LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ toggle→1 (hit_target=%d hit_ov=%d)", i, hit_target, hit_overflow);
+                        if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (toggle)");
+                    }
+                } else {
+                    /* Pulse mode: set bit10, fire IRQ if not already pending */
                     t->mode |= (1 << 10);
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ: target reached (counter=%u, target=%u)", i, t->counter, t->target);
-                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (target)");
+                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ pulse (hit_target=%d hit_ov=%d)", i, hit_target, hit_overflow);
+                    if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (pulse)");
                 }
-                t->counter = 0;
-                continue;
-            }
-            // Overflow?
-            if (t->counter == 0x10000) {
-                t->reached_ffff_flag = true;
-                if (t->irq_on_ffff && (t->mode & 0x100)) {
-                    t->interrupt_requested = true;
-                    t->mode |= (1 << 10);
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ: overflow", i);
-                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (overflow)");
+
+                /* One-shot (irq_repeat=0): disable after first fire */
+                if (!t->irq_repeat) {
+                    t->irq_on_target = false;
+                    t->irq_on_ffff   = false;
+                    t->mode &= ~((1 << 4) | (1 << 5));
                 }
-                t->counter = 0;
             }
+
+            if (hit_target) { t->counter = 0; continue; }
+            if (hit_overflow) t->counter = 0;
         }
     }
 }
 
 // --- Event scheduling for timers ---
 void timers_schedule_next_event(Timers* timers, int timer_index) {
-Timer* t = &timers->timers[timer_index];
-    
-    // Special handling for Timer0 (VBlank) - schedule every frame, not every cycle
-    if (timer_index == 0) {
-        // Timer0 should fire every frame (60Hz), not every few cycles
-        uint32_t frame_cycles = timers_calculate_frame_cycles();
-        eventq_schedule(timers->inter, EVQ_TIMER0, frame_cycles);
-        return;
-    }
-    
-    // For other timers, use the original logic
+    Timer* t = &timers->timers[timer_index];
     uint32_t cycles_until_event = 0;
     if (t->reset_on_target && t->target != 0) {
         if (t->counter < t->target)
@@ -407,9 +415,9 @@ static void timer_event_handler(Timers* timers, int timer_index) {
     if (t->counter == 0xFFFF) {
         t->reached_ffff_flag = true;
     }
-    // Only request IRQ if not already requested and enabled
+    /* Only request IRQ if not already requested and enabled */
     bool irq_enabled = (t->irq_on_target && t->reached_target_flag) || (t->irq_on_ffff && t->reached_ffff_flag);
-    if (irq_enabled && !t->interrupt_requested && (t->mode & 0x100)) {
+    if (irq_enabled && !t->interrupt_requested) {
         t->interrupt_requested = true;
         t->mode |= (1 << 10);
         LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ triggered by event handler", timer_index);

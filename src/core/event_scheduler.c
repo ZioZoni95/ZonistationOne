@@ -151,20 +151,12 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     
     // Trigger VBlank interrupt (IRQ0 per PSX-SPX)
     interconnect_request_irq(sys, 0, "VBlank");
-    
-    timers_on_vblank(&sys->timers_state);
 
-    // Force the renderer to blit the display-area from VRAM to the screen
-    if (sys->gpu.renderer.initialized && sys->gpu.crtc.display_width > 0 && sys->gpu.crtc.display_height > 0) {
-        uint32_t dump_x = sys->gpu.crtc.display_vram_x;
-        uint32_t dump_y = sys->gpu.crtc.display_vram_y;
-        uint32_t dump_w = sys->gpu.crtc.display_width  ? sys->gpu.crtc.display_width  : 320;
-        uint32_t dump_h = sys->gpu.crtc.display_height ? sys->gpu.crtc.display_height : 240;
-        if (dump_x + dump_w > 1024) dump_w = 1024 - dump_x;
-        if (dump_y + dump_h > 512) dump_h = 512 - dump_y;
-        
-        renderer_blit_vram(&sys->gpu.renderer, (uint16_t)sys->gpu.crtc.display_vram_x, (uint16_t)sys->gpu.crtc.display_vram_y, (uint16_t)dump_w, (uint16_t)dump_h);
-    }
+    // NOTE: renderer_blit_vram disabled — FBO already contains correctly rendered content
+    // from OpenGL primitive draws (polys, rects, lines). The blit read from vram_texture
+    // (CPU-side R16UI buffer) had a UV wrap bug: fragment shader masks v with &0xFF, so
+    // for vram_y=240 the v coordinate wraps at 256 → draws VRAM y=0 data over frame 2.
+    // draw_ps1_display() now crops the FBO to crtc.display_vram_y/display_height directly.
 }
 
 static void evq_handle_timer0(struct Interconnect* sys) {

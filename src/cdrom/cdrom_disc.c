@@ -4,6 +4,7 @@
  */
 
 #include "cdrom_disc.h"
+#include "cdrom.h"
 #include "log.h"
 #include <string.h>
 #include <stdlib.h>
@@ -277,12 +278,15 @@ uint8_t cdrom_disc_get_track_at_lba(CdromDisc *disc, uint32_t lba) {
  * ========================================================================= */
 
 uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba) {
-    if (from_lba == to_lba) return 800;
+    if (from_lba == to_lba) return CDROM_SEEK_FAST_DELAY;
     uint32_t dist = from_lba > to_lba ? from_lba - to_lba : to_lba - from_lba;
-    if (dist <= 2) return CDROM_SEEK_MIN_DELAY;
-    uint32_t ticks = CDROM_SEEK_MIN_DELAY + dist * 100;
-    uint32_t cap   = PSX_SYSCLK_HZ * 2;
-    return ticks < cap ? ticks : cap;
+    /* Tier-based curve matching pcsx-redux hardware tests.
+     * Short: cdReadTime*4 base. Long: add proportional term, cap at ~60s. */
+    uint32_t base = CDROM_SEEK_DELAY;
+    if (dist <= 10) return base;
+    uint32_t extra = (dist * CDROM_SECTOR_TIME) / 1000u;
+    uint32_t cap   = CDROM_SECTOR_TIME * 60u;
+    return base + (extra < cap ? extra : cap);
 }
 
 /* =========================================================================

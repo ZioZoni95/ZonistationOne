@@ -18,15 +18,40 @@ struct Interconnect;
 #define CDROM_RESPONSE_FIFO_SIZE 16
 #define CDROM_SECTOR_BUFFERS      8
 
-/* Timing (CPU cycles @ 33.8688 MHz) */
-#define CDROM_ACK_DELAY          25000
+/* Timing (CPU cycles @ 33.8688 MHz) — calibrated against pcsx-redux */
+#define CDROM_CLK_HZ             33868800u
+
+/* Sector read: 75 sectors/sec → PSX_CLK/75 cycles per sector */
+#define CDROM_SECTOR_TIME        (CDROM_CLK_HZ / 75u)       /* 451584 — 1x */
+#define CDROM_SECTOR_TIME_2X     (CDROM_CLK_HZ / 75u / 2u)  /* 225792 — 2x */
+
+#define CDROM_ACK_DELAY          25000   /* command → INT3 first response */
 #define CDROM_FAST_ACK_DELAY      5000
-#define CDROM_ID_READ_DELAY      33868
-#define CDROM_INIT_DELAY       4000000
-#define CDROM_RESET_DELAY      4000000
-#define CDROM_SEEK_MIN_DELAY     30000
-#define CDROM_READ_DELAY_1X      50000
-#define CDROM_SPINUP_DELAY      400000
+#define CDROM_ID_READ_DELAY      20480   /* GetID second response (pcsx-redux) */
+#define CDROM_INIT_DELAY       4100000   /* Init/Reset second response */
+#define CDROM_RESET_DELAY      4100000
+
+/* Seek delays */
+#define CDROM_SEEK_FAST_DELAY     0x800  /* setloc_pending, no head movement */
+#define CDROM_SEEK_DELAY         (CDROM_SECTOR_TIME * 4u)      /* real seek base */
+#define CDROM_SEEK_CHANGE_DELAY  (CDROM_SECTOR_TIME * 30u)     /* post-location-change first read */
+
+/* Spinup */
+#define CDROM_SPINUP_DELAY       (CDROM_SECTOR_TIME * 125u / 2u)  /* ~28M cycles */
+
+/* Stop */
+#define CDROM_STOP_IDLE_DELAY    0x800                          /* motor already stopped */
+#define CDROM_STOP_SPIN_DELAY    (CDROM_SECTOR_TIME * 30u / 2u) /* spinning → stop */
+
+/* Pause — speed-dependent (pcsx-redux hardware-tested values) */
+#define CDROM_PAUSE_IDLE_DELAY    7000    /* already idle/standby */
+#define CDROM_PAUSE_1X_DELAY    1000000
+#define CDROM_PAUSE_2X_DELAY    2000000
+
+/* Aliases for readability */
+#define CDROM_READ_DELAY_1X      CDROM_SECTOR_TIME
+#define CDROM_READ_DELAY_2X      CDROM_SECTOR_TIME_2X
+
 #define CDROM_MIN_INT_DELAY       1000
 
 #define IRQ_CDROM 2
@@ -223,8 +248,10 @@ typedef struct Cdrom {
     AudioFifo    audio_fifo;
     XaAdpcmState xa_adpcm_state;
 
-    /* Volume matrix (L←CDL, L←CDR, R←CDL, R←CDR) — default 0x80 each */
-    uint8_t vol_ll, vol_lr, vol_rl, vol_rr;
+    /* Volume matrix (L←CDL, L←CDR, R←CDL, R←CDR) — default 0x80 each.
+     * _t = temp staging registers; committed to working regs on write3[idx3] bit5. */
+    uint8_t vol_ll,   vol_lr,   vol_rl,   vol_rr;
+    uint8_t vol_ll_t, vol_lr_t, vol_rl_t, vol_rr_t;
 
 } Cdrom;
 

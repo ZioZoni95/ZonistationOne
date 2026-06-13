@@ -101,6 +101,44 @@ static void shutdown_sdl(SdlCtx* s) {
     SDL_Quit();
 }
 
+// --- SDL2 audio ---
+static Spu* g_spu_for_audio = NULL;
+static SDL_AudioDeviceID g_audio_dev = 0;
+
+static void audio_callback(void* userdata, Uint8* stream, int len) {
+    (void)userdata;
+    int num_samples = len / (2 * sizeof(int16_t)); // stereo int16
+    if (g_spu_for_audio)
+        spu_fill_audio(g_spu_for_audio, (int16_t*)stream, num_samples);
+    else
+        memset(stream, 0, (size_t)len);
+}
+
+static void audio_init(Spu* spu) {
+    g_spu_for_audio = spu;
+    SDL_AudioSpec want = {0}, got = {0};
+    want.freq     = 44100;
+    want.format   = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples  = 512;
+    want.callback = audio_callback;
+    g_audio_dev = SDL_OpenAudioDevice(NULL, 0, &want, &got, 0);
+    if (g_audio_dev == 0) {
+        LOG_SYSTEM_WARN("[SYSTEM] SDL audio open failed: %s — no sound", SDL_GetError());
+        return;
+    }
+    LOG_SYSTEM_INFO("[SYSTEM] Audio: %d Hz ch=%d fmt=0x%x buf=%d",
+                    got.freq, got.channels, got.format, got.samples);
+    SDL_PauseAudioDevice(g_audio_dev, 0);
+}
+
+static void audio_shutdown(void) {
+    if (g_audio_dev) {
+        SDL_CloseAudioDevice(g_audio_dev);
+        g_audio_dev = 0;
+    }
+}
+
 // --- PS-X EXE loader ---
 static bool load_exe(const char* path, Cpu* cpu, Interconnect* inter) {
     // Warm-up: let BIOS init kernel before sideloading
@@ -244,6 +282,8 @@ int main(int argc, char* argv[]) {
     controller_init(&gamepad);
     sio_set_controller_connected(&inter.sio, true);
 
+    audio_init(&inter.spu);
+
     eventq_schedule(&inter, EVQ_VBLANK, VBLANK_CYCLES);
     eventq_schedule(&inter, EVQ_TIMER0, 1024);
     eventq_schedule(&inter, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
@@ -315,6 +355,7 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Cleanup ---
+    audio_shutdown();
     debug_ui_shutdown();
     cdrom_audio_sdl_close();
     cdrom_eject_disc(&inter.cdrom);

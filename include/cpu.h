@@ -199,6 +199,7 @@ void cpu_exception(Cpu* cpu, ExceptionCause cause);
 // --- BIOS SYSCALL interceptors (DuckStation-style) ---
 void handle_a0_syscall(Cpu* cpu);
 void handle_b0_syscall(Cpu* cpu);
+void handle_c0_syscall(Cpu* cpu);
 
 
 // --- Register Access ---
@@ -242,6 +243,9 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr);
 
 // --- Disassembler ---
 const char* disassemble_mips(uint32_t instruction, uint32_t pc);
+
+// --- Instruction dispatch handler type ---
+typedef void (*cpu_handler_t)(Cpu*, uint32_t);
 
 // --- Instruction Handler Prototypes (Internal linkage) ---
 // These functions implement the behavior of individual MIPS instructions.

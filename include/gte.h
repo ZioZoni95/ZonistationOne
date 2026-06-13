@@ -130,4 +130,18 @@ void gte_avsz3(Gte* gte);
 // AVSZ4 - Average Z (4 points)
 void gte_avsz4(Gte* gte);
 
-#endif // GTE_H 
+// Color/lighting operations
+void gte_dpcs(Gte* gte, uint32_t instruction);
+void gte_dpct(Gte* gte, uint32_t instruction);
+void gte_ncds(Gte* gte, uint32_t instruction);
+void gte_ncdt(Gte* gte, uint32_t instruction);
+void gte_cdp(Gte* gte, uint32_t instruction);
+void gte_nccs(Gte* gte, uint32_t instruction);
+void gte_ncct(Gte* gte, uint32_t instruction);
+void gte_cc(Gte* gte, uint32_t instruction);
+void gte_ncs(Gte* gte, uint32_t instruction);
+void gte_nct(Gte* gte, uint32_t instruction);
+void gte_gpf(Gte* gte, uint32_t instruction);
+void gte_gpl(Gte* gte, uint32_t instruction);
+
+#endif // GTE_H
