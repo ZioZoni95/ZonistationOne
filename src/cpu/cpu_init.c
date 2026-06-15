@@ -42,6 +42,8 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->epc = 0;           // Exception PC (cleared)
     cpu->badvaddr = 0;      // Bad virtual address (COP0 r8)
     cpu->prid = 0x00000002; // Processor Revision Identifier: PSX value
+    cpu->cop0_tar = 0;
+    cpu->cop0_dcic = 0;
 
     // Initialize boot stage tracking
     cpu->boot_stage = BOOT_STAGE_POWER_ON;

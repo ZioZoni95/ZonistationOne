@@ -3,6 +3,8 @@
 // Based on DuckStation's pad.cpp: https://github.com/stenzek/duckstation
 
 #include "sio.h"
+#include "interconnect.h"
+#include "event_scheduler.h"
 #include "log.h"
 #include <string.h>
 #include <stdio.h>
@@ -94,9 +96,9 @@ typedef struct {
     uint16_t button_state;
     uint8_t controller_transfer_step;
 
-    // Memory Cards
-    MemoryCard card_slot1;
-    MemoryCard card_slot2;
+    // Memory Cards (pointers into public Sio struct — set by sio_init)
+    MemoryCard *mc1;
+    MemoryCard *mc2;
     bool card_slot1_present;
     bool card_slot2_present;
 
@@ -109,10 +111,14 @@ typedef struct {
     uint8_t mc_checksum;       // running XOR over addr + data
     uint8_t mc_flag;           // FLAG byte: 0x08 on powerup, bit3 = unread-dir
     bool mc_write_ok;          // write checksum matched
+    uint8_t mc_last_byte;      // last byte sent by host (for echo responses)
 
     // Pending events
     bool pending_irq;
     uint32_t pending_irq_type;  // 0=none, 1=TX, 2=RX, 3=ACK
+
+    // Interconnect back-pointer (set by sio_set_interconnect after sio_init)
+    struct Interconnect* inter;
 } SioInternal;
 
 static SioInternal sio_internal = {};
@@ -140,6 +146,7 @@ static void sio_reset_device_transfer_state(void);
 void sio_init(Sio* sio) {
     memset(sio, 0, sizeof(Sio));
     memset(&sio_internal, 0, sizeof(SioInternal));
+    sio_internal.inter = NULL;  // set later by sio_set_interconnect
 
     // Initialize register state
     sio_internal.stat = STAT_TXRDY | STAT_TXDONE;
@@ -158,6 +165,10 @@ void sio_init(Sio* sio) {
     sio_internal.button_state = 0xFFFF;  // All buttons released
     sio_internal.controller_transfer_step = 0;
 
+    // Wire memory card pointers to the public Sio struct
+    sio_internal.mc1 = &sio->card_slot1;
+    sio_internal.mc2 = &sio->card_slot2;
+
     // Initialize memory cards
     sio_internal.card_slot1_present = false;
     sio_internal.card_slot2_present = false;
@@ -174,6 +185,28 @@ void sio_init(Sio* sio) {
     sio->controller_connected = sio_internal.controller_connected;
 
     LOG_SYSTEM_INFO("[SYSTEM] SIO initialized (DuckStation-style implementation)");
+}
+
+void sio_set_interconnect(Sio* sio, struct Interconnect* inter) {
+    (void)sio;
+    sio_internal.inter = inter;
+}
+
+// Called by EVQ_SIO event handler — executes the deferred byte transfer and
+// delivers IRQ7 if enabled. Also reschedules for chained transfers.
+void sio_execute_event(Sio* sio) {
+    sio_do_transfer();
+
+    // Deliver ACK IRQ if pending (set by sio_do_ack via sio_trigger_irq)
+    if (sio_internal.pending_irq) {
+        sio->pending_irq = true;
+        sio_internal.pending_irq = false;
+        if (sio_internal.inter) {
+            LOG_SYSTEM_DEBUG("[SIO] EVQ_SIO: firing IRQ7 (CTRLMEMCARD)");
+            interconnect_set_irq_line(sio_internal.inter, IRQ_CTRLMEMCARD, true);
+            interconnect_set_irq_line(sio_internal.inter, IRQ_CTRLMEMCARD, false);
+        }
+    }
 }
 
 // ============================================================================
@@ -209,8 +242,12 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
 
 uint16_t sio_read16(Sio* sio, uint32_t offset) {
     switch (offset) {
-        case 0x04:  // JOY_STAT (1F801044h)
-            return sio_internal.stat;
+        case 0x04: {  // JOY_STAT (1F801044h)
+            // ACK_INPUT (bit 7) is a momentary pulse — clear on read per DuckStation
+            uint16_t stat = (uint16_t)sio_internal.stat;
+            sio_internal.stat &= ~STAT_ACKINPUT;
+            return stat;
+        }
 
         case 0x08:  // JOY_MODE (1F801048h)
             return sio_internal.mode;
@@ -257,6 +294,11 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
 
         default:
             break;
+    }
+
+    if (sio_internal.pending_irq) {
+        sio->pending_irq = true;
+        sio_internal.pending_irq = false;
     }
 }
 
@@ -320,6 +362,11 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
         default:
             break;
     }
+
+    if (sio_internal.pending_irq) {
+        sio->pending_irq = true;
+        sio_internal.pending_irq = false;
+    }
 }
 
 void sio_write32(Sio* sio, uint32_t offset, uint32_t value) {
@@ -378,7 +425,7 @@ static void sio_soft_reset(void) {
 
 static void sio_begin_transfer(void) {
     SIO_DBG("[SIO] BeginTransfer");
-    
+
     if (sio_internal.state != STATE_IDLE || !sio_can_transfer()) {
         return;
     }
@@ -388,9 +435,16 @@ static void sio_begin_transfer(void) {
     sio_internal.transmit_value = sio_internal.transmit_buffer;
     sio_internal.transmit_buffer_full = false;
 
-    // In DuckStation this would schedule an event after some ticks
-    // For our simplified implementation, do transfer immediately
-    sio_do_transfer();
+    // Defer transfer via event scheduler (DuckStation: BAUD*8 cycles delay).
+    // This gives the BIOS time to clear stale I_STAT[7] and set up IRQ handlers
+    // before the ACK IRQ arrives — required for IRQ-driven memory card access.
+    if (sio_internal.inter) {
+        uint32_t delay = (uint32_t)sio_internal.baud * 8;
+        if (delay < 128) delay = 128;
+        eventq_schedule(sio_internal.inter, EVQ_SIO, delay);
+    } else {
+        sio_do_transfer();  // fallback (no interconnect, e.g. unit tests)
+    }
 }
 
 static void sio_do_transfer(void) {
@@ -488,18 +542,11 @@ static void sio_end_transfer(void) {
 
 static void sio_reset_device_transfer_state(void) {
     SIO_DBG("[SIO] ResetDeviceTransferState (step=%d)", sio_internal.controller_transfer_step);
-    
+
     sio_internal.active_device = ACTIVE_DEVICE_NONE;
-    
-    // Only reset transfer step after a complete 4-byte sequence
-    // or if we're not in the middle of a sequence
-    if (sio_internal.controller_transfer_step >= 4) {
-        sio_internal.controller_transfer_step = 0;
-        SIO_DBG("[SIO] Sequence complete, resetting step");
-    } else if (sio_internal.controller_transfer_step > 0) {
-        // Keep step across SELECT toggles - the BIOS does multiple transfers per sequence
-        SIO_DBG("[SIO] Keeping step=%d for next transfer", sio_internal.controller_transfer_step);
-    }
+    sio_internal.mc_step = 0;
+    // Always reset controller step on CS deassert (matches DuckStation behavior)
+    sio_internal.controller_transfer_step = 0;
 }
 
 static void sio_update_joystat(void) {
@@ -588,7 +635,8 @@ static uint8_t sio_controller_transfer(uint8_t tx_byte) {
 
 static uint8_t sio_memcard_transfer(uint8_t tx) {
     SioInternal* s = &sio_internal;
-    MemoryCard* card = &s->card_slot1;
+    MemoryCard* card = s->mc1;
+    if (!card) return 0xFF;
     uint8_t resp = 0xFF;
 
     switch (s->mc_step) {
@@ -598,6 +646,7 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
             s->mc_byte_pos = 0;
             resp = s->mc_flag;
             s->mc_step++;
+            LOG_SYSTEM_DEBUG("[MC] Command 0x%02x (flag=0x%02x)", tx, s->mc_flag);
             break;
 
         case 1: resp = 0x5A; s->mc_step++; break;  // ID1
@@ -607,13 +656,15 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
             s->mc_sector = (uint16_t)(tx << 8);
             s->mc_checksum = tx;
             resp = 0x00;
+            s->mc_last_byte = tx;
             s->mc_step++;
             break;
 
-        case 4:  // Addr LSB
+        case 4:  // Addr LSB — echo MSB back (DuckStation: m_last_byte)
             s->mc_sector |= tx;
             s->mc_checksum ^= tx;
-            resp = 0x00;
+            resp = s->mc_last_byte;  // echo MSBadr
+            s->mc_last_byte = tx;
             s->mc_step++;
             break;
 
@@ -642,31 +693,38 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
                 } else if (pos == 133) {                                // end byte 'G'
                     resp = 0x47;
                     s->mc_step = 0xFF;
+                    LOG_SYSTEM_DEBUG("[MC] READ sector=%u complete chk=0x%02x", s->mc_sector, s->mc_checksum);
                 }
             } else if (s->mc_cmd == 0x57) {
                 // WRITE: steps 5..136
                 int pos = (int)s->mc_step - 5;
                 if (pos >= 0 && pos < 128) {                            // 128 data bytes
+                    resp = s->mc_last_byte;  // echo previous host byte (DuckStation)
                     s->mc_write_buf[pos] = tx;
                     s->mc_checksum ^= tx;
+                    s->mc_last_byte = tx;
                     s->mc_step++;
-                    resp = 0x00;
                 } else if (pos == 128) {                                // host checksum
+                    resp = s->mc_last_byte;  // echo last data byte (DuckStation)
                     s->mc_write_ok = (tx == s->mc_checksum) &&
                                      (s->mc_sector < MEMCARD_SECTORS);
+                    LOG_SYSTEM_DEBUG("[MC] WRITE sector=%u chk_host=0x%02x chk_card=0x%02x %s",
+                        s->mc_sector, tx, s->mc_checksum,
+                        s->mc_write_ok ? "OK" : "CHKSUM_FAIL");
                     if (s->mc_write_ok) {
                         uint32_t off = (uint32_t)s->mc_sector * MEMCARD_SECTOR_SIZE;
                         memcpy(card->data + off, s->mc_write_buf, MEMCARD_SECTOR_SIZE);
                         card->dirty = true;
-                        s->mc_flag &= ~0x08;  // clear "unread dir" flag on write
+                        s->mc_flag &= ~0x08;
                     }
-                    resp = 0x00;
                     s->mc_step++;
                 } else if (pos == 129) { resp = 0x5C; s->mc_step++; } // ack1
                 else if (pos == 130) { resp = 0x5D; s->mc_step++; }   // ack2
                 else if (pos == 131) {                                  // end byte
                     resp = s->mc_write_ok ? 0x47 : 0x4E;
                     s->mc_step = 0xFF;
+                    LOG_SYSTEM_DEBUG("[MC] WRITE sector=%u result=%s", s->mc_sector,
+                        s->mc_write_ok ? "GOOD(0x47)" : "BAD(0x4E)");
                     if (card->dirty) sio_save_memcard(card);
                 }
             } else if (s->mc_cmd == 0x53) {
@@ -726,14 +784,29 @@ bool sio_save_memcard(MemoryCard* card) {
 
 void sio_create_memcard(MemoryCard* card, const char* filepath) {
     strncpy(card->filepath, filepath, sizeof(card->filepath) - 1);
-    memset(card->data, 0xFF, MEMCARD_SIZE);
-    // Sony MC header frame: "MC" + 0x00 padding + XOR checksum at byte 127
+    memset(card->data, 0x00, MEMCARD_SIZE);
+
+    // Sector 0: header "MC" + 0x00×125 + XOR checksum at byte 127
     card->data[0] = 'M';
     card->data[1] = 'C';
-    memset(card->data + 2, 0x00, 125);
-    uint8_t xor = 0;
-    for (int i = 0; i < 127; i++) xor ^= card->data[i];
-    card->data[127] = xor;
+    card->data[127] = 0x0E;  // XOR of 'M'^'C' = 0x0E
+
+    // Sectors 1-15: free directory entries
+    for (int i = 1; i <= 15; i++) {
+        uint8_t* s = card->data + i * MEMCARD_SECTOR_SIZE;
+        s[0]   = 0xA0;  // alloc_state: free
+        s[8]   = 0xFF;
+        s[9]   = 0xFF;
+        s[127] = 0xA0;  // checksum: only s[0] is non-zero in range [0..126]
+    }
+
+    // Sectors 16-35: broken sector list (0xFFFFFFFF link, 0x00000000 padding)
+    for (int i = 16; i <= 35; i++) {
+        uint8_t* s = card->data + i * MEMCARD_SECTOR_SIZE;
+        s[0] = 0xFF; s[1] = 0xFF; s[2] = 0xFF; s[3] = 0xFF;
+        s[8] = 0xFF; s[9] = 0xFF;
+    }
+
     card->present = true;
     card->dirty = true;
     sio_internal.card_slot1_present = true;

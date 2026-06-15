@@ -21,14 +21,18 @@ void op_ori(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_sw(Cpu* cpu, uint32_t instruction) {
-    if ((cpu->sr & 0x10000) != 0) // Cache isolated — writes go to I-cache, not RAM
-        return;
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t address = cpu_reg(cpu, rs) + offset;
-    uint32_t value = cpu_reg(cpu, rt); // Use input register set
-    // Enforce word alignment for SW
+    uint32_t value = cpu_reg(cpu, rt);
+    if ((cpu->sr & 0x10000) != 0) {
+        // Cache isolation: write invalidates I-cache line at this address
+        uint32_t paddr = mask_region(address);
+        ICacheLine* line = &cpu->icache[(paddr >> 4) & (ICACHE_NUM_LINES - 1)];
+        line->valid[0] = line->valid[1] = line->valid[2] = line->valid[3] = false;
+        return;
+    }
     if ((address & 3) != 0) {
         LOG_CPU_ERROR("[CPU] SW Address Error: Unaligned address 0x%08x = 0x%08x @ 0x%08x", address, value, cpu->current_pc);
         cpu->badvaddr = address;
@@ -56,8 +60,8 @@ void op_addiu(Cpu* cpu, uint32_t instruction) {
 
 void op_j(Cpu* cpu, uint32_t instruction) {
     uint32_t target_imm = instr_imm_jump(instruction);
-    // Upper 4 bits come from the delay slot's PC (cpu->pc already advanced to delay slot).
     cpu->next_pc = (cpu->pc & 0xF0000000) | (target_imm << 2);
+    cpu->cop0_tar = cpu->next_pc;
     cpu->branch_taken = true;
 }
 
@@ -96,9 +100,11 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value = cpu_reg(cpu, cpu_r);
 
     switch (cop_r) {
-        case 3: case 5: case 6: case 7: case 9: case 11: // Breakpoint/DCIC regs
-             if (value != 0) LOG_CPU_DEBUG("[CPU] MTC0 breakpoint/DCIC reg %u <- 0x%08x", cop_r, value);
+        case 3: case 5: case 9: case 11: // Breakpoint regs — not implemented, ignore
+             if (value != 0) LOG_CPU_DEBUG("[CPU] MTC0 breakpoint reg %u <- 0x%08x (ignored)", cop_r, value);
              break;
+        case 6: cpu->cop0_tar = value; break;   // TAR / JUMPDEST
+        case 7: cpu->cop0_dcic = value; break;  // DCIC
         case 12: // SR (Status Register)
 // Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
             cpu->sr = (cpu->sr & ~0xF27FFFFF) | (value & 0xF27FFFFF);
@@ -198,30 +204,30 @@ void op_addu(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_sh(Cpu* cpu, uint32_t instruction) {
-    if ((cpu->sr & 0x10000) != 0) {
-// Keep debug print
-        return;
-    }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t address = cpu_reg(cpu, rs) + offset;
-    // Enforce halfword alignment for SH
+    if ((cpu->sr & 0x10000) != 0) {
+        uint32_t paddr = mask_region(address);
+        ICacheLine* line = &cpu->icache[(paddr >> 4) & (ICACHE_NUM_LINES - 1)];
+        line->valid[0] = line->valid[1] = line->valid[2] = line->valid[3] = false;
+        return;
+    }
     if ((address & 1) != 0) {
         LOG_CPU_ERROR("[CPU] SH Address Error: Unaligned address 0x%08x @ 0x%08x", address, cpu->current_pc);
         cpu->badvaddr = address;
         cpu_exception(cpu, EXCEPTION_STORE_ADDRESS_ERROR);
         return;
     }
-    uint16_t value = (uint16_t)cpu_reg(cpu, rt); // Lower 16 bits of rt
-    interconnect_store16(cpu->inter, address, value);
+    interconnect_store16(cpu->inter, address, (uint16_t)cpu_reg(cpu, rt));
 }
 
 void op_jal(Cpu* cpu, uint32_t instruction) {
-    cpu_set_reg(cpu, REG_RA, cpu->pc + 4); // Link Register $31 gets PC+8 (address after delay slot)
+    cpu_set_reg(cpu, REG_RA, cpu->pc + 4);
     uint32_t target_imm = instr_imm_jump(instruction);
-    // Upper 4 bits come from the delay slot's PC (cpu->pc already advanced to delay slot).
     cpu->next_pc = (cpu->pc & 0xF0000000) | (target_imm << 2);
+    cpu->cop0_tar = cpu->next_pc;
     cpu->branch_taken = true;
 }
 
@@ -233,16 +239,17 @@ void op_andi(Cpu* cpu, uint32_t instruction) {
 }
 
 void op_sb(Cpu* cpu, uint32_t instruction) {
-    if ((cpu->sr & 0x10000) != 0) {
-// Keep debug print
-        return;
-    }
     uint32_t offset = instr_imm_se(instruction);
     uint32_t rt = instr_t(instruction);
     uint32_t rs = instr_s(instruction);
     uint32_t address = cpu_reg(cpu, rs) + offset;
-    uint8_t value = (uint8_t)cpu_reg(cpu, rt); // Lower 8 bits of rt
-    interconnect_store8(cpu->inter, address, value);
+    if ((cpu->sr & 0x10000) != 0) {
+        uint32_t paddr = mask_region(address);
+        ICacheLine* line = &cpu->icache[(paddr >> 4) & (ICACHE_NUM_LINES - 1)];
+        line->valid[0] = line->valid[1] = line->valid[2] = line->valid[3] = false;
+        return;
+    }
+    interconnect_store8(cpu->inter, address, (uint8_t)cpu_reg(cpu, rt));
 }
 
 void op_jr(Cpu* cpu, uint32_t instruction) {
@@ -275,9 +282,9 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
     if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
         // Suppressed full CPU state dump for 0x1010 loop to avoid excessive logs
 }
+    cpu->cop0_tar = target_address;
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
-    // Alignment check will happen on fetch in the next cycle
 }
 
 void op_lb(Cpu* cpu, uint32_t instruction) {
@@ -313,13 +320,13 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value_read = 0; // Default value if read fails or is unhandled
 
     switch (cop_r_src) {
-        case  3: value_read = 0; break; // BPC (breakpoint on execute) — not implemented, return 0
-        case  5: value_read = 0; break; // BDA (breakpoint on data access) — not implemented, return 0
-        case  6: value_read = 0; break; // JUMPDEST (TAR, target address register) — not implemented, return 0
-        case  7: value_read = 0; break; // DCIC (debug/cache control) — not implemented, return 0
-        case  8: value_read = cpu->badvaddr; break; // BadVaddr
-        case  9: value_read = 0; break; // BDAM (breakpoint data access mask) — not implemented, return 0
-        case 11: value_read = 0; break; // BPCM (breakpoint execute mask) — not implemented, return 0
+        case  3: value_read = 0; break;              // BPC — not implemented
+        case  5: value_read = 0; break;              // BDA — not implemented
+        case  6: value_read = cpu->cop0_tar; break;  // TAR / JUMPDEST
+        case  7: value_read = cpu->cop0_dcic; break; // DCIC
+        case  8: value_read = cpu->badvaddr; break;  // BadVaddr
+        case  9: value_read = 0; break;              // BDAM — not implemented
+        case 11: value_read = 0; break;              // BPCM — not implemented
         case 12: value_read = cpu->sr; break; // SR
         case 13: value_read = cpu->cause; break; // CAUSE
         case 14: value_read = cpu->epc; break; // EPC
@@ -421,12 +428,10 @@ if (target_address == 0xA0)
     if ((target_address & 0x3) != 0) {
 }
 
-    // Store return address in rd
     cpu_set_reg(cpu, rd, return_addr);
-    // Set jump target
+    cpu->cop0_tar = target_address;
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
-    // Alignment check will happen on fetch in the next cycle
 }
 
 // Handles BGEZ, BLTZ, BGEZAL, BLTZAL based on bits 20 and 16
@@ -591,15 +596,24 @@ void op_nor(Cpu* cpu, uint32_t instruction) {
 // Move To LO
 void op_mtlo(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
-    cpu->lo = cpu_reg(cpu, rs); //
-    // TODO: Writing HI/LO can interfere with ongoing DIV/MULT. Ignored for now.
+    // Stall until ongoing MULT/DIV completes (matches MFHI/MFLO stall logic)
+    if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
+        uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
+        cpu->inter->cpu_cycle_counter += stall;
+        cpu->downcount -= (int32_t)stall;
+    }
+    cpu->lo = cpu_reg(cpu, rs);
 }
 
 // Move To HI
 void op_mthi(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
-    cpu->hi = cpu_reg(cpu, rs); //
-    // TODO: Timing/interlock implications ignored.
+    if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
+        uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
+        cpu->inter->cpu_cycle_counter += stall;
+        cpu->downcount -= (int32_t)stall;
+    }
+    cpu->hi = cpu_reg(cpu, rs);
 }
 
 // Load Halfword Unsigned

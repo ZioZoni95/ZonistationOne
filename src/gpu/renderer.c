@@ -473,6 +473,15 @@ bool renderer_init(Renderer* renderer) {
     LOG_RENDERER_DEBUG("[RENDERER] Display FBO created successfully (FBO: %u, Texture: %u).", renderer->display_fbo, renderer->display_texture);
     // Note: We leave display_fbo bound so all PSX rendering goes here!
 
+    // --- VRAM viewer texture (RGBA8, updated on CPU each frame) ---
+    glGenTextures(1, &renderer->vram_viewer_texture);
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    LOG_RENDERER_DEBUG("[RENDERER] VRAM viewer texture created (ID: %u).", renderer->vram_viewer_texture);
+
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
     renderer->uniform_vram_texture_loc = glGetUniformLocation(renderer->shader_program, "vram_texture");
@@ -697,11 +706,38 @@ void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mas
     glUseProgram(0);
 }
 
+static void renderer_upload_vram_rect_to_display(Renderer* renderer,
+                                                  const uint8_t* vram_bytes,
+                                                  uint16_t x, uint16_t y,
+                                                  uint16_t w, uint16_t h) {
+    if (!renderer->initialized || w == 0 || h == 0) return;
+    static uint8_t rgb_buf[1024 * 512 * 3];
+    const uint16_t* src = (const uint16_t*)vram_bytes;
+    for (uint16_t row = 0; row < h; row++) {
+        uint8_t* dst = rgb_buf + (uint32_t)row * w * 3;
+        uint32_t base = ((uint32_t)(y + row) * 1024u) + x;
+        for (uint16_t col = 0; col < w; col++) {
+            uint16_t raw = src[base + col];
+            *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
+            *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+            *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+        }
+    }
+    renderer_draw(renderer);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+}
+
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     if (!renderer->initialized) return;
     glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, vram_data);
     glBindTexture(GL_TEXTURE_2D, 0);
+    renderer_upload_vram_rect_to_display(renderer, (const uint8_t*)vram_data, 0, 0, 1024, 512);
 }
 
 void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
@@ -713,6 +749,7 @@ void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
                     &vram_data[(uint32_t)y * 1024u + x]);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    renderer_upload_vram_rect_to_display(renderer, (const uint8_t*)vram_data, x, y, w, h);
 }
 
 // Uploads buffered data and performs the OpenGL draw call.
@@ -1056,6 +1093,28 @@ GLuint renderer_get_display_texture(Renderer* renderer) {
     return renderer->display_texture;
 }
 
+void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) {
+    if (!renderer->initialized) return;
+    static uint8_t rgba_buf[1024 * 512 * 4];
+    const uint16_t* src = (const uint16_t*)vram_bytes;
+    uint8_t* dst = rgba_buf;
+    for (int i = 0; i < 1024 * 512; i++) {
+        uint16_t raw = src[i];
+        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
+        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+        *dst++ = 255;
+    }
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RGBA, GL_UNSIGNED_BYTE, rgba_buf);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+GLuint renderer_get_vram_viewer_texture(Renderer* renderer) {
+    if (!renderer || !renderer->initialized) return 0;
+    return renderer->display_texture;
+}
+
 // Cleans up OpenGL resources
 void renderer_destroy(Renderer* renderer) {
     if (!renderer || !renderer->initialized) return;
@@ -1069,6 +1128,8 @@ void renderer_destroy(Renderer* renderer) {
     glDeleteBuffers(1, &renderer->position_buffer); check_gl_error("destroy - glDeleteBuffers pos");
     glDeleteBuffers(1, &renderer->color_buffer); check_gl_error("destroy - glDeleteBuffers col");
     // Add texcoord buffer deletion later if implemented
+
+    glDeleteTextures(1, &renderer->vram_viewer_texture); check_gl_error("destroy - vram_viewer_texture");
 
     LOG_RENDERER_DEBUG("[RENDERER]   Deleting VAO (ID: %u)", renderer->vao);
     glDeleteVertexArrays(1, &renderer->vao); check_gl_error("destroy - glDeleteVertexArrays");

@@ -314,5 +314,8 @@ void interconnect_tty_input_add(Interconnect* inter, char ch);
  */
 int interconnect_tty_input_get(Interconnect* inter);
 
+// Initialize HW dispatch tables (call once from interconnect_init).
+void bus_hw_tables_init(void);
+
 
 #endif // INTERCONNECT_H

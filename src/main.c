@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include <SDL2/SDL.h>
 #define GLEW_STATIC
@@ -104,6 +105,15 @@ static void shutdown_sdl(SdlCtx* s) {
 // --- SDL2 audio ---
 static Spu* g_spu_for_audio = NULL;
 static SDL_AudioDeviceID g_audio_dev = 0;
+
+// --- Exec trace on forced shutdown ---
+static const Cpu* g_cpu_for_trace = NULL;
+
+static void sighandler_dump_trace(int sig) {
+    (void)sig;
+    if (g_cpu_for_trace) cpu_dump_exec_trace(g_cpu_for_trace, "logs/exec_trace.log");
+    _exit(1);
+}
 
 static void audio_callback(void* userdata, Uint8* stream, int len) {
     (void)userdata;
@@ -289,6 +299,11 @@ int main(int argc, char* argv[]) {
     eventq_schedule(&inter, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
     LOG_SPU_INFO("[SPU] EVQ_SPU scheduled at 44100 Hz (768 cy/sample)");
 
+    g_cpu_for_trace = &cpu;
+    signal(SIGINT,  sighandler_dump_trace);
+    signal(SIGTERM, sighandler_dump_trace);
+    signal(SIGABRT, sighandler_dump_trace);
+
     LOG_SYSTEM_INFO("[SYSTEM] All components initialised — starting loop");
 
     // --- Main loop ---
@@ -355,6 +370,7 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Cleanup ---
+    cpu_dump_exec_trace(&cpu, "logs/exec_trace.log");
     audio_shutdown();
     debug_ui_shutdown();
     cdrom_audio_sdl_close();

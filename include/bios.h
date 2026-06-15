@@ -58,4 +58,8 @@ void bios_print_bootstrap_strings(const Bios* bios);
 // Pass --bios-strings on the command line to invoke this instead of the boot-only scan.
 void bios_print_all_hidden_strings(const Bios* bios);
 
+// Patch BIOS ROM in memory to skip the shell (and region check).
+// DuckStation-style fast boot: replaces shell entry with display-enable + jr $ra.
+void bios_apply_fastboot_patch(Bios* bios);
+
 #endif // BIOS_H

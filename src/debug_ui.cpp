@@ -97,6 +97,7 @@ static bool g_show_disasm      = true;
 static bool g_show_registers   = true;
 static bool g_show_breakpoints = false;
 static bool g_show_spu         = false;
+static bool g_show_vram_viewer = true;
 
 // ---------------------------------------------------------------------------
 // Disasm state
@@ -415,6 +416,11 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
 
     ImGui::Separator();
 
+    // Tab bar: Live Disasm | Exec Trace
+    if (ImGui::BeginTabBar("##disasm_tabs")) {
+
+    if (ImGui::BeginTabItem("Live Disasm")) {
+
     // Auto-follow PC when running
     if (!dbg->paused && g_disasm_follow_pc)
         g_disasm_view_addr = (cpu->current_pc > 32 * 4) ? (cpu->current_pc - 32 * 4) : 0;
@@ -519,6 +525,67 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
             g_scroll_to_pc = true;
         }
     }
+
+    ImGui::EndTabItem(); // Live Disasm
+
+    } // BeginTabItem "Live Disasm"
+
+    // -------------------------------------------------------------------------
+    // Exec Trace tab — ring buffer of last EXEC_TRACE_SIZE executed instructions
+    // -------------------------------------------------------------------------
+    if (ImGui::BeginTabItem("Exec Trace")) {
+        uint32_t count = cpu->exec_trace_count;
+        uint32_t head  = cpu->exec_trace_head;
+        uint32_t start = (head - count) & (EXEC_TRACE_SIZE - 1);
+
+        // Buttons row
+        if (ImGui::Button("Dump to file")) {
+            cpu_dump_exec_trace(cpu, "logs/exec_trace.log");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%u entries)", count);
+        ImGui::Separator();
+
+        ImGui::BeginChild("##tracelist", ImVec2(0, 0), false,
+                          ImGuiWindowFlags_HorizontalScrollbar);
+
+        ImGuiListClipper tc;
+        tc.Begin((int)count);
+        while (tc.Step()) {
+            for (int row = tc.DisplayStart; row < tc.DisplayEnd; row++) {
+                uint32_t idx = (start + (uint32_t)row) & (EXEC_TRACE_SIZE - 1);
+                uint32_t pc  = cpu->exec_trace_pc[idx];
+                uint32_t ins = cpu->exec_trace_instr[idx];
+                const char* dis = disassemble_mips(ins, pc);
+                bool is_last = ((uint32_t)row == count - 1);
+
+                if (is_last) {
+                    ImVec2 rmin = ImGui::GetCursorScreenPos();
+                    rmin.x = ImGui::GetWindowPos().x;
+                    ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
+                                    rmin.y + ImGui::GetTextLineHeightWithSpacing() };
+                    ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(80, 20, 0, 180));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
+                    ImGui::Text(">>> [%4u] %08X  %08X  %s", row, pc, ins, dis ? dis : "?");
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::TextDisabled("    [%4u] %08X  %08X  %s", row, pc, ins, dis ? dis : "?");
+                }
+            }
+        }
+        tc.End();
+
+        // Auto-scroll to bottom (most recent instruction)
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f)
+            ImGui::SetScrollHereY(1.0f);
+
+        ImGui::EndChild();
+        ImGui::EndTabItem(); // Exec Trace
+    }
+
+    ImGui::EndTabBar();
+    } // BeginTabBar
+
     ImGui::End();
 }
 
@@ -632,6 +699,29 @@ static void draw_spu_debug_window(Spu* spu) {
 }
 
 // ---------------------------------------------------------------------------
+// VRAM Viewer window
+// ---------------------------------------------------------------------------
+
+static void draw_vram_viewer_window(Renderer* renderer) {
+    if (!g_show_vram_viewer || !renderer) return;
+    GLuint tex = renderer_get_vram_viewer_texture(renderer);
+    ImGui::SetNextWindowSize(ImVec2(1024, 520), ImGuiCond_FirstUseEver);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    if (ImGui::Begin("VRAM Viewer", &g_show_vram_viewer,
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float scale = avail.x / 1024.0f;
+        ImVec2 img_size = ImVec2(avail.x, 512.0f * scale);
+        if (tex)
+            ImGui::Image((void*)(intptr_t)tex, img_size, ImVec2(0, 1), ImVec2(1, 0));
+        else
+            ImGui::TextDisabled("VRAM not ready");
+    }
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// ---------------------------------------------------------------------------
 // PS1 Display window
 // ---------------------------------------------------------------------------
 
@@ -698,6 +788,7 @@ static void setup_dockspace(ImGuiID dockspace_id) {
 
     ImGui::DockBuilderDockWindow("PS1 Display",   main);
     ImGui::DockBuilderDockWindow("Disassembly",   right_top);
+    ImGui::DockBuilderDockWindow("VRAM Viewer",   right_top);
     ImGui::DockBuilderDockWindow("CPU Registers", right_bottom);
     ImGui::DockBuilderDockWindow("Breakpoints",   right_bottom);
     ImGui::DockBuilderDockWindow("SPU Debug",     right_bottom);
@@ -782,6 +873,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             ImGui::MenuItem("Breakpoints",   nullptr, &g_show_breakpoints);
             ImGui::MenuItem("SPU Debug",     nullptr, &g_show_spu);
             ImGui::MenuItem("PS1 Display",   nullptr, &g_show_display);
+            ImGui::MenuItem("VRAM Viewer",   nullptr, &g_show_vram_viewer);
             ImGui::EndMenu();
         }
 
@@ -865,6 +957,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     GLuint tex_id = 0;
     if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
     draw_ps1_display(tex_id, inter);
+    if (inter) draw_vram_viewer_window(&inter->gpu.renderer);
 
     ImGui::End(); // DockHost
 

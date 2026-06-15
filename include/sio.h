@@ -61,8 +61,15 @@ typedef struct {
     bool pending_irq;
 } Sio;
 
+// Forward declaration for interconnect wiring
+struct Interconnect;
+
 // Initialization
 void sio_init(Sio* sio);
+void sio_set_interconnect(Sio* sio, struct Interconnect* inter);
+
+// Deferred transfer event (called by event scheduler EVQ_SIO handler)
+void sio_execute_event(Sio* sio);
 
 // Memory Card file operations
 bool sio_load_memcard(MemoryCard* card, const char* filepath);

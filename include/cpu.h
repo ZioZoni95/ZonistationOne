@@ -126,6 +126,8 @@ typedef struct Cpu {
     uint32_t epc;           // COP0 Reg 14: Exception Program Counter (Address of instruction causing exception).
     uint32_t badvaddr;      // COP0 Reg 8: Bad Virtual Address (Address that caused address error exception).
     uint32_t prid;          // COP0 Reg 15: Processor Revision Identifier (Read-only, 0x00000002 for PSX).
+    uint32_t cop0_tar;      // COP0 Reg 6: TAR / JUMPDEST (last branch target address).
+    uint32_t cop0_dcic;     // COP0 Reg 7: DCIC (Debug/Cache Isolation Control).
 
     // --- Connection to Memory System ---
     Interconnect* inter;    // Pointer to the interconnect module for memory accesses.
@@ -142,6 +144,13 @@ typedef struct Cpu {
     // --- Cycle Accounting (DuckStation-style) ---
     int32_t  downcount;              // countdown to next event (decrements per instruction)
     uint32_t muldiv_completion_tick; // cycle when pending MULT/DIV finishes (for MFHI/MFLO stall)
+
+    // --- Execution Trace Ring Buffer ---
+#define EXEC_TRACE_SIZE 512  // must be power-of-2
+    uint32_t exec_trace_pc[EXEC_TRACE_SIZE];
+    uint32_t exec_trace_instr[EXEC_TRACE_SIZE];
+    uint32_t exec_trace_head;   // next write index
+    uint32_t exec_trace_count;  // entries filled (capped at EXEC_TRACE_SIZE)
 
 } Cpu;
 
@@ -179,6 +188,9 @@ void cpu_init(Cpu* cpu, Interconnect* inter);
  * @param cpu Pointer to the Cpu state.
  */
 void cpu_run_next_instruction(Cpu* cpu);
+
+// Dump last EXEC_TRACE_SIZE instructions to file (call on shutdown/crash).
+void cpu_dump_exec_trace(const Cpu* cpu, const char* path);
 
 /**
  * @brief Decodes the fetched instruction and calls the appropriate handler function.

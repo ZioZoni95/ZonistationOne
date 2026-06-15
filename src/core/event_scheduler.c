@@ -1,5 +1,6 @@
 #include "event_scheduler.h"
 #include "interconnect.h"
+#include "cpu.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include "gpu.h"           // For GPU DMA transfer
 #include "timers.h"        // For timer event handler prototypes
 #include "spu.h"           // For spu_step / CPU_TICKS_PER_SPU_TICK
+#include "sio.h"           // For sio_execute_event
 
 // ===============================
 // Event Scheduler Implementation
@@ -29,6 +31,7 @@ static void evq_handle_dma_gpu(struct Interconnect* sys);   // GPU DMA event
 static void evq_handle_dma_cdrom(struct Interconnect* sys); // CDROM DMA event
 static void evq_handle_cdrom(struct Interconnect* sys); // CDROM event
 static void evq_handle_spu(struct Interconnect* sys);   // SPU sample generation
+static void evq_handle_sio(struct Interconnect* sys);   // SIO deferred transfer
 
 // Table of event handlers, indexed by EventQueueType
 typedef EventQueueHandler EventHandlerTable[EVQ_EVENT_COUNT];
@@ -41,7 +44,7 @@ static EventHandlerTable evq_handlers = {
     evq_handle_dma_cdrom,// EVQ_DMA_CDROM
     NULL,                // EVQ_DMA_SPU
     NULL,                // EVQ_DMA_OTC
-    NULL,                // EVQ_SIO
+    evq_handle_sio,      // EVQ_SIO
     evq_handle_cdrom,    // EVQ_CDROM (non-DMA)
     NULL,                // EVQ_GPU (non-DMA)
     NULL,                // EVQ_MDEC
@@ -55,10 +58,16 @@ static EventHandlerTable evq_handlers = {
 void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cycles_from_now) {
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
-    
+
     // Update the next event cycle if this event is sooner
     if (sys->evq_next_cycle > sys->evq_target_cycle[event] || sys->evq_next_cycle <= sys->cpu_cycle_counter) {
         sys->evq_next_cycle = sys->evq_target_cycle[event];
+        // Immediately truncate CPU downcount so the CPU wakes up at the right time
+        if (sys->cpu) {
+            int32_t cycles_until = (int32_t)(sys->evq_next_cycle - sys->cpu_cycle_counter);
+            if (cycles_until > 0 && cycles_until < sys->cpu->downcount)
+                sys->cpu->downcount = cycles_until;
+        }
     }
 }
 
@@ -211,4 +220,9 @@ static void evq_handle_cdrom(struct Interconnect* sys) {
 static void evq_handle_spu(struct Interconnect* sys) {
     spu_step(sys, CPU_TICKS_PER_SPU_TICK);
     eventq_schedule(sys, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
-} 
+}
+
+static void evq_handle_sio(struct Interconnect* sys) {
+    LOG_SYSTEM_DEBUG("[SYSTEM] Firing EVQ_SIO: executing deferred SIO byte transfer");
+    sio_execute_event(&sys->sio);
+}

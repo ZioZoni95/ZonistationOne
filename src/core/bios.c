@@ -43,8 +43,41 @@ bool bios_load(Bios* bios, const char* path) {
 
     // Print a success message including the path and size.
     LOG_BIOS_WARN("[BIOS] BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
-    // Return true to indicate success.
+    // bios_apply_fastboot_patch(bios);  // disabled: only helps when region check passes
     return true;
+}
+
+void bios_apply_fastboot_patch(Bios* bios) {
+    // Replace BIOS shell entry point with: enable display + jr $ra
+    // This skips region check and shell entirely (DuckStation PatchBIOSFastBoot Type1).
+    static const uint32_t patch[] = {
+        0x3C011F80,  // lui  $at, 0x1F80
+        0x3C0A0300,  // lui  $t2, 0x0300
+        0xAC2A1814,  // sw   $t2, 0x1814($at)  (GP1: enable display)
+        0x03E00008,  // jr   $ra
+        0x00000000,  // nop
+    };
+    // Type1B pattern: shell decompressor prolog (first 12 bytes)
+    static const uint8_t pat[] = {
+        0xe0,0xff,0xbd,0x27, 0x1c,0x00,0xbf,0xaf, 0x20,0x00,0xa4,0xaf
+    };
+    uint32_t patch_offset = 0x18000; // Type1A fallback
+    for (uint32_t i = 0; i + 32 < BIOS_SIZE; i++) {
+        if (memcmp(&bios->data[i], pat, sizeof(pat)) == 0) {
+            patch_offset = i;
+            LOG_BIOS_INFO("[BIOS] Fast boot: Type1B pattern at 0x%05x", i);
+            break;
+        }
+    }
+    if (patch_offset == 0x18000) LOG_BIOS_INFO("[BIOS] Fast boot: fallback at 0x18000");
+    for (int i = 0; i < 5; i++) {
+        uint32_t w = patch[i];
+        bios->data[patch_offset + i*4 + 0] = (uint8_t)(w >>  0);
+        bios->data[patch_offset + i*4 + 1] = (uint8_t)(w >>  8);
+        bios->data[patch_offset + i*4 + 2] = (uint8_t)(w >> 16);
+        bios->data[patch_offset + i*4 + 3] = (uint8_t)(w >> 24);
+    }
+    LOG_BIOS_INFO("[BIOS] Fast boot patch applied (region check bypassed)");
 }
 
 // Reads a 32-bit value from the loaded BIOS data at a specific 'offset'.

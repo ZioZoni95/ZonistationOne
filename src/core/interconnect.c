@@ -41,6 +41,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
+    sio_set_interconnect(&inter->sio, inter);  // wire back-pointer for deferred transfers
     sio_load_memcard(&inter->sio.card_slot1, "memcard1.mcd");
     mdec_init(&inter->mdec);
     // Initialize SPU
@@ -56,6 +57,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     memset(inter->tty_input_buf, 0, sizeof(inter->tty_input_buf));
 
     debugger_init(&inter->debugger);
+    bus_hw_tables_init();
 
     LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }

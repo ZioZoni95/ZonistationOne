@@ -53,6 +53,8 @@ typedef struct {
     GLuint display_fbo;     // Framebuffer Object for the main display
     GLuint display_texture; // Texture attached to the display FBO
 
+    GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
+
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
     GLint uniform_use_texture_loc;
@@ -99,6 +101,8 @@ bool renderer_init(Renderer* renderer);
  * @return OpenGL texture ID.
  */
 GLuint renderer_get_display_texture(Renderer* renderer);
+void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
+GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
 
 /**
  * @brief Buffers a triangle's vertex data for later drawing.
