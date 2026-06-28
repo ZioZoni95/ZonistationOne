@@ -9,7 +9,6 @@
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
 #include "timers.h"        // For timer event handler prototypes
-#include "spu.h"           // For spu_step / CPU_TICKS_PER_SPU_TICK
 #include "sio.h"           // For sio_execute_event
 
 // ===============================
@@ -30,7 +29,6 @@ static void evq_handle_timer2(struct Interconnect* sys); // Timer2 event
 static void evq_handle_dma_gpu(struct Interconnect* sys);   // GPU DMA event
 static void evq_handle_dma_cdrom(struct Interconnect* sys); // CDROM DMA event
 static void evq_handle_cdrom(struct Interconnect* sys); // CDROM event
-static void evq_handle_spu(struct Interconnect* sys);   // SPU sample generation
 static void evq_handle_sio(struct Interconnect* sys);   // SIO deferred transfer
 
 // Table of event handlers, indexed by EventQueueType
@@ -48,7 +46,7 @@ static EventHandlerTable evq_handlers = {
     evq_handle_cdrom,    // EVQ_CDROM (non-DMA)
     NULL,                // EVQ_GPU (non-DMA)
     NULL,                // EVQ_MDEC
-    evq_handle_spu       // EVQ_SPU
+    NULL                 // EVQ_SPU — handled by dedicated SPU thread
 };
 
 // --- Event Scheduling ---
@@ -143,19 +141,15 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     static uint32_t vblank_count = 0;
     vblank_count++;
 
-    // Advance CRTC scanline counter and update STAT[31]
     gpu_crtc_tick(&sys->gpu, VBLANK_CYCLES);
 
-    // Log VBlank with SYSTEM category to bypass timer rate limiting
-    if (vblank_count <= 5 || vblank_count % 60 == 0) {
-}
-    
-    // Always reschedule the next VBlank
+    if (vblank_count <= 5 || vblank_count % 60 == 0)
+        LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u)", vblank_count, sys->cpu_cycle_counter);
+
     eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
-    
-    // Verify it was scheduled
+
     if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
-        LOG_SYSTEM_ERROR("[SYSTEM] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);
+        LOG_EVENT_ERROR("[EVQ] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);
     }
     
     // Trigger VBlank interrupt (IRQ0 per PSX-SPX)
@@ -170,39 +164,16 @@ static void evq_handle_vblank(struct Interconnect* sys) {
 
 static void evq_handle_timer0(struct Interconnect* sys) {
     static int timer0_dispatch_count = 0;
-    if (timer0_dispatch_count < 5) {
-}
+    if (timer0_dispatch_count++ < 3)
+        LOG_EVENT_DEBUG("[EVQ] Timer0 fired (#%d)", timer0_dispatch_count);
     timer0_event_handler(sys);
 }
 static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(sys); }
 static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
 
 static void evq_handle_dma_gpu(struct Interconnect* sys) {
-    static uint32_t gpu_dma_count = 0;
-    gpu_dma_count++;
-    
-    Dma* dma = &sys->dma;
-    DmaChannel* ch = &dma->channels[2]; // Channel 2: GPU
-    if (!ch->enable) {
-        // Only log first few times
-        if (gpu_dma_count <= 3) {
-}
-        return;
-    }
-    extern void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch);
-    perform_gpu_dma_transfer(sys, ch);
-    dma_channel_done(ch);
-    // --- DMA IRQ logic (PCSX ReARMed style) ---
-    // Set channel IRQ flag for channel 2
-    dma->channel_irq_flags |= (1 << 2);
-// If channel IRQ enable and master IRQ enable are set, set master IRQ flag
-    if ((dma->channel_irq_enable & (1 << 2)) && dma->master_irq_enable) {
-        dma->master_irq_flag = true;
-}
-    // If master IRQ flag is set, set IRQ3 (DMA IRQ) in irq_status
-    if (dma->master_irq_flag) {
-interconnect_request_irq(sys, 3, "DMA_GPU"); // Use edge-triggered API
-    }
+    /* Resume GPU DMA slice — sets up next slice or signals completion */
+    dma_gpu_resume(sys);
 }
 
 static void evq_handle_dma_cdrom(struct Interconnect* sys) {
@@ -217,12 +188,7 @@ static void evq_handle_cdrom(struct Interconnect* sys) {
     (void)sys;
 }
 
-static void evq_handle_spu(struct Interconnect* sys) {
-    spu_step(sys, CPU_TICKS_PER_SPU_TICK);
-    eventq_schedule(sys, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
-}
-
 static void evq_handle_sio(struct Interconnect* sys) {
-    LOG_SYSTEM_DEBUG("[SYSTEM] Firing EVQ_SIO: executing deferred SIO byte transfer");
+    LOG_EVENT_DEBUG("[EVQ] Firing SIO deferred byte transfer");
     sio_execute_event(&sys->sio);
 }

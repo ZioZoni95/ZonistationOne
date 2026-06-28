@@ -1,12 +1,68 @@
 #include "renderer.h"
 #include "log.h"
 #include <stdio.h>
-#include <stdlib.h> // For malloc, free, exit
-#include <string.h> // For memcpy, memset
+#include <stdlib.h>
+#include <string.h>
 
-// Make sure GLEW/GLAD is included if not done in the header
-// #define GLEW_STATIC
-// #include <GL/glew.h>
+/* =========================================================================
+ * GPU Thread — Double-Buffered Batch Recording (Phase 2)
+ *
+ * CPU thread calls renderer_draw() → records a GpuBatch into s_frame[write_idx].
+ * At frame end, renderer_submit_frame() swaps write_idx and wakes GPU thread.
+ * GPU thread drains s_frame[read_idx], executing all GL calls.
+ * CPU runs next frame immediately while GPU renders previous frame.
+ * ========================================================================= */
+
+#define GPU_MAX_BATCHES        1024
+#define GPU_MAX_VRAM_UPDATES   256
+#define GPU_VRAM_POOL_SIZE     (4 * 1024 * 1024)  /* 4 MB per slot */
+
+typedef struct {
+    uint32_t vertex_start;      /* index into s_pos/col/tex/tpg pools */
+    uint32_t vertex_count;
+    bool is_lines;              /* true → GL_LINES, false → GL_TRIANGLES */
+    /* Renderer state snapshot */
+    bool texture_enabled;
+    bool raw_texture_enabled;
+    bool semi_trans_enabled;
+    bool dither_enabled;
+    uint8_t semi_trans_mode;
+    float screen_w, screen_h;
+    int16_t offset_x, offset_y;
+    int32_t tex_window[4];      /* and_x, and_y, or_x, or_y */
+    int32_t scissor[4];         /* gl_x, gl_y, clip_w, clip_h */
+} GpuBatch;
+
+typedef struct {
+    uint16_t x, y, w, h;
+    uint32_t data_offset;       /* byte offset into s_vram_pool[slot] */
+    bool     update_display;    /* true → also update display_texture (R16UI→RGB) */
+    bool     full_upload;       /* unused, kept for alignment */
+    bool     is_viewer;         /* true → upload to vram_viewer_texture (RGBA8) */
+} GpuVramUpdate;
+
+typedef struct {
+    GpuBatch       batches[GPU_MAX_BATCHES];
+    uint32_t       batch_count;
+    GpuVramUpdate  vram_updates[GPU_MAX_VRAM_UPDATES];
+    uint32_t       vram_update_count;
+    void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
+    uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
+} GpuFrame;
+
+/* Double-buffered vertex pools — in BSS (static), not on stack */
+static RendererPosition s_pos[2][VERTEX_BUFFER_LEN];
+static RendererColor    s_col[2][VERTEX_BUFFER_LEN];
+static RendererTexCoord s_tex[2][VERTEX_BUFFER_LEN];
+static RendererTPage    s_tpg[2][VERTEX_BUFFER_LEN];
+static uint32_t         s_vtx[2];   /* vertex pool write position per slot */
+
+/* Double-buffered VRAM copy pools */
+static uint8_t   s_vram_pool[2][GPU_VRAM_POOL_SIZE];
+static uint32_t  s_vram_pool_used[2];
+
+/* Frame command lists */
+static GpuFrame  s_frame[2];
 
 // --- Helper: Check for OpenGL Errors ---
 void check_gl_error(const char* location) {
@@ -640,13 +696,9 @@ void renderer_set_texture_mode(Renderer* renderer, bool enabled) {
 void renderer_set_raw_texture_mode(Renderer* renderer, bool enabled) {
     if (!renderer->initialized) return;
     if (renderer->raw_texture_enabled == enabled) return;
-    renderer_draw(renderer); // Flush before changing modulation behavior
+    renderer_draw(renderer);
     renderer->raw_texture_enabled = enabled;
-    if (renderer->uniform_raw_texture_loc >= 0) {
-        glUseProgram(renderer->shader_program);
-        glUniform1i(renderer->uniform_raw_texture_loc, enabled ? 1 : 0);
-        glUseProgram(0);
-    }
+    /* GL uniform applied per-batch in renderer_draw_gl() on GPU thread */
 }
 
 void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t height) {
@@ -668,16 +720,10 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
         return; // Nothing to update
     }
 
-    renderer_draw(renderer); // Keep batches consistent when scale changes
-
-    renderer->screen_width = (float)width;
+    renderer_draw(renderer);
+    renderer->screen_width  = (float)width;
     renderer->screen_height = (float)height;
-
-    glUseProgram(renderer->shader_program);
-    glUniform2f(renderer->uniform_screen_scale_loc,
-                renderer->screen_width * 0.5f,
-                renderer->screen_height * 0.5f);
-    glUseProgram(0);
+    /* GL uniform applied per-batch in renderer_draw_gl() on GPU thread */
 }
 
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y) {
@@ -696,126 +742,126 @@ void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mas
     uint32_t or_x = (offset_x & mask_x) * 8u;
     uint32_t or_y = (offset_y & mask_y) * 8u;
 
-    // Flush current batch before changing uniforms
     renderer_draw(renderer);
-
-    glUseProgram(renderer->shader_program);
-    if (renderer->uniform_tex_window_loc >= 0) {
-        glUniform4i(renderer->uniform_tex_window_loc, (GLint)and_x, (GLint)and_y, (GLint)or_x, (GLint)or_y);
-    }
-    glUseProgram(0);
+    /* Cache tex window — applied per-batch in renderer_draw_gl() on GPU thread */
+    renderer->cached_tex_window[0] = (int32_t)and_x;
+    renderer->cached_tex_window[1] = (int32_t)and_y;
+    renderer->cached_tex_window[2] = (int32_t)or_x;
+    renderer->cached_tex_window[3] = (int32_t)or_y;
 }
 
-static void renderer_upload_vram_rect_to_display(Renderer* renderer,
-                                                  const uint8_t* vram_bytes,
-                                                  uint16_t x, uint16_t y,
-                                                  uint16_t w, uint16_t h) {
+/* -------------------------------------------------------------------------
+ * renderer_record_vram_update — CPU thread: copy VRAM rect into pool and
+ * record a GpuVramUpdate command for the GPU thread to execute.
+ * ------------------------------------------------------------------------- */
+static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram_data,
+                                         uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                                         bool update_display) {
     if (!renderer->initialized || w == 0 || h == 0) return;
-    static uint8_t rgb_buf[1024 * 512 * 3];
-    const uint16_t* src = (const uint16_t*)vram_bytes;
-    for (uint16_t row = 0; row < h; row++) {
-        uint8_t* dst = rgb_buf + (uint32_t)row * w * 3;
-        uint32_t base = ((uint32_t)(y + row) * 1024u) + x;
-        for (uint16_t col = 0; col < w; col++) {
-            uint16_t raw = src[base + col];
-            *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
-            *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
-            *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
-        }
+    int wi = renderer->write_idx;
+    GpuFrame* frame = &s_frame[wi];
+
+    if (frame->vram_update_count >= GPU_MAX_VRAM_UPDATES) {
+        LOG_RENDERER_WARN("[RENDERER] VRAM update overflow — skipping %u×%u rect", w, h);
+        return;
     }
-    renderer_draw(renderer);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+
+    /* Copy only the rect rows (R16UI, row-stride = 1024 halfwords) */
+    uint32_t bytes_needed = (uint32_t)w * h * sizeof(uint16_t);
+    uint32_t aligned = (bytes_needed + 3u) & ~3u;
+    if (s_vram_pool_used[wi] + aligned > GPU_VRAM_POOL_SIZE) {
+        LOG_RENDERER_WARN("[RENDERER] VRAM pool full — skipping rect");
+        return;
+    }
+
+    uint8_t* dst = s_vram_pool[wi] + s_vram_pool_used[wi];
+    for (uint16_t row = 0; row < h; row++) {
+        const uint16_t* src_row = &vram_data[((uint32_t)(y + row)) * 1024u + x];
+        memcpy(dst + (uint32_t)row * w * 2u, src_row, w * sizeof(uint16_t));
+    }
+
+    GpuVramUpdate* u = &frame->vram_updates[frame->vram_update_count++];
+    u->x              = x;
+    u->y              = y;
+    u->w              = w;
+    u->h              = h;
+    u->data_offset    = s_vram_pool_used[wi];
+    u->update_display = update_display;
+    u->full_upload    = false;
+    s_vram_pool_used[wi] += aligned;
 }
 
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     if (!renderer->initialized) return;
-    glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RED_INTEGER, GL_UNSIGNED_SHORT, vram_data);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    renderer_upload_vram_rect_to_display(renderer, (const uint8_t*)vram_data, 0, 0, 1024, 512);
+    renderer_record_vram_update(renderer, vram_data, 0, 0, 1024, 512, false);
 }
 
 void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
                                 uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (!renderer->initialized || w == 0 || h == 0) return;
-    glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 1024);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RED_INTEGER, GL_UNSIGNED_SHORT,
-                    &vram_data[(uint32_t)y * 1024u + x]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    renderer_upload_vram_rect_to_display(renderer, (const uint8_t*)vram_data, x, y, w, h);
+    renderer_record_vram_update(renderer, vram_data, x, y, w, h, false);
 }
 
-// Uploads buffered data and performs the OpenGL draw call.
-void renderer_draw(Renderer* renderer) {
-     if (!renderer->initialized) {
-         LOG_RENDERER_ERROR("[RENDERER] Renderer Error: Draw called before initialization.");
-         return;
-     }
-     if (renderer->vertex_count == 0) {
-        return; // Nothing to draw
-     }
+/* -------------------------------------------------------------------------
+ * renderer_draw_gl — INTERNAL: called by GPU thread to execute one batch.
+ * All GL calls are here; CPU thread never calls this directly.
+ * ------------------------------------------------------------------------- */
+static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
+    if (b->vertex_count == 0) return;
 
-    LOG_RENDERER_DEBUG("[RENDERER] Renderer: Drawing %u vertices...", renderer->vertex_count);
+    glDisable(GL_BLEND);  /* each batch starts with blend off; two-pass re-enables for STP pass */
+    glUseProgram(renderer->shader_program);
 
-    glUseProgram(renderer->shader_program); check_gl_error("draw - glUseProgram");
-    glBindVertexArray(renderer->vao); check_gl_error("draw - glBindVertexArray");
+    /* Apply cached state from batch snapshot */
+    glUniform2i(renderer->uniform_offset_loc, b->offset_x, b->offset_y);
+    if (renderer->uniform_screen_scale_loc >= 0)
+        glUniform2f(renderer->uniform_screen_scale_loc,
+                    b->screen_w * 0.5f, b->screen_h * 0.5f);
+    if (renderer->uniform_tex_window_loc >= 0)
+        glUniform4i(renderer->uniform_tex_window_loc,
+                    b->tex_window[0], b->tex_window[1],
+                    b->tex_window[2], b->tex_window[3]);
+    if (renderer->uniform_dither_loc >= 0)
+        glUniform1i(renderer->uniform_dither_loc, b->dither_enabled ? 1 : 0);
+    glUniform1i(renderer->uniform_use_texture_loc, b->texture_enabled ? 1 : 0);
+    if (renderer->uniform_raw_texture_loc >= 0)
+        glUniform1i(renderer->uniform_raw_texture_loc, b->raw_texture_enabled ? 1 : 0);
+    glUniform1i(renderer->uniform_vram_texture_loc, 0);
 
-    // Set texture uniforms
-    glUniform1i(renderer->uniform_use_texture_loc, renderer->texture_enabled ? 1 : 0);
-    if (renderer->uniform_raw_texture_loc >= 0) {
-        glUniform1i(renderer->uniform_raw_texture_loc, renderer->raw_texture_enabled ? 1 : 0);
-    }
-    glUniform1i(renderer->uniform_vram_texture_loc, 0); // Texture unit 0
-    if (renderer->uniform_dither_loc >= 0) {
-        glUniform1i(renderer->uniform_dither_loc, renderer->dither_enabled ? 1 : 0);
-    }
+    /* Scissor */
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(b->scissor[0], b->scissor[1], b->scissor[2], b->scissor[3]);
 
-    if (renderer->texture_enabled) {
+    if (b->texture_enabled) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
     }
 
-    // --- Upload Buffered Vertex Data via glBufferSubData ---
-glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer); check_gl_error("draw - glBindBuffer pos");
-    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererPosition), renderer->positions_data);
-    check_gl_error("draw - glBufferSubData pos");
+    glBindVertexArray(renderer->vao);
 
-glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer); check_gl_error("draw - glBindBuffer col");
-    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererColor), renderer->colors_data);
-    check_gl_error("draw - glBufferSubData col");
+    /* Upload vertex data from pool */
+    uint32_t vs = b->vertex_start;
+    uint32_t vc = b->vertex_count;
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(RendererPosition), &s_pos[slot][vs]);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(RendererColor),    &s_col[slot][vs]);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(RendererTexCoord), &s_tex[slot][vs]);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(RendererTPage),    &s_tpg[slot][vs]);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer); check_gl_error("draw - glBindBuffer tex");
-    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererTexCoord), renderer->texcoords_data);
-    check_gl_error("draw - glBufferSubData tex");
+    GLenum prim = b->is_lines ? GL_LINES : GL_TRIANGLES;
 
-glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer); check_gl_error("draw - glBindBuffer tpage");
-    glBufferSubData(GL_ARRAY_BUFFER, 0, renderer->vertex_count * sizeof(RendererTPage), renderer->tpage_data);
-    check_gl_error("draw - glBufferSubData tpage");
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0); // Unbind GL_ARRAY_BUFFER target
-    // ------------------------------------------------------
-
-    /* Two-pass STP rendering for semi-transparent textured primitives.
-     * Pass 1: blend OFF, discard STP=1 pixels → opaque STP=0 drawn.
-     * Pass 2: blend ON,  discard STP=0 pixels → blended STP=1 drawn. */
-    if (renderer->semi_trans_enabled && renderer->texture_enabled) {
-        /* Pass 1 — opaque pixels (STP=0) */
+    if (!b->is_lines && b->semi_trans_enabled && b->texture_enabled) {
         glDisable(GL_BLEND);
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, 0);
-        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
-        check_gl_error("draw - pass1 STP=0");
+        glDrawArrays(prim, 0, vc);
 
-        /* Pass 2 — blended pixels (STP=1): restore blend state */
         glEnable(GL_BLEND);
-        switch (renderer->semi_trans_mode) {
+        switch (b->semi_trans_mode) {
             case 0:
                 glBlendEquation(GL_FUNC_ADD);
                 glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
@@ -837,28 +883,78 @@ glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer); check_gl_error("draw - gl
         }
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, 1);
-        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
-        check_gl_error("draw - pass2 STP=1");
-
-        /* Reset for next batch */
+        glDrawArrays(prim, 0, vc);
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
     } else {
-        /* Single pass: opaque draw or non-textured semi-trans */
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
-        glDrawArrays(GL_TRIANGLES, 0, renderer->vertex_count);
-        check_gl_error("draw - glDrawArrays");
+        glDrawArrays(prim, 0, vc);
     }
 
-    // --- Unbind ---
     glBindVertexArray(0);
     glUseProgram(0);
     glBindTexture(GL_TEXTURE_2D, 0);
+}
 
-    // Reset the CPU buffer count for the next batch
+/* -------------------------------------------------------------------------
+ * renderer_draw — CPU thread: records a batch. No GL calls.
+ * ------------------------------------------------------------------------- */
+void renderer_draw(Renderer* renderer) {
+    if (!renderer->initialized) return;
+    if (renderer->vertex_count == 0) return;
+
+    int wi = renderer->write_idx;
+    GpuFrame* frame = &s_frame[wi];
+
+    if (frame->batch_count >= GPU_MAX_BATCHES) {
+        LOG_RENDERER_WARN("[RENDERER] batch overflow — dropping %u vertices", renderer->vertex_count);
+        renderer->vertex_count = 0;
+        return;
+    }
+
+    uint32_t vtx_start = s_vtx[wi];
+    uint32_t vtx_count = renderer->vertex_count;
+
+    if (vtx_start + vtx_count > VERTEX_BUFFER_LEN) {
+        LOG_RENDERER_WARN("[RENDERER] vertex pool overflow — dropping batch");
+        renderer->vertex_count = 0;
+        return;
+    }
+
+    /* Copy vertex data to pool */
+    memcpy(&s_pos[wi][vtx_start], renderer->positions_data, vtx_count * sizeof(RendererPosition));
+    memcpy(&s_col[wi][vtx_start], renderer->colors_data,    vtx_count * sizeof(RendererColor));
+    memcpy(&s_tex[wi][vtx_start], renderer->texcoords_data, vtx_count * sizeof(RendererTexCoord));
+    memcpy(&s_tpg[wi][vtx_start], renderer->tpage_data,     vtx_count * sizeof(RendererTPage));
+    s_vtx[wi] += vtx_count;
+
+    /* Record batch with full state snapshot */
+    GpuBatch* b = &frame->batches[frame->batch_count++];
+    b->vertex_start       = vtx_start;
+    b->vertex_count       = vtx_count;
+    b->is_lines           = false;
+    b->texture_enabled    = renderer->texture_enabled;
+    b->raw_texture_enabled = renderer->raw_texture_enabled;
+    b->semi_trans_enabled = renderer->semi_trans_enabled;
+    b->semi_trans_mode    = renderer->semi_trans_mode;
+    b->dither_enabled     = renderer->dither_enabled;
+    b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
+    b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;
+    b->offset_x           = renderer->cached_offset_x;
+    b->offset_y           = renderer->cached_offset_y;
+    b->tex_window[0]      = renderer->cached_tex_window[0];
+    b->tex_window[1]      = renderer->cached_tex_window[1];
+    b->tex_window[2]      = renderer->cached_tex_window[2];
+    b->tex_window[3]      = renderer->cached_tex_window[3];
+    b->scissor[0]         = renderer->cached_scissor[0];
+    b->scissor[1]         = renderer->cached_scissor[1];
+    b->scissor[2]         = renderer->cached_scissor[2];
+    b->scissor[3]         = renderer->cached_scissor[3];
+
     renderer->vertex_count = 0;
-    LOG_RENDERER_DEBUG("[RENDERER] Renderer: Draw finished, vertex count reset.");
+    LOG_RENDERER_DEBUG("[RENDERER] batch recorded: %u verts (slot %d, batch %u)",
+                       vtx_count, wi, frame->batch_count - 1);
 }
 
 // Blits a portion of the VRAM texture to the screen as a full-screen quad
@@ -914,15 +1010,18 @@ void renderer_blit_vram(Renderer* renderer, uint16_t vram_x, uint16_t vram_y, ui
     uint16_t tpage = (vram_x / 64) | ((vram_y / 256) << 4) | (2 << 7);
     uint16_t clut = 0; // Not used for 15-bit mode
     
-    // Temporarily disable offset for screen blit
-    glUseProgram(renderer->shader_program);
-    glUniform2i(renderer->uniform_offset_loc, 0, 0);
-    glUseProgram(0);
-    
-    // Push as textured quad
+    /* Save offset, zero it for the blit quad, then restore */
+    int16_t saved_ox = renderer->cached_offset_x;
+    int16_t saved_oy = renderer->cached_offset_y;
+    renderer->cached_offset_x = 0;
+    renderer->cached_offset_y = 0;
+
     renderer_set_texture_mode(renderer, true);
     renderer_push_quad(renderer, positions, colors, texcoords, clut, tpage);
     renderer_draw(renderer);
+
+    renderer->cached_offset_x = saved_ox;
+    renderer->cached_offset_y = saved_oy;
 }
 
 // Draws buffered primitives and requests buffer swap (swap happens in main loop)
@@ -937,13 +1036,12 @@ void renderer_display(Renderer* renderer) {
 // Sets the drawing offset uniform. Forces a draw first.
 // Based on Guide Section 5.10
 void renderer_set_draw_offset(Renderer* renderer, int16_t x, int16_t y) {
-     if (!renderer->initialized) return;
-     LOG_RENDERER_DEBUG("[RENDERER] Renderer: Setting Draw Offset (%d, %d), forcing draw first.", x, y);
-     renderer_draw(renderer);
-     glUseProgram(renderer->shader_program); check_gl_error("set_draw_offset - glUseProgram");
-     glUniform2i(renderer->uniform_offset_loc, (GLint)x, (GLint)y);
-     check_gl_error("set_draw_offset - glUniform2i");
-     glUseProgram(0);
+    if (!renderer->initialized) return;
+    LOG_RENDERER_DEBUG("[RENDERER] draw offset (%d, %d) — flushing batch", x, y);
+    renderer_draw(renderer);
+    renderer->cached_offset_x = x;
+    renderer->cached_offset_y = y;
+    /* GL uniform applied per-batch in renderer_draw_gl() on GPU thread */
 }
 
 // ---------------------------------------------------------------------------
@@ -953,12 +1051,8 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
                                 uint16_t right, uint16_t bottom)
 {
     if (!renderer->initialized) return;
-    renderer_draw(renderer); // flush before changing scissor
+    renderer_draw(renderer);
 
-    // Scale drawing-area VRAM coordinates to window pixels.
-    // screen_width/height hold the active display dimensions (e.g. 320x240).
-    // The SDL window is always 1024x512. With screen_scale = (sw/2, sh/2) the
-    // display area fills the window, so: win_x = vram_x * 1024 / sw.
     float sw = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
     float sh = renderer->screen_height ? renderer->screen_height : 512.0f;
     float sx = 1024.0f / sw;
@@ -973,12 +1067,14 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
     if (clip_w <= 0) clip_w = 1;
     if (clip_h <= 0) clip_h = 1;
 
-    // OpenGL scissor: Y=0 is bottom of window; flip.
     int gl_y = 512 - gl_bot;
     if (gl_y < 0) gl_y = 0;
 
-    glEnable(GL_SCISSOR_TEST);
-    glScissor((GLint)gl_left, (GLint)gl_y, (GLsizei)clip_w, (GLsizei)clip_h);
+    /* Cache scissor — applied per-batch on GPU thread */
+    renderer->cached_scissor[0] = gl_left;
+    renderer->cached_scissor[1] = gl_y;
+    renderer->cached_scissor[2] = clip_w;
+    renderer->cached_scissor[3] = clip_h;
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,90 +1098,64 @@ void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode
     if (renderer->semi_trans_enabled == enabled && renderer->semi_trans_mode == mode)
         return;
 
-    renderer_draw(renderer); // flush before blend state change
-
+    renderer_draw(renderer);
     renderer->semi_trans_enabled = enabled;
     renderer->semi_trans_mode    = mode;
-
-    if (!enabled) {
-        glDisable(GL_BLEND);
-        return;
-    }
-
-    glEnable(GL_BLEND);
-    switch (mode) {
-        case 0: // B/2 + F/2
-            glBlendEquation(GL_FUNC_ADD);
-            glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
-            glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
-            break;
-        case 1: // B + F
-            glBlendEquation(GL_FUNC_ADD);
-            glBlendFunc(GL_ONE, GL_ONE);
-            break;
-        case 2: // B - F
-            glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-            glBlendFunc(GL_ONE, GL_ONE);
-            break;
-        case 3: // B + F/4
-            glBlendEquation(GL_FUNC_ADD);
-            glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-            glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
-            break;
-        default:
-            glBlendEquation(GL_FUNC_ADD);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            break;
-    }
+    /* GL blend state applied per-batch in renderer_draw_gl() on GPU thread */
 }
 
 // ---------------------------------------------------------------------------
-// renderer_push_line — draw a 2-vertex line segment immediately
-// Flushes any pending triangle batch first, then draws GL_LINES.
+// renderer_push_line — CPU thread: record a 2-vertex line batch.
 // ---------------------------------------------------------------------------
 void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererColor col[2])
 {
     if (!renderer->initialized) return;
 
-    // Flush pending triangle batch
+    /* Flush any pending triangle batch first (different primitive type) */
     renderer_draw(renderer);
 
-    // Upload 2 vertices to the existing VBOs
-    renderer->positions_data[0] = pos[0];
-    renderer->positions_data[1] = pos[1];
-    renderer->colors_data[0]    = col[0];
-    renderer->colors_data[1]    = col[1];
-    // Zero out texcoord/tpage for untextured lines
+    int wi = renderer->write_idx;
+    GpuFrame* frame = &s_frame[wi];
+
+    if (frame->batch_count >= GPU_MAX_BATCHES) {
+        LOG_RENDERER_WARN("[RENDERER] batch overflow in push_line — skipping");
+        return;
+    }
+    if (s_vtx[wi] + 2 > VERTEX_BUFFER_LEN) {
+        LOG_RENDERER_WARN("[RENDERER] vertex pool overflow in push_line — skipping");
+        return;
+    }
+
+    uint32_t vs = s_vtx[wi];
     RendererTexCoord zero_tc = {0, 0};
     RendererTPage    zero_tp = {0, 0};
-    renderer->texcoords_data[0] = zero_tc;
-    renderer->texcoords_data[1] = zero_tc;
-    renderer->tpage_data[0]     = zero_tp;
-    renderer->tpage_data[1]     = zero_tp;
+    s_pos[wi][vs]     = pos[0]; s_pos[wi][vs+1] = pos[1];
+    s_col[wi][vs]     = col[0]; s_col[wi][vs+1] = col[1];
+    s_tex[wi][vs]     = zero_tc; s_tex[wi][vs+1] = zero_tc;
+    s_tpg[wi][vs]     = zero_tp; s_tpg[wi][vs+1] = zero_tp;
+    s_vtx[wi] += 2;
 
-    glUseProgram(renderer->shader_program);
-    glBindVertexArray(renderer->vao);
-
-    glUniform1i(renderer->uniform_use_texture_loc, 0);
-    if (renderer->uniform_raw_texture_loc >= 0)
-        glUniform1i(renderer->uniform_raw_texture_loc, 0);
-    glUniform1i(renderer->uniform_vram_texture_loc, 0);
-
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->position_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererPosition), renderer->positions_data);
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->color_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererColor), renderer->colors_data);
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->texcoord_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererTexCoord), renderer->texcoords_data);
-    glBindBuffer(GL_ARRAY_BUFFER, renderer->tpage_buffer);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, 2 * sizeof(RendererTPage), renderer->tpage_data);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    glDrawArrays(GL_LINES, 0, 2);
-    check_gl_error("renderer_push_line - glDrawArrays");
-
-    glBindVertexArray(0);
-    glUseProgram(0);
+    GpuBatch* b = &frame->batches[frame->batch_count++];
+    b->vertex_start       = vs;
+    b->vertex_count       = 2;
+    b->is_lines           = true;
+    b->texture_enabled    = false;
+    b->raw_texture_enabled = false;
+    b->semi_trans_enabled = false;
+    b->dither_enabled     = renderer->dither_enabled;
+    b->semi_trans_mode    = 0;
+    b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
+    b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;
+    b->offset_x           = renderer->cached_offset_x;
+    b->offset_y           = renderer->cached_offset_y;
+    b->tex_window[0]      = renderer->cached_tex_window[0];
+    b->tex_window[1]      = renderer->cached_tex_window[1];
+    b->tex_window[2]      = renderer->cached_tex_window[2];
+    b->tex_window[3]      = renderer->cached_tex_window[3];
+    b->scissor[0]         = renderer->cached_scissor[0];
+    b->scissor[1]         = renderer->cached_scissor[1];
+    b->scissor[2]         = renderer->cached_scissor[2];
+    b->scissor[3]         = renderer->cached_scissor[3];
 }
 
 GLuint renderer_get_display_texture(Renderer* renderer) {
@@ -1095,9 +1165,17 @@ GLuint renderer_get_display_texture(Renderer* renderer) {
 
 void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) {
     if (!renderer->initialized) return;
-    static uint8_t rgba_buf[1024 * 512 * 4];
+
+    int wi = renderer->write_idx;
+    GpuFrame* frame = &s_frame[wi];
+    if (frame->vram_update_count >= GPU_MAX_VRAM_UPDATES) return;
+
+    /* RGBA8: 4 bytes/pixel × 1024×512 = 2 MB — fits in our 2 MB pool */
+    uint32_t bytes_needed = 1024u * 512u * 4u;
+    if (s_vram_pool_used[wi] + bytes_needed > GPU_VRAM_POOL_SIZE) return;
+
+    uint8_t* dst = s_vram_pool[wi] + s_vram_pool_used[wi];
     const uint16_t* src = (const uint16_t*)vram_bytes;
-    uint8_t* dst = rgba_buf;
     for (int i = 0; i < 1024 * 512; i++) {
         uint16_t raw = src[i];
         *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
@@ -1105,14 +1183,22 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
         *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
         *dst++ = 255;
     }
-    glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512, GL_RGBA, GL_UNSIGNED_BYTE, rgba_buf);
-    glBindTexture(GL_TEXTURE_2D, 0);
+
+    GpuVramUpdate* u = &frame->vram_updates[frame->vram_update_count++];
+    u->x              = 0;
+    u->y              = 0;
+    u->w              = 1024;
+    u->h              = 512;
+    u->data_offset    = s_vram_pool_used[wi];
+    u->update_display = false;
+    u->full_upload    = false;
+    u->is_viewer      = true;
+    s_vram_pool_used[wi] += bytes_needed;
 }
 
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer) {
     if (!renderer || !renderer->initialized) return 0;
-    return renderer->display_texture;
+    return renderer->vram_viewer_texture;
 }
 
 // Cleans up OpenGL resources
@@ -1136,4 +1222,227 @@ void renderer_destroy(Renderer* renderer) {
 
     renderer->initialized = false;
     LOG_RENDERER_DEBUG("[RENDERER] Renderer Destroyed.");
+}
+
+/* =========================================================================
+ * GPU Thread — execute VRAM updates then draw batches from a read slot.
+ * All functions below are GPU-thread-only (GL context owned by GPU thread).
+ * ========================================================================= */
+
+/* Execute all VRAM updates recorded in a frame slot */
+static void renderer_execute_vram_updates(Renderer* renderer, const GpuFrame* frame, int slot) {
+    for (uint32_t i = 0; i < frame->vram_update_count; i++) {
+        const GpuVramUpdate* u = &frame->vram_updates[i];
+        const uint8_t* data = s_vram_pool[slot] + u->data_offset;
+
+        if (u->is_viewer) {
+            /* RGBA8 viewer upload */
+            glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512,
+                            GL_RGBA, GL_UNSIGNED_BYTE, data);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        } else {
+            /* R16UI VRAM texture upload */
+            glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+                            GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
+            glBindTexture(GL_TEXTURE_2D, 0);
+
+            if (u->update_display) {
+                /* Convert R16UI rect to RGB and upload to display_texture */
+                static uint8_t rgb_buf[1024 * 512 * 3];
+                const uint16_t* src = (const uint16_t*)data;
+                for (uint16_t row = 0; row < u->h; row++) {
+                    uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
+                    for (uint16_t col = 0; col < u->w; col++) {
+                        uint16_t raw = src[(uint32_t)row * u->w + col];
+                        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
+                        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+                        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+                    }
+                }
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+                                GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
+                glBindTexture(GL_TEXTURE_2D, 0);
+                glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+            }
+        }
+    }
+}
+
+/* GPU thread argument */
+typedef struct {
+    Renderer*     renderer;
+    SDL_Window*   window;
+    SDL_GLContext gl_context;
+} GpuThreadArg;
+
+static GpuThreadArg s_gpu_thread_arg;
+
+static int gpu_thread_main(void* userdata) {
+    GpuThreadArg* arg = (GpuThreadArg*)userdata;
+    Renderer*   renderer = arg->renderer;
+    SDL_Window* window   = arg->window;
+
+    if (SDL_GL_MakeCurrent(window, arg->gl_context) != 0) {
+        LOG_RENDERER_ERROR("[GPU-THREAD] SDL_GL_MakeCurrent failed: %s", SDL_GetError());
+        return -1;
+    }
+    LOG_RENDERER_INFO("[GPU-THREAD] GPU thread started — GL context acquired");
+
+    /* ImGui OpenGL backend needs to be initialized on this thread */
+    extern void imgui_opengl_new_frame(void);
+
+    while (!SDL_AtomicGet(&renderer->gpu_stop)) {
+        SDL_LockMutex(renderer->gpu_mutex);
+        while (renderer->frames_pending == 0 && !SDL_AtomicGet(&renderer->gpu_stop))
+            SDL_CondWait(renderer->frame_ready, renderer->gpu_mutex);
+        if (SDL_AtomicGet(&renderer->gpu_stop)) {
+            SDL_UnlockMutex(renderer->gpu_mutex);
+            break;
+        }
+        int ri = 1 - renderer->write_idx; /* read slot = opposite of current write slot */
+        SDL_UnlockMutex(renderer->gpu_mutex); /* frames_pending stays 1 until render+reset done */
+
+        /* Bind FBO for all draw commands — viewport MUST match FBO size, not window */
+        glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+        glViewport(0, 0, 1024, 512);
+
+        /* 1) Apply VRAM updates */
+        renderer_execute_vram_updates(renderer, &s_frame[ri], ri);
+
+        /* 2) Execute draw batches */
+        for (uint32_t i = 0; i < s_frame[ri].batch_count; i++)
+            renderer_draw_gl(renderer, &s_frame[ri].batches[i], ri);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        /* 3) Prepare default framebuffer for ImGui — display via draw_ps1_display() ImGui::Image */
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_BLEND);
+        {
+            int win_w, win_h;
+            SDL_GetWindowSize(window, &win_w, &win_h);
+            glViewport(0, 0, win_w, win_h);
+        }
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        /* 4) ImGui: prepare GL backend for next frame, then render current frame */
+        imgui_opengl_new_frame();
+        if (s_frame[ri].imgui_draw_data) {
+            extern void imgui_render_draw_data(void* draw_data);
+            imgui_render_draw_data(s_frame[ri].imgui_draw_data);
+        }
+
+        SDL_GL_SwapWindow(window);
+
+        /* Reset read slot for reuse */
+        s_frame[ri].batch_count        = 0;
+        s_frame[ri].vram_update_count  = 0;
+        s_frame[ri].imgui_draw_data    = NULL;
+        s_vtx[ri]                      = 0;
+        s_vram_pool_used[ri]           = 0;
+
+        /* Signal CPU that frame is done — set pending=0 here (after render+reset) */
+        SDL_LockMutex(renderer->gpu_mutex);
+        renderer->frames_pending = 0;
+        SDL_CondSignal(renderer->frame_done);
+        SDL_UnlockMutex(renderer->gpu_mutex);
+    }
+
+    SDL_GL_MakeCurrent(window, NULL);
+    LOG_RENDERER_INFO("[GPU-THREAD] GPU thread exiting");
+    return 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Public GPU thread control API
+ * ------------------------------------------------------------------------- */
+
+void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLContext ctx) {
+    renderer->gpu_mutex   = SDL_CreateMutex();
+    renderer->frame_ready = SDL_CreateCond();
+    renderer->frame_done  = SDL_CreateCond();
+    renderer->sdl_window  = window;
+    renderer->gl_context  = ctx;
+    renderer->frames_pending = 0;
+    SDL_AtomicSet(&renderer->gpu_stop, 0);
+
+    /* Reset both slots */
+    for (int i = 0; i < 2; i++) {
+        s_frame[i].batch_count       = 0;
+        s_frame[i].vram_update_count = 0;
+        s_frame[i].imgui_draw_data   = NULL;
+        s_vtx[i]           = 0;
+        s_vram_pool_used[i] = 0;
+    }
+    renderer->write_idx = 0;
+
+    s_gpu_thread_arg.renderer   = renderer;
+    s_gpu_thread_arg.window     = window;
+    s_gpu_thread_arg.gl_context = ctx;
+
+    renderer->gpu_thread = SDL_CreateThread(gpu_thread_main, "GPU", &s_gpu_thread_arg);
+    if (!renderer->gpu_thread)
+        LOG_RENDERER_ERROR("[RENDERER] Failed to create GPU thread: %s", SDL_GetError());
+    else
+        LOG_RENDERER_INFO("[RENDERER] GPU thread started");
+}
+
+void renderer_stop_gpu_thread(Renderer* renderer) {
+    if (!renderer->gpu_thread) return;
+    SDL_AtomicSet(&renderer->gpu_stop, 1);
+    SDL_LockMutex(renderer->gpu_mutex);
+    SDL_CondSignal(renderer->frame_ready);
+    SDL_UnlockMutex(renderer->gpu_mutex);
+    SDL_WaitThread(renderer->gpu_thread, NULL);
+    renderer->gpu_thread = NULL;
+    SDL_DestroyMutex(renderer->gpu_mutex);
+    SDL_DestroyCond(renderer->frame_ready);
+    SDL_DestroyCond(renderer->frame_done);
+    renderer->gpu_mutex   = NULL;
+    renderer->frame_ready = NULL;
+    renderer->frame_done  = NULL;
+    LOG_RENDERER_INFO("[RENDERER] GPU thread stopped");
+}
+
+void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    renderer->display_x = x;
+    renderer->display_y = y;
+    renderer->display_w = w;
+    renderer->display_h = h;
+}
+
+void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
+    if (!renderer->gpu_thread) return;
+
+    /* Flush any leftover batch from CPU */
+    renderer_draw(renderer);
+
+    SDL_LockMutex(renderer->gpu_mutex);
+    /* Block if GPU is still rendering the previous frame */
+    while (renderer->frames_pending > 0)
+        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+
+    GpuFrame* f = &s_frame[renderer->write_idx];
+    f->imgui_draw_data = imgui_draw_data;
+    f->disp_x = renderer->display_x;
+    f->disp_y = renderer->display_y;
+    f->disp_w = renderer->display_w;
+    f->disp_h = renderer->display_h;
+    renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
+    renderer->frames_pending = 1;
+    SDL_CondSignal(renderer->frame_ready);
+    SDL_UnlockMutex(renderer->gpu_mutex);
+}
+
+void renderer_wait_frame_done(Renderer* renderer) {
+    if (!renderer->gpu_thread) return;
+    SDL_LockMutex(renderer->gpu_mutex);
+    while (renderer->frames_pending > 0)
+        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+    SDL_UnlockMutex(renderer->gpu_mutex);
 }

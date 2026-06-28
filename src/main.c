@@ -24,6 +24,9 @@
 #include "debugger.h"
 #include "spu.h"
 
+/* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
+extern void* debug_ui_get_draw_data(void);
+
 #define VBLANK_CYCLES 564480
 #define CYCLES_PER_FRAME (33868800 / 60)
 
@@ -69,7 +72,7 @@ static bool init_sdl(SdlCtx* out) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     out->win = SDL_CreateWindow("ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1024, 512, SDL_WINDOW_OPENGL);
+        1280, 720, SDL_WINDOW_OPENGL);
     if (!out->win) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_CreateWindow: %s", SDL_GetError());
         SDL_Quit();
@@ -266,6 +269,9 @@ int main(int argc, char* argv[]) {
         shutdown_sdl(&sdl);
         return 1;
     }
+    /* Release GL context from main thread — GPU thread will acquire it */
+    SDL_GL_MakeCurrent(sdl.win, NULL);
+    renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
 
     cdrom_audio_sdl_open(&inter.cdrom.audio_fifo);
     cdrom_audio_set_spu(&inter.spu);
@@ -293,11 +299,10 @@ int main(int argc, char* argv[]) {
     sio_set_controller_connected(&inter.sio, true);
 
     audio_init(&inter.spu);
+    spu_thread_start(&inter.spu, &inter);
 
     eventq_schedule(&inter, EVQ_VBLANK, VBLANK_CYCLES);
     eventq_schedule(&inter, EVQ_TIMER0, 1024);
-    eventq_schedule(&inter, EVQ_SPU, CPU_TICKS_PER_SPU_TICK);
-    LOG_SPU_INFO("[SPU] EVQ_SPU scheduled at 44100 Hz (768 cy/sample)");
 
     g_cpu_for_trace = &cpu;
     signal(SIGINT,  sighandler_dump_trace);
@@ -347,15 +352,22 @@ int main(int argc, char* argv[]) {
         }
         frame_done:;
 
-        renderer_draw(&inter.gpu.renderer);
+        /* Wait for GPU to finish previous frame's ImGui draw data before NewFrame */
+        renderer_wait_frame_done(&inter.gpu.renderer);
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
-        SDL_GL_SwapWindow(sdl.win);
-        check_gl_error("SwapWindow");
-        glBindFramebuffer(GL_FRAMEBUFFER, inter.gpu.renderer.display_fbo);
+
+        /* Full VRAM upload at end of frame — ensures vram_texture matches vram.data even when
+         * GP0(A0) sprite loads cleared vram_dirty (preventing upload_vram_if_dirty in draw cmds).
+         * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
+        renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
+
+        /* Snapshot VRAM into viewer texture before submitting */
+        renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+
+        /* Submit frame to GPU thread: swap buffers, wake renderer */
+        renderer_submit_frame(&inter.gpu.renderer, debug_ui_get_draw_data());
 
         // 60 Hz cap
         uint64_t now = SDL_GetPerformanceCounter();
@@ -371,7 +383,11 @@ int main(int argc, char* argv[]) {
 
     // --- Cleanup ---
     cpu_dump_exec_trace(&cpu, "logs/exec_trace.log");
+    spu_thread_stop(&inter.spu);
     audio_shutdown();
+    renderer_stop_gpu_thread(&inter.gpu.renderer);
+    /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */
+    SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
     debug_ui_shutdown();
     cdrom_audio_sdl_close();
     cdrom_eject_disc(&inter.cdrom);

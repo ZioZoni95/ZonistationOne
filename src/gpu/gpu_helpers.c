@@ -24,14 +24,13 @@ bool gpu_validate_texture_coords(uint8_t page_x, uint8_t page_y, uint8_t depth,
 
     uint16_t page_width, page_height = 256;
 
-    // Texture depth determines page width:
-    // 0 = 4-bit (16 colors): 256 pixels wide (16 4-bit pixels = 64 bytes * 4)
-    // 1 = 8-bit (256 colors): 128 pixels wide (128 8-bit pixels = 128 bytes)
-    // 2 = 15-bit (direct): 64 pixels wide (64 15-bit pixels = 128 bytes)
+    // UV is always 8-bit (0..255). For 15bpp: 1 texel per halfword, page spans
+    // 256 VRAM pixels. For 8bpp: 2 texels per halfword → 128 VRAM pixels = 256 UV.
+    // For 4bpp: 4 texels per halfword → 64 VRAM pixels = 256 UV.
     switch (depth) {
         case 0: page_width = 256; break;
-        case 1: page_width = 128; break;
-        case 2: page_width = 64; break;
+        case 1: page_width = 256; break;
+        case 2: page_width = 256; break;
         default: return false;
     }
 

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <SDL2/SDL.h>
 
 // --- OpenGL Includes ---
 // Make sure you have GLEW (or GLAD) headers included correctly in your project setup
@@ -82,6 +83,25 @@ typedef struct {
     bool semi_trans_enabled;    // Whether semi-transparency blending is active
     uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
     bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
+
+    /* Cached pipeline state — snapshot into each batch for GPU thread replay */
+    int16_t  cached_offset_x, cached_offset_y;
+    int32_t  cached_tex_window[4];  /* and_x, and_y, or_x, or_y */
+    int32_t  cached_scissor[4];     /* gl_x, gl_y, clip_w, clip_h (GL coords) */
+
+    /* Display region — cropped from CRTC state, passed to GPU thread blit */
+    uint16_t display_x, display_y, display_w, display_h;
+
+    /* GPU render thread (Phase 2 threading refactor) */
+    SDL_Thread*  gpu_thread;
+    SDL_mutex*   gpu_mutex;
+    SDL_cond*    frame_ready;   /* GPU wakes when CPU submits a frame */
+    SDL_cond*    frame_done;    /* CPU waits if GPU is behind */
+    SDL_atomic_t gpu_stop;
+    int          write_idx;     /* CPU writes to slot [write_idx]; GPU reads [1-write_idx] */
+    int          frames_pending;
+    SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
+    SDL_GLContext gl_context;   /* moved from main thread to GPU thread */
 } Renderer;
 
 // --- Function Prototypes ---
@@ -89,11 +109,36 @@ typedef struct {
 /**
  * @brief Initializes the OpenGL renderer.
  * Compiles shaders, links program, creates VAO and VBOs, sets initial GL state.
- * Must be called after an OpenGL context is created.
- * @param renderer Pointer to the Renderer struct to initialize.
- * @return True if initialization was successful, false otherwise.
+ * Must be called with the GL context current on the calling thread.
  */
 bool renderer_init(Renderer* renderer);
+
+/**
+ * @brief Starts the GPU render thread. Call after renderer_init() and AFTER
+ * releasing the GL context from the main thread with SDL_GL_MakeCurrent(w, NULL).
+ */
+void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLContext ctx);
+
+/**
+ * @brief Signals GPU thread to stop and waits for it to exit.
+ */
+void renderer_stop_gpu_thread(Renderer* renderer);
+
+/**
+ * @brief Submits the current frame's batch list to the GPU thread for rendering.
+ * Swaps write/read buffers. CPU continues immediately with the next frame.
+ * If the GPU thread is still rendering the PREVIOUS frame, CPU blocks here
+ * (bounded wait — GPU renders one frame per VBlank interval).
+ * @param imgui_draw_data  Pointer to ImGui draw data (valid until next ImGui::NewFrame()).
+ */
+void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data);
+
+/**
+ * @brief Waits for the GPU thread to finish the most recently submitted frame.
+ * Call at the START of each CPU frame, before ImGui::NewFrame(), to ensure
+ * the previous frame's ImGui draw data is no longer in use.
+ */
+void renderer_wait_frame_done(Renderer* renderer);
 
 /**
  * @brief Gets the OpenGL texture ID used for the off-screen display.
@@ -270,5 +315,11 @@ void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode
  */
 void renderer_set_dither_mode(Renderer* renderer, bool enabled);
 
+/**
+ * @brief Sets the PSX display region to crop from the FBO when blitting to screen.
+ * Called from gpu_update_display_mapping() whenever GP1(05/06/07/08) are written.
+ * Thread-safe to call from CPU thread — snapshotted into GpuFrame at submit time.
+ */
+void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
 #endif // RENDERER_H

@@ -732,33 +732,41 @@ static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     if (ImGui::Begin("PS1 Display", &g_show_display,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-        ImVec2 size = ImGui::GetContentRegionAvail();
+        ImVec2 avail = ImGui::GetContentRegionAvail();
         if (texture_id && inter) {
-            // Crop FBO to the active display region only.
+            // Crop FBO to the active display region.
             // FBO is 1024x512; vertex shader maps PSX y=0 → GL clip +1 → FBO top.
-            // GL texture v: v = 1.0 - psx_y / 512.0
+            // GL texture v = 1.0 - psx_y / 512.0
             uint16_t vx = inter->gpu.crtc.display_vram_x;
             uint16_t vy = inter->gpu.crtc.display_vram_y;
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
             uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
 
-            float u0 =        (float)vx        / 1024.0f;
-            float u1 =        (float)(vx + vw) / 1024.0f;
-            float v0 = 1.0f - (float)vy        / 512.0f;   // top of display region
-            float v1 = 1.0f - (float)(vy + vh) / 512.0f;   // bottom of display region
+            float u0 = (float)vx        / 1024.0f;
+            float u1 = (float)(vx + vw) / 1024.0f;
+            float v0 = 1.0f - (float)vy        / 512.0f;
+            float v1 = 1.0f - (float)(vy + vh) / 512.0f;
 
-            // Debug: print UV values on first 5 frames to verify correct crop
-            static int dbg_frames = 0;
-            if (dbg_frames < 5) {
-                fprintf(stderr, "[DISPLAY] frame=%d vram=(%d,%d) size=%dx%d  UV: (%.3f,%.3f)→(%.3f,%.3f)\n",
-                        dbg_frames, vx, vy, vw, vh, u0, v0, u1, v1);
-                dbg_frames++;
+            // Letterbox at 4:3 — PSX always outputs to a 4:3 TV regardless of pixel count.
+            const float psx_aspect = 4.0f / 3.0f;
+            float disp_w, disp_h;
+            if (avail.x / avail.y > psx_aspect) {
+                disp_h = avail.y;
+                disp_w = disp_h * psx_aspect;
+            } else {
+                disp_w = avail.x;
+                disp_h = disp_w / psx_aspect;
             }
+            float pad_x = (avail.x - disp_w) * 0.5f;
+            float pad_y = (avail.y - disp_h) * 0.5f;
+            ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + pad_x,
+                                       ImGui::GetCursorPosY() + pad_y));
 
-            ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(u0, v0), ImVec2(u1, v1));
+            ImGui::Image((void*)(intptr_t)texture_id, ImVec2(disp_w, disp_h),
+                         ImVec2(u0, v0), ImVec2(u1, v1));
         } else if (texture_id) {
             // Fallback: show entire FBO Y-flipped
-            ImGui::Image((void*)(intptr_t)texture_id, size, ImVec2(0, 1), ImVec2(1, 0));
+            ImGui::Image((void*)(intptr_t)texture_id, avail, ImVec2(0, 1), ImVec2(1, 0));
         } else {
             ImGui::TextDisabled("Display not ready");
         }
@@ -811,15 +819,8 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
     ImGui::StyleColorsDark();
-
-    ImGuiStyle& style = ImGui::GetStyle();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        style.WindowRounding = 0.0f;
-        style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-    }
 
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -846,7 +847,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     Cpu* cpu = (Cpu*)cpu_ptr;
     Interconnect* inter = (Interconnect*)interconnect_ptr;
 
-    ImGui_ImplOpenGL3_NewFrame();
+    /* ImGui_ImplOpenGL3_NewFrame() moved to GPU thread — owns GL context */
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
@@ -973,16 +974,22 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     }
 
     ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    /* ImGui_ImplOpenGL3_RenderDrawData moved to GPU thread via imgui_render_draw_data() */
+}
 
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-        SDL_Window* bkp_win = SDL_GL_GetCurrentWindow();
-        SDL_GLContext bkp_ctx = SDL_GL_GetCurrentContext();
-        ImGui::UpdatePlatformWindows();
-        ImGui::RenderPlatformWindowsDefault();
-        SDL_GL_MakeCurrent(bkp_win, bkp_ctx);
-    }
+extern "C" void* debug_ui_get_draw_data(void) {
+    return ImGui::GetDrawData();
+}
+
+/* Called from GPU thread to render ImGui onto the screen */
+extern "C" void imgui_render_draw_data(void* draw_data) {
+    if (draw_data)
+        ImGui_ImplOpenGL3_RenderDrawData(static_cast<ImDrawData*>(draw_data));
+}
+
+/* Called from GPU thread at start of each frame (needs GL context) */
+extern "C" void imgui_opengl_new_frame(void) {
+    ImGui_ImplOpenGL3_NewFrame();
 }
 
 extern "C" void debug_ui_shutdown(void) {

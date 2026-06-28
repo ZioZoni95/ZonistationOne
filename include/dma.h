@@ -63,20 +63,28 @@ typedef struct {
 
     struct Interconnect* inter; // Pointer to Interconnect for event scheduling
 
+    /* GPU DMA slice state (Phase 3 threading) */
+    uint32_t gpu_ll_addr;       /* current LL node address between slices */
+    bool     gpu_ll_active;     /* true: GPU linked-list transfer in progress */
+    uint32_t gpu_req_addr;      /* current word address for REQUEST/MANUAL GPU DMA */
+    uint32_t gpu_req_remaining; /* words remaining in REQUEST/MANUAL GPU transfer */
+    int32_t  gpu_req_step;      /* address step: +4 or -4 */
+    bool     gpu_req_active;    /* true: GPU REQUEST/MANUAL transfer in progress */
+
 } Dma;
 
 // --- Function Prototypes ---
 void dma_init(Dma* dma, struct Interconnect* inter);
 uint32_t dma_read(Dma* dma, uint32_t offset);
-// Return bool to indicate if a channel became active
-bool dma_write(Dma* dma, uint32_t offset, uint32_t value); // <-- Return type changed here
+bool dma_write(Dma* dma, uint32_t offset, uint32_t value);
 bool dma_channel_is_active(DmaChannel* ch);
 void dma_channel_done(DmaChannel* ch);
 
-// Helper to get channel control register value
-uint32_t channel_get_control(DmaChannel* ch); // <-- Declaration added
-// Helper to set channel control register value
-void channel_set_control(DmaChannel* ch, uint32_t value); // <-- Declaration added
+uint32_t channel_get_control(DmaChannel* ch);
+void channel_set_control(DmaChannel* ch, uint32_t value);
+
+/* GPU DMA slice resume — called by evq_handle_dma_gpu each slice */
+void dma_gpu_resume(struct Interconnect* inter);
 
 
 #endif // DMA_H

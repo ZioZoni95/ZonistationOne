@@ -620,6 +620,24 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         sb->lba   = cdrom->current_lba;
         sb->valid = true;
 
+        /* Software modchip: spoof US license data for LBA 4-11.
+         * EU discs have "Sony Computer Entertainment Euro pe" where
+         * US BIOS expects "Sony Computer   Entertainment          of   America".
+         * User data in Mode2 sectors starts at raw[24]; diff begins at +0x20. */
+        if (cdrom->current_lba >= 4 && cdrom->current_lba <= 11) {
+            static const uint8_t us_patch[] = {
+                /* +0x20 */ 'S','o','n','y',' ','C','o','m','p','u','t','e','r',' ',' ',' ',
+                /* +0x30 */ 'E','n','t','e','r','t','a','i','n','m','e','n','t',
+                /* +0x3D */ ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
+                /* +0x47 */ 'o','f',' ',' ',' ','A','m','e','r','i','c','a',' ',' ',
+            };
+            memcpy(sb->raw + 24 + 0x20, us_patch, sizeof(us_patch));
+            /* zero out any remaining EU bytes beyond patch end */
+            memset(sb->raw + 24 + 0x20 + sizeof(us_patch), 0,
+                   2048 - 0x20 - sizeof(us_patch));
+            LOG_CDROM_DEBUG("License sector LBA=%u: spoofed US region data", cdrom->current_lba);
+        }
+
         /* Check XA subheader: submode byte at offset 18 */
         uint8_t submode = raw[18];
         bool is_xa_audio = (submode & 0x04) != 0;  /* bit 2 = AUDIO */

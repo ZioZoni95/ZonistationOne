@@ -258,6 +258,75 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
 }
 
 /* =========================================================================
+ * SPU Dedicated Thread (Phase 1 threading refactor)
+ *
+ * Generates audio samples independently of CPU execution.
+ * Wall-clock driven: produces 128 samples (~2.9ms) per iteration, then
+ * sleeps 2ms. Ring buffer gives ~93ms underrun headroom at 4096 slots.
+ *
+ * Shared state: voice registers written by CPU thread, read here without
+ * mutex (PCSX-Redux pattern — benign stale reads, no structural corruption).
+ * CDROM audio FIFO pop is the only write from this thread to shared state;
+ * the FIFO is a single-consumer SPSC (this thread = consumer).
+ * ========================================================================= */
+
+typedef struct { Spu* spu; struct Interconnect* inter; } SpuThreadArg;
+static SpuThreadArg s_spu_thread_arg;
+
+static int spu_thread_main(void* userdata) {
+    SpuThreadArg* arg = (SpuThreadArg*)userdata;
+    Spu* spu = arg->spu;
+    struct Interconnect* inter = arg->inter;
+
+    while (!SDL_AtomicGet(&spu->spu_stop)) {
+        /* Occupancy-driven rate control: generate at CPU speed until buffer is
+         * nearly full, then sleep 1ms. SDL_Delay(N) on Linux sleeps 10-50ms
+         * regardless of N — using a fixed delay causes underruns. */
+        int head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
+        int used = (spu->sample_buf_tail - head + SPU_SAMPLE_BUFFER_SIZE) % SPU_SAMPLE_BUFFER_SIZE;
+        int free_slots = SPU_SAMPLE_BUFFER_SIZE - 1 - used;
+
+        if (free_slots < 256) {
+            SDL_Delay(1);
+            continue;
+        }
+
+        int to_gen = (free_slots < 512) ? (free_slots - 256) : 512;
+        for (int i = 0; i < to_gen; i++) {
+            /* Pull one CDROM audio sample into SPU CD inputs */
+            {
+                int16_t cl = 0, cr = 0;
+                if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo))
+                    cdrom_audio_fifo_pop(&inter->cdrom.audio_fifo, &cl, &cr);
+                int32_t cv_l = (int32_t)(int16_t)spu->cd_vol_left;
+                int32_t cv_r = (int32_t)(int16_t)spu->cd_vol_right;
+                if (cv_l == 0 && cv_r == 0) { cv_l = 0x7FFF; cv_r = 0x7FFF; }
+                spu->cd_audio_left  = (int16_t)(((int32_t)cl * cv_l) >> 15);
+                spu->cd_audio_right = (int16_t)(((int32_t)cr * cv_r) >> 15);
+            }
+
+            int16_t l, r;
+            spu_generate_one_sample(spu, inter, &l, &r);
+
+            int next_tail = (spu->sample_buf_tail + 1) % SPU_SAMPLE_BUFFER_SIZE;
+            int cur_head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
+            if (next_tail != cur_head) {
+                int tidx = spu->sample_buf_tail * 2;
+                spu->sample_buffer[tidx]     = l;
+                spu->sample_buffer[tidx + 1] = r;
+                __atomic_store_n(&spu->sample_buf_tail, next_tail, __ATOMIC_RELEASE);
+                spu->sample_buf_count++;
+                spu->total_samples_generated++;
+            }
+        }
+        /* Decay peak levels once per batch */
+        spu->peak_level_left  = (spu->peak_level_left  * 15) >> 4;
+        spu->peak_level_right = (spu->peak_level_right * 15) >> 4;
+    }
+    return 0;
+}
+
+/* =========================================================================
  * SPU Step (called from main loop with CPU cycles)
  * ========================================================================= */
 
@@ -288,14 +357,22 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
         int16_t l, r;
         spu_generate_one_sample(spu, inter, &l, &r);
 
-        /* Push to circular buffer */
-        if (spu->sample_buf_count < SPU_SAMPLE_BUFFER_SIZE) {
-            int tail = spu->sample_buf_tail * 2;
-            spu->sample_buffer[tail] = l;
-            spu->sample_buffer[tail + 1] = r;
-            spu->sample_buf_tail = (spu->sample_buf_tail + 1) % SPU_SAMPLE_BUFFER_SIZE;
-            spu->sample_buf_count++;
-            spu->total_samples_generated++;
+        /* Push to circular buffer — lock-free SPSC.
+         * Producer owns tail; consumer owns head. Only the producer writes tail
+         * (after writing data), so consumer can safely read tail without a lock.
+         * __ATOMIC_ACQUIRE on head ensures we see consumer's latest progress.
+         * __ATOMIC_RELEASE on tail ensures data writes are visible before tail update. */
+        {
+            int next_tail = (spu->sample_buf_tail + 1) % SPU_SAMPLE_BUFFER_SIZE;
+            int head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
+            if (next_tail != head) {  /* not full */
+                int tidx = spu->sample_buf_tail * 2;
+                spu->sample_buffer[tidx]     = l;
+                spu->sample_buffer[tidx + 1] = r;
+                __atomic_store_n(&spu->sample_buf_tail, next_tail, __ATOMIC_RELEASE);
+                spu->sample_buf_count++;  /* approximate, for debug display */
+                spu->total_samples_generated++;
+            }
         }
     }
 
@@ -310,12 +387,17 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
 
 int spu_get_samples(Spu* spu, int16_t* buffer, int max_samples) {
     int count = 0;
-    while (count < max_samples && spu->sample_buf_count > 0) {
-        int head = spu->sample_buf_head * 2;
-        buffer[count * 2]     = spu->sample_buffer[head];
-        buffer[count * 2 + 1] = spu->sample_buffer[head + 1];
-        spu->sample_buf_head = (spu->sample_buf_head + 1) % SPU_SAMPLE_BUFFER_SIZE;
-        spu->sample_buf_count--;
+    while (count < max_samples) {
+        /* __ATOMIC_ACQUIRE on tail: ensure we see data written before tail update */
+        int tail = __atomic_load_n(&spu->sample_buf_tail, __ATOMIC_ACQUIRE);
+        if (spu->sample_buf_head == tail) break;  /* empty */
+        int hidx = spu->sample_buf_head * 2;
+        buffer[count * 2]     = spu->sample_buffer[hidx];
+        buffer[count * 2 + 1] = spu->sample_buffer[hidx + 1];
+        int next_head = (spu->sample_buf_head + 1) % SPU_SAMPLE_BUFFER_SIZE;
+        /* __ATOMIC_RELEASE on head: producer can now use this slot */
+        __atomic_store_n(&spu->sample_buf_head, next_head, __ATOMIC_RELEASE);
+        if (spu->sample_buf_count > 0) spu->sample_buf_count--;
         count++;
     }
     return count;
@@ -346,4 +428,27 @@ void spu_generate_samples(Spu* spu, int16_t* buffer, int num_samples) {
         buffer[s * 2] = l;
         buffer[s * 2 + 1] = r;
     }
+}
+
+/* =========================================================================
+ * SPU Thread Lifecycle (start/stop called from main.c)
+ * ========================================================================= */
+
+void spu_thread_start(Spu* spu, struct Interconnect* inter) {
+    SDL_AtomicSet(&spu->spu_stop, 0);
+    s_spu_thread_arg.spu   = spu;
+    s_spu_thread_arg.inter = inter;
+    spu->spu_thread = SDL_CreateThread(spu_thread_main, "SPU", &s_spu_thread_arg);
+    if (!spu->spu_thread)
+        LOG_SPU_ERROR("[SPU] Failed to create SPU thread: %s", SDL_GetError());
+    else
+        LOG_SPU_INFO("[SPU] SPU thread started (wall-clock, 128 samples / 2ms batch)");
+}
+
+void spu_thread_stop(Spu* spu) {
+    if (!spu->spu_thread) return;
+    SDL_AtomicSet(&spu->spu_stop, 1);
+    SDL_WaitThread(spu->spu_thread, NULL);
+    spu->spu_thread = NULL;
+    LOG_SPU_INFO("[SPU] SPU thread stopped");
 }

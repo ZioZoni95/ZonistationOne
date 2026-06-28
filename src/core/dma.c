@@ -93,6 +93,13 @@ dma->inter = inter; // Store pointer to Interconnect
         dma->channels[i].block_count = 0;
     }
 
+    dma->gpu_ll_addr       = 0;
+    dma->gpu_ll_active     = false;
+    dma->gpu_req_addr      = 0;
+    dma->gpu_req_remaining = 0;
+    dma->gpu_req_step      = 4;
+    dma->gpu_req_active    = false;
+
     LOG_DMA_INFO("[DMA] DMA Initialized. DPCR=0x%08x, Channels initialized.", dma->control);
 }
 

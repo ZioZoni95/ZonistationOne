@@ -30,22 +30,15 @@ void gpu_update_display_mapping(Gpu* gpu) {
     // Width: use display_width_hint computed by gp1_display_mode from resolution index.
     uint16_t disp_w = gpu->display_width_hint ? gpu->display_width_hint : 320;
 
-    // Height: derive from the vertical line range set by GP1(07).
+    // Height: 480i uses full 480-line single buffer; 240p uses GP1(07) line range.
     uint16_t disp_h = 240;
-    if (gpu->display_line_end > gpu->display_line_start) {
+    if (gpu->interlaced && gpu->vres == Y480Lines) {
+        disp_h = 480;
+    } else if (gpu->display_line_end > gpu->display_line_start) {
         uint16_t h = gpu->display_line_end - gpu->display_line_start;
-        // Clamp to sane values
         if (h > 0 && h <= VRAM_HEIGHT)
             disp_h = h;
-        else
-            disp_h = gpu->display_height_hint ? gpu->display_height_hint : 240;
-    } else if (gpu->display_height_hint) {
-        disp_h = gpu->display_height_hint;
     }
-    // For interlaced mode the line range covers one field (~240 lines) but the
-    // logical frame height is 480. Use the hint when it's larger.
-    if (gpu->display_height_hint > disp_h)
-        disp_h = gpu->display_height_hint;
 
     // Store computed display area into CRTC state for the VBlank blit path.
     gpu->crtc.display_vram_x = gpu->display_vram_x_start;
@@ -57,6 +50,9 @@ void gpu_update_display_mapping(Gpu* gpu) {
     // visible — full VRAM view, VRAM objects remain visible as the user prefers.
     renderer_set_screen_scale(&gpu->renderer, VRAM_WIDTH, VRAM_HEIGHT);
     renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
+    renderer_set_display_region(&gpu->renderer,
+        gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+        gpu->crtc.display_width,  gpu->crtc.display_height);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,20 +294,16 @@ uint32_t gpu_read_status(Gpu* gpu) {
     if (gpu->dma_setting != GPU_DMA_Off) r |= (1 << 25);
     // GPU-1 FIX: Correct ready bits and DMA request per GPUSTAT spec.
 
-    // Bit 26: Ready to receive Cmd Word.
-    // Per docs: set when GPU wants to receive a command, cleared while receiving params or busy.
-    // We use: set when in COMMAND mode and FIFO not full.
-    bool ready_to_recv_cmd = (gpu->gp0_mode == GP0_MODE_COMMAND) && (gpu->gp0_fifo_count < 16);
+    // Bit 26: Ready to receive Cmd Word — always 1 (synchronous emulator, never busy).
+    bool ready_to_recv_cmd = true;
     if (ready_to_recv_cmd) r |= (1u << 26);
 
-    // Bit 27: Ready to send VRAM to CPU.
-    // Per docs: set after GP0(C0h) and stays set until all data words are received.
+    // Bit 27: Ready to send VRAM to CPU — only when IMAGE_STORE transfer is pending.
     bool vram_send_ready = (gpu->gp0_mode == GP0_MODE_IMAGE_STORE && gpu->gp0_words_remaining > 0);
     if (vram_send_ready) r |= (1u << 27);
 
-    // Bit 28: Ready to receive DMA Block.
-    // Per docs: cleared immediately after receiving polygon/line command word.
-    bool dma_recv_ready = (gpu->gp0_fifo_count < 16);
+    // Bit 28: Ready to receive DMA Block — always 1 (synchronous emulator).
+    bool dma_recv_ready = true;
     if (dma_recv_ready) r |= (1u << 28);
 
     // Bit 25: DMA / Data Request — meaning depends on GP1(04h) DMA Direction:
@@ -453,6 +445,8 @@ static void gpu_reset_state(Gpu* gpu) {
     renderer_set_drawing_area(&gpu->renderer,
         gpu->drawing_area_left, gpu->drawing_area_top,
         gpu->drawing_area_right, gpu->drawing_area_bottom);
+    // Set default display region (320x240 at VRAM origin) for correct blit before GP1(05-08)
+    renderer_set_display_region(&gpu->renderer, 0, 0, 320, 240);
 }
 
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {

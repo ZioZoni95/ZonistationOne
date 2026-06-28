@@ -503,8 +503,112 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 }
 
 // =============================================================================
-// DMA TRANSFER LOGIC  (unchanged from previous implementation)
+// DMA TRANSFER LOGIC
 // =============================================================================
+
+#define DMA_SLICE_WORDS  64    /* GPU commands per slice before yielding */
+#define DMA_SLICE_CYCLES 1000  /* EVQ cycles between slices (~30µs) */
+
+/* Signal DMA ch2 completion IRQ */
+static void dma_ch2_signal_done(Interconnect* inter) {
+    DmaChannel* ch = &inter->dma.channels[2];
+    dma_channel_done(ch);
+    /* Fixed stall per slice (exact accounting happens across EVQ_DMA_GPU reschedules) */
+    if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
+
+    if (inter->dma.channel_irq_enable & (1u << 2)) {
+        inter->dma.channel_irq_flags |= (1u << 2);
+        inter->dma.master_irq_flag = inter->dma.force_irq ||
+            (inter->dma.master_irq_enable &&
+             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
+        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
+            interconnect_request_irq(inter, IRQ_DMA, "DMA ch2 done");
+    }
+}
+
+/* Run one slice of the GPU DMA transfer. Returns true when fully done. */
+static bool dma_gpu_run_slice(Interconnect* inter) {
+    Dma* dma = &inter->dma;
+    uint32_t words_done = 0;
+
+    if (dma->gpu_ll_active) {
+        uint32_t addr = dma->gpu_ll_addr;
+        while (words_done < DMA_SLICE_WORDS) {
+            if (addr >= RAM_SIZE) {
+                LOG_DMA_ERROR("[DMA] GPU LL: addr 0x%08x out of bounds", addr);
+                dma->gpu_ll_active = false;
+                return true;
+            }
+            uint32_t header    = interconnect_load32(inter, addr);
+            uint32_t num_words = header >> 24;
+            uint32_t raw_next  = header & 0x00FFFFFF;
+            uint32_t next_addr = raw_next & 0x00FFFFFC;
+
+            for (uint32_t i = 0; i < num_words; i++) {
+                addr = (addr + 4) & 0x00FFFFFC;
+                if (addr >= RAM_SIZE) {
+                    dma->gpu_ll_active = false;
+                    return true;
+                }
+                gpu_gp0(&inter->gpu, interconnect_load32(inter, addr));
+                words_done++;
+            }
+
+            if (raw_next & 0x800000u) {
+                LOG_DMA_TRACE("[DMA] GPU LL done after %u words (sliced)", words_done);
+                dma->gpu_ll_active = false;
+                return true;
+            }
+            if (next_addr >= RAM_SIZE) {
+                LOG_DMA_ERROR("[DMA] GPU LL: next 0x%08x out of bounds", next_addr);
+                dma->gpu_ll_active = false;
+                return true;
+            }
+            addr = next_addr;
+            words_done++;  /* count header traversal */
+        }
+        dma->gpu_ll_addr = addr;
+        return false;
+    }
+
+    if (dma->gpu_req_active) {
+        uint32_t addr      = dma->gpu_req_addr;
+        uint32_t remaining = dma->gpu_req_remaining;
+        while (words_done < DMA_SLICE_WORDS && remaining > 0) {
+            uint32_t cur = addr & 0x00FFFFFC;
+            if (cur >= RAM_SIZE) {
+                LOG_DMA_ERROR("[DMA] GPU req: addr 0x%08x out of bounds", cur);
+                dma->gpu_req_active = false;
+                return true;
+            }
+            gpu_gp0(&inter->gpu, interconnect_load32(inter, cur));
+            addr = (uint32_t)((int32_t)addr + dma->gpu_req_step);
+            remaining--;
+            words_done++;
+        }
+        dma->gpu_req_addr      = addr;
+        dma->gpu_req_remaining = remaining;
+        if (remaining == 0) {
+            dma->gpu_req_active = false;
+            return true;
+        }
+        return false;
+    }
+
+    return true;  /* nothing active */
+}
+
+/* Public: called by evq_handle_dma_gpu each slice tick */
+void dma_gpu_resume(struct Interconnect* inter) {
+    bool done = dma_gpu_run_slice(inter);
+    if (done) {
+        dma_ch2_signal_done(inter);
+    } else {
+        eventq_schedule(inter, EVQ_DMA_GPU, DMA_SLICE_CYCLES);
+        LOG_DMA_TRACE("[DMA] GPU DMA slice: %u words left, rescheduled",
+                      inter->dma.gpu_req_active ? inter->dma.gpu_req_remaining : 0u);
+    }
+}
 
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
     if (ch->sync == LINKED_LIST) return 0;
@@ -534,52 +638,12 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     switch (sync_mode) {
         case LINKED_LIST:
             if (channel_index == 2 && ch->direction == FROM_RAM) {
-                uint32_t addr = ch->base_addr & 0x00FFFFFC;
-                LOG_DMA_DEBUG("[DMA] GPU LL start at 0x%08x", addr);
-                while (1) {
-                    if (addr >= RAM_SIZE) {
-                        LOG_DMA_ERROR("[DMA] GPU LL: header 0x%08x out of bounds", addr);
-                        break;
-                    }
-                    uint32_t header   = interconnect_load32(inter, addr);
-                    uint32_t num_words = header >> 24;
-                    uint32_t raw_next  = header & 0x00FFFFFF;
-                    uint32_t next_addr = raw_next & 0x00FFFFFC;
-
-                    bool force_stop = false;
-                    if (num_words > 0) {
-                        for (uint32_t i = 0; i < num_words; ++i) {
-                            addr = (addr + 4) & 0x00FFFFFC;
-                            if (addr >= RAM_SIZE) {
-                                LOG_DMA_ERROR("[DMA] GPU LL: cmd addr 0x%08x out of bounds", addr);
-                                force_stop = true;
-                                break;
-                            }
-                            uint32_t cmd = interconnect_load32(inter, addr);
-                            LOG_DMA_TRACE("[DMA] GPU LL word=0x%08x addr=0x%08x", cmd, addr);
-                            {
-                                int w = 0;
-                                while ((gpu_read_status(&inter->gpu) & (1u << 28)) == 0) {
-                                    eventq_dispatch_due(inter);
-                                    if (++w > 10000) { LOG_DMA_WARN("[DMA] GPU LL: DMA-ready timeout"); break; }
-                                }
-                            }
-                            gpu_gp0(&inter->gpu, cmd);
-                        }
-                        if (force_stop) break;
-                    }
-
-                    if (raw_next & 0x800000u) {
-                        LOG_DMA_TRACE("[DMA] GPU LL end (raw_next=0x%06x)", raw_next);
-                        break;
-                    }
-                    if (next_addr >= RAM_SIZE) {
-                        LOG_DMA_ERROR("[DMA] GPU LL: next 0x%08x out of bounds", next_addr);
-                        break;
-                    }
-                    addr = next_addr;
-                }
-                LOG_DMA_DEBUG("[DMA] GPU LL done");
+                LOG_DMA_DEBUG("[DMA] GPU LL start at 0x%08x (sliced)", ch->base_addr & 0x00FFFFFC);
+                inter->dma.gpu_ll_addr   = ch->base_addr & 0x00FFFFFC;
+                inter->dma.gpu_ll_active = true;
+                inter->dma.gpu_req_active = false;
+                dma_gpu_resume(inter);
+                return;  /* done/IRQ handled by dma_gpu_resume */
             } else {
                 LOG_DMA_ERROR("[DMA] Linked list on unsupported ch=%d dir=%d", channel_index, ch->direction);
             }
@@ -592,6 +656,19 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 
             uint32_t addr = ch->base_addr & 0x00FFFFFC;
             int32_t  step = (ch->step == INCREMENT) ? 4 : -4;
+
+            /* GPU FROM_RAM: slice via EVQ to avoid stalling CPU */
+            if (channel_index == 2 && ch->direction == FROM_RAM) {
+                LOG_DMA_DEBUG("[DMA] GPU REQUEST/MANUAL FROM_RAM: %u words (sliced)", words_to_transfer);
+                inter->dma.gpu_req_addr      = addr;
+                inter->dma.gpu_req_remaining = words_to_transfer;
+                inter->dma.gpu_req_step      = step;
+                inter->dma.gpu_req_active    = true;
+                inter->dma.gpu_ll_active     = false;
+                dma_gpu_resume(inter);
+                return;  /* done/IRQ handled by dma_gpu_resume */
+            }
+
             LOG_DMA_DEBUG("[DMA] ch%d %s %s step=%d addr=0x%08x words=%u",
                           channel_index,
                           ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM",
@@ -608,15 +685,6 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                     uint32_t data = interconnect_load32(inter, cur);
                     switch (channel_index) {
                         case 0: mdec_dma_in(&inter->mdec, data); break;
-                        case 2: {
-                            int w = 0;
-                            while ((gpu_read_status(&inter->gpu) & (1u << 28)) == 0) {
-                                eventq_dispatch_due(inter);
-                                if (++w > 10000) { LOG_DMA_WARN("[DMA] GPU DMA-ready timeout"); break; }
-                            }
-                            gpu_gp0(&inter->gpu, data);
-                            break;
-                        }
                         case 4: {
                             uint16_t hw[2] = { (uint16_t)(data & 0xFFFF), (uint16_t)(data >> 16) };
                             spu_dma_write_halfwords(&inter->spu, inter, hw, 2);
@@ -687,43 +755,3 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 // =============================================================================
 void interconnect_check_bios_boot(Interconnect* inter) { (void)inter; }
 
-void perform_gpu_dma_transfer(struct Interconnect* sys, DmaChannel* ch) {
-    LOG_DMA_DEBUG("[DMA] GPU transfer sync=%d dir=%d", ch->sync, ch->direction);
-    if (ch->direction == FROM_RAM) {
-        uint32_t addr  = ch->base_addr & 0x00FFFFFC;
-        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count)
-                       * (ch->block_size  == 0 ? 1 : ch->block_size);
-        if (words == 0) words = 1;
-        LOG_DMA_DEBUG("[DMA] GPU FROM_RAM base=0x%08x words=%u", ch->base_addr, words);
-        for (uint32_t i = 0; i < words; ++i) {
-            uint32_t data = ram_load32(sys->ram, addr);
-            int w = 0;
-            while ((gpu_read_status(&sys->gpu) & (1u << 28)) == 0)
-                if (++w > 1000) break;
-            gpu_gp0(&sys->gpu, data);
-            addr += 4;
-        }
-    } else if (ch->direction == TO_RAM) {
-        uint32_t addr  = ch->base_addr & 0x00FFFFFC;
-        uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count)
-                       * (ch->block_size  == 0 ? 1 : ch->block_size);
-        if (words == 0) words = 1;
-        for (uint32_t i = 0; i < words; ++i) {
-            ram_store32(sys->ram, addr, gpu_read_data(&sys->gpu));
-            addr += 4;
-        }
-    } else if (ch->sync == LINKED_LIST) {
-        uint32_t addr   = ch->base_addr & 0x00FFFFFC;
-        uint32_t safety = 0;
-        while (safety++ < 0x10000) {
-            uint32_t hdr   = ram_load32(sys->ram, addr);
-            uint32_t count = (hdr >> 24) & 0xFF;
-            for (uint32_t i = 0; i < count; ++i) {
-                addr = (addr + 4) & 0x00FFFFFC;
-                gpu_gp0(&sys->gpu, ram_load32(sys->ram, addr));
-            }
-            if (hdr & 0x800000) break;
-            addr = hdr & 0x00FFFFFC;
-        }
-    }
-}

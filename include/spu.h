@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <SDL2/SDL.h>
 
 struct Interconnect;
 
@@ -266,11 +267,14 @@ typedef struct Spu {
     /* IRQ state */
     bool     irq9_flag;
 
-    /* Sample generation state */
+    /* Sample generation state — lock-free SPSC ring buffer.
+     * Only producer (spu_step, main thread) writes sample_buf_tail.
+     * Only consumer (spu_fill_audio, SDL audio thread) writes sample_buf_head.
+     * sample_buf_count is approximate (for debug display only, not used for flow control). */
     int16_t  sample_buffer[SPU_SAMPLE_BUFFER_SIZE * 2]; /* interleaved L,R */
-    int      sample_buf_head;   /* read position (SDL callback) */
-    int      sample_buf_tail;   /* write position (emulation) */
-    int      sample_buf_count;  /* number of stereo frames in buffer */
+    int      sample_buf_head;   /* read position (consumer) */
+    int      sample_buf_tail;   /* write position (producer) */
+    int      sample_buf_count;  /* approximate count — debug display only */
     uint64_t spu_tick_counter;  /* accumulated CPU cycles for SPU timing */
 
     /* Debug/logging */
@@ -278,6 +282,10 @@ typedef struct Spu {
     uint32_t total_key_on_events;
     int32_t  peak_level_left;   /* peak level for audio meter */
     int32_t  peak_level_right;
+
+    /* SPU dedicated thread (Phase 1 threading refactor) */
+    SDL_Thread*  spu_thread;
+    SDL_atomic_t spu_stop;     /* set to 1 to signal thread exit */
 } Spu;
 
 /* --- Public API --- */
@@ -321,7 +329,11 @@ void     spu_voice_sweep_tick(SpuVoice* voice);
 /* ADSR mix — called from spu_voice.c; returns 0-1023 */
 int      spu_adsr_mix(SpuVoice* voice);
 
-/* SPU sample buffer management (driven by EVQ_SPU event scheduler) */
+/* SPU dedicated thread management */
+void     spu_thread_start(Spu* spu, struct Interconnect* inter);
+void     spu_thread_stop(Spu* spu);
+
+/* SPU sample buffer management (legacy: was driven by EVQ_SPU; now used internally by SPU thread) */
 void     spu_step(struct Interconnect* inter, uint32_t cpu_cycles);
 int      spu_get_samples(Spu* spu, int16_t* buffer, int max_samples);
 
