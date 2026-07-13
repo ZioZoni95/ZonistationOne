@@ -264,6 +264,12 @@ void    cdrom_reset(Cdrom *cdrom);
 bool    cdrom_load_disc(Cdrom *cdrom, const char *cue_path);
 void    cdrom_eject_disc(Cdrom *cdrom);
 
+/* Event-scheduler tick handlers — installed into event_scheduler.c's
+ * EVQ_CDROM_COMMAND / EVQ_CDROM_DRIVE / EVQ_CDROM_SECOND_RESPONSE slots. */
+void    cdrom_command_event_tick(struct Interconnect *inter);
+void    cdrom_drive_event_tick(struct Interconnect *inter);
+void    cdrom_second_response_event_tick(struct Interconnect *inter);
+
 uint8_t cdrom_read8(Cdrom *cdrom, uint32_t addr);
 void    cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value);
 

@@ -28,25 +28,26 @@ static void evq_handle_timer1(struct Interconnect* sys); // Timer1 event
 static void evq_handle_timer2(struct Interconnect* sys); // Timer2 event
 static void evq_handle_dma_gpu(struct Interconnect* sys);   // GPU DMA event
 static void evq_handle_dma_cdrom(struct Interconnect* sys); // CDROM DMA event
-static void evq_handle_cdrom(struct Interconnect* sys); // CDROM event
+static void evq_handle_cdrom_command(struct Interconnect* sys);         // CDROM command event
+static void evq_handle_cdrom_drive(struct Interconnect* sys);           // CDROM drive event
+static void evq_handle_cdrom_second_response(struct Interconnect* sys); // CDROM second-response event
 static void evq_handle_sio(struct Interconnect* sys);   // SIO deferred transfer
 
 // Table of event handlers, indexed by EventQueueType
 typedef EventQueueHandler EventHandlerTable[EVQ_EVENT_COUNT];
 static EventHandlerTable evq_handlers = {
-    evq_handle_vblank,   // EVQ_VBLANK
-    evq_handle_timer0,   // EVQ_TIMER0
-    evq_handle_timer1,   // EVQ_TIMER1
-    evq_handle_timer2,   // EVQ_TIMER2
-    evq_handle_dma_gpu,  // EVQ_DMA_GPU
-    evq_handle_dma_cdrom,// EVQ_DMA_CDROM
-    NULL,                // EVQ_DMA_SPU
-    NULL,                // EVQ_DMA_OTC
-    evq_handle_sio,      // EVQ_SIO
-    evq_handle_cdrom,    // EVQ_CDROM (non-DMA)
-    NULL,                // EVQ_GPU (non-DMA)
-    NULL,                // EVQ_MDEC
-    NULL                 // EVQ_SPU — handled by dedicated SPU thread
+    evq_handle_vblank,                // EVQ_VBLANK
+    evq_handle_timer0,                // EVQ_TIMER0
+    evq_handle_timer1,                // EVQ_TIMER1
+    evq_handle_timer2,                // EVQ_TIMER2
+    evq_handle_dma_gpu,               // EVQ_DMA_GPU
+    evq_handle_dma_cdrom,             // EVQ_DMA_CDROM
+    evq_handle_sio,                   // EVQ_SIO
+    evq_handle_cdrom_command,         // EVQ_CDROM_COMMAND
+    evq_handle_cdrom_drive,           // EVQ_CDROM_DRIVE
+    evq_handle_cdrom_second_response, // EVQ_CDROM_SECOND_RESPONSE
+    NULL,                              // EVQ_MDEC
+    NULL                                // EVQ_SPU — handled by dedicated SPU thread
 };
 
 // --- Event Scheduling ---
@@ -181,10 +182,16 @@ static void evq_handle_dma_cdrom(struct Interconnect* sys) {
     (void)sys;
 }
 
-static void evq_handle_cdrom(struct Interconnect* sys) {
-    // CDROM events are now handled via interconnect_check_cdrom_events()
-    // This handler is kept for legacy event system compatibility
-    (void)sys;
+static void evq_handle_cdrom_command(struct Interconnect* sys) {
+    cdrom_command_event_tick(sys);
+}
+
+static void evq_handle_cdrom_drive(struct Interconnect* sys) {
+    cdrom_drive_event_tick(sys);
+}
+
+static void evq_handle_cdrom_second_response(struct Interconnect* sys) {
+    cdrom_second_response_event_tick(sys);
 }
 
 static void evq_handle_sio(struct Interconnect* sys) {

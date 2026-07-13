@@ -6,6 +6,7 @@
 
 #include "cdrom.h"
 #include "interconnect.h"
+#include "event_scheduler.h"
 #include "log.h"
 #include <string.h>
 #include <stdlib.h>
@@ -55,37 +56,33 @@ void cdrom_send_error(Cdrom *cdrom, uint8_t err, uint8_t reason) {
 
 /* =========================================================================
  * Event Scheduling
+ *
+ * Scheduled on the shared event_scheduler.c queue (EVQ_CDROM_COMMAND/
+ * DRIVE/SECOND_RESPONSE), not a private timer array. Tick functions below
+ * are called by event_scheduler.c's handler table when those events fire.
  * ========================================================================= */
-
-static void command_event_callback(void *ctx, uint32_t cycles_late);
-static void drive_event_callback(void *ctx, uint32_t cycles_late);
-static void second_response_callback(void *ctx, uint32_t cycles_late);
 
 void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
     if (cdrom->cmd_event_pending) return;
     cdrom->cmd_event_pending = true;
     if (cdrom->inter)
-        interconnect_schedule_event(cdrom->inter, cycles,
-                                    command_event_callback, cdrom, "CDROM_CMD");
+        eventq_schedule(cdrom->inter, EVQ_CDROM_COMMAND, cycles);
 }
 
 void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
     if (cdrom->inter)
-        interconnect_schedule_event(cdrom->inter, cycles,
-                                    drive_event_callback, cdrom, "CDROM_DRIVE");
+        eventq_schedule(cdrom->inter, EVQ_CDROM_DRIVE, cycles);
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
     if (cdrom->second_event_pending) return;
     cdrom->second_event_pending = true;
     if (cdrom->inter)
-        interconnect_schedule_event(cdrom->inter, cycles,
-                                    second_response_callback, cdrom, "CDROM_INT2");
+        eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE, cycles);
 }
 
-static void command_event_callback(void *ctx, uint32_t cycles_late) {
-    (void)cycles_late;
-    Cdrom *cdrom = (Cdrom *)ctx;
+void cdrom_command_event_tick(struct Interconnect *inter) {
+    Cdrom *cdrom = &inter->cdrom;
     cdrom->cmd_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
         cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
@@ -95,9 +92,8 @@ static void command_event_callback(void *ctx, uint32_t cycles_late) {
     cdrom_execute_command(cdrom);
 }
 
-static void drive_event_callback(void *ctx, uint32_t cycles_late) {
-    (void)cycles_late;
-    Cdrom *cdrom = (Cdrom *)ctx;
+void cdrom_drive_event_tick(struct Interconnect *inter) {
+    Cdrom *cdrom = &inter->cdrom;
     if (cdrom->interrupt_flag != 0) {
         /* Drive event blocked by pending INT — retry after a short delay.
            For CDDA there is no INT1, so don't retry there. */
@@ -110,9 +106,8 @@ static void drive_event_callback(void *ctx, uint32_t cycles_late) {
     cdrom_execute_drive(cdrom);
 }
 
-static void second_response_callback(void *ctx, uint32_t cycles_late) {
-    (void)cycles_late;
-    Cdrom *cdrom = (Cdrom *)ctx;
+void cdrom_second_response_event_tick(struct Interconnect *inter) {
+    Cdrom *cdrom = &inter->cdrom;
     cdrom->second_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
         cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);

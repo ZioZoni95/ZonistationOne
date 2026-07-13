@@ -73,62 +73,6 @@ void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
     LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect CPU pointer set (exception triggering enabled).");
 }
 
-// --- CDROM Event Scheduler ---
-// Schedule an event for the CDROM (simple callback-based timer)
-typedef struct {
-    void (*callback)(void*, uint32_t);
-    void* context;
-    uint32_t target_cycle;
-    bool active;
-    const char* name;
-} CdromEvent;
-
-#define MAX_CDROM_EVENTS 8
-static CdromEvent cdrom_events[MAX_CDROM_EVENTS];
-
-void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
-                                 void (*callback)(void*, uint32_t), void* context,
-                                 const char* name) {
-    uint32_t target = inter->cpu_cycle_counter + cycles;
-
-    // Find free slot
-    for (int i = 0; i < MAX_CDROM_EVENTS; i++) {
-        if (!cdrom_events[i].active) {
-            cdrom_events[i].callback = callback;
-            cdrom_events[i].context = context;
-            cdrom_events[i].target_cycle = target;
-            cdrom_events[i].active = true;
-            cdrom_events[i].name = name;
-            static uint32_t evt_sched_count = 0;
-            if (++evt_sched_count <= 10 || evt_sched_count % 50 == 0) {
-                LOG_CDROM_DEBUG("[SYSTEM] Scheduled #%u: %s for cycle %u (now=%u, delay=%u)",
-                         evt_sched_count, name, target, inter->cpu_cycle_counter, cycles);
-            }
-            return;
-        }
-    }
-    LOG_CDROM_ERROR("[SYSTEM] No free event slots for %s!", name);
-}
-
-// Called by main loop to check/fire CDROM events
-void interconnect_check_cdrom_events(Interconnect* inter) {
-    for (int i = 0; i < MAX_CDROM_EVENTS; i++) {
-        if (cdrom_events[i].active) {
-            if (inter->cpu_cycle_counter >= cdrom_events[i].target_cycle) {
-                cdrom_events[i].active = false;
-                uint32_t cycles_late = inter->cpu_cycle_counter - cdrom_events[i].target_cycle;
-                static uint32_t evt_fire_count = 0;
-                if (++evt_fire_count <= 10 || evt_fire_count % 50 == 0) {
-                    LOG_SYSTEM_DEBUG("[SYSTEM] Firing #%u: %s (late=%u, target=%u, now=%u)",
-                             evt_fire_count, cdrom_events[i].name, cycles_late,
-                             cdrom_events[i].target_cycle, inter->cpu_cycle_counter);
-                }
-                cdrom_events[i].callback(cdrom_events[i].context, cycles_late);
-            }
-        }
-    }
-}
-
 // --- TTY Input Buffer Management (for kernel getc support) ---
 /**
  * @brief Add a character to the TTY input buffer

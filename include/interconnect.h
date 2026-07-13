@@ -268,31 +268,11 @@ void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char
 void interconnect_clear_irq(Interconnect* inter, uint32_t irq_line, const char* source);
 
 /**
- * @brief Schedule an event to be executed after a number of cycles.
- * Used by CDROM for async command execution.
- * @param inter Pointer to the Interconnect instance.
- * @param cycles Number of cycles until the event fires.
- * @param callback Function to call when event fires.
- * @param context Context pointer passed to callback.
- * @param name Name of the event (for debugging).
- */
-void interconnect_schedule_event(Interconnect* inter, uint32_t cycles,
-                                 void (*callback)(void*, uint32_t), void* context,
-                                 const char* name);
-
-/**
  * @brief Trigger CDROM IRQ (IRQ2).
  * Called by CDROM when it needs to raise an interrupt.
  * @param inter Pointer to the Interconnect instance.
  */
 void interconnect_trigger_cdrom_irq(Interconnect* inter);
-
-/**
- * @brief Check and fire pending CDROM events.
- * Called by main emulation loop every frame/step.
- * @param inter Pointer to the Interconnect instance.
- */
-void interconnect_check_cdrom_events(Interconnect* inter);
 
 /**
  * @brief Add a character to the TTY input buffer (for kernel getc)

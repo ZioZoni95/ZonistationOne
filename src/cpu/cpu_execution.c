@@ -141,9 +141,6 @@ void cpu_run_next_instruction(Cpu* cpu) {
         cpu->downcount = (next != UINT32_MAX && (int32_t)(next - now) > 0)
                        ? (int32_t)(next - now) : 1;
     }
-
-    // --- 10. Check CDROM custom events ---
-    interconnect_check_cdrom_events(cpu->inter);
 }
 
 // Safe memory peek for trace output — no bus side effects, no exceptions.
