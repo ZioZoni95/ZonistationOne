@@ -48,8 +48,12 @@ static void gp0_quad_shaded_opaque(Gpu* gpu);
 static void gp0_quad_shaded_semi(Gpu* gpu);
 static void gp0_tri_shaded_tex_blend_opaque(Gpu* gpu);
 static void gp0_tri_shaded_tex_blend_semi(Gpu* gpu);
+static void gp0_tri_shaded_tex_raw_opaque(Gpu* gpu);
+static void gp0_tri_shaded_tex_raw_semi(Gpu* gpu);
 static void gp0_quad_shaded_tex_blend_opaque(Gpu* gpu);
 static void gp0_quad_shaded_tex_blend_semi(Gpu* gpu);
+static void gp0_quad_shaded_tex_raw_opaque(Gpu* gpu);
+static void gp0_quad_shaded_tex_raw_semi(Gpu* gpu);
 
 // Rectangle handlers
 static void gp0_rect_variable_opaque(Gpu* gpu);
@@ -527,7 +531,7 @@ static void gp0_tri_shaded_semi(Gpu* gpu)   { gp0_tri_shaded_impl(gpu, true);  }
 // Shaded+Textured Triangle (0x34–0x37)
 // Words: c0/cmd, v0, uv0+clut, c1, v1, uv1+tpage, c2, v2, uv2
 // ---------------------------------------------------------------------------
-static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
+static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     if (gpu->gp0_command_buffer.count < 9) return;
     RendererColor c[3]; RendererPosition p[3]; RendererTexCoord t[3];
     uint16_t clut = 0, texpage = 0;
@@ -558,10 +562,11 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
     t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
 
-    // Validate texture coordinates
+    // Validate texture coordinates. raw/blend mode comes from the GP0 opcode
+    // (bit24), not from tpage bit15 which is reserved/always 0 on real hardware.
     uint8_t page_x, page_y, depth;
-    bool raw_texture;
-    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_texture);
+    bool raw_tex_unused;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     for (int i = 0; i < 3; i++) {
         if (!gpu_validate_texture_coords(page_x, page_y, depth, t[i].u, t[i].v)) {
@@ -597,8 +602,10 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     renderer_push_triangle(&gpu->renderer, p, c, t, clut, texpage);
 }
 
-static void gp0_tri_shaded_tex_blend_opaque(Gpu* gpu) { gp0_tri_shaded_tex_impl(gpu, false); }
-static void gp0_tri_shaded_tex_blend_semi(Gpu* gpu)   { gp0_tri_shaded_tex_impl(gpu, true);  }
+static void gp0_tri_shaded_tex_blend_opaque(Gpu* gpu) { gp0_tri_shaded_tex_impl(gpu, false, false); }
+static void gp0_tri_shaded_tex_blend_semi(Gpu* gpu)   { gp0_tri_shaded_tex_impl(gpu, true,  false); }
+static void gp0_tri_shaded_tex_raw_opaque(Gpu* gpu)   { gp0_tri_shaded_tex_impl(gpu, false, true);  }
+static void gp0_tri_shaded_tex_raw_semi(Gpu* gpu)     { gp0_tri_shaded_tex_impl(gpu, true,  true);  }
 
 // ---------------------------------------------------------------------------
 // Monochrome Quad (0x28–0x2B)
@@ -749,7 +756,7 @@ static void gp0_quad_shaded_semi(Gpu* gpu)   { gp0_quad_shaded_impl(gpu, true); 
 // Shaded+Textured Quad (0x3C–0x3F)
 // Words: c0/cmd, v0, uv0+clut, c1, v1, uv1+tpage, c2, v2, uv2, c3, v3, uv3
 // ---------------------------------------------------------------------------
-static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
+static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     if (gpu->gp0_command_buffer.count < 12) return;
     RendererColor c[4]; RendererPosition p[4]; RendererTexCoord t[4];
     uint16_t clut = 0, texpage = 0;
@@ -765,10 +772,11 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
         if (i == 1) texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
     }
 
-    // Extract raw_texture flag from texpage
+    // raw/blend mode comes from the GP0 opcode (bit24), not from tpage bit15
+    // which is reserved/always 0 on real hardware.
     uint8_t page_x, page_y, depth;
-    bool raw_texture;
-    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_texture);
+    bool raw_tex_unused;
+    gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     // Validate texture coordinates
     for (int i = 0; i < 4; i++) {
@@ -804,8 +812,10 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans) {
     renderer_push_quad(&gpu->renderer, p, c, t, clut, texpage);
 }
 
-static void gp0_quad_shaded_tex_blend_opaque(Gpu* gpu) { gp0_quad_shaded_tex_impl(gpu, false); }
-static void gp0_quad_shaded_tex_blend_semi(Gpu* gpu)   { gp0_quad_shaded_tex_impl(gpu, true);  }
+static void gp0_quad_shaded_tex_blend_opaque(Gpu* gpu) { gp0_quad_shaded_tex_impl(gpu, false, false); }
+static void gp0_quad_shaded_tex_blend_semi(Gpu* gpu)   { gp0_quad_shaded_tex_impl(gpu, true,  false); }
+static void gp0_quad_shaded_tex_raw_opaque(Gpu* gpu)   { gp0_quad_shaded_tex_impl(gpu, false, true);  }
+static void gp0_quad_shaded_tex_raw_semi(Gpu* gpu)     { gp0_quad_shaded_tex_impl(gpu, true,  true);  }
 
 // ---------------------------------------------------------------------------
 // Line commands (0x40–0x5F)
@@ -1227,9 +1237,9 @@ static const Gp0TableEntry gp0_table[256] = {
 
     // Shaded+textured tri (9 words)
     [0x34] = {9, gp0_tri_shaded_tex_blend_opaque},
-    [0x35] = {9, gp0_tri_shaded_tex_blend_opaque},
+    [0x35] = {9, gp0_tri_shaded_tex_raw_opaque},
     [0x36] = {9, gp0_tri_shaded_tex_blend_semi},
-    [0x37] = {9, gp0_tri_shaded_tex_blend_semi},
+    [0x37] = {9, gp0_tri_shaded_tex_raw_semi},
 
     // Shaded quad (8 words)
     [0x38] = {8, gp0_quad_shaded_opaque},
@@ -1239,9 +1249,9 @@ static const Gp0TableEntry gp0_table[256] = {
 
     // Shaded+textured quad (12 words)
     [0x3C] = {12, gp0_quad_shaded_tex_blend_opaque},
-    [0x3D] = {12, gp0_quad_shaded_tex_blend_opaque},
+    [0x3D] = {12, gp0_quad_shaded_tex_raw_opaque},
     [0x3E] = {12, gp0_quad_shaded_tex_blend_semi},
-    [0x3F] = {12, gp0_quad_shaded_tex_blend_semi},
+    [0x3F] = {12, gp0_quad_shaded_tex_raw_semi},
 
     // Lines (monochrome: 3 words, shaded: 4 words)
     [0x40] = {3, gp0_line_mono_opaque},

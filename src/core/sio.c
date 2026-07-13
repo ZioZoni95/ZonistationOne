@@ -134,7 +134,7 @@ static void sio_do_ack(void);
 static void sio_end_transfer(void);
 static void sio_update_joystat(void);
 static void sio_trigger_irq(const char* type);
-static uint8_t sio_controller_transfer(uint8_t tx_byte);
+static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte);
 static uint8_t sio_memcard_transfer(uint8_t tx_byte);
 static bool sio_can_transfer(void);
 static void sio_reset_device_transfer_state(void);
@@ -464,10 +464,7 @@ static void sio_do_transfer(void) {
             ack = true;
             SIO_DBG("[SIO] Memory card detected (0x81)");
         } else if (sio_internal.controller_connected) {
-            const uint8_t prev_step = sio_internal.controller_transfer_step;
-            data_in = sio_controller_transfer(data_out);
-            // Button bytes can legitimately be 0xFF — ACK on step advance only
-            ack = (sio_internal.controller_transfer_step != prev_step);
+            ack = sio_controller_transfer(data_out, &data_in);
             if (ack) {
                 sio_internal.active_device = ACTIVE_DEVICE_CONTROLLER;
                 SIO_DBG("[SIO] Controller detected");
@@ -476,9 +473,7 @@ static void sio_do_transfer(void) {
             ack = false;
         }
     } else if (sio_internal.active_device == ACTIVE_DEVICE_CONTROLLER) {
-        const uint8_t prev_step = sio_internal.controller_transfer_step;
-        data_in = sio_controller_transfer(data_out);
-        ack = (sio_internal.controller_transfer_step != prev_step);
+        ack = sio_controller_transfer(data_out, &data_in);
     } else if (sio_internal.active_device == ACTIVE_DEVICE_MEMCARD) {
         data_in = sio_memcard_transfer(data_out);
         ack = (sio_internal.mc_step != 0xFF);
@@ -575,57 +570,64 @@ static void sio_trigger_irq(const char* type) {
 // CONTROLLER PROTOCOL (Digital Pad)
 // ============================================================================
 
-static uint8_t sio_controller_transfer(uint8_t tx_byte) {
-    uint8_t response = 0xFF;
+// Digital pad protocol (PSX-SPX): 0x01 (select) -> 0xFF ack, 0x42 (read cmd) ->
+// ID low 0x41, then ID high 0x5A, then buttons LSB, then buttons MSB (no ack
+// on this last byte — that's what tells the host the packet is complete).
+static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
+    bool ack = false;
 
     SIO_DBG("[SIO_CTRL] Transfer step %d, TX=0x%02x, buttons=0x%04x",
             sio_internal.controller_transfer_step, tx_byte, sio_internal.button_state);
 
     switch (sio_internal.controller_transfer_step) {
         case 0:
-            // First byte: check command (0x01 = read state)
+            // Idle: only 0x01 (select controller) advances the state machine
+            *out_byte = 0xFF;
             if (tx_byte == 0x01) {
-                response = CTRL_RESPONSE_ID;  // 0x41 = digital controller
                 sio_internal.controller_transfer_step = 1;
-                SIO_DBG("[SIO_CTRL] Step 0->1: Recevied 0x01, sending controller ID 0x41");
-            } else {
-                response = 0xFF;
-                SIO_DBG("[SIO_CTRL] Step 0: Unknown command 0x%02x", tx_byte);
+                ack = true;
+                SIO_DBG("[SIO_CTRL] Step 0->1: Received 0x01 (select)");
             }
             break;
 
         case 1:
-            // Second byte: usually data request (0x42 = read digital)
-            response = CTRL_RESPONSE_READY;  // 0x5A
-            sio_internal.controller_transfer_step = 2;
-            SIO_DBG("[SIO_CTRL] Step 1->2: Sending separator 0x5A");
+            // Ready: only 0x42 (read digital) advances to sending the ID
+            if (tx_byte == 0x42) {
+                *out_byte = CTRL_RESPONSE_ID;  // 0x41
+                sio_internal.controller_transfer_step = 2;
+                ack = true;
+                SIO_DBG("[SIO_CTRL] Step 1->2: Received 0x42, sending ID low 0x41");
+            } else {
+                *out_byte = 0xFF;
+                SIO_DBG("[SIO_CTRL] Step 1: Unexpected command 0x%02x", tx_byte);
+            }
             break;
 
         case 2:
-            // Third byte: button state HIGH byte
-            response = (sio_internal.button_state >> 8) & 0xFF;
+            *out_byte = CTRL_RESPONSE_READY;  // 0x5A (ID high)
             sio_internal.controller_transfer_step = 3;
-            SIO_DBG("[SIO_CTRL] Step 2->3: Sending button_high 0x%02x", response);
+            ack = true;
+            SIO_DBG("[SIO_CTRL] Step 2->3: Sending ID high 0x5A");
             break;
 
         case 3:
-            // Fourth byte: button state LOW byte
-            response = sio_internal.button_state & 0xFF;
+            *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // buttons LSB
             sio_internal.controller_transfer_step = 4;
-            SIO_DBG("[SIO_CTRL] Step 3->4: Sending button_low 0x%02x", response);
+            ack = true;
+            SIO_DBG("[SIO_CTRL] Step 3->4: Sending buttons LSB 0x%02x", *out_byte);
             break;
 
         case 4:
         default:
-            // End of transfer - keep returning 0xFF until next transfer
-            response = 0xFF;
-            sio_internal.controller_transfer_step = 4;  // Stay at 4 until reset
-            SIO_DBG("[SIO_CTRL] Step 4+: Transfer complete, EOP");
+            *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // buttons MSB
+            sio_internal.controller_transfer_step = 0;  // packet complete, back to idle
+            ack = false;  // no ack on final byte — signals end of packet
+            SIO_DBG("[SIO_CTRL] Step 4->0: Sending buttons MSB 0x%02x (EOP, no ack)", *out_byte);
             break;
     }
 
-    SIO_DBG("[SIO_CTRL] Response: 0x%02x", response);
-    return response;
+    SIO_DBG("[SIO_CTRL] Response: 0x%02x ack=%d", *out_byte, ack);
+    return ack;
 }
 
 // ============================================================================

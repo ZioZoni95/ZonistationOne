@@ -266,18 +266,23 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
         }
         (void)func_num; /* used by handlers; avoid unused warning if logging is off */
 
+        bool hle = false;
         if (target_address == 0x000000A0)
-            handle_a0_syscall(cpu);
+            hle = handle_a0_syscall(cpu);
         else if (target_address == 0x000000B0)
             handle_b0_syscall(cpu);
         else if (target_address == 0x000000C0)
             handle_c0_syscall(cpu);
-        /* LLE: BIOS native code executes normally */
+        /* LLE: BIOS native code executes normally unless HLE'd */
+        if (hle) {
+            cpu->branch_taken = true;
+            return;
+        }
     }
     /* Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM) */
     else if ((target_address & 0x3) != 0) {
 }
-    
+
     // Dedicated log for suspicious infinite loop at 0x00001010
     if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
         // Suppressed full CPU state dump for 0x1010 loop to avoid excessive logs

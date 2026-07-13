@@ -210,19 +210,45 @@ static void capture_bios_puts(Cpu* cpu) {
     }
 }
 
-// Called from op_jr when target == 0xA0
-void handle_a0_syscall(Cpu* cpu) {
+// Called from op_jr when target == 0xA0.
+// Returns true if the call was HLE'd; op_jr must then skip the native jump (next_pc already set).
+bool handle_a0_syscall(Cpu* cpu) {
     uint32_t call = cpu->regs[9]; // $t1
-    /* Filter out garbage JR targets misidentified as syscalls (e.g. 0x1E988, 0x1F801800) */
-    if (call > 0xFF) return;
+    /* Filter out garbage JR targets misidentified as syscalls (e.g. 0x1E988, 0x1F801800).
+     * Exception: the A0 dispatch table does SLL $t1,$t1,2 before jumping to the function;
+     * a re-entrant A0 call from inside the dispatch stub therefore arrives with $t1 already
+     * shifted left by 2 (e.g. 0xA1 → 0x284).  Recover the original index. */
+    if (call > 0xFF) {
+        if ((call & 3) == 0 && (call >> 2) <= 0xFF)
+            call >>= 2;   /* undo the SLL×2 from the dispatch table */
+        else
+            return false;
+    }
 
     bios_last_syscall.table = 0;
     bios_last_syscall.func = call;
     bios_last_syscall.name = get_bios_a_function_name(call);
 
-    /* Suppress high-frequency shell rendering call (spams log ~70x/frame) */
-    if (call == 0xBC) return;
+    /* Suppress high-frequency calls */
+    if (call == 0xBC) return false;
+    if (call == 0x40) {
+        /* Only log A0(0x40) once — it becomes an infinite loop after crash */
+        static bool a40_logged = false;
+        if (a40_logged) return false;
+        a40_logged = true;
+    }
     LOG_CPU_DEBUG("[CPU] A0(%s / 0x%02X)", bios_last_syscall.name, call);
+    if (call == 0x00 && cpu->inter) {
+        uint32_t name_ptr = cpu->regs[4];
+        char name[64]; uint32_t i;
+        for (i = 0; i < sizeof(name) - 1 && name_ptr; i++) {
+            uint8_t b = interconnect_load8(cpu->inter, name_ptr + i);
+            if (b == 0) break;
+            name[i] = (char)b;
+        }
+        name[i] = 0;
+        LOG_CPU_DEBUG("[CPU] open(\"%s\", 0x%x)", name, cpu->regs[5]);
+    }
 
     switch (call) {
         case 0x03: capture_bios_write(cpu);  break;  // write()
@@ -230,10 +256,35 @@ void handle_a0_syscall(Cpu* cpu) {
         case 0x3C: capture_bios_putc(cpu);   break;  // putchar()
         case 0x3E: capture_bios_puts(cpu);   break;  // puts()
         case 0x3F: capture_bios_printf(cpu); break;  // printf() — outputs raw format string
-        default:   break;
+
+        case 0x40: {
+            // SystemErrorUnresolvedException — one-shot full CPU state dump before loop
+            static bool dumped_0x40 = false;
+            if (!dumped_0x40) {
+                dumped_0x40 = true;
+                uint32_t epc = cpu->in_delay_slot ? (cpu->current_pc - 4) : cpu->current_pc;
+                LOG_CPU_ERROR("[CPU] === A0(0x40) SystemErrorUnresolvedException ===");
+                LOG_CPU_ERROR("[CPU]  PC=0x%08x  nPC=0x%08x  curPC=0x%08x",
+                              cpu->pc, cpu->next_pc, cpu->current_pc);
+                LOG_CPU_ERROR("[CPU]  EPC=0x%08x  Cause=0x%08x  SR=0x%08x  BD=%d",
+                              epc, cpu->cause, cpu->sr, cpu->in_delay_slot);
+                for (int i = 0; i < 32; i += 4) {
+                    LOG_CPU_ERROR("[CPU]  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x",
+                                  i,   cpu->regs[i],
+                                  i+1, cpu->regs[i+1],
+                                  i+2, cpu->regs[i+2],
+                                  i+3, cpu->regs[i+3]);
+                }
+                LOG_CPU_ERROR("[CPU]  $ra(saved)=0x%08x", cpu->regs[31]);
+                LOG_CPU_ERROR("[CPU] === END A0(0x40) STATE ===");
+            }
+            break;
+        }
+
+        default: break;
     }
-    // LLE: Do NOT fake return values — BIOS kernel executes its real getc/putc implementations
-    // TTY input is provided via interconnect_tty_input_add() called from main.c keyboard handler
+    // LLE: Do NOT fake return values — BIOS kernel executes its real implementations.
+    return false;
 }
 
 // Called from op_jr when target == 0xB0
@@ -250,6 +301,17 @@ void handle_b0_syscall(Cpu* cpu) {
     // Suppress noise for high-frequency polling calls (GetC = 0x32, B0(0x2C), etc.)
     if (call != 0x32 && call != 0x2C) {
         LOG_BIOS_DEBUG("[BIOS] B0(%s / 0x%02X)", bios_last_syscall.name, call);
+    }
+    if (call == 0x00) {
+        LOG_BIOS_DEBUG("[BIOS] AllocKernelMemory(size=0x%x) ra=0x%08x", cpu->regs[4], cpu->regs[31]);
+        if (cpu->regs[4] == 0xf1000001) {
+            static bool dumped_bad_alloc = false;
+            if (!dumped_bad_alloc) {
+                dumped_bad_alloc = true;
+                cpu_dump_exec_trace(cpu, "logs/exec_trace_bad_alloc.log");
+                LOG_BIOS_ERROR("[BIOS] Dumped exec trace for bad AllocKernelMemory size to logs/exec_trace_bad_alloc.log");
+            }
+        }
     }
 
     switch (call) {

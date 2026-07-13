@@ -146,11 +146,12 @@ typedef struct Cpu {
     uint32_t muldiv_completion_tick; // cycle when pending MULT/DIV finishes (for MFHI/MFLO stall)
 
     // --- Execution Trace Ring Buffer ---
-#define EXEC_TRACE_SIZE 512  // must be power-of-2
+#define EXEC_TRACE_SIZE 8192  // must be power-of-2
     uint32_t exec_trace_pc[EXEC_TRACE_SIZE];
     uint32_t exec_trace_instr[EXEC_TRACE_SIZE];
     uint32_t exec_trace_head;   // next write index
     uint32_t exec_trace_count;  // entries filled (capped at EXEC_TRACE_SIZE)
+    bool     exec_trace_frozen; // stop writing once set (freeze on first crash)
 
 } Cpu;
 
@@ -209,7 +210,7 @@ void decode_and_execute(Cpu* cpu, uint32_t instruction);
 void cpu_exception(Cpu* cpu, ExceptionCause cause);
 
 // --- BIOS SYSCALL interceptors (DuckStation-style) ---
-void handle_a0_syscall(Cpu* cpu);
+bool handle_a0_syscall(Cpu* cpu);  /* returns true if HLE'd (caller must skip native jump) */
 void handle_b0_syscall(Cpu* cpu);
 void handle_c0_syscall(Cpu* cpu);
 

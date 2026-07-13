@@ -357,8 +357,16 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     const uint32_t phys = mask_region(address);
 
     // RAM (2 MB, mirrored in first 8 MB)
-    if (phys < 0x00800000)
-        return ram_load32(inter->ram, phys & (RAM_SIZE - 1));
+    if (phys < 0x00800000) {
+        uint32_t ram_off = phys & (RAM_SIZE - 1);
+        uint32_t val = ram_load32(inter->ram, ram_off);
+        if (ram_off >= 0xB870 && ram_off <= 0xB890) {
+            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
+            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT load32 RAM[0x%05X]=0x%08x from PC=0x%08x",
+                                  ram_off, val, pc);
+        }
+        return val;
+    }
     // Scratchpad (KUSEG/KSEG0 only — excluded in KSEG1)
     if (phys >= 0x1F800000 && phys < 0x1F800400 && address < 0xA0000000)
         return sp_load32(inter, phys - 0x1F800000);
@@ -440,7 +448,19 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
     const uint32_t phys = mask_region(address);
 
-    if (phys < 0x00800000)         { ram_store32(inter->ram, phys & (RAM_SIZE-1), value); return; }
+    if (phys < 0x00800000) {
+        uint32_t ram_off = phys & (RAM_SIZE - 1);
+        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
+            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
+            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
+            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
+            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
+            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store32 RAM[0x%05X]=0x%08x from PC=0x%08x",
+                                  ram_off, value, pc);
+        }
+        ram_store32(inter->ram, ram_off, value);
+        return;
+    }
     if (phys >= 0x1F800000 && phys < 0x1F800400) { sp_store32(inter, phys - 0x1F800000, value); return; }
     if (phys >= 0x1F000000 && phys < 0x1F800000) return; // EXP1
     if (phys >= 0x1F801000 && phys < 0x1F802000) { g_hw_write[(phys>>4)&0xFF](inter, phys, value, BUS_WORD); return; }
@@ -461,7 +481,19 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
     const uint32_t phys = mask_region(address);
 
-    if (phys < 0x00800000)         { ram_store16(inter->ram, phys & (RAM_SIZE-1), value); return; }
+    if (phys < 0x00800000) {
+        uint32_t ram_off = phys & (RAM_SIZE - 1);
+        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
+            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
+            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
+            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
+            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
+            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store16 RAM[0x%05X]=0x%04x from PC=0x%08x",
+                                  ram_off, value, pc);
+        }
+        ram_store16(inter->ram, ram_off, value);
+        return;
+    }
     if (phys >= 0x1F800000 && phys < 0x1F800400) { sp_store16(inter, phys - 0x1F800000, value); return; }
     if (phys >= 0x1F000000 && phys < 0x1F800000) return;
     if (phys >= 0x1F801000 && phys < 0x1F802000) { g_hw_write[(phys>>4)&0xFF](inter, phys, value, BUS_HWORD); return; }
@@ -476,22 +508,44 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     const uint32_t phys = mask_region(address);
 
-    if (phys < 0x00800000)         { ram_store8(inter->ram, phys & (RAM_SIZE-1), value); return; }
+    if (phys < 0x00800000) {
+        uint32_t ram_off = phys & (RAM_SIZE - 1);
+        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
+            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
+            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
+            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
+            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
+            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store8 RAM[0x%05X]=0x%02x from PC=0x%08x",
+                                  ram_off, (uint32_t)value, pc);
+        }
+        ram_store8(inter->ram, ram_off, value);
+        return;
+    }
     if (phys >= 0x1F800000 && phys < 0x1F800400) { inter->scratchpad[phys - 0x1F800000] = value; return; }
     if (phys >= 0x1F000000 && phys < 0x1F800000) return; // EXP1
     if (phys >= 0x1F801000 && phys < 0x1F802000) { g_hw_write[(phys>>4)&0xFF](inter, phys, value, BUS_BYTE); return; }
-    // EXP2 (0x1F802000-0x1F803FFF) — BIOS TTY capture
+    // EXP2 (0x1F802000-0x1F803FFF) — only offset 0x23/0x80 is the TTY char
+    // port (matches DuckStation's EXP2WriteHandler). The rest of the range is
+    // POST status codes and other diagnostic registers — capturing writes to
+    // those as if they were TTY text corrupts the log with garbage characters.
     if (phys >= 0x1F802000 && phys < 0x1F804000) {
-        char ch = (char)(value & 0xFF);
-        if ((uint8_t)ch >= 0x20 && (uint8_t)ch < 0x7F) {
-            if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
-                inter->tty_line_buf[inter->tty_line_len++] = ch;
-        } else if (ch == '\n' || ch == '\r') {
-            if (inter->tty_line_len > 0) {
-                inter->tty_line_buf[inter->tty_line_len] = '\0';
-                LOG_BIOS_INFO("[BUS] [TTY] %s", inter->tty_line_buf);
-                inter->tty_line_len = 0;
+        uint32_t offset = phys - 0x1F802000;
+        if (offset == 0x23 || offset == 0x80) {
+            char ch = (char)(value & 0xFF);
+            if ((uint8_t)ch >= 0x20 && (uint8_t)ch < 0x7F) {
+                if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
+                    inter->tty_line_buf[inter->tty_line_len++] = ch;
+            } else if (ch == '\n' || ch == '\r') {
+                if (inter->tty_line_len > 0) {
+                    inter->tty_line_buf[inter->tty_line_len] = '\0';
+                    LOG_BIOS_INFO("[BUS] [TTY] %s", inter->tty_line_buf);
+                    inter->tty_line_len = 0;
+                }
             }
+        } else if (offset == 0x41 || offset == 0x42) {
+            LOG_BIOS_DEBUG("[BUS] BIOS POST status: 0x%02x", (unsigned)(value & 0x0F));
+        } else if (offset == 0x70) {
+            LOG_BIOS_DEBUG("[BUS] BIOS POST2 status: 0x%02x", (unsigned)(value & 0x0F));
         }
         return;
     }

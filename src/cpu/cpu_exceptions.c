@@ -4,12 +4,33 @@
 
 // --- Exception Handling Helpers ---
 static void log_exception_details(Cpu* cpu, ExceptionCause cause) {
-    // Suppress high-frequency exceptions — only log unexpected ones
     if (cause != EXCEPTION_INTERRUPT && cause != EXCEPTION_SYSCALL && cause != EXCEPTION_BREAK) {
         uint32_t epc = cpu->in_delay_slot ? (cpu->current_pc - 4) : cpu->current_pc;
         LOG_CPU_DEBUG("[CPU] Exception 0x%02x at 0x%08x (epc=0x%08x, BD=%s)",
                       (uint8_t)cause, cpu->current_pc, epc,
                       cpu->in_delay_slot ? "true" : "false");
+
+        // One-shot: freeze trace + dump immediately before exception handler overwrites it
+        static bool first_exception_dumped = false;
+        if (!first_exception_dumped) {
+            first_exception_dumped = true;
+            // Freeze FIRST, before any more instructions execute
+            cpu->exec_trace_frozen = true;
+            cpu_dump_exec_trace(cpu, "logs/exec_trace_crash.log");
+            LOG_CPU_ERROR("[CPU] === FIRST EXCEPTION FULL STATE (cause=0x%02x) ===", (uint8_t)cause);
+            LOG_CPU_ERROR("[CPU]  PC=0x%08x  nPC=0x%08x  curPC=0x%08x  BD=%d",
+                          cpu->pc, cpu->next_pc, cpu->current_pc, cpu->in_delay_slot);
+            LOG_CPU_ERROR("[CPU]  EPC=0x%08x  Cause=0x%08x  SR=0x%08x",
+                          epc, (uint32_t)cause << 2, cpu->sr);
+            for (int i = 0; i < 32; i += 4) {
+                LOG_CPU_ERROR("[CPU]  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x",
+                              i,   cpu->regs[i],
+                              i+1, cpu->regs[i+1],
+                              i+2, cpu->regs[i+2],
+                              i+3, cpu->regs[i+3]);
+            }
+            LOG_CPU_ERROR("[CPU] === END FIRST EXCEPTION STATE ===");
+        }
     }
 }
 

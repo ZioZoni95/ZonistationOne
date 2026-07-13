@@ -41,14 +41,32 @@ typedef struct {
     bool     is_viewer;         /* true → upload to vram_viewer_texture (RGBA8) */
 } GpuVramUpdate;
 
+/* Ops record VRAM updates and draw batches in the exact order they were
+ * submitted by the CPU thread. A VRAM texture page can be uploaded to,
+ * drawn from, then re-uploaded within the same frame (e.g. text glyphs
+ * reusing a page previously holding a sprite) — executing all VRAM updates
+ * before any draw would apply the *later* upload before the *earlier* draw
+ * runs, corrupting whatever that draw was supposed to sample. */
+typedef enum { GPU_OP_VRAM_UPDATE, GPU_OP_BATCH } GpuOpType;
+typedef struct { GpuOpType type; uint32_t index; } GpuOp;
+#define GPU_MAX_OPS (GPU_MAX_BATCHES + GPU_MAX_VRAM_UPDATES)
+
 typedef struct {
     GpuBatch       batches[GPU_MAX_BATCHES];
     uint32_t       batch_count;
     GpuVramUpdate  vram_updates[GPU_MAX_VRAM_UPDATES];
     uint32_t       vram_update_count;
+    GpuOp          ops[GPU_MAX_OPS];
+    uint32_t       op_count;
     void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
     uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
 } GpuFrame;
+
+/* Record submission order for the GPU thread — see GpuOp comment above. */
+static inline void gpu_frame_record_op(GpuFrame* frame, GpuOpType type, uint32_t index) {
+    if (frame->op_count < GPU_MAX_OPS)
+        frame->ops[frame->op_count++] = (GpuOp){ type, index };
+}
 
 /* Double-buffered vertex pools — in BSS (static), not on stack */
 static RendererPosition s_pos[2][VERTEX_BUFFER_LEN];
@@ -780,7 +798,8 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
         memcpy(dst + (uint32_t)row * w * 2u, src_row, w * sizeof(uint16_t));
     }
 
-    GpuVramUpdate* u = &frame->vram_updates[frame->vram_update_count++];
+    uint32_t idx = frame->vram_update_count++;
+    GpuVramUpdate* u = &frame->vram_updates[idx];
     u->x              = x;
     u->y              = y;
     u->w              = w;
@@ -789,6 +808,7 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
     u->update_display = update_display;
     u->full_upload    = false;
     s_vram_pool_used[wi] += aligned;
+    gpu_frame_record_op(frame, GPU_OP_VRAM_UPDATE, idx);
 }
 
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
@@ -930,7 +950,8 @@ void renderer_draw(Renderer* renderer) {
     s_vtx[wi] += vtx_count;
 
     /* Record batch with full state snapshot */
-    GpuBatch* b = &frame->batches[frame->batch_count++];
+    uint32_t batch_idx = frame->batch_count++;
+    GpuBatch* b = &frame->batches[batch_idx];
     b->vertex_start       = vtx_start;
     b->vertex_count       = vtx_count;
     b->is_lines           = false;
@@ -952,6 +973,7 @@ void renderer_draw(Renderer* renderer) {
     b->scissor[2]         = renderer->cached_scissor[2];
     b->scissor[3]         = renderer->cached_scissor[3];
 
+    gpu_frame_record_op(frame, GPU_OP_BATCH, batch_idx);
     renderer->vertex_count = 0;
     LOG_RENDERER_DEBUG("[RENDERER] batch recorded: %u verts (slot %d, batch %u)",
                        vtx_count, wi, frame->batch_count - 1);
@@ -1135,7 +1157,8 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     s_tpg[wi][vs]     = zero_tp; s_tpg[wi][vs+1] = zero_tp;
     s_vtx[wi] += 2;
 
-    GpuBatch* b = &frame->batches[frame->batch_count++];
+    uint32_t line_batch_idx = frame->batch_count++;
+    GpuBatch* b = &frame->batches[line_batch_idx];
     b->vertex_start       = vs;
     b->vertex_count       = 2;
     b->is_lines           = true;
@@ -1156,6 +1179,8 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     b->scissor[1]         = renderer->cached_scissor[1];
     b->scissor[2]         = renderer->cached_scissor[2];
     b->scissor[3]         = renderer->cached_scissor[3];
+
+    gpu_frame_record_op(frame, GPU_OP_BATCH, line_batch_idx);
 }
 
 GLuint renderer_get_display_texture(Renderer* renderer) {
@@ -1184,7 +1209,8 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
         *dst++ = 255;
     }
 
-    GpuVramUpdate* u = &frame->vram_updates[frame->vram_update_count++];
+    uint32_t viewer_idx = frame->vram_update_count++;
+    GpuVramUpdate* u = &frame->vram_updates[viewer_idx];
     u->x              = 0;
     u->y              = 0;
     u->w              = 1024;
@@ -1194,6 +1220,7 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
     u->full_upload    = false;
     u->is_viewer      = true;
     s_vram_pool_used[wi] += bytes_needed;
+    gpu_frame_record_op(frame, GPU_OP_VRAM_UPDATE, viewer_idx);
 }
 
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer) {
@@ -1229,45 +1256,44 @@ void renderer_destroy(Renderer* renderer) {
  * All functions below are GPU-thread-only (GL context owned by GPU thread).
  * ========================================================================= */
 
-/* Execute all VRAM updates recorded in a frame slot */
-static void renderer_execute_vram_updates(Renderer* renderer, const GpuFrame* frame, int slot) {
-    for (uint32_t i = 0; i < frame->vram_update_count; i++) {
-        const GpuVramUpdate* u = &frame->vram_updates[i];
-        const uint8_t* data = s_vram_pool[slot] + u->data_offset;
+/* Execute a single VRAM update. Called in submission order, interleaved with
+ * draw batches, so a texture page reused later in the same frame is only
+ * visible to draws that were actually issued after it (see GpuOp comment). */
+static void renderer_execute_one_vram_update(Renderer* renderer, const GpuVramUpdate* u, int slot) {
+    const uint8_t* data = s_vram_pool[slot] + u->data_offset;
 
-        if (u->is_viewer) {
-            /* RGBA8 viewer upload */
-            glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512,
-                            GL_RGBA, GL_UNSIGNED_BYTE, data);
-            glBindTexture(GL_TEXTURE_2D, 0);
-        } else {
-            /* R16UI VRAM texture upload */
-            glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
-                            GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
-            glBindTexture(GL_TEXTURE_2D, 0);
+    if (u->is_viewer) {
+        /* RGBA8 viewer upload */
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1024, 512,
+                        GL_RGBA, GL_UNSIGNED_BYTE, data);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    } else {
+        /* R16UI VRAM texture upload */
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+                        GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
+        glBindTexture(GL_TEXTURE_2D, 0);
 
-            if (u->update_display) {
-                /* Convert R16UI rect to RGB and upload to display_texture */
-                static uint8_t rgb_buf[1024 * 512 * 3];
-                const uint16_t* src = (const uint16_t*)data;
-                for (uint16_t row = 0; row < u->h; row++) {
-                    uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
-                    for (uint16_t col = 0; col < u->w; col++) {
-                        uint16_t raw = src[(uint32_t)row * u->w + col];
-                        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
-                        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
-                        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
-                    }
+        if (u->update_display) {
+            /* Convert R16UI rect to RGB and upload to display_texture */
+            static uint8_t rgb_buf[1024 * 512 * 3];
+            const uint16_t* src = (const uint16_t*)data;
+            for (uint16_t row = 0; row < u->h; row++) {
+                uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
+                for (uint16_t col = 0; col < u->w; col++) {
+                    uint16_t raw = src[(uint32_t)row * u->w + col];
+                    *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
+                    *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+                    *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
                 }
-                glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-                glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
-                                GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
-                glBindTexture(GL_TEXTURE_2D, 0);
-                glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
             }
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+                            GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
         }
     }
 }
@@ -1310,14 +1336,38 @@ static int gpu_thread_main(void* userdata) {
         glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
         glViewport(0, 0, 1024, 512);
 
-        /* 1) Apply VRAM updates */
-        renderer_execute_vram_updates(renderer, &s_frame[ri], ri);
-
-        /* 2) Execute draw batches */
-        for (uint32_t i = 0; i < s_frame[ri].batch_count; i++)
-            renderer_draw_gl(renderer, &s_frame[ri].batches[i], ri);
+        /* Replay VRAM updates and draw batches in original submission order —
+         * required when a texture page is re-uploaded mid-frame (see GpuOp). */
+        for (uint32_t i = 0; i < s_frame[ri].op_count; i++) {
+            const GpuOp* op = &s_frame[ri].ops[i];
+            if (op->type == GPU_OP_VRAM_UPDATE)
+                renderer_execute_one_vram_update(renderer, &s_frame[ri].vram_updates[op->index], ri);
+            else
+                renderer_draw_gl(renderer, &s_frame[ri].batches[op->index], ri);
+        }
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        {
+            static int s_dump_counter = 0;
+            const char* dump_path = getenv("ZS1_DUMP_FRAME");
+            if (dump_path) {
+                int target = 300;
+                const char* target_env = getenv("ZS1_DUMP_FRAME_N");
+                if (target_env) target = atoi(target_env);
+                if (s_dump_counter == target) {
+                    unsigned char* buf = (unsigned char*)malloc(1024 * 512 * 3);
+                    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+                    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, buf);
+                    glBindTexture(GL_TEXTURE_2D, 0);
+                    FILE* f = fopen(dump_path, "wb");
+                    if (f) { fwrite(buf, 1, 1024 * 512 * 3, f); fclose(f); }
+                    free(buf);
+                    LOG_RENDERER_INFO("[GPU-THREAD] Dumped display_texture frame %d to %s", s_dump_counter, dump_path);
+                }
+                s_dump_counter++;
+            }
+        }
 
         /* 3) Prepare default framebuffer for ImGui — display via draw_ps1_display() ImGui::Image */
         glDisable(GL_SCISSOR_TEST);
@@ -1342,6 +1392,7 @@ static int gpu_thread_main(void* userdata) {
         /* Reset read slot for reuse */
         s_frame[ri].batch_count        = 0;
         s_frame[ri].vram_update_count  = 0;
+        s_frame[ri].op_count           = 0;
         s_frame[ri].imgui_draw_data    = NULL;
         s_vtx[ri]                      = 0;
         s_vram_pool_used[ri]           = 0;
@@ -1375,6 +1426,7 @@ void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLCon
     for (int i = 0; i < 2; i++) {
         s_frame[i].batch_count       = 0;
         s_frame[i].vram_update_count = 0;
+        s_frame[i].op_count          = 0;
         s_frame[i].imgui_draw_data   = NULL;
         s_vtx[i]           = 0;
         s_vram_pool_used[i] = 0;

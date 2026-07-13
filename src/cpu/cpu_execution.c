@@ -100,11 +100,13 @@ void cpu_run_next_instruction(Cpu* cpu) {
     
     uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc);
 
-    // Record into execution trace ring buffer
-    cpu->exec_trace_pc[cpu->exec_trace_head]    = cpu->current_pc;
-    cpu->exec_trace_instr[cpu->exec_trace_head] = instruction;
-    cpu->exec_trace_head = (cpu->exec_trace_head + 1) & (EXEC_TRACE_SIZE - 1);
-    if (cpu->exec_trace_count < EXEC_TRACE_SIZE) cpu->exec_trace_count++;
+    // Record into execution trace ring buffer (frozen after first crash dump)
+    if (!cpu->exec_trace_frozen) {
+        cpu->exec_trace_pc[cpu->exec_trace_head]    = cpu->current_pc;
+        cpu->exec_trace_instr[cpu->exec_trace_head] = instruction;
+        cpu->exec_trace_head = (cpu->exec_trace_head + 1) & (EXEC_TRACE_SIZE - 1);
+        if (cpu->exec_trace_count < EXEC_TRACE_SIZE) cpu->exec_trace_count++;
+    }
 
     // --- 4. Update Branch State ---
     cpu->branch_taken = false;

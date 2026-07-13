@@ -243,6 +243,7 @@ int main(int argc, char* argv[]) {
     if (!parse_args(argc, argv, &args)) return 1;
 
     log_init();
+    if (getenv("ZS1_LOG_STDERR")) log_set_stderr_quiet(false);
     LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
 
     SdlCtx sdl;
@@ -272,9 +273,6 @@ int main(int argc, char* argv[]) {
     /* Release GL context from main thread — GPU thread will acquire it */
     SDL_GL_MakeCurrent(sdl.win, NULL);
     renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
-
-    cdrom_audio_sdl_open(&inter.cdrom.audio_fifo);
-    cdrom_audio_set_spu(&inter.spu);
 
     if (args.game_path) {
         if (!cdrom_load_disc(&inter.cdrom, args.game_path))
@@ -389,7 +387,6 @@ int main(int argc, char* argv[]) {
     /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */
     SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
     debug_ui_shutdown();
-    cdrom_audio_sdl_close();
     cdrom_eject_disc(&inter.cdrom);
     renderer_destroy(&inter.gpu.renderer);
     shutdown_sdl(&sdl);
