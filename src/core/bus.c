@@ -804,8 +804,3 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     }
 }
 
-// =============================================================================
-// MISC (called from event_scheduler.c via extern)
-// =============================================================================
-void interconnect_check_bios_boot(Interconnect* inter) { (void)inter; }
-

@@ -21,7 +21,7 @@
 // --- Event Handler Table ---
 typedef void (*EventQueueHandler)(struct Interconnect*);
 
-// Event handler stubs for all timer events
+// Event handler forward declarations
 static void evq_handle_vblank(struct Interconnect* sys); // VBlank event
 static void evq_handle_timer0(struct Interconnect* sys); // Timer0 event
 static void evq_handle_timer1(struct Interconnect* sys); // Timer1 event
@@ -131,8 +131,7 @@ uint32_t eventq_cycles_until_next(const struct Interconnect* sys) {
     return next - now;
 }
 
-// --- Example Event Handlers (Stubs) ---
-// These should be implemented to set IRQs, reschedule themselves, etc.
+// --- Event Handlers ---
 
 #define VBLANK_CYCLES 564480 // NTSC: 33868800 / 60
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed

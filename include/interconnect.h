@@ -25,9 +25,6 @@ struct Cpu;
  * These define the physical address ranges used by the interconnect
  * after mapping the CPU's virtual address.
  */
-#define TIMERS_START 0x1f801100
-#define TIMERS_SIZE  0x30 // Covers Timers 0, 1, 2
-#define TIMERS_END   (TIMERS_START + TIMERS_SIZE - 1)
 
 // Main RAM (2 Megabytes)
 #define RAM_START 0x00000000
@@ -259,9 +256,6 @@ void interconnect_set_irq_line(Interconnect* inter, uint32_t irq_line, bool stat
  * @param source The source of the interrupt request.
  */
 void interconnect_request_irq(Interconnect* inter, uint32_t irq_line, const char* source);
-
-// Debug: Check for accidental clearing of irq_status
-void interconnect_debug_check_irq_status(const Interconnect* inter, const char* context);
 
 /**
  * @brief Called by peripherals to clear/deassert an interrupt line.

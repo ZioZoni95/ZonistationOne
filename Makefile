@@ -23,12 +23,13 @@ EMU_CPU_SRCS = \
 EMU_CORE_SRCS = \
     src/core/bios.c src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/sio.c \
-    src/core/mdec.c src/core/controller.c src/core/event_scheduler.c src/core/pcdrv.c
+    src/core/mdec.c src/core/controller.c src/core/event_scheduler.c src/core/pcdrv.c \
+    src/core/debugger.c
 
 # --- GPU ---
 EMU_GPU_SRCS = \
     src/gpu/gpu.c src/gpu/gpu_helpers.c src/gpu/gpu_commands.c \
-    src/gpu/renderer.c src/gpu/vram.c src/gpu/debugger.c
+    src/gpu/renderer.c src/gpu/vram.c
 
 # --- GTE ---
 EMU_GTE_SRCS = \

@@ -43,9 +43,3 @@ void interconnect_trigger_cdrom_irq(Interconnect* inter) {
     }
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
 }
-
-void interconnect_debug_check_irq_status(const Interconnect* inter, const char* context) {
-    (void)inter;
-    (void)context;
-    // stub
-}

@@ -394,15 +394,6 @@ static void timer_force_bios_boot_config(Timers* timers) {
     }
 }
 
-// --- BIOS Timer Functions (stubs, not used by BIOS itself) ---
-// See PSX-Spex kernelbios for details
-int bios_init_timer(int t, uint16_t reload, uint16_t flags) { (void)t; (void)reload; (void)flags; return 1; }
-int bios_get_timer(int t) { (void)t; return 0; }
-int bios_enable_timer_irq(int t) { (void)t; return 1; }
-int bios_disable_timer_irq(int t) { (void)t; return 1; }
-int bios_restart_timer(int t) { (void)t; return 1; }
-int bios_ChangeClearRCnt(int t, int flag) { (void)t; (void)flag; return 0; }
-
 // --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
 // These handlers are called by the event queue when a timer event fires.

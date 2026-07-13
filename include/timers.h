@@ -137,14 +137,6 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  */
 void timers_step(Timers* timers, uint32_t cycles);
 
-// --- BIOS Timer Functions (stubs, not used by BIOS itself) ---
-int bios_init_timer(int t, uint16_t reload, uint16_t flags);
-int bios_get_timer(int t);
-int bios_enable_timer_irq(int t);
-int bios_disable_timer_irq(int t);
-int bios_restart_timer(int t);
-int bios_ChangeClearRCnt(int t, int flag);
-
 // --- New Timer/Event Function Prototypes ---
 void timers_update(Timers* timers);  // Main update function for event system
 void timers_schedule_next(Timers* timers);  // Schedule next timer event

@@ -279,14 +279,6 @@ void op_jr(Cpu* cpu, uint32_t instruction) {
             return;
         }
     }
-    /* Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM) */
-    else if ((target_address & 0x3) != 0) {
-}
-
-    // Dedicated log for suspicious infinite loop at 0x00001010
-    if (target_address == 0x00001010 && cpu->current_pc == 0x00001010 && rs == 26) {
-        // Suppressed full CPU state dump for 0x1010 loop to avoid excessive logs
-}
     cpu->cop0_tar = target_address;
     cpu->next_pc = target_address;
     cpu->branch_taken = true;
@@ -411,27 +403,6 @@ void op_jalr(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction); // Register to store return address (defaults to $ra=31 if rd=0?)
     uint32_t target_address = cpu_reg(cpu, rs);
     uint32_t return_addr = cpu->pc + 4; // Address of instruction after delay slot
-
-    // DISABLED for LLE mode: Let BIOS ROM handle syscalls natively
-    // HLE interceptors are moved to LowLevelEmulation branch
-    /*
-    if (target_address == 0xA0 || target_address == 0xB0 || target_address == 0xC0) {
-        uint32_t func_num = cpu_reg(cpu, 9);
-        if (func_num >= 0x100 || func_num == 0) {
-            uint32_t alt = cpu_reg(cpu, 10);
-            if (alt < 0x100 && alt != 0) func_num = alt;
-        }
-        const char* vector_name = (target_address == 0xA0) ? "A" :
-                                  (target_address == 0xB0) ? "B" : "C";
-if (target_address == 0xA0)
-            handle_a0_syscall(cpu);
-        else if (target_address == 0xB0)
-            handle_b0_syscall(cpu);
-    }
-    */
-    // Log truly suspicious jumps: only unaligned targets (BIOS routinely jumps to low RAM)
-    if ((target_address & 0x3) != 0) {
-}
 
     cpu_set_reg(cpu, rd, return_addr);
     cpu->cop0_tar = target_address;
