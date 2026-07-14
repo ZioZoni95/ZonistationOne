@@ -360,11 +360,6 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
         uint32_t val = ram_load32(inter->ram, ram_off);
-        if (ram_off >= 0xB870 && ram_off <= 0xB890) {
-            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
-            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT load32 RAM[0x%05X]=0x%08x from PC=0x%08x",
-                                  ram_off, val, pc);
-        }
         return val;
     }
     // Scratchpad (KUSEG/KSEG0 only — excluded in KSEG1)
@@ -450,14 +445,6 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
-        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
-            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
-            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
-            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
-            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
-            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store32 RAM[0x%05X]=0x%08x from PC=0x%08x",
-                                  ram_off, value, pc);
-        }
         ram_store32(inter->ram, ram_off, value);
         return;
     }
@@ -483,14 +470,6 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
-        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
-            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
-            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
-            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
-            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
-            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store16 RAM[0x%05X]=0x%04x from PC=0x%08x",
-                                  ram_off, value, pc);
-        }
         ram_store16(inter->ram, ram_off, value);
         return;
     }
@@ -510,14 +489,6 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
-        if ((ram_off >= 0xB070 && ram_off <= 0xB090) ||
-            (ram_off >= 0xB870 && ram_off <= 0xB890) ||
-            (ram_off >= 0x8648 && ram_off <= 0x89EC) ||
-            (ram_off >= 0x79E70 && ram_off <= 0x79E90)) {
-            uint32_t pc = inter->cpu ? inter->cpu->current_pc : 0xDEAD;
-            LOG_INTERCONNECT_WARN("[BUS] WATCHPOINT store8 RAM[0x%05X]=0x%02x from PC=0x%08x",
-                                  ram_off, (uint32_t)value, pc);
-        }
         ram_store8(inter->ram, ram_off, value);
         return;
     }

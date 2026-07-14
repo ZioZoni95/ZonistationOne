@@ -195,6 +195,8 @@ bool cdrom_load_disc(Cdrom *cdrom, const char *cue_path) {
     cdrom->disc_present = true;
     cdrom->shell_open   = false;
     cdrom->motor_on     = true;
+    cdrom->disc_region  = cdrom_disc_detect_region(&cdrom->disc);
+    LOG_CDROM_INFO("[CDROM] Disc region detected: '%c'", cdrom->disc_region ? cdrom->disc_region : '?');
 
     /* Seed SubQ to track 1 start */
     cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, 0);
@@ -304,9 +306,17 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
                 cdrom->data_buffer_armed = true;
                 cdrom->sector_buffers[cdrom->current_read_buffer].position = 0;
             } else {
-                /* Disarm / clear buffer */
+                /* Disarm (BFRD=0): stop offering data via RDDATA/DMA, but do
+                 * NOT discard the already-loaded sector — real hardware
+                 * doesn't re-fetch from disc just because software briefly
+                 * un-sets BFRD before re-arming; only a fresh ReadN/sector
+                 * load (cdrom_execute_drive) or full consumption
+                 * (cdrom_dma_read_word) should invalidate the buffer.
+                 * Previously this cleared ->valid too, which discarded a
+                 * still-unread, correctly-loaded sector whenever software
+                 * wrote BFRD=0 then BFRD=1 again without an intervening
+                 * ReadN — causing DMA to silently transfer all zeros. */
                 cdrom->data_buffer_armed = false;
-                cdrom->sector_buffers[cdrom->current_read_buffer].valid = false;
             }
             break;
 

@@ -56,6 +56,7 @@ typedef struct {
 bool     cdrom_disc_load(CdromDisc *disc, const char *cue_path);
 void     cdrom_disc_unload(CdromDisc *disc);
 bool     cdrom_disc_read_sector(CdromDisc *disc, uint32_t lba, uint8_t *out_2352);
+char     cdrom_disc_detect_region(CdromDisc *disc);
 SubQ     cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba);
 uint8_t  cdrom_disc_get_track_at_lba(CdromDisc *disc, uint32_t lba);
 uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba);

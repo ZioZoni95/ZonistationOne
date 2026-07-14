@@ -96,11 +96,13 @@ typedef struct {
     uint16_t button_state;
     uint8_t controller_transfer_step;
 
-    // Memory Cards (pointers into public Sio struct — set by sio_init)
+    // Memory Cards (pointers into public Sio struct — set by sio_init).
+    // Presence is tracked on MemoryCard.present itself (set by sio_load/create_memcard);
+    // no separate slot1/slot2 "present" flags here — those were a redundant, buggy copy.
     MemoryCard *mc1;
     MemoryCard *mc2;
-    bool card_slot1_present;
-    bool card_slot2_present;
+    MemoryCard *active_card;   // card targeted by the in-progress transfer (mc1 or mc2,
+                               // selected via JOY_CTRL bit 13 / CTRL_SLOT when 0x81 is sent)
 
     // Memory card transfer state machine
     uint8_t mc_step;           // step index (0xFF = sequence done)
@@ -168,10 +170,9 @@ void sio_init(Sio* sio) {
     // Wire memory card pointers to the public Sio struct
     sio_internal.mc1 = &sio->card_slot1;
     sio_internal.mc2 = &sio->card_slot2;
+    sio_internal.active_card = NULL;
 
     // Initialize memory cards
-    sio_internal.card_slot1_present = false;
-    sio_internal.card_slot2_present = false;
     sio_internal.mc_step  = 0;
     sio_internal.mc_flag  = 0x08;  // "directory not read" on powerup
     sio_internal.mc_write_ok = false;
@@ -181,7 +182,6 @@ void sio_init(Sio* sio) {
     sio->mode = sio_internal.mode;
     sio->ctrl = sio_internal.ctrl;
     sio->baud = sio_internal.baud;
-    sio->button_state = sio_internal.button_state;
     sio->controller_connected = sio_internal.controller_connected;
 
     LOG_SYSTEM_INFO("[SYSTEM] SIO initialized (DuckStation-style implementation)");
@@ -379,6 +379,7 @@ void sio_write32(Sio* sio, uint32_t offset, uint32_t value) {
 // ============================================================================
 
 void sio_set_button_state(Sio* sio, uint16_t buttons) {
+    (void)sio;  // sio_internal.button_state is the single source of truth; see SioInternal
     if (buttons != sio_internal.button_state) {
         static uint16_t last_logged = 0xFFFF;
         if (buttons != last_logged) {
@@ -387,12 +388,11 @@ void sio_set_button_state(Sio* sio, uint16_t buttons) {
         }
     }
     sio_internal.button_state = buttons;
-    sio->button_state = buttons;
 }
 
 void sio_set_controller_connected(Sio* sio, bool connected) {
+    (void)sio;  // sio_internal.controller_connected is the single source of truth
     sio_internal.controller_connected = connected;
-    sio->controller_connected = connected;
     LOG_SYSTEM_INFO("[SYSTEM] SIO: Controller %s", connected ? "connected" : "disconnected");
 }
 
@@ -456,13 +456,16 @@ static void sio_do_transfer(void) {
 
     // Try to transfer to active device
     if (sio_internal.active_device == ACTIVE_DEVICE_NONE) {
-        if (data_out == 0x81 && sio_internal.card_slot1_present) {
-            // Memory card device select
+        // Memory card device select. JOY_CTRL bit 13 (CTRL_SLOT) picks which
+        // physical port's card this transfer targets — mc1 when clear, mc2 when set.
+        MemoryCard* target_card = (sio_internal.ctrl & CTRL_SLOT) ? sio_internal.mc2 : sio_internal.mc1;
+        if (data_out == 0x81 && target_card && target_card->present) {
             sio_internal.active_device = ACTIVE_DEVICE_MEMCARD;
+            sio_internal.active_card = target_card;
             sio_internal.mc_step = 0;
             data_in = 0xFF;  // N/A per PSX-SPX spec
             ack = true;
-            SIO_DBG("[SIO] Memory card detected (0x81)");
+            SIO_DBG("[SIO] Memory card detected (0x81, slot=%d)", (sio_internal.ctrl & CTRL_SLOT) ? 2 : 1);
         } else if (sio_internal.controller_connected) {
             ack = sio_controller_transfer(data_out, &data_in);
             if (ack) {
@@ -539,6 +542,7 @@ static void sio_reset_device_transfer_state(void) {
     SIO_DBG("[SIO] ResetDeviceTransferState (step=%d)", sio_internal.controller_transfer_step);
 
     sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.active_card = NULL;
     sio_internal.mc_step = 0;
     // Always reset controller step on CS deassert (matches DuckStation behavior)
     sio_internal.controller_transfer_step = 0;
@@ -637,7 +641,7 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
 
 static uint8_t sio_memcard_transfer(uint8_t tx) {
     SioInternal* s = &sio_internal;
-    MemoryCard* card = s->mc1;
+    MemoryCard* card = s->active_card;
     if (!card) return 0xFF;
     uint8_t resp = 0xFF;
 
@@ -765,7 +769,6 @@ bool sio_load_memcard(MemoryCard* card, const char* filepath) {
         memset(card->data + n, 0xFF, MEMCARD_SIZE - n);
     card->present = true;
     card->dirty = false;
-    sio_internal.card_slot1_present = true;
     LOG_SYSTEM_INFO("[SIO] Memory card loaded: %s (%zu bytes)", filepath, n);
     return true;
 }
@@ -811,7 +814,6 @@ void sio_create_memcard(MemoryCard* card, const char* filepath) {
 
     card->present = true;
     card->dirty = true;
-    sio_internal.card_slot1_present = true;
     sio_save_memcard(card);
     LOG_SYSTEM_INFO("[SIO] Memory card created: %s", filepath);
 }

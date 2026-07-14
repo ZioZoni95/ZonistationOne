@@ -4,46 +4,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/**
- * PSX Controller button mapping (bit positions in button_state)
- * Note: 0 = pressed, 1 = released (inverted logic)
- */
-typedef struct {
-    unsigned select : 1;    // Bit 0
-    unsigned l3 : 1;        // Bit 1 (L3 stick press)
-    unsigned r3 : 1;        // Bit 2 (R3 stick press)
-    unsigned start : 1;     // Bit 3
-    unsigned up : 1;        // Bit 4
-    unsigned right : 1;     // Bit 5
-    unsigned down : 1;      // Bit 6
-    unsigned left : 1;      // Bit 7
-    unsigned l2 : 1;        // Bit 8 (left trigger)
-    unsigned r2 : 1;        // Bit 9 (right trigger)
-    unsigned l1 : 1;        // Bit 10 (left shoulder)
-    unsigned r1 : 1;        // Bit 11 (right shoulder)
-    unsigned triangle : 1;  // Bit 12
-    unsigned circle : 1;    // Bit 13
-    unsigned cross : 1;     // Bit 14
-    unsigned square : 1;    // Bit 15
-} ControllerButtons;
+// PSX button bit positions (0=pressed, 1=released, inverted logic), for reference:
+// 0=SELECT 1=L3 2=R3 3=START 4=UP 5=RIGHT 6=DOWN 7=LEFT
+// 8=L2 9=R2 10=L1 11=R1 12=TRIANGLE 13=CIRCLE 14=CROSS 15=SQUARE
 
 typedef struct {
-    uint16_t button_state;  // Bitfield of all buttons (0=pressed, 1=released)
-    bool connected;
+    bool connected;  // host input enabled/disabled (not the PSX-side pad connection)
 } Controller;
 
 // Initialize controller
 void controller_init(Controller* ctrl);
 
-// Update controller state from keyboard input
-// Returns updated button_state (16-bit PSX format)
+// Poll SDL keyboard and return the current PSX button state (16-bit, 0=pressed,
+// 1=released). Stateless aside from `connected`/internal change-log tracking —
+// callers own the returned value; sio_set_button_state() is the single place
+// it's stored (SioInternal.button_state), not this struct.
 uint16_t controller_update_from_keyboard(Controller* ctrl);
-
-// Helper: Set individual button states
-void controller_set_button(Controller* ctrl, int button_bit, bool pressed);
-
-// Helper: Get current button state as PSX format (already inverted)
-uint16_t controller_get_button_state(Controller* ctrl);
 
 // Connect/disconnect controller
 void controller_set_connected(Controller* ctrl, bool connected);

@@ -219,6 +219,28 @@ bool cdrom_disc_read_sector(CdromDisc *disc, uint32_t lba, uint8_t *out_2352) {
     return true;
 }
 
+/* Reads the disc's licence string (system area sector 4, Mode2/Form1 user
+ * data starts at raw+24, licence text at +0x20 per DOCS/cdromformat.md) and
+ * returns the region letter real hardware/BIOS uses: 'A'=America, 'E'=Europe,
+ * 'I'=Japan, or 0 if the sector couldn't be read. This is the actual data
+ * GetID's region byte and the boot logo's SCEx trademark text are meant to
+ * reflect — see DOCS/cdromdrive.md ("The 'SCEx' string is displayed in the
+ * intro"). */
+char cdrom_disc_detect_region(CdromDisc *disc) {
+    uint8_t raw[CDROM_RAW_SECTOR];
+    if (!cdrom_disc_read_sector(disc, 4, raw)) return 0;
+
+    const char *text = (const char *)(raw + 24 + 0x20);
+    const int text_len = 2048 - 0x20;
+    for (int i = 0; i + 4 <= text_len; i++) {
+        if (memcmp(text + i, "Euro", 4) == 0) return 'E';
+        if (memcmp(text + i, "Amer", 4) == 0) return 'A';
+    }
+    /* No EU/US marker: Japanese licence text ends "...Entertainment Inc." with
+     * no further region word, so absence of either marker means Japan. */
+    return 'I';
+}
+
 /* =========================================================================
  * SubQ Generation
  * ========================================================================= */

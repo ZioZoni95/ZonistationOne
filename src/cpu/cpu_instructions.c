@@ -255,30 +255,15 @@ void op_sb(Cpu* cpu, uint32_t instruction) {
 void op_jr(Cpu* cpu, uint32_t instruction) {
     uint32_t rs = instr_s(instruction);
     uint32_t target_address = cpu_reg(cpu, rs);
-    
-    // Detect BIOS function vector calls — DuckStation-style LLE side-channel capture.
-    // The BIOS will still execute normally (cpu->next_pc = target_address below).
-    if (target_address == 0x000000A0 || target_address == 0x000000B0 || target_address == 0x000000C0) {
-        uint32_t func_num = cpu_reg(cpu, 9);
-        if (func_num >= 0x100 || func_num == 0) {
-            uint32_t alt = cpu_reg(cpu, 10);
-            if (alt < 0x100 && alt != 0) func_num = alt;
-        }
-        (void)func_num; /* used by handlers; avoid unused warning if logging is off */
 
-        bool hle = false;
-        if (target_address == 0x000000A0)
-            hle = handle_a0_syscall(cpu);
-        else if (target_address == 0x000000B0)
-            handle_b0_syscall(cpu);
-        else if (target_address == 0x000000C0)
-            handle_c0_syscall(cpu);
-        /* LLE: BIOS native code executes normally unless HLE'd */
-        if (hle) {
-            cpu->branch_taken = true;
-            return;
-        }
-    }
+    // NOTE: BIOS syscall side-channel capture (A0h/B0h/C0h) is NOT done here.
+    // The real calling convention sets $t1 (the function-select register) in
+    // the JR's OWN delay-slot instruction (e.g. "jr $10 ; addiu $9,$0,0xA1" —
+    // confirmed via disassembly trace), so $t1 is only valid once control
+    // actually REACHES the vector address, not at the JR itself. Capturing
+    // here would read $t1 one instruction too early (stale). See
+    // cpu_execution.c's cpu_run_next_instruction, which checks current_pc
+    // against the vector addresses after the delay slot has committed.
     cpu->cop0_tar = target_address;
     cpu->next_pc = target_address;
     cpu->branch_taken = true;

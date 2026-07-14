@@ -51,9 +51,10 @@ typedef struct {
     MemoryCard card_slot1;    // Port 1 memory card (bu00:)
     MemoryCard card_slot2;    // Port 2 memory card (bu10:)
     
-    // Controller state (basic stub for now)
+    // Controller connection flag mirrored here for the struct layout; the actual
+    // button state lives only in sio.c's internal SioInternal singleton (single
+    // source of truth for the transfer state machine — see sio_set_button_state).
     bool controller_connected;
-    uint16_t button_state;    // Digital button state
 
     // IRQ7 (IRQ_CTRLMEMCARD) pending flag.
     // Set by sio_handle_transfer when ACK occurs and CTRL bit 12 (/ACK IRQ enable) is set.

@@ -43,6 +43,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     sio_init(&inter->sio);
     sio_set_interconnect(&inter->sio, inter);  // wire back-pointer for deferred transfers
     sio_load_memcard(&inter->sio.card_slot1, "memcard1.mcd");
+    sio_load_memcard(&inter->sio.card_slot2, "memcard2.mcd");
     mdec_init(&inter->mdec);
     // Initialize SPU
     spu_init(&inter->spu);

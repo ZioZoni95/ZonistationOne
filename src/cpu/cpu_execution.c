@@ -5,6 +5,7 @@
 #include "event_scheduler.h"
 #include "gte.h"
 #include "debugger.h"
+#include "log.h"
 
 // ============================================================================
 // CPU Execution Loop - DuckStation Style
@@ -118,7 +119,33 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 5. Commit Register State ---
     memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs));
     cpu->regs[REG_ZERO] = 0;
-    
+
+    // --- BIOS syscall side-channel capture (A0h/B0h/C0h) ---
+    // Must fire here, once control actually reaches the vector address, NOT
+    // inside op_jr's own handler: the real calling convention sets $t1 (the
+    // function-select register) in the JR's delay-slot instruction (e.g.
+    // "jr $10 ; addiu $9,$0,0xA1", confirmed via disassembly trace), so $t1
+    // is only valid after that delay-slot instruction has committed — which
+    // happens via the regs commit just above, one cpu_run_next_instruction
+    // call after the JR itself. Intercepting inside op_jr would read $t1 one
+    // instruction too early (stale, misattributing calls in debug logs).
+    if (cpu->current_pc == 0x000000A0 || cpu->current_pc == 0x000000B0 || cpu->current_pc == 0x000000C0) {
+        bool hle = false;
+        if (cpu->current_pc == 0x000000A0)
+            hle = handle_a0_syscall(cpu);
+        else if (cpu->current_pc == 0x000000B0)
+            handle_b0_syscall(cpu);
+        else
+            handle_c0_syscall(cpu);
+        /* LLE: real BIOS code executes normally unless HLE'd. */
+        if (hle) {
+            cpu->pc = cpu->regs[31];  // $ra: return to caller, as if the call fully executed
+            cpu->next_pc = cpu->pc + 4;
+            cpu->branch_taken = true;
+            return;
+        }
+    }
+
     // --- 6. Decode and Execute ---
     decode_and_execute(cpu, instruction);
     if (cpu->exception_pending) {

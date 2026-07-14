@@ -56,6 +56,7 @@ static const char* get_bios_a_function_name(uint32_t func_num) {
         [0x4C]="gpu_abort_dma",     [0x4D]="GetGPUStatus",      [0x4E]="gpu_sync",
         [0x4F]="SystemError",       [0x50]="SystemError",
         [0x51]="LoadAndExecute",    [0x52]="SystemError",        [0x53]="SystemError",
+        [0xA1]="SystemError",
         [0x54]="CdInit",            [0x55]="_bu_init",           [0x56]="CdRemove",
         [0x57]="unused",            [0x58]="unused",
         [0x59]="unused",            [0x5A]="unused",
@@ -237,7 +238,7 @@ bool handle_a0_syscall(Cpu* cpu) {
         if (a40_logged) return false;
         a40_logged = true;
     }
-    LOG_CPU_DEBUG("[CPU] A0(%s / 0x%02X)", bios_last_syscall.name, call);
+    LOG_CPU_DEBUG("[CPU] A0(%s / 0x%02X) called from $ra=0x%08x", bios_last_syscall.name, call, cpu->regs[31]);
     if (call == 0x00 && cpu->inter) {
         uint32_t name_ptr = cpu->regs[4];
         char name[64]; uint32_t i;
@@ -247,9 +248,9 @@ bool handle_a0_syscall(Cpu* cpu) {
             name[i] = (char)b;
         }
         name[i] = 0;
-        LOG_CPU_DEBUG("[CPU] open(\"%s\", 0x%x)", name, cpu->regs[5]);
+        LOG_CPU_DEBUG("[CPU] open(\"%s\", 0x%x) called from $ra=0x%08x $a0=0x%08x",
+                      name, cpu->regs[5], cpu->regs[31], name_ptr);
     }
-
     switch (call) {
         case 0x03: capture_bios_write(cpu);  break;  // write()
         case 0x09:                                    // putc()
@@ -281,6 +282,37 @@ bool handle_a0_syscall(Cpu* cpu) {
             break;
         }
 
+        case 0xA1: {
+            // SystemError(type, errorcode) — type: 'B'=Boot, 'D'=Disk (DOCS/kernelbios.md).
+            // Per docs this function loops on itself by design once reached, so this is
+            // always the terminal/fatal condition — one-shot dump with full context.
+            static bool dumped_0xA1 = false;
+            if (!dumped_0xA1) {
+                dumped_0xA1 = true;
+                uint32_t type_arg = cpu->regs[4];  // $a0
+                uint32_t errorcode = cpu->regs[5]; // $a1
+                char type_ch = (type_arg >= 0x20 && type_arg < 0x7F) ? (char)type_arg : '?';
+                uint32_t epc = cpu->in_delay_slot ? (cpu->current_pc - 4) : cpu->current_pc;
+                LOG_CPU_ERROR("[CPU] === A0(0xA1) SystemError(type='%c' (0x%08x), errorcode=0x%08x) ===",
+                              type_ch, type_arg, errorcode);
+                LOG_CPU_ERROR("[CPU]  Called from $ra=0x%08x  PC=0x%08x  nPC=0x%08x  curPC=0x%08x",
+                              cpu->regs[31], cpu->pc, cpu->next_pc, cpu->current_pc);
+                LOG_CPU_ERROR("[CPU]  EPC=0x%08x  Cause=0x%08x  SR=0x%08x  BD=%d",
+                              epc, cpu->cause, cpu->sr, cpu->in_delay_slot);
+                for (int i = 0; i < 32; i += 4) {
+                    LOG_CPU_ERROR("[CPU]  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x  $%02d=0x%08x",
+                                  i,   cpu->regs[i],
+                                  i+1, cpu->regs[i+1],
+                                  i+2, cpu->regs[i+2],
+                                  i+3, cpu->regs[i+3]);
+                }
+                LOG_CPU_ERROR("[CPU] === END A0(0xA1) STATE ===");
+                cpu_dump_exec_trace(cpu, "logs/exec_trace_systemerror_a1.log");
+                LOG_CPU_ERROR("[CPU] Dumped exec trace to logs/exec_trace_systemerror_a1.log");
+            }
+            break;
+        }
+
         default: break;
     }
     // LLE: Do NOT fake return values — BIOS kernel executes its real implementations.
@@ -298,9 +330,25 @@ void handle_b0_syscall(Cpu* cpu) {
     bios_last_syscall.func = call;
     bios_last_syscall.name = get_bios_b_function_name(call);
     
-    // Suppress noise for high-frequency polling calls (GetC = 0x32, B0(0x2C), etc.)
+    // Suppress noise for high-frequency polling calls (B0(0x32)=open, B0(0x2C), etc.)
+    // NOTE: 0x32 is "open", not "GetC" as the old comment claimed — verified against
+    // DOCS/kernelbios.md and by static disassembly of the B0(0x32) trampoline.
     if (call != 0x32 && call != 0x2C) {
         LOG_BIOS_DEBUG("[BIOS] B0(%s / 0x%02X)", bios_last_syscall.name, call);
+    }
+    if (call == 0x32 && cpu->inter) {
+        // open(filename, accessmode) — filename capture, bypassing the log
+        // suppression above just for this, to root-cause a failing open().
+        uint32_t name_ptr = cpu->regs[4];
+        char name[64]; uint32_t i;
+        for (i = 0; i < sizeof(name) - 1 && name_ptr; i++) {
+            uint8_t b = interconnect_load8(cpu->inter, name_ptr + i);
+            if (b == 0) break;
+            name[i] = (char)b;
+        }
+        name[i] = 0;
+        LOG_BIOS_DEBUG("[BIOS] B0(open) open(\"%s\", 0x%x) called from $ra=0x%08x $a0=0x%08x",
+                       name, cpu->regs[5], cpu->regs[31], name_ptr);
     }
     if (call == 0x00) {
         LOG_BIOS_DEBUG("[BIOS] AllocKernelMemory(size=0x%x) ra=0x%08x", cpu->regs[4], cpu->regs[31]);

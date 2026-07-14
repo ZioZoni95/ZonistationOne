@@ -513,8 +513,9 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     switch (cmd) {
 
     case CDC_GETID:
-        LOG_CDROM_DEBUG("[CDROM] GetID second: disc_present=%d motor_on=%d shell_open=%d",
-                        cdrom->disc_present, cdrom->motor_on, cdrom->shell_open);
+        LOG_CDROM_DEBUG("[CDROM] GetID second: disc_present=%d motor_on=%d shell_open=%d region='%c'",
+                        cdrom->disc_present, cdrom->motor_on, cdrom->shell_open,
+                        cdrom->disc_region ? cdrom->disc_region : '?');
         if (!cdrom->disc_present) {
             cdrom_send_error(cdrom, 0x08, 0x40);
         } else {
@@ -525,7 +526,9 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
             cdrom_push_response(cdrom, 'S');
             cdrom_push_response(cdrom, 'C');
             cdrom_push_response(cdrom, 'E');
-            cdrom_push_response(cdrom, 'A');
+            /* Reflects the disc's real licence region (cdrom_disc_detect_region),
+             * not hardcoded — see DOCS/cdromdrive.md, GetID's 4th SCEx byte. */
+            cdrom_push_response(cdrom, cdrom->disc_region ? cdrom->disc_region : 'A');
             cdrom_send_complete(cdrom);
         }
         break;
@@ -619,24 +622,6 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         memcpy(sb->raw, raw, 2352);
         sb->lba   = cdrom->current_lba;
         sb->valid = true;
-
-        /* Software modchip: spoof US license data for LBA 4-11.
-         * EU discs have "Sony Computer Entertainment Euro pe" where
-         * US BIOS expects "Sony Computer   Entertainment          of   America".
-         * User data in Mode2 sectors starts at raw[24]; diff begins at +0x20. */
-        if (cdrom->current_lba >= 4 && cdrom->current_lba <= 11) {
-            static const uint8_t us_patch[] = {
-                /* +0x20 */ 'S','o','n','y',' ','C','o','m','p','u','t','e','r',' ',' ',' ',
-                /* +0x30 */ 'E','n','t','e','r','t','a','i','n','m','e','n','t',
-                /* +0x3D */ ' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',
-                /* +0x47 */ 'o','f',' ',' ',' ','A','m','e','r','i','c','a',' ',' ',
-            };
-            memcpy(sb->raw + 24 + 0x20, us_patch, sizeof(us_patch));
-            /* zero out any remaining EU bytes beyond patch end */
-            memset(sb->raw + 24 + 0x20 + sizeof(us_patch), 0,
-                   2048 - 0x20 - sizeof(us_patch));
-            LOG_CDROM_DEBUG("License sector LBA=%u: spoofed US region data", cdrom->current_lba);
-        }
 
         /* Check XA subheader: submode byte at offset 18 */
         uint8_t submode = raw[18];

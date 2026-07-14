@@ -205,6 +205,9 @@ typedef struct Cdrom {
     bool       shell_open;
     bool       read_after_seek;
     bool       play_after_seek;
+    char       disc_region;   /* 'A'/'E'/'I' from the disc's real licence string
+                                  (cdrom_disc_detect_region), 0 if none loaded yet.
+                                  GetID's SCEx response byte reflects this. */
 
     /* --- Position --- */
     uint32_t current_lba;
