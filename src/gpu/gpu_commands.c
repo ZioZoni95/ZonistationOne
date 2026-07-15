@@ -13,6 +13,7 @@
 #include "vram.h"
 #include "log.h"
 #include "interconnect.h"
+#include "cpu.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -520,7 +521,9 @@ static void gp0_tri_shaded_impl(Gpu* gpu, bool semi_trans) {
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
-    LOG_GPU_TRACE("[GPU] Render three-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
+    LOG_GPU_TRACE("[GPU] Render three-point %s shaded polygon rgb0=(%u,%u,%u) v=(%d,%d)(%d,%d)(%d,%d)",
+                  semi_trans ? "semi-transparent" : "opaque", c[0].r, c[0].g, c[0].b,
+                  p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y);
     renderer_push_triangle(&gpu->renderer, p, c, NULL, 0, 0);
 }
 
@@ -626,7 +629,9 @@ static void gp0_quad_mono_impl(Gpu* gpu, bool semi_trans) {
     renderer_set_dither_mode(&gpu->renderer, false); // mono quad: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
-    LOG_GPU_TRACE("[GPU] Render four-point %s mono polygon", semi_trans ? "semi-transparent" : "opaque");
+    LOG_GPU_TRACE("[GPU] Render four-point %s mono polygon rgb=(%u,%u,%u) v=(%d,%d)(%d,%d)(%d,%d)(%d,%d)",
+                  semi_trans ? "semi-transparent" : "opaque", col.r, col.g, col.b,
+                  p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
     renderer_push_quad(&gpu->renderer, p, colors, NULL, 0, 0);
 }
 
@@ -745,7 +750,20 @@ static void gp0_quad_shaded_impl(Gpu* gpu, bool semi_trans) {
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
     renderer_set_texture_mode(&gpu->renderer, false);
-    LOG_GPU_TRACE("[GPU] Render four-point %s shaded polygon", semi_trans ? "semi-transparent" : "opaque");
+    LOG_GPU_TRACE("[GPU] Render four-point %s shaded polygon rgb0=(%u,%u,%u) v=(%d,%d)(%d,%d)(%d,%d)(%d,%d)",
+                  semi_trans ? "semi-transparent" : "opaque", c[0].r, c[0].g, c[0].b,
+                  p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
+    // TEMP DIAG (one-shot, remove after use): identify the BIOS logo-draw
+    // call site for the red "P" quad (rgb0=(178,0,0)), to trace what the
+    // BIOS does right after — does it advance to the next logo piece, or
+    // loop back and redraw the same piece?
+    {
+        static bool diag_fired = false;
+        if (!diag_fired && c[0].r == 178 && c[0].g == 0 && c[0].b == 0 && gpu->inter && gpu->inter->cpu) {
+            diag_fired = true;
+            LOG_GPU_ERROR("[DIAG] red-P quad drawn: ra=0x%08x pc=0x%08x", gpu->inter->cpu->regs[31], gpu->inter->cpu->current_pc);
+        }
+    }
     renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
 }
 
@@ -1183,7 +1201,7 @@ static void gp0_image_store(Gpu* gpu) {
     gpu->gp0_words_remaining = words;
     gpu->vram_load_count = 0;
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
-    LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM\xE2\x86\x92CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
+    LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM->CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
     LOG_VRAM_DEBUG("Copy rectangle from VRAM to CPU offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
                    x, y, w, h, (uint32_t)w * h, words, x / 64);
 }
