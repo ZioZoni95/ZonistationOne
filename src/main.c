@@ -261,7 +261,6 @@ int main(int argc, char* argv[]) {
     ram_init(&ram);
 
     if (!bios_load(&bios, args.bios_path)) { shutdown_sdl(&sdl); return 1; }
-    bios_print_bootstrap_strings(&bios);
 
     interconnect_init(&inter, &bios, &ram);
 

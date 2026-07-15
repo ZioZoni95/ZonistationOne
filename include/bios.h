@@ -48,16 +48,6 @@ uint32_t bios_load32(Bios* bios, uint32_t offset);
 // Based on Guide Section 2.7 load16 example [cite: 121]
 uint16_t bios_load16(Bios* bios, uint32_t offset);
 
-// Scans the BIOS ROM for the bootstrap string block ("PS-X Realtime Kernel" etc.)
-// and prints each string as a [BIOS TTY] line to stderr.
-// Call once after bios_load() succeeds.
-void bios_print_bootstrap_strings(const Bios* bios);
-
-// Dumps ALL TCRF-documented hidden string blocks: Bootstrap/Kernel, PIO Shell,
-// Control PAD driver, Standard Libraries, and CD debug strings.
-// Pass --bios-strings on the command line to invoke this instead of the boot-only scan.
-void bios_print_all_hidden_strings(const Bios* bios);
-
 // Patch BIOS ROM in memory to skip the shell (and region check).
 // DuckStation-style fast boot: replaces shell entry with display-enable + jr $ra.
 void bios_apply_fastboot_patch(Bios* bios);

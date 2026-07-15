@@ -300,23 +300,30 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
     case 3:
         switch (cdrom->index) {
         case 0:
-            /* Request register */
+            /* Request register. Reset-point matches DuckStation's model
+             * (duckstation_ref/src/core/cdrom.cpp, WriteRegister case 2):
+             * disarm (BFRD=0) resets the read pointer, arm (BFRD=1) does NOT.
+             * This lets software issue several separate reads of the SAME
+             * sector (e.g. a short header peek followed by a bulk data
+             * transfer) without losing progress across re-arms — armed-only
+             * transitions must leave ->position exactly where it was. A
+             * fresh sector load (cdrom_execute_drive) already resets
+             * ->position=0 on its own, so this only handles the explicit
+             * software-driven "restart from the top" case. Previously this
+             * was backwards (reset on arm, not on disarm), which silently
+             * discarded any header-then-data split-transfer progress the
+             * moment software re-armed for the second transfer. */
             if (value & 0x80) {
-                /* Arm data buffer: reset read pointer */
                 cdrom->data_buffer_armed = true;
-                cdrom->sector_buffers[cdrom->current_read_buffer].position = 0;
             } else {
-                /* Disarm (BFRD=0): stop offering data via RDDATA/DMA, but do
-                 * NOT discard the already-loaded sector — real hardware
-                 * doesn't re-fetch from disc just because software briefly
-                 * un-sets BFRD before re-arming; only a fresh ReadN/sector
-                 * load (cdrom_execute_drive) or full consumption
-                 * (cdrom_dma_read_word) should invalidate the buffer.
-                 * Previously this cleared ->valid too, which discarded a
-                 * still-unread, correctly-loaded sector whenever software
-                 * wrote BFRD=0 then BFRD=1 again without an intervening
-                 * ReadN — causing DMA to silently transfer all zeros. */
+                /* Disarm (BFRD=0): stop offering data via RDDATA/DMA and
+                 * reset the read pointer, but do NOT discard the underlying
+                 * sector data (->valid) — real hardware doesn't re-fetch
+                 * from disc just because software un-sets BFRD; only a
+                 * fresh ReadN/sector load or full consumption
+                 * (cdrom_dma_read_word) should invalidate the buffer. */
                 cdrom->data_buffer_armed = false;
+                cdrom->sector_buffers[cdrom->current_read_buffer].position = 0;
             }
             break;
 

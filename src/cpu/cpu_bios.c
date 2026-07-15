@@ -170,19 +170,140 @@ static void capture_bios_write(Cpu* cpu) {
     }
 }
 
-// Capture printf(fmt, ...) — output the raw format string from $a0.
-// PCSX-style: the format string itself is the "hidden text"
-// (format specifiers like %s/%08x appear literally, unsubstituted).
-static void capture_bios_printf(Cpu* cpu) {
-    uint32_t fmt = cpu->regs[4];  // $a0 = format string pointer
+// MIPS o32 varargs cursor for printf(fmt, ...): first 3 varargs come from
+// $a1-$a3, the rest from the caller's stack at $sp+16, $sp+20, ... (the o32
+// ABI always reserves 4 argument-shadow words on the stack, so args beyond
+// $a3 start right after that reserved block).
+typedef struct {
+    Cpu*     cpu;
+    uint32_t a1, a2, a3;
+    int      next_reg;    // 0..3: how many of {a1,a2,a3} consumed so far
+    uint32_t sp;
+    int      stack_slot;  // next stack word index beyond $sp+16
+} PrintfArgs;
 
-    if (fmt && cpu->inter) {
-        for (uint32_t i = 0; i < 256; i++) {
-            uint8_t b = interconnect_load8(cpu->inter, fmt + i);
-            if (b == 0) break;
-            tty_add_char(cpu->inter, (char)b);
+static uint32_t printf_next_u32(PrintfArgs* pa) {
+    switch (pa->next_reg) {
+        case 0: pa->next_reg++; return pa->a1;
+        case 1: pa->next_reg++; return pa->a2;
+        case 2: pa->next_reg++; return pa->a3;
+        default: {
+            uint32_t addr = pa->sp + 16u + (uint32_t)pa->stack_slot * 4u;
+            pa->stack_slot++;
+            return interconnect_load32(pa->cpu->inter, addr);
         }
     }
+}
+
+// Capture printf(fmt, ...) — actually substitute %s/%d/%x/etc. from the
+// caller's registers/stack per the MIPS o32 varargs convention, instead of
+// dumping the raw format string. Each %-directive is re-extracted verbatim
+// (flags/width/precision/length + conversion char) and handed to the host's
+// real snprintf with a correctly-typed argument, so width/zero-pad specs
+// like "%08x" format exactly as real hardware would show them.
+static void capture_bios_printf(Cpu* cpu) {
+    uint32_t fmt = cpu->regs[4];  // $a0 = format string pointer
+    if (!fmt || !cpu->inter) return;
+
+    char fmtbuf[512];
+    uint32_t flen = 0;
+    for (; flen < sizeof(fmtbuf) - 1; flen++) {
+        uint8_t b = interconnect_load8(cpu->inter, fmt + flen);
+        if (b == 0) break;
+        fmtbuf[flen] = (char)b;
+    }
+    fmtbuf[flen] = '\0';
+
+    PrintfArgs pa = {
+        .cpu = cpu,
+        .a1 = cpu->regs[5], .a2 = cpu->regs[6], .a3 = cpu->regs[7],
+        .next_reg = 0,
+        .sp = cpu->regs[29],
+        .stack_slot = 0,
+    };
+
+    char out[1024];
+    uint32_t oi = 0;
+    for (uint32_t i = 0; i < flen && oi < sizeof(out) - 1; ) {
+        if (fmtbuf[i] != '%') { out[oi++] = fmtbuf[i++]; continue; }
+
+        uint32_t start = i;
+        i++; // skip '%'
+        while (i < flen && strchr("-+ #0", fmtbuf[i])) i++;
+        while (i < flen && fmtbuf[i] >= '0' && fmtbuf[i] <= '9') i++;
+        if (i < flen && fmtbuf[i] == '.') {
+            i++;
+            while (i < flen && fmtbuf[i] >= '0' && fmtbuf[i] <= '9') i++;
+        }
+        while (i < flen && strchr("hlLqjzt", fmtbuf[i])) i++;
+        if (i >= flen) {
+            for (uint32_t k = start; k < flen && oi < sizeof(out) - 1; k++) out[oi++] = fmtbuf[k];
+            break;
+        }
+        char conv = fmtbuf[i++];
+
+        char directive[32];
+        uint32_t dlen = i - start;
+        if (dlen >= sizeof(directive)) dlen = sizeof(directive) - 1;
+        memcpy(directive, fmtbuf + start, dlen);
+        directive[dlen] = '\0';
+
+        int written;
+        switch (conv) {
+            case '%':
+                if (oi < sizeof(out) - 1) out[oi++] = '%';
+                continue; // literal '%', no arg consumed
+
+            case 's': {
+                uint32_t ptr = printf_next_u32(&pa);
+                char strbuf[256];
+                uint32_t si = 0;
+                if (ptr) {
+                    for (; si < sizeof(strbuf) - 1; si++) {
+                        uint8_t b = interconnect_load8(cpu->inter, ptr + si);
+                        if (b == 0) break;
+                        strbuf[si] = (char)b;
+                    }
+                }
+                strbuf[si] = '\0';
+                written = snprintf(out + oi, sizeof(out) - oi, directive, ptr ? strbuf : "(null)");
+                break;
+            }
+            case 'c': {
+                int v = (int)printf_next_u32(&pa);
+                written = snprintf(out + oi, sizeof(out) - oi, directive, v);
+                break;
+            }
+            case 'd': case 'i': {
+                int32_t v = (int32_t)printf_next_u32(&pa);
+                written = snprintf(out + oi, sizeof(out) - oi, directive, v);
+                break;
+            }
+            case 'u': case 'x': case 'X': case 'o': {
+                uint32_t v = printf_next_u32(&pa);
+                written = snprintf(out + oi, sizeof(out) - oi, directive, v);
+                break;
+            }
+            case 'p': {
+                // %p expects a host pointer-sized arg; PS1 addresses are 32-bit,
+                // so widen explicitly rather than passing a bare uint32_t (which
+                // would under-supply the vararg slot on a 64-bit host).
+                uint32_t v = printf_next_u32(&pa);
+                written = snprintf(out + oi, sizeof(out) - oi, directive, (void*)(uintptr_t)v);
+                break;
+            }
+            default:
+                // Unknown conversion: copy the directive text as-is, consume no arg.
+                for (uint32_t k = start; k < i && oi < sizeof(out) - 1; k++) out[oi++] = fmtbuf[k];
+                continue;
+        }
+        if (written > 0) oi += (uint32_t)written;
+    }
+    if (oi >= sizeof(out)) oi = sizeof(out) - 1;
+    out[oi] = '\0';
+
+    for (uint32_t k = 0; k < oi; k++)
+        tty_add_char(cpu->inter, out[k]);
 }
 
 // Capture putc(c, fd) / putchar(c)
@@ -256,7 +377,7 @@ bool handle_a0_syscall(Cpu* cpu) {
         case 0x09:                                    // putc()
         case 0x3C: capture_bios_putc(cpu);   break;  // putchar()
         case 0x3E: capture_bios_puts(cpu);   break;  // puts()
-        case 0x3F: capture_bios_printf(cpu); break;  // printf() — outputs raw format string
+        case 0x3F: capture_bios_printf(cpu); break;  // printf() — substituted, see capture_bios_printf
 
         case 0x40: {
             // SystemErrorUnresolvedException — one-shot full CPU state dump before loop
