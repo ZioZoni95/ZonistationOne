@@ -43,11 +43,7 @@ typedef struct {
     
     // Control Registers (32-bit)
     int32_t control[32]; // GTE Control Registers (RT, TR, LIGHT, LCOL, SZ0-SZ3, OFX, OFY, H, DQA, DQB, ZSF3, ZSF4, FLAG)
-    
-    // Internal state
-    bool busy; // GTE busy flag
-    uint32_t cycles_remaining; // Cycles until operation completes
-    
+
 } Gte;
 
 // --- GTE Function Prototypes ---

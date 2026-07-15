@@ -113,6 +113,38 @@ bool log_should_print(LogCategory category, LogLevel level) {
     return category_states[category].enabled;
 }
 
+// --- Consecutive-duplicate collapsing ---
+// Tight polling loops (e.g. a BIOS-syscall retry loop) can emit the exact
+// same line hundreds of times in a row, which is pure noise: no new
+// information past the first occurrence, but real overhead (string
+// formatting + sink dispatch + file I/O) and a log file that's mostly
+// unreadable repetition. Collapse strictly-consecutive identical
+// (category, level, message) lines into a single "(xN repeats)" summary,
+// flushed either when a different line arrives or after DUP_FLUSH_THRESHOLD
+// repeats (so a genuinely infinite loop still surfaces periodic evidence
+// it's still running, rather than going silent forever).
+#define DUP_FLUSH_THRESHOLD 200
+static LogCategory dup_last_category = (LogCategory)-1;
+static LogLevel    dup_last_level    = LOG_LEVEL_SILENT;
+static char        dup_last_msg[480] = {0};
+static uint32_t    dup_repeat_count  = 0;
+
+static void dispatch_line(LogCategory category, LogLevel level, const char* msg) {
+    for (int i = 0; i < sink_count; i++)
+        sinks[i].fn((int)category, (int)level, msg, sinks[i].udata);
+    char full[560];
+    snprintf(full, sizeof(full), "[%-12s] %s", category_names[category], msg);
+    rxi_log_log(to_rxi_level(level), __FILE__, __LINE__, "%s", full);
+}
+
+static void dup_flush(void) {
+    if (dup_repeat_count == 0) return;
+    char note[560];
+    snprintf(note, sizeof(note), "%s  (x%u repeats)", dup_last_msg, dup_repeat_count + 1);
+    dispatch_line(dup_last_category, dup_last_level, note);
+    dup_repeat_count = 0;
+}
+
 // --- Core Logging ---
 void log_print(LogCategory category, LogLevel level, const char* format, ...) {
     if (!log_initialized) log_init();
@@ -135,14 +167,27 @@ void log_print(LogCategory category, LogLevel level, const char* format, ...) {
     vsnprintf(msg, sizeof(msg), format, args);
     va_end(args);
 
-    // Dispatch to custom sinks (ImGui) — raw message + category/level
-    for (int i = 0; i < sink_count; i++)
-        sinks[i].fn((int)category, (int)level, msg, sinks[i].udata);
+    if (category == dup_last_category && level == dup_last_level && strcmp(msg, dup_last_msg) == 0) {
+        dup_repeat_count++;
+        if (dup_repeat_count < DUP_FLUSH_THRESHOLD) return;
+        dup_flush(); // periodic "still repeating" note, then keep collapsing
+        return;
+    }
 
-    // Dispatch to rxi (colored stderr + optional file) — prefixed with [CAT]
-    char full[512];
-    snprintf(full, sizeof(full), "[%-12s] %s", category_names[category], msg);
-    rxi_log_log(to_rxi_level(level), __FILE__, __LINE__, "%s", full);
+    dup_flush(); // a different line arrived: surface the pending summary first
+    dup_last_category = category;
+    dup_last_level    = level;
+    strncpy(dup_last_msg, msg, sizeof(dup_last_msg) - 1);
+    dup_last_msg[sizeof(dup_last_msg) - 1] = '\0';
+
+    dispatch_line(category, level, msg);
+}
+
+// --- BIOS/game TTY output — always emitted, bypasses the level/category gate ---
+void log_print_tty(const char* msg) {
+    if (!log_initialized) log_init();
+    if (!msg) return;
+    dispatch_line(LOG_CAT_BIOS, LOG_LEVEL_INFO, msg);
 }
 
 // --- Helpers ---

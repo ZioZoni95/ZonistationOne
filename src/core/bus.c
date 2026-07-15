@@ -509,7 +509,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
             } else if (ch == '\n' || ch == '\r') {
                 if (inter->tty_line_len > 0) {
                     inter->tty_line_buf[inter->tty_line_len] = '\0';
-                    LOG_BIOS_INFO("[BUS] [TTY] %s", inter->tty_line_buf);
+                    log_print_tty(inter->tty_line_buf);
                     inter->tty_line_len = 0;
                 }
             }

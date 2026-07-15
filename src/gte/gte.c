@@ -24,8 +24,6 @@ static const char* gte_opcode_name(uint8_t op) {
 void gte_init(Gte* gte) {
     memset(gte->data, 0, sizeof(gte->data));
     memset(gte->control, 0, sizeof(gte->control));
-    gte->busy = false;
-    gte->cycles_remaining = 0;
     LOG_GTE_INFO("[GTE] GTE initialized");
 }
 
@@ -150,7 +148,5 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
     }
 
     gte_update_error_flag(gte);
-    gte->busy = true;
-    gte->cycles_remaining = cycles;
     return cycles;
 }

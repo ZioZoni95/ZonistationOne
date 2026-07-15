@@ -741,22 +741,37 @@ void op_cop2(Cpu* cpu, uint32_t instruction) {
 
     /* rs bit4 set → GTE data operation (0x10-0x1F) */
     if (rs & 0x10) {
+        // Stall until any still-in-flight GTE op finishes before issuing a new
+        // one (DuckStation's StallUntilGTEComplete, called before dispatch).
+        if (cpu->inter->cpu_cycle_counter < cpu->gte_completion_tick) {
+            uint32_t stall = cpu->gte_completion_tick - cpu->inter->cpu_cycle_counter;
+            cpu->inter->cpu_cycle_counter += stall;
+            cpu->downcount -= (int32_t)stall;
+        }
         uint32_t cycles = gte_execute_instruction(&cpu->gte, instruction);
-        (void)cycles;
+        cpu->gte_completion_tick = cpu->inter->cpu_cycle_counter + cycles;
         return;
     }
 
     /* rs 0x00-0x0F → COP2 register move */
     switch (rs) {
         case 0x00: { /* MFC2: rt ← GTE data[rd] (load delay) */
-            uint32_t v = (cpu->gte_load_delay_reg == rd)
-                       ? cpu->gte_load_delay_value
-                       : (uint32_t)gte_read_data_register(&cpu->gte, rd);
+            // Stall until the in-flight GTE op finishes before reading its result.
+            if (cpu->inter->cpu_cycle_counter < cpu->gte_completion_tick) {
+                uint32_t stall = cpu->gte_completion_tick - cpu->inter->cpu_cycle_counter;
+                cpu->inter->cpu_cycle_counter += stall;
+                cpu->downcount -= (int32_t)stall;
+            }
             cpu->load_reg_idx = rt;
-            cpu->load_value   = v;
+            cpu->load_value   = (uint32_t)gte_read_data_register(&cpu->gte, rd);
             break;
         }
         case 0x02: { /* CFC2: rt ← GTE ctrl[rd] (load delay) */
+            if (cpu->inter->cpu_cycle_counter < cpu->gte_completion_tick) {
+                uint32_t stall = cpu->gte_completion_tick - cpu->inter->cpu_cycle_counter;
+                cpu->inter->cpu_cycle_counter += stall;
+                cpu->downcount -= (int32_t)stall;
+            }
             cpu->load_reg_idx = rt;
             cpu->load_value   = (uint32_t)gte_read_control_register(&cpu->gte, rd);
             break;
@@ -907,6 +922,10 @@ void op_lwc1(Cpu* cpu, uint32_t instruction) {
 
 // Load Word Coprocessor 2 (GTE): [RS + imm_se] -> GTE data register RT
 void op_lwc2(Cpu* cpu, uint32_t instruction) {
+    if (!(cpu->sr & (1u << 30))) {
+        cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
+        return;
+    }
     uint32_t rt     = instr_t(instruction);           // destination GTE data register
     uint32_t rs     = instr_s(instruction);           // base address register
     uint32_t offset = instr_imm_se(instruction);
@@ -935,6 +954,10 @@ void op_swc1(Cpu* cpu, uint32_t instruction) {
 
 // Store Word Coprocessor 2 (GTE): GTE data register RT -> [RS + imm_se]
 void op_swc2(Cpu* cpu, uint32_t instruction) {
+    if (!(cpu->sr & (1u << 30))) {
+        cpu_exception(cpu, EXCEPTION_COPROCESSOR_ERROR);
+        return;
+    }
     uint32_t rt     = instr_t(instruction);           // source GTE data register
     uint32_t rs     = instr_s(instruction);           // base address register
     uint32_t offset = instr_imm_se(instruction);

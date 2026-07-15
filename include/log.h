@@ -63,6 +63,14 @@ bool log_should_print(LogCategory category, LogLevel level);
 // Internal logging function
 void log_print(LogCategory category, LogLevel level, const char* format, ...);
 
+// BIOS/game TTY output (EXP2 DUART / printf-putc-puts capture). Always
+// emitted regardless of the current log level or per-category enable state
+// — this is the guest program's actual output, not a debug trace, so
+// lowering the log level to cut noise must never hide it. Message should be
+// the plain program text with no added tag (the log window/category already
+// identifies the source).
+void log_print_tty(const char* msg);
+
 
 // --- Direct Component-Specific Macros (PCSX ReARMed style) ---
 // These call log_print directly to avoid circular definitions

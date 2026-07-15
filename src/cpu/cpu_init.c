@@ -58,15 +58,10 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
 
     gte_init(&cpu->gte);
 
-    // Initialize GTE Load Delay (Phase B5)
-    cpu->gte_load_delay_reg = 255;      // No pending delay (255 = disabled)
-    cpu->gte_load_delay_value = 0;
-    cpu->gte_next_load_delay_reg = 255; // No next delay
-    cpu->gte_next_load_delay_value = 0;
-
     // Initialize cycle accounting
     cpu->downcount = 1;              // fire dispatch immediately on first cycle
     cpu->muldiv_completion_tick = 0; // no pending MulDiv
+    cpu->gte_completion_tick = 0;    // no pending GTE op
 
     LOG_CPU_INFO("[CPU] CPU ready");
 }

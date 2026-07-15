@@ -102,13 +102,6 @@ typedef struct Cpu {
     RegisterIndex load_reg_idx; // Target register for the pending load.
     uint32_t load_value;        // Value to be loaded into the target register.
 
-    // --- GTE Load Delay (Phase B5) ---
-    // GTE coprocessor has 1-2 instruction delays on data register reads (MFC2).
-    // Dual-buffer approach: current delayed value + pending delayed value.
-    uint8_t gte_load_delay_reg;      // Current GTE register being delayed (0-31, 255=none)
-    uint32_t gte_load_delay_value;   // Current value to return on MFC2
-    uint8_t gte_next_load_delay_reg; // Pending GTE register (0-31, 255=none)
-    uint32_t gte_next_load_delay_value; // Pending value for next cycle
 
     // --- HI/LO Registers ---
     // Used for results of multiplication and division.
@@ -144,6 +137,7 @@ typedef struct Cpu {
     // --- Cycle Accounting (DuckStation-style) ---
     int32_t  downcount;              // countdown to next event (decrements per instruction)
     uint32_t muldiv_completion_tick; // cycle when pending MULT/DIV finishes (for MFHI/MFLO stall)
+    uint32_t gte_completion_tick;    // cycle when pending GTE op finishes (for MFC2/CFC2/next-op stall)
 
     // --- Execution Trace Ring Buffer ---
 #define EXEC_TRACE_SIZE 8192  // must be power-of-2
