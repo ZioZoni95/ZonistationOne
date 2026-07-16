@@ -13,7 +13,6 @@
 #include "vram.h"
 #include "log.h"
 #include "interconnect.h"
-#include "cpu.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -753,17 +752,6 @@ static void gp0_quad_shaded_impl(Gpu* gpu, bool semi_trans) {
     LOG_GPU_TRACE("[GPU] Render four-point %s shaded polygon rgb0=(%u,%u,%u) v=(%d,%d)(%d,%d)(%d,%d)(%d,%d)",
                   semi_trans ? "semi-transparent" : "opaque", c[0].r, c[0].g, c[0].b,
                   p[0].x, p[0].y, p[1].x, p[1].y, p[2].x, p[2].y, p[3].x, p[3].y);
-    // TEMP DIAG (one-shot, remove after use): identify the BIOS logo-draw
-    // call site for the red "P" quad (rgb0=(178,0,0)), to trace what the
-    // BIOS does right after — does it advance to the next logo piece, or
-    // loop back and redraw the same piece?
-    {
-        static bool diag_fired = false;
-        if (!diag_fired && c[0].r == 178 && c[0].g == 0 && c[0].b == 0 && gpu->inter && gpu->inter->cpu) {
-            diag_fired = true;
-            LOG_GPU_ERROR("[DIAG] red-P quad drawn: ra=0x%08x pc=0x%08x", gpu->inter->cpu->regs[31], gpu->inter->cpu->current_pc);
-        }
-    }
     renderer_push_quad(&gpu->renderer, p, c, NULL, 0, 0);
 }
 

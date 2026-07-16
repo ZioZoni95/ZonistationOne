@@ -48,6 +48,10 @@ typedef struct {
     bool reached_target_flag; // Internal sticky flag mirroring Mode[11]
     bool reached_ffff_flag;   // Internal sticky flag mirroring Mode[12]
 
+    // --- Sync-mode gating (DuckStation Timers::SetGate/UpdateCountingEnabled model) ---
+    bool gate;              // External gate line level (Timer0=hblank, Timer1=vblank, Timer2=n/a)
+    bool counting_enabled;  // Derived from sync_enable/sync_mode/gate; gates counter increment
+
     // --- Added for cycle-accurate emulation ---
     uint32_t rate;           // Clock rate for this timer
     uint32_t irq;            // IRQ line (4 for Timer0, 5 for Timer1, 6 for Timer2)
@@ -136,6 +140,14 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  * @param cycles Number of master clock cycles that have passed.
  */
 void timers_step(Timers* timers, uint32_t cycles);
+
+/**
+ * @brief Sets the external gate line level for a timer (Timer0=hblank,
+ * Timer1=vblank) and applies the PS1 sync-mode edge behavior (counter
+ * reset/pause per mode), matching DuckStation's Timers::SetGate model.
+ * No-op if the level hasn't changed. Timer2 has no real gate input.
+ */
+void timers_set_gate(Timers* timers, int timer_index, bool state);
 
 // --- New Timer/Event Function Prototypes ---
 void timers_update(Timers* timers);  // Main update function for event system

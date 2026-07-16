@@ -31,6 +31,65 @@ void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
 static void timer_force_bios_boot_config(Timers* timers);
 
 /**
+ * @brief Recomputes counting_enabled from sync_enable/sync_mode/gate.
+ * Matches DuckStation's Timers::UpdateCountingEnabled exactly, including
+ * Timer2's gate-less special case (its sync bit selects a stop/free-run
+ * behavior instead of real gating).
+ */
+static void timer_update_counting_enabled(Timer* t, int timer_index) {
+    if (timer_index != 2) {
+        if (t->sync_enable) {
+            switch (t->sync_mode) {
+                case 0: /* PauseWhileGateActive */
+                    t->counting_enabled = !t->gate;
+                    break;
+                case 1: /* ResetOnGateEnd */
+                    t->counting_enabled = true;
+                    break;
+                case 2: /* ResetAndRunOnGateStart */
+                case 3: /* FreeRunOnGateEnd */
+                    t->counting_enabled = t->gate;
+                    break;
+            }
+        } else {
+            t->counting_enabled = true;
+        }
+    } else {
+        /* Timer2: no gate source. Sync modes 0/3 stop counting, 1/2 free-run. */
+        t->counting_enabled = !t->sync_enable || t->sync_mode == 1 || t->sync_mode == 2;
+    }
+}
+
+/**
+ * @brief Sets the external gate line level for a timer and applies the PS1
+ * sync-mode edge behavior (counter reset/pause per mode). See timers.h.
+ */
+void timers_set_gate(Timers* timers, int timer_index, bool state) {
+    if (timer_index < 0 || timer_index > 2) return;
+    Timer* t = &timers->timers[timer_index];
+    if (t->gate == state) return;
+    t->gate = state;
+
+    if (!t->sync_enable) return;
+
+    switch (t->sync_mode) {
+        case 0: /* PauseWhileGateActive: no counter change on edge */
+            break;
+        case 1: /* ResetOnGateEnd: reset while gate is active */
+            t->counter = state ? t->counter : 0;
+            break;
+        case 2: /* ResetAndRunOnGateStart: reset at gate-active edge */
+            t->counter = state ? 0 : t->counter;
+            break;
+        case 3: /* FreeRunOnGateEnd: sync_enable latches off once gate clears */
+            t->sync_enable = t->sync_enable && state;
+            break;
+    }
+
+    timer_update_counting_enabled(t, timer_index);
+}
+
+/**
  * @brief Helper function to decode the mode register into internal state flags.
  * Called whenever the mode register is written.
  * @param timers Pointer to the Timers structure.
@@ -38,7 +97,6 @@ static void timer_force_bios_boot_config(Timers* timers);
  * @param timer_index Index of the timer (0, 1, or 2).
  */
 static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_index) {
-    (void)timer_index;
     uint16_t mode = timer->mode;
 
     timer->sync_enable       = (mode & (1 << 0)) != 0;
@@ -64,6 +122,8 @@ static void timer_update_internal_state(Timers* timers, Timer* timer, int timer_
         timer->mode |= (1 << 10);
         interconnect_request_irq(timers->inter, timer->irq, "Timer re-assert after mode write");
     }
+
+    timer_update_counting_enabled(timer, timer_index);
 }
 
 /**
@@ -230,6 +290,7 @@ void timers_step(Timers* timers, uint32_t cpu_cycles) {
     // For each timer, step according to its clock source and mode
     for (int i = 0; i < 3; ++i) {
         Timer* t = &timers->timers[i];
+        if (!t->counting_enabled) continue; // sync-mode gate holds this timer paused
         double ticks_to_add = timers->fractional_ticks[i];
         double timer_clock_hz = 0.0;
         bool use_hblank = false, use_dotclock = false, use_div8 = false;

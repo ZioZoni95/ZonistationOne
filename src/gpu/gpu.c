@@ -11,6 +11,7 @@
 #include "vram.h"
 #include "log.h"
 #include "interconnect.h"
+#include "timers.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -91,6 +92,13 @@ void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
     LOG_GPU_DEBUG("[GPU] tick: scanline=%u vblank=%d lsb=%u",
                   gpu->crtc.current_scanline, (int)gpu->crtc.in_vblank,
                   gpu->crtc.active_line_lsb);
+
+    // Timer1's external gate is VBlank (PSX-SPX; DuckStation's HBLANK_TIMER_INDEX
+    // despite the name is gated by vblank, not hblank). Timer0's gate is hblank,
+    // which this CRTC model doesn't track at per-scanline granularity yet, so it
+    // isn't wired up here.
+    if (gpu->inter)
+        timers_set_gate(&gpu->inter->timers_state, 1, gpu->crtc.in_vblank);
 }
 
 // ---------------------------------------------------------------------------

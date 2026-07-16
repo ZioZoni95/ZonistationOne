@@ -16,8 +16,6 @@
 // ===============================
 // This file implements the central event/timing system for the emulator.
 // All hardware events (timers, VBlank, DMA, etc.) are scheduled and dispatched here.
-// Naming and structure are original and distinct from PCSX ReARMed.
-
 // --- Event Handler Table ---
 typedef void (*EventQueueHandler)(struct Interconnect*);
 
