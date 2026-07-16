@@ -388,11 +388,13 @@ Initial live-test (`roms/SCPH1001.BIN` NTSC-U + `games/Ace Combat 2 (Europe).bin
 
 **Reference pattern**: DuckStation offers two selectable IDCT/YUV code paths (this project ports only the "Old" — complete and correct on its own; "New" is a performance variant, not a correctness requirement) and paces decoded-block availability to the output FIFO via a dedicated `TimingEvent`. PCSX-Redux independently converges on the same overall shape (zigzag descan, AAN-scaled IDCT, YUV→RGB, 15/24-bit output) — cross-validating that this project's port is structurally sound.
 
-**Gap**: None identified against either reference's design. One nuance not confirmed during this pass: whether decoded-block output is paced through the event scheduler (matching DuckStation's `block_copy_out_event`) or made available instantly — relevant to DMA timing accuracy during MDEC-heavy FMV playback.
+**Correction (2026-07-16)**: this section's "EVQ_MDEC already has a real, non-NULL handler" claim was already flagged wrong back in §6's Phase 1 write-up (confirmed by direct read at the time: `EVQ_MDEC`'s handler is `NULL` and it is never scheduled anywhere) — that correction was never carried back into this section until now. Also new: live-tested this session — `Ace Combat 2 (Europe)` reaches its "Presented by Namco" publisher screen (post Phase 2.6 CDROM fix) and then shows nothing where the real game's FMV intro should play; no root cause investigation was done (out of scope for this pass, user flagged it as context only) but the decoder never being wired to `EVQ_MDEC`/the real DMA-driven bitstream feed is the obvious first suspect given the confirmed-dead event slot.
 
-**Priority**: Low — verification item only.
+**Gap**: the decoder itself (`mdec.c`'s state machine/IDCT/YUV pipeline) looks structurally sound against both references — no gap identified there. The real gap is integration: `EVQ_MDEC` is dead (confirmed twice now), so whatever pacing/completion signaling real FMV playback depends on (block-ready IRQ timing, DMA channel 0/1 hand-off cadence) has no scheduled path to fire correctly. Whether MDEC ever receives real compressed bitstream data from a CD-XA STR stream in the first place is unconfirmed — not verified this pass.
 
-**Recommended action**: No refactor required. Verify block-output pacing semantics whenever the Phase 1 event-scheduler unification touches MDEC's `EVQ_MDEC` slot (which already has a real, non-`NULL` handler).
+**Priority**: **High** (upgraded from Low) — this is the actual current blocker to reaching gameplay in any FMV-intro game, not just a verification nicety. See Phase 2.8.
+
+**Recommended action**: See Phase 2.8 below for the tracked investigation. Starting point: wire `EVQ_MDEC` to a real handler (or confirm one is genuinely unneeded for this project's synchronous DMA model, matching the CDROM ch3 precedent in §6), then verify a CD-XA STR sector actually reaches `mdec_dma_in()` during FMV playback before assuming the decoder itself needs work.
 
 ---
 
@@ -530,7 +532,27 @@ Follow-up to §8/Phase 2.6's "also flagged" note: the boot screen shows the lice
 
 **Conclusion**: this is very likely a CDROM-data-correctness issue (are we delivering the full, byte-correct content of LBA 4-11 the way the BIOS's logo-model parser expects?) rather than a GPU-rendering or BIOS-ROM-logic issue — consistent with the user's own read of the situation ("il boot lo fa il BIOS ma lo fa DAL CDROM"). **Not yet root-caused**: the exact on-disc binary format Sony uses to encode the logo's geometry within the licence-sector data is undocumented in every source checked (PSX-SPX, psxdev, this session's web search) — this would need direct byte-level comparison of LBA 5-11's content against what a working reference emulator's CD-read path delivers for the same sectors, or symbolizing the BIOS's licence-sector parser, neither attempted yet.
 
-- Priority: **Medium** — cosmetic (doesn't block gameplay, which now works), but concrete and worth finishing once picked back up. Next step should be dumping LBA 5-11's raw bytes and looking for recognizable geometry-like patterns (repeated fixed-size records, plausible small integer coordinate ranges) rather than more BIOS-ROM disassembly.
+- Priority: **Medium** — cosmetic (doesn't block the publisher-screen boot reached so far), but concrete and worth finishing once picked back up. **Correction**: this was previously described as "doesn't block gameplay, which now works" — that overstated where things stand; see Phase 2.8 for the actual current blocker. Next step for the logo itself should be dumping LBA 5-11's raw bytes and looking for recognizable geometry-like patterns (repeated fixed-size records, plausible small integer coordinate ranges) rather than more BIOS-ROM disassembly.
+
+**Phase 2.8 — FMV intro playback / MDEC integration (2026-07-16, new, open — current blocker to gameplay)**
+
+Boot now reaches Ace Combat 2's "Presented by Namco" publisher screen (Phase 2.6 fix) — the real game plays an FMV intro immediately after this screen; our emulator shows nothing there instead. User separately observed that pressing Start (the real game's skip-video input) is followed by the game appearing stuck, but this specific observation came from a run that wasn't set up to test input handling (window focus not confirmed) — **not confirmed as a real bug, not investigated, do not treat as established** until deliberately re-tested with focus confirmed.
+
+**What's confirmed**: §12's `EVQ_MDEC` dead-handler gap (known since Phase 1, never carried back into §12 until this pass) is the obvious first suspect — MDEC's decoder itself looks structurally sound (ported from DuckStation, no TODOs), but its integration into the real event-scheduled DMA/IRQ pacing real FMV playback depends on has no scheduled path. Whether CD-XA STR sector data ever reaches `mdec_dma_in()` in the first place is also unconfirmed.
+
+**Not yet done**: no live investigation this pass (explicitly out of scope — user flagged the symptom as context, not a request to dig in this turn). Next session should: (1) confirm whether MDEC ever receives real bitstream data during this game's intro (log `mdec_dma_in`/`mdec_write` call counts during the publisher-screen-to-intro transition), (2) wire or confirm-unnecessary the dead `EVQ_MDEC` slot, (3) only then, separately and with window focus deliberately confirmed, re-test the Start-to-skip input path before concluding anything about it.
+
+- Priority: **High** — this is the actual current blocker to reaching any real gameplay, in this game and likely most disc-based titles (FMV intros are near-universal on PS1). Supersedes the old "MDEC not started" framing (README/§12 already corrected this session) — decoder exists, integration doesn't.
+
+**Phase 3.7 — Full GPU accuracy pass (`GPU_GAP_ANALYSIS_2026-07-15.md`)** *(new, added 2026-07-16 — the dedicated GPU file had no corresponding roadmap phase; Gap A/B are already tracked in Phase 3.6, listed here too for a single point of reference)*
+- [ ] **Gap B — VRAM readback from rasterized output** (High, do first): `glReadPixels`/`glBlitFramebuffer` from the render target into `gpu->vram.data`, either after each batch or lazily before a VRAM-copy/CPU-read/texture-sample touches a GL-rendered region. Also the architectural blocker for a clean Gap A fix. *(= Phase 3.6's GPU item, same task, cross-referenced here.)*
+- [ ] **Gap A — mask-bit on rasterized primitives** (High, do after B): extend `vram_write_masked`-style checking into the readback/blit step, or a fragment-shader-side mask test (DuckStation's depth-buffer-as-mask-carrier trick) if a per-primitive readback is too costly. *(= Phase 3.6's GPU item, same task, cross-referenced here.)*
+- [ ] GPU command-timing model + real GPUSTAT ready bits (Medium): port DuckStation's per-command tick-cost tables if precise DMA-chaining/frame-pacing games become a priority; low urgency otherwise since PCSX-Redux ships the same "always ready" simplification successfully.
+- [ ] CRTC per-scanline granularity (Medium): move `gpu_crtc_tick` off the once-per-VBlank call site onto a more frequent tick — mirrors the fix already applied to Timers' dotclock/hblank feeds (§5 history) and would also make the new Timer1/vblank gate (Phase 3.6) more temporally accurate.
+- [ ] 24-bit display mode decode (Low-Medium): tracked in GPUSTAT but display path always unpacks as 5:5:5.
+- [ ] Full CPU↔VRAM opcode range (Low): GP0(0xA0-0xBF)/(0xC0-0xDF) mirror range, currently only exact 0xA0/0xC0 handled — real games essentially never hit this, cheap to fix if touching that code anyway.
+- [ ] Software-renderer fallback / backend abstraction (Medium, structural, carried from main doc §8 Phase 5) — not GPU-correctness, just portability/debuggability.
+- Priority: High for Gap A/B (real rendering-correctness issues), Medium for timing-model/CRTC/software-fallback, Low for the rest. Full detail, citations, and DuckStation/PCSX-Redux comparison for every item in `GPU_GAP_ANALYSIS_2026-07-15.md`.
 
 **Phase 3 — DMA/Bus edge cases**
 - Implement or explicitly document-as-intentional: DMA channel 5 (PIO) (§4)
