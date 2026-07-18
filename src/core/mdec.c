@@ -499,3 +499,11 @@ uint32_t mdec_dma_out(Mdec* m) {
         mdec_execute(m);
     return v;
 }
+
+bool mdec_input_has_space(const Mdec* m) {
+    return in_space(m) >= 2;
+}
+
+bool mdec_output_has_data(const Mdec* m) {
+    return !out_empty(m);
+}

@@ -71,6 +71,17 @@ typedef struct {
     int32_t  gpu_req_step;      /* address step: +4 or -4 */
     bool     gpu_req_active;    /* true: GPU REQUEST/MANUAL transfer in progress */
 
+    /* MDEC DMA slice state (ch0 = RAM->MDEC input, ch1 = MDEC->RAM output).
+     * Sliced the same way as GPU above: real hardware runs both channels as
+     * background transfers that interleave with each other and with the CPU,
+     * so MDEC's own decode-one-macroblock-then-wait-for-drain pacing (see
+     * mdec.c) can proceed instead of the whole ch0 burst overflowing MDEC's
+     * input FIFO before ch1 ever gets a chance to drain any output. */
+    uint32_t mdec_in_addr;      uint32_t mdec_in_remaining;
+    int32_t  mdec_in_step;      bool     mdec_in_active;
+    uint32_t mdec_out_addr;     uint32_t mdec_out_remaining;
+    int32_t  mdec_out_step;     bool     mdec_out_active;
+
 } Dma;
 
 // --- Function Prototypes ---
@@ -85,6 +96,9 @@ void channel_set_control(DmaChannel* ch, uint32_t value);
 
 /* GPU DMA slice resume — called by evq_handle_dma_gpu each slice */
 void dma_gpu_resume(struct Interconnect* inter);
+
+/* MDEC DMA slice resume — called by evq_handle_mdec each slice */
+void dma_mdec_resume(struct Interconnect* inter);
 
 
 #endif // DMA_H

@@ -44,7 +44,7 @@ static EventHandlerTable evq_handlers = {
     evq_handle_cdrom_command,         // EVQ_CDROM_COMMAND
     evq_handle_cdrom_drive,           // EVQ_CDROM_DRIVE
     evq_handle_cdrom_second_response, // EVQ_CDROM_SECOND_RESPONSE
-    NULL,                              // EVQ_MDEC
+    dma_mdec_resume,                  // EVQ_MDEC — sliced ch0/ch1 MDEC DMA (see dma_mdec_resume, bus.c)
     NULL                                // EVQ_SPU — handled by dedicated SPU thread
 };
 

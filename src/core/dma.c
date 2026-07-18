@@ -100,6 +100,15 @@ dma->inter = inter; // Store pointer to Interconnect
     dma->gpu_req_step      = 4;
     dma->gpu_req_active    = false;
 
+    dma->mdec_in_addr      = 0;
+    dma->mdec_in_remaining = 0;
+    dma->mdec_in_step      = 4;
+    dma->mdec_in_active    = false;
+    dma->mdec_out_addr      = 0;
+    dma->mdec_out_remaining = 0;
+    dma->mdec_out_step      = 4;
+    dma->mdec_out_active    = false;
+
     LOG_DMA_INFO("[DMA] DMA Initialized. DPCR=0x%08x, Channels initialized.", dma->control);
 }
 

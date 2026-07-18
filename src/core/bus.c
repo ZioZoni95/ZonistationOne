@@ -680,6 +680,84 @@ void dma_gpu_resume(struct Interconnect* inter) {
     }
 }
 
+/* Signal MDEC ch0 (input) / ch1 (output) completion IRQ. */
+static void dma_mdec_signal_done(Interconnect* inter, uint32_t channel) {
+    DmaChannel* ch = &inter->dma.channels[channel];
+    dma_channel_done(ch);
+    if (inter->dma.channel_irq_enable & (1u << channel)) {
+        inter->dma.channel_irq_flags |= (1u << channel);
+        inter->dma.master_irq_flag = inter->dma.force_irq ||
+            (inter->dma.master_irq_enable &&
+             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
+        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
+            interconnect_request_irq(inter, IRQ_DMA, channel == 0 ? "DMA ch0 done" : "DMA ch1 done");
+    }
+}
+
+/* Run one slice of MDEC input (ch0) / output (ch1) DMA, each gated on MDEC's
+ * own FIFO readiness rather than blasting the whole burst through unconditionally
+ * — see the comment on Dma.mdec_in_active in dma.h for why this matters. */
+static bool dma_mdec_run_slice(Interconnect* inter) {
+    Dma* dma = &inter->dma;
+
+    if (dma->mdec_in_active) {
+        uint32_t addr = dma->mdec_in_addr;
+        uint32_t remaining = dma->mdec_in_remaining;
+        uint32_t words_done = 0;
+        while (words_done < DMA_SLICE_WORDS && remaining > 0 && mdec_input_has_space(&inter->mdec)) {
+            uint32_t cur = addr & 0x00FFFFFC;
+            if (cur >= RAM_SIZE) {
+                LOG_DMA_ERROR("[DMA] MDEC in: addr 0x%08x out of bounds", cur);
+                remaining = 0;
+                break;
+            }
+            mdec_dma_in(&inter->mdec, interconnect_load32(inter, cur));
+            addr = (uint32_t)((int32_t)addr + dma->mdec_in_step);
+            remaining--;
+            words_done++;
+        }
+        dma->mdec_in_addr = addr;
+        dma->mdec_in_remaining = remaining;
+        if (remaining == 0) dma->mdec_in_active = false;
+    }
+
+    if (dma->mdec_out_active) {
+        uint32_t addr = dma->mdec_out_addr;
+        uint32_t remaining = dma->mdec_out_remaining;
+        uint32_t words_done = 0;
+        while (words_done < DMA_SLICE_WORDS && remaining > 0 && mdec_output_has_data(&inter->mdec)) {
+            uint32_t cur = addr & 0x00FFFFFC;
+            if (cur >= RAM_SIZE) {
+                LOG_DMA_ERROR("[DMA] MDEC out: addr 0x%08x out of bounds", cur);
+                remaining = 0;
+                break;
+            }
+            interconnect_store32(inter, cur, mdec_dma_out(&inter->mdec));
+            addr = (uint32_t)((int32_t)addr + dma->mdec_out_step);
+            remaining--;
+            words_done++;
+        }
+        dma->mdec_out_addr = addr;
+        dma->mdec_out_remaining = remaining;
+        if (remaining == 0) dma->mdec_out_active = false;
+    }
+
+    return !dma->mdec_in_active && !dma->mdec_out_active;
+}
+
+/* Public: called by evq_handle_mdec each slice tick */
+void dma_mdec_resume(struct Interconnect* inter) {
+    bool was_in  = inter->dma.mdec_in_active;
+    bool was_out = inter->dma.mdec_out_active;
+    bool done = dma_mdec_run_slice(inter);
+    if (was_in  && !inter->dma.mdec_in_active)  dma_mdec_signal_done(inter, 0);
+    if (was_out && !inter->dma.mdec_out_active) dma_mdec_signal_done(inter, 1);
+    if (!done) {
+        if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
+        eventq_schedule(inter, EVQ_MDEC, DMA_SLICE_CYCLES);
+    }
+}
+
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
     if (ch->sync == LINKED_LIST) return 0;
 
@@ -739,6 +817,30 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                 return;  /* done/IRQ handled by dma_gpu_resume */
             }
 
+            /* MDEC input (ch0) / output (ch1): slice via EVQ, gated on MDEC's own
+             * FIFO readiness — see dma_mdec_run_slice's comment for why blasting
+             * the whole burst through synchronously (like the generic loop below)
+             * overflows MDEC's input FIFO before ch1 ever gets a chance to drain
+             * decoded output. */
+            if (channel_index == 0 && ch->direction == FROM_RAM) {
+                LOG_DMA_DEBUG("[DMA] MDEC ch0 FROM_RAM: %u words (sliced)", words_to_transfer);
+                inter->dma.mdec_in_addr      = addr;
+                inter->dma.mdec_in_remaining = words_to_transfer;
+                inter->dma.mdec_in_step      = step;
+                inter->dma.mdec_in_active    = true;
+                dma_mdec_resume(inter);
+                return;  /* done/IRQ handled by dma_mdec_resume */
+            }
+            if (channel_index == 1 && ch->direction == TO_RAM) {
+                LOG_DMA_DEBUG("[DMA] MDEC ch1 TO_RAM: %u words (sliced)", words_to_transfer);
+                inter->dma.mdec_out_addr      = addr;
+                inter->dma.mdec_out_remaining = words_to_transfer;
+                inter->dma.mdec_out_step      = step;
+                inter->dma.mdec_out_active    = true;
+                dma_mdec_resume(inter);
+                return;  /* done/IRQ handled by dma_mdec_resume */
+            }
+
             LOG_DMA_DEBUG("[DMA] ch%d %s %s step=%d addr=0x%08x words=%u",
                           channel_index,
                           ch->direction == FROM_RAM ? "FROM_RAM" : "TO_RAM",
@@ -754,7 +856,6 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                 if (ch->direction == FROM_RAM) {
                     uint32_t data = interconnect_load32(inter, cur);
                     switch (channel_index) {
-                        case 0: mdec_dma_in(&inter->mdec, data); break;
                         case 4: {
                             uint16_t hw[2] = { (uint16_t)(data & 0xFFFF), (uint16_t)(data >> 16) };
                             spu_dma_write_halfwords(&inter->spu, inter, hw, 2);
@@ -767,7 +868,6 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
                 } else {
                     uint32_t data = 0;
                     switch (channel_index) {
-                        case 1: data = mdec_dma_out(&inter->mdec); break;
                         case 6: data = (i == words_to_transfer - 1) ? 0x00FFFFFF : ((addr - 4) & 0x00FFFFFC); break;
                         case 2: data = gpu_read_data(&inter->gpu); break;
                         case 3: data = cdrom_dma_read_word(&inter->cdrom); break;
