@@ -41,5 +41,15 @@ void interconnect_trigger_cdrom_irq(Interconnect* inter) {
         LOG_CDROM_ERROR("[INTERCONNECT] trigger_cdrom_irq: inter is NULL!");
         return;
     }
+    // cdrom.c only calls this after its own interrupt_flag==0 gate confirms a fresh,
+    // distinct interrupt cause (cdrom_command_event_tick/cdrom_drive_event_tick/
+    // cdrom_second_response_event_tick all reschedule-and-wait otherwise) — so this is
+    // always a genuine new edge at the device level, regardless of whether the CPU has
+    // separately gotten around to acking the previous one in I_STAT yet. Force the line
+    // low-then-high so the generic edge-detector in interconnect_set_irq_line (which
+    // otherwise requires I_STAT to have been acked first) can't swallow it — matching
+    // real hardware, where the IRQ2 line is driven directly by the device's own
+    // interrupt-cause register, not a separate CPU-side latch.
+    interconnect_clear_irq(inter, IRQ_CDROM, "CDROM");
     interconnect_request_irq(inter, IRQ_CDROM, "CDROM");
 }

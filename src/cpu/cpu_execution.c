@@ -33,7 +33,7 @@ static inline bool CheckPendingInterrupt(Cpu* cpu) {
     if (has_interrupt) {
         /* PSX-SPX: do not take IRQ if the next instruction is a GTE opcode (COP2 data op).
            Defer until the GTE instruction completes to avoid EPC pointing into a GTE op. */
-        uint32_t next_instr = cpu_icache_fetch(cpu, cpu->current_pc);
+        uint32_t next_instr = cpu_icache_fetch(cpu, cpu->current_pc, false);
         if ((next_instr & 0xFE000000) == 0x4A000000) return false;
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return true;
@@ -81,7 +81,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
         return;
     }
     
-    uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc);
+    uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc, true);
 
     // Record into execution trace ring buffer (frozen after first crash dump)
     if (!cpu->exec_trace_frozen) {

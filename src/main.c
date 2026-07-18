@@ -244,6 +244,7 @@ int main(int argc, char* argv[]) {
 
     log_init();
     if (getenv("ZS1_LOG_STDERR")) log_set_stderr_quiet(false);
+    if (getenv("ZS1_LOG_TRACE"))  log_set_level(LOG_LEVEL_TRACE);
     LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
 
     SdlCtx sdl;
@@ -252,10 +253,14 @@ int main(int argc, char* argv[]) {
     debug_ui_init(sdl.win, sdl.ctx);
 
     // --- Component init ---
-    Bios       bios;
-    Ram        ram;
-    Interconnect inter;
-    Cpu        cpu;
+    // static: these structs are multi-MB (Bios 512KB, Ram 2MB, Interconnect ~3.4MB) —
+    // too large for the 8MB default thread stack alongside the rest of main()'s frame
+    // and its callees; a single process-lifetime instance of each, so static (BSS) is
+    // the natural home, not the stack (and not heap, per this project's no-malloc convention).
+    static Bios       bios;
+    static Ram        ram;
+    static Interconnect inter;
+    static Cpu        cpu;
     Controller gamepad;
 
     ram_init(&ram);
@@ -334,12 +339,24 @@ int main(int argc, char* argv[]) {
                 if (chunk == 0) chunk = 1;
                 if (chunk > left) chunk = left;
 
-                for (uint32_t i = 0; i < chunk; ++i) {
+                /* chunk is a target CYCLE distance (until the next event or frame boundary),
+                 * not an instruction count — per-instruction cost varies (BIOS ROM/EXP1
+                 * fetches cost several extra cycles, see cpu_icache.c), so bound the inner
+                 * loop by real elapsed cycles from cpu_cycle_counter, not by instructions
+                 * run. Without this, a chunk sized for "cycles until next event" but used as
+                 * an instruction count could run far past the intended cycle target when
+                 * instructions are expensive, overshooting frame pacing by many multiples.
+                 * Event dispatch itself is already correct regardless of this loop's
+                 * granularity (cpu_run_next_instruction checks downcount after every
+                 * instruction) — this only fixes frame-pacing/timer bookkeeping. */
+                uint32_t cycles_before = inter.cpu_cycle_counter;
+                while (inter.cpu_cycle_counter - cycles_before < chunk) {
                     cpu_run_next_instruction(&cpu);
                     if (dbg->paused) goto frame_done;
                 }
-                timers_step(&inter.timers_state, chunk);
-                cycles_run += chunk;
+                uint32_t elapsed = inter.cpu_cycle_counter - cycles_before;
+                timers_step(&inter.timers_state, elapsed);
+                cycles_run += elapsed;
             }
         } else if (debug_ui_step_requested()) {
             dbg->step_skip_bp = true;

@@ -10,7 +10,39 @@
  * @param vaddr The virtual address of the instruction to fetch.
  * @return The 32-bit instruction word.
  */
-uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
+// BIOS ROM occupies physical 0x1FC00000-0x1FC7FFFF (512 KB) — see CLAUDE.md memory map.
+#define BIOS_ROM_PHYS_START 0x1FC00000u
+#define BIOS_ROM_PHYS_END   0x1FC80000u
+
+// Real per-instruction BIOS ROM wait-state costing (~24-32 extra cycles/word, matching
+// MEMCTRL-configured delay registers — see bus_memctrl_recalculate() in bus.c) is
+// architecturally correct (matches DuckStation's Bus::CalculateMemoryTiming model) but
+// is DISABLED here: enabling it causes the CD-ROM command sequence to hang partway
+// through boot (confirmed via isolation testing — with this cost applied, boot never
+// reads past a same-location SeekL to LBA 23; with it disabled, boot proceeds normally
+// deep into game data). The likely cause is a BIOS interrupt-handler / CD second-response
+// IRQ timing race that becomes live once ROM-resident code takes ~25-30x longer per
+// instruction, but the exact mechanism was not fully root-caused this session (an
+// IRQ edge-detector hardening in bus_irq.c's interconnect_trigger_cdrom_irq and a
+// CDROM_SEEK_FAST_DELAY increase to match DuckStation's MIN_SEEK_TICKS were both tried
+// and did not resolve it). Keep disabled until the real interaction is found — do not
+// re-enable without re-running the same isolation test (ZS1_LOG_TRACE boot of
+// Ace Combat 2, check logs/CDROM.log progresses past LBA 23).
+#define ZS1_ENABLE_BIOS_ROM_CYCLE_COST 0
+
+static inline void charge_bios_rom_cycles(Cpu* cpu, uint32_t paddr, uint32_t word_count, bool count_cycles) {
+#if ZS1_ENABLE_BIOS_ROM_CYCLE_COST
+    if (!count_cycles) return;
+    if (paddr < BIOS_ROM_PHYS_START || paddr >= BIOS_ROM_PHYS_END) return;
+    uint32_t extra = cpu->inter->bios_access_cycles * word_count;
+    cpu->inter->cpu_cycle_counter += extra;
+    cpu->downcount -= (int32_t)extra;
+#else
+    (void)cpu; (void)paddr; (void)word_count; (void)count_cycles;
+#endif
+}
+
+uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
     // --- Cache Bypass Check ---
     // KSEG1 region (0xA0000000 - 0xBFFFFFFF) is un-cached.
     // Check the top 3 bits. If they are 101 (binary), it's KSEG1.
@@ -18,10 +50,14 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
         // KSEG1: Bypass cache, fetch directly from interconnect
         // printf("~ I-Cache Bypass (KSEG1 address: 0x%08x)\n", vaddr); // Optional debug
         uint32_t instruction = interconnect_load32(cpu->inter, vaddr);
+        charge_bios_rom_cycles(cpu, vaddr & 0x1FFFFFFFu, 1, count_cycles);
         return instruction;
     }
-    // TODO: Add checks for SR[IsC] (cache isolation) and SR[SwC] (swap caches)
-    //       if implementing those features later. For now, assume cache is active.
+    // SR.IsC/SwC ("isolate/swap cache") are data-cache concerns per real R3000A semantics
+    // (confirmed against DuckStation: Bus::GetMemoryHandlers only swaps LOAD/STORE handler
+    // tables for isolate/swap, never the instruction-fetch path) — already handled at the
+    // data load/store level (see the `cpu->sr & 0x10000` checks in cpu_instructions.c).
+    // Instruction fetch is correctly unaffected by either bit; no fetch-path change needed.
 
 
     // --- Address Calculation ---
@@ -78,6 +114,7 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr) {
         // Mark this word as valid
         line->valid[j] = true;
     }
+    charge_bios_rom_cycles(cpu, line_paddr_start + (word_index * 4), ICACHE_LINE_WORDS - word_index, count_cycles);
 
     // Return the instruction data for the originally requested word index
     return line->data[word_index];

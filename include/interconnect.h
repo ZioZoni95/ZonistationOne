@@ -154,6 +154,14 @@ typedef struct Interconnect {
     // --- Debugger ---
     Debugger debugger;
 
+    // --- Memory Control 1 (0x1F801000-0x1F801020) — real register storage + derived timing ---
+    // Ported from DuckStation's Bus::CalculateMemoryTiming (nocash spec): real games/BIOS
+    // configure these delay registers, and un-cached/BIOS-ROM instruction fetches cost several
+    // cycles each on real hardware, not the flat 1 cycle/instruction this project previously used.
+    uint32_t memctrl_regs[9];    // exp1_base, exp2_base, exp1_delay, exp3_delay, bios_delay,
+                                 // spu_delay, cdrom_delay, exp2_delay, common_delay
+    uint32_t bios_access_cycles; // extra cycles (beyond the base 1/instruction) per BIOS ROM word fetch
+
 } Interconnect;
 
 /* --- Function Declarations (Prototypes) --- */
@@ -290,6 +298,10 @@ int interconnect_tty_input_get(Interconnect* inter);
 
 // Initialize HW dispatch tables (call once from interconnect_init).
 void bus_hw_tables_init(void);
+
+// Memory Control 1 (0x1F801000-0x1F801020) real register storage + derived access-time.
+void bus_memctrl_init(Interconnect* inter);
+void bus_memctrl_recalculate(Interconnect* inter);
 
 
 #endif // INTERCONNECT_H

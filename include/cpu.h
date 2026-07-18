@@ -246,7 +246,7 @@ void cpu_branch(Cpu* cpu, uint32_t offset_se);
  * @param vaddr The virtual address of the instruction to fetch.
  * @return The 32-bit instruction word.
  */
-uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr);
+uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles);
 
 // --- Disassembler ---
 const char* disassemble_mips(uint32_t instruction, uint32_t pc);

@@ -108,26 +108,71 @@ void bus_hw_tables_init(void) {
 // =============================================================================
 
 // --- MemCtrl (0x1F801000-0x1F80103F) ---
-static uint32_t hw_memctrl_read(Interconnect* inter, uint32_t addr, BusSize sz) {
-    (void)inter;
+// Real per-region access-delay registers (nocash spec), ported from DuckStation's
+// Bus::CalculateMemoryTiming. Real BIOS/EXP1/CDROM/SPU ROM/bus accesses cost several
+// cycles each — not the flat 1 cycle/instruction this project used to assume everywhere.
+static uint32_t calc_memory_timing_word_cycles(uint32_t mem_delay, uint32_t common_delay) {
+    int32_t access_time    = (int32_t)((mem_delay >> 4) & 0xF);
+    bool use_com0          = (mem_delay >> 8)  & 1;
+    bool use_com2          = (mem_delay >> 10) & 1;
+    bool use_com3          = (mem_delay >> 11) & 1;
+    bool data_bus_16bit    = (mem_delay >> 12) & 1;
+
+    int32_t com0 = (int32_t)(common_delay & 0xF);
+    int32_t com2 = (int32_t)((common_delay >> 8)  & 0xF);
+    int32_t com3 = (int32_t)((common_delay >> 12) & 0xF);
+
+    int32_t first = 0, seq = 0, min_cycles = 0;
+    if (use_com0) { first += com0 - 1; seq += com0 - 1; }
+    if (use_com2) { first += com2; seq += com2; }
+    if (use_com3) { min_cycles = com3; }
+    if (first < 6) first++;
+    first = first + access_time + 2;
+    seq   = seq   + access_time + 2;
+    if (first < min_cycles + 6) first = min_cycles + 6;
+    if (seq   < min_cycles + 2) seq   = min_cycles + 2;
+
+    int32_t word_time = data_bus_16bit ? (first + seq) : (first + seq + seq + seq);
+    return (uint32_t)(word_time - 1 > 0 ? word_time - 1 : 0);
+}
+
+void bus_memctrl_recalculate(Interconnect* inter) {
+    inter->bios_access_cycles = calc_memory_timing_word_cycles(inter->memctrl_regs[4], inter->memctrl_regs[8]);
+    LOG_INTERCONNECT_DEBUG("[BUS] Memory timing recalculated: BIOS word access = %u extra cycles",
+                            inter->bios_access_cycles);
+}
+
+void bus_memctrl_init(Interconnect* inter) {
     static const uint32_t defaults[9] = {
         0x1F000000, 0x1F802000, 0x0013243F, 0x00003022,
         0x0013243F, 0x200931E1, 0x00020843, 0x00070777, 0x00031125,
     };
+    memcpy(inter->memctrl_regs, defaults, sizeof(defaults));
+    bus_memctrl_recalculate(inter);
+}
+
+static uint32_t hw_memctrl_read(Interconnect* inter, uint32_t addr, BusSize sz) {
     uint32_t off = addr - 0x1F801000;
     uint32_t idx = off >> 2;
-    uint32_t v32 = (idx < 9) ? defaults[idx] : 0;
+    uint32_t v32 = (idx < 9) ? inter->memctrl_regs[idx] : 0;
     if (sz == BUS_WORD)  return v32;
     if (sz == BUS_HWORD) return (uint16_t)(v32 >> ((off & 2) << 3));
     return (uint8_t)(v32 >> ((off & 3) << 3));
 }
 
 static void hw_memctrl_write(Interconnect* inter, uint32_t addr, uint32_t val, BusSize sz) {
-    (void)inter; (void)sz;
+    (void)sz;
     if      (addr == 0x1F801000 && val != 0x1F000000)
         LOG_INTERCONNECT_WARN("[BUS] Bad EXP1 base write: 0x%08x", val);
     else if (addr == 0x1F801004 && val != 0x1F802000)
         LOG_INTERCONNECT_WARN("[BUS] Bad EXP2 base write: 0x%08x", val);
+
+    uint32_t idx = (addr - 0x1F801000) >> 2;
+    if (idx < 9) {
+        inter->memctrl_regs[idx] = val;
+        if (idx == 4 || idx == 8) // bios_delay or common_delay
+            bus_memctrl_recalculate(inter);
+    }
 }
 
 // --- PAD/SIO (0x1F801040-0x1F80105F) ---

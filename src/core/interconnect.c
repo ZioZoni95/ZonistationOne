@@ -59,6 +59,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
 
     debugger_init(&inter->debugger);
     bus_hw_tables_init();
+    bus_memctrl_init(inter);
 
     LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect Initialized (BIOS, RAM, DMA, GPU, CDROM, SIO, Timers, IRQ states set).");
 }
