@@ -11,6 +11,12 @@ PlayStation 1 emulator written in C99. SDL2 + OpenGL 3.3 Core (GLEW). Early deve
 
 As of July 2026, `games/Ace Combat 2 (Europe).cue` boots past the license screen into the game itself — a real commercial disc, not just the BIOS menu.
 
+### Ace Combat 2 (Europe) — past the Namco publisher screen, FMV blocker visible (July 2026)
+![Produced by Namco](Screenshot%202026-07-18%20115008.png)
+![Black screen, VRAM filling with asset data](Screenshot%202026-07-18%20115014.png)
+
+Boot now reaches the "Presented by Namco" publisher screen and progresses further — the VRAM Viewer (right panel, second screenshot) shows real texture/asset data being written by the game immediately after, but the display itself goes black. This matches the current top blocker: the FMV intro that plays here needs a working MDEC pipeline that isn't wired into the event scheduler yet (see "Current Status" below).
+
 ### BIOS Menu + ImGui Debug IDE (May 2026)
 ![BIOS Menu with Debug UI](screenshots/Screenshot%202026-05-02%20212421.png)
 
@@ -35,7 +41,7 @@ BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL)
 
 ## Current Status (July 2026)
 
-BIOS boots to the interactive menu, and real commercial discs now boot past their splash/publisher screen — `Ace Combat 2 (Europe)` reaches its "Presented by Namco" screen after a CDROM sector-buffer fix (the drive's Request Register was resetting the read pointer on the wrong arm/disarm transition, corrupting any game that re-reads a sector's header before its data). **Not yet at real gameplay**: most games play an FMV intro right after this screen, which needs a working MDEC pipeline we don't have yet; pressing Start to skip the video is detected by the input system but the game then gets stuck in a loop instead of proceeding. GPU, DMA, timers, CDROM, SIO, GTE, I-Cache, SPU, and a from-scratch MDEC (ported from DuckStation's reference algorithms, not yet wired into real playback) are all implemented. The renderer has a full ImGui IDE-style debug interface with CPU disassembler, breakpoint manager, execution tracer, and per-component log windows — including a BIOS/game TTY log with real `printf`-style argument substitution.
+BIOS boots to the interactive menu, and real commercial discs now boot past their splash/publisher screen — `Ace Combat 2 (Europe)` reaches its "Presented by Namco" screen after a CDROM sector-buffer fix (the drive's Request Register was resetting the read pointer on the wrong arm/disarm transition, corrupting any game that re-reads a sector's header before its data). A stack-overflow crash (multi-MB structs declared as stack locals in `main()`) and a CDROM IRQ edge-detection gap were also fixed in July 2026, and MEMCTRL registers now have real backing storage instead of hardcoded readback values. **Not yet at real gameplay**: past the Namco screen, the game starts writing real texture/asset data into VRAM (visible in the VRAM Viewer) but the display stays black — most games play an FMV intro right after this screen, which needs a working MDEC pipeline we don't have yet; pressing Start to skip the video is detected by the input system but the game then gets stuck in a loop instead of proceeding. GPU, DMA, timers, CDROM, SIO, GTE, I-Cache, SPU, and a from-scratch MDEC (ported from DuckStation's reference algorithms, not yet wired into real playback) are all implemented. The renderer has a full ImGui IDE-style debug interface with CPU disassembler, breakpoint manager, execution tracer, and per-component log windows — including a BIOS/game TTY log with real `printf`-style argument substitution.
 
 Outstanding: FMV/video playback doesn't work yet (see above) — this is the current blocker to reaching actual gameplay. GPU mask-bit handling and VRAM readback have known gaps affecting some rendering techniques (see `GPU_GAP_ANALYSIS_2026-07-15.md`). SPU audio sync has minor timing issues.
 
