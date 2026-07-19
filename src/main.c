@@ -23,6 +23,7 @@
 #include "controller.h"
 #include "debugger.h"
 #include "spu.h"
+#include "lua_debug.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -291,6 +292,8 @@ int main(int argc, char* argv[]) {
 
     cpu_init(&cpu, &inter);
     interconnect_set_cpu(&inter, &cpu);
+    lua_debug_init(&inter, &cpu);
+    if (getenv("ZS1_LUA_SCRIPT")) lua_debug_run_file(getenv("ZS1_LUA_SCRIPT"));
 
     if (args.exe_path && !load_exe(args.exe_path, &cpu, &inter)) {
         shutdown_sdl(&sdl);
@@ -330,6 +333,27 @@ int main(int argc, char* argv[]) {
         sio_set_button_state(&inter.sio, controller_update_from_keyboard(&gamepad));
         inject_tty_keys(&inter);
 
+        /* Wait for GPU to finish the previous frame's rendering. */
+        renderer_wait_frame_done(&inter.gpu.renderer);
+
+        /* GPU_GAP_ANALYSIS Gap B fix (VRAM readback) — DISABLED, live-tested regression:
+         * display_texture only holds real content for regions actually GL-rasterized
+         * this session. Off-screen VRAM regions used purely as CPU-upload texture/font
+         * storage (GP0(0xA0), never drawn as a primitive) stay at GL's initial/clear
+         * color there. A full 1024x512 readback-and-overwrite of gpu->vram.data — even
+         * with correct before-CPU-execution ordering — clobbers that real, valid
+         * CPU-uploaded texture data with black for every such off-screen region,
+         * corrupting subsequent textured draws that sample it (live-observed: SONY
+         * splash text turned to solid black rectangles). Needs a properly scoped fix
+         * (e.g. dirty-rect tracking limited to the actual GL-rasterized bounding box
+         * per frame) before re-enabling — see GPU_GAP_ANALYSIS_2026-07-15.md Gap B and
+         * check how DuckStation/PCSX-Redux avoid this (likely: one unified VRAM texture
+         * used for CPU uploads, GL rasterization target, AND texture sampling all at
+         * once, rather than this project's split vram_texture/display_texture). */
+#if 0
+        renderer_apply_vram_readback(&inter.gpu.renderer, (uint16_t*)inter.gpu.vram.data);
+#endif
+
         Debugger* dbg = &inter.debugger;
         if (!dbg->paused) {
             uint32_t cycles_run = 0;
@@ -366,9 +390,6 @@ int main(int argc, char* argv[]) {
         }
         frame_done:;
 
-        /* Wait for GPU to finish previous frame's ImGui draw data before NewFrame */
-        renderer_wait_frame_done(&inter.gpu.renderer);
-
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
 
@@ -403,6 +424,7 @@ int main(int argc, char* argv[]) {
     /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */
     SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
     debug_ui_shutdown();
+    lua_debug_shutdown();
     cdrom_eject_disc(&inter.cdrom);
     renderer_destroy(&inter.gpu.renderer);
     shutdown_sdl(&sdl);

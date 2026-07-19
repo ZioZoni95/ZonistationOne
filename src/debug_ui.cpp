@@ -18,6 +18,7 @@ extern "C" {
 #include "renderer.h"
 #include "debugger.h"
 #include "spu.h"
+#include "lua_debug.h"
 }
 
 extern "C" const char* disassemble_mips(uint32_t instruction, uint32_t pc);
@@ -98,6 +99,7 @@ static bool g_show_registers   = true;
 static bool g_show_breakpoints = false;
 static bool g_show_spu         = false;
 static bool g_show_vram_viewer = true;
+static bool g_show_lua_console = false;
 
 // ---------------------------------------------------------------------------
 // Disasm state
@@ -699,6 +701,49 @@ static void draw_spu_debug_window(Spu* spu) {
 }
 
 // ---------------------------------------------------------------------------
+// Lua Console window
+// ---------------------------------------------------------------------------
+
+static void draw_lua_console_window(void) {
+    if (!g_show_lua_console) return;
+
+    ImGui::SetNextWindowSize(ImVec2(640, 520), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Lua Console", &g_show_lua_console)) { ImGui::End(); return; }
+
+    static char path_buf[256] = "scripts/mdec_handoff.lua";
+    ImGui::SetNextItemWidth(-140.0f);
+    ImGui::InputText("##script_path", path_buf, sizeof(path_buf));
+    ImGui::SameLine();
+    if (ImGui::Button("Load & Run", ImVec2(120, 0))) {
+        lua_debug_run_file(path_buf);
+    }
+
+    ImGui::Separator();
+
+    static char scratch[4096] = "print(\"hello from lua\")";
+    ImGui::TextUnformatted("Script (inline):");
+    ImGui::InputTextMultiline("##scratch", scratch, sizeof(scratch), ImVec2(-1, 140));
+    if (ImGui::Button("Run", ImVec2(80, 0))) {
+        lua_debug_run_string(scratch);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear Console")) {
+        lua_debug_console_clear();
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Console:");
+    ImGui::BeginChild("##lua_console_out", ImVec2(0, 0), true,
+                       ImGuiWindowFlags_HorizontalScrollbar);
+    ImGui::TextUnformatted(lua_debug_console_text());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
 // VRAM Viewer window
 // ---------------------------------------------------------------------------
 
@@ -875,6 +920,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             ImGui::MenuItem("SPU Debug",     nullptr, &g_show_spu);
             ImGui::MenuItem("PS1 Display",   nullptr, &g_show_display);
             ImGui::MenuItem("VRAM Viewer",   nullptr, &g_show_vram_viewer);
+            ImGui::MenuItem("Lua Console",   nullptr, &g_show_lua_console);
             ImGui::EndMenu();
         }
 
@@ -959,6 +1005,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
     draw_ps1_display(tex_id, inter);
     if (inter) draw_vram_viewer_window(&inter->gpu.renderer);
+    draw_lua_console_window();
 
     ImGui::End(); // DockHost
 

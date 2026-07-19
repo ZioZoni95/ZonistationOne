@@ -8,6 +8,8 @@
 #include "ram.h"
 #include "cpu.h"
 #include "mdec.h"
+#include "debugger.h"
+#include "lua_debug.h"
 
 // --- Memory Region Masking ---
 const uint32_t REGION_MASK[8] = {
@@ -399,6 +401,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
         if (inter->cpu) { inter->cpu->badvaddr = address; cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR); }
         return 0;
     }
+    debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
 
     // RAM (2 MB, mirrored in first 8 MB)
@@ -437,6 +440,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
         if (inter->cpu) { inter->cpu->badvaddr = address; cpu_exception(inter->cpu, EXCEPTION_LOAD_ADDRESS_ERROR); }
         return 0;
     }
+    debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
 
     if (phys < 0x00800000)
@@ -457,6 +461,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 }
 
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
+    debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
 
     if (phys < 0x00800000)
@@ -486,6 +491,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
         if (inter->cpu) { inter->cpu->badvaddr = address; cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR); }
         return;
     }
+    debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
 
     if (phys < 0x00800000) {
@@ -511,6 +517,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
         if (inter->cpu) { inter->cpu->badvaddr = address; cpu_exception(inter->cpu, EXCEPTION_STORE_ADDRESS_ERROR); }
         return;
     }
+    debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
 
     if (phys < 0x00800000) {
@@ -530,6 +537,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 }
 
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
+    debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
 
     if (phys < 0x00800000) {
@@ -594,6 +602,7 @@ static void dma_ch2_signal_done(Interconnect* inter) {
         if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
             interconnect_request_irq(inter, IRQ_DMA, "DMA ch2 done");
     }
+    lua_debug_notify("dma_ch2_done");
 }
 
 /* Run one slice of the GPU DMA transfer. Returns true when fully done. */
@@ -692,6 +701,7 @@ static void dma_mdec_signal_done(Interconnect* inter, uint32_t channel) {
         if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
             interconnect_request_irq(inter, IRQ_DMA, channel == 0 ? "DMA ch0 done" : "DMA ch1 done");
     }
+    if (channel == 1) lua_debug_notify("mdec_ch1_done");
 }
 
 /* Run one slice of MDEC input (ch0) / output (ch1) DMA, each gated on MDEC's

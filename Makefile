@@ -5,7 +5,7 @@ CC = gcc
 CXX = g++
 
 # Common includes and libs
-INCLUDES = -Iinclude -Ithird_party/imgui -Ithird_party/imgui/backends
+INCLUDES = -Iinclude -Ithird_party/imgui -Ithird_party/imgui/backends -Ithird_party/lua
 LIBS = -lSDL2 -lGL -lGLEW -lm -lpthread
 
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
@@ -24,7 +24,17 @@ EMU_CORE_SRCS = \
     src/core/bios.c src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/sio.c \
     src/core/mdec.c src/core/controller.c src/core/event_scheduler.c src/core/pcdrv.c \
-    src/core/debugger.c
+    src/core/debugger.c src/core/lua_debug.c
+
+# --- Lua 5.4 (vendored source, see third_party/lua/) ---
+# lua.c/luac.c both define main() (would collide with src/main.c); loadlib.c
+# implements dynamic C-module loading (package/require/dlopen) which a debug
+# script has no legitimate use for — excluding it drops the -ldl requirement
+# too. See lua_debug.c's lua_debug_init for the luaL_requiref() calls that
+# replace luaL_openlibs() (which needs loadlib.c's luaopen_package).
+EMU_LUA_SRCS = $(filter-out third_party/lua/lua.c third_party/lua/luac.c \
+                 third_party/lua/loadlib.c third_party/lua/linit.c, \
+                 $(wildcard third_party/lua/*.c))
 
 # --- GPU ---
 EMU_GPU_SRCS = \
@@ -52,7 +62,7 @@ EMU_UTIL_SRCS = \
 # --- Emulator C sources (aggregated) ---
 EMU_C_SRCS = src/main.c \
     $(EMU_CPU_SRCS) $(EMU_CORE_SRCS) $(EMU_GPU_SRCS) \
-    $(EMU_GTE_SRCS) $(EMU_CDROM_SRCS) $(EMU_SPU_SRCS) $(EMU_UTIL_SRCS)
+    $(EMU_GTE_SRCS) $(EMU_CDROM_SRCS) $(EMU_SPU_SRCS) $(EMU_UTIL_SRCS) $(EMU_LUA_SRCS)
 
 # --- Emulator C++ sources ---
 EMU_CXX_SRCS = src/debug_ui.cpp \
@@ -70,6 +80,7 @@ EMU_BIN = myps1_emu
 TEST_SRCS = tests/cpu_minimal_test.c \
     $(EMU_CPU_SRCS) src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/bios.c \
+    src/core/mdec.c src/core/debugger.c src/core/lua_debug.c $(EMU_LUA_SRCS) \
     src/gte/gte.c src/gte/gte_ops.c src/utils/log.c \
     src/gpu/gpu.c src/gpu/renderer.c src/gpu/vram.c \
     src/spu/spu.c src/utils/rxi_log.c src/core/event_scheduler.c
@@ -99,5 +110,5 @@ clean:
 	rm -f $(EMU_BIN) $(TEST_BIN) split_log \
 	    src/*.o src/cpu/*.o src/core/*.o src/gpu/*.o src/gte/*.o \
 	    src/cdrom/*.o src/spu/*.o src/utils/*.o \
-	    third_party/imgui/*.o third_party/imgui/backends/*.o \
+	    third_party/imgui/*.o third_party/imgui/backends/*.o third_party/lua/*.o \
 	    *.txt logs/*.txt logs/*_old.txt

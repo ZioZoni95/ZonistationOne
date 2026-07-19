@@ -102,6 +102,18 @@ typedef struct {
     int          frames_pending;
     SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
     SDL_GLContext gl_context;   /* moved from main thread to GPU thread */
+
+    /* GPU-thread-owned VRAM readback (GPU_GAP_ANALYSIS Gap B). display_texture
+     * already composites BOTH CPU-driven VRAM updates and GL-rasterized draws
+     * (see renderer_execute_one_vram_update's update_display path) in correct
+     * submission order — reading it back here makes it the single source of
+     * truth for gpu->vram.data too, instead of vram.data only ever reflecting
+     * CPU-side Fill/Copy/Upload and staying stale for anything GL-rasterized.
+     * Written by the GPU thread at the end of each frame (gpu_thread_main,
+     * after the batch/VRAM-update replay loop); read by the main thread via
+     * renderer_apply_vram_readback() after renderer_wait_frame_done() — that
+     * wait is what makes the cross-thread read safe without extra locking. */
+    uint8_t vram_readback_rgb[1024 * 512 * 3];
 } Renderer;
 
 // --- Function Prototypes ---
@@ -205,6 +217,19 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
  * @param offset_y Texture window Y offset (5 bits).
  */
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
+
+/**
+ * @brief Merges the last frame's GPU-thread VRAM readback (display_texture, which
+ * already composites CPU uploads + GL-rasterized draws) into a CPU-side VRAM
+ * buffer. Call once per frame from the main thread, after renderer_wait_frame_done()
+ * (that wait provides the cross-thread happens-before needed to read the buffer
+ * safely) and before renderer_upload_vram() re-uploads it for the next frame's
+ * texture sampling. Fixes GPU_GAP_ANALYSIS Gap B (rasterized output never visible
+ * to subsequent VRAM-copy/CPU-read/texture-sample operations).
+ * @param renderer Pointer to the Renderer instance.
+ * @param vram_data Pointer to the 1024x512 uint16_t CPU-side VRAM buffer to update.
+ */
+void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data);
 
 /**
  * @brief Uploads VRAM data to the GPU texture (full 1024x512).

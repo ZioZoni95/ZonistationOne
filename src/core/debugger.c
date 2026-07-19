@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "log.h"
+#include "lua_debug.h"
 
 /**
  * @brief Initializes the debugger state.
@@ -204,6 +205,10 @@ void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t ad
 // ============================================================================
 
 void debugger_handle_break(Debugger* dbg, struct Cpu* cpu, const char* reason) {
-    (void)cpu; (void)reason;
+    (void)cpu;
     dbg->paused = true;
+    /* May flip dbg->paused back to false via emu.resume() — lets a script
+     * count hits and only really halt on a specific one. No-op, zero
+     * behavior change, when no Lua on_break callback is registered. */
+    lua_debug_dispatch_break(reason);
 }

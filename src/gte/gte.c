@@ -6,6 +6,7 @@
 #include "gte_internal.h"
 #include <string.h>
 #include "log.h"
+#include "lua_debug.h"
 
 static const char* gte_opcode_name(uint8_t op) {
     switch (op) {
@@ -148,5 +149,6 @@ uint32_t gte_execute_instruction(Gte* gte, uint32_t instruction) {
     }
 
     gte_update_error_flag(gte);
+    lua_debug_notify(gte_opcode_name((uint8_t)opcode));
     return cycles;
 }
