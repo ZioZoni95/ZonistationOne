@@ -85,5 +85,6 @@ void     mdec_dma_in(Mdec* m, uint32_t word);   /* DMA0: push one 32-bit word */
 uint32_t mdec_dma_out(Mdec* m);                  /* DMA1: pull one 32-bit word */
 bool     mdec_input_has_space(const Mdec* m);    /* true: room for >=1 more word (2 halfwords) */
 bool     mdec_output_has_data(const Mdec* m);    /* true: at least 1 word ready to pop */
+void     mdec_execute(Mdec* m);                  /* try to advance the decode state machine */
 
 #endif /* MDEC_H */

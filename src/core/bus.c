@@ -740,6 +740,18 @@ static bool dma_mdec_run_slice(Interconnect* inter) {
         dma->mdec_out_addr = addr;
         dma->mdec_out_remaining = remaining;
         if (remaining == 0) dma->mdec_out_active = false;
+
+        /* If ch1 is still expecting output but none is ready, decode may be
+         * stuck mid-command with buffered-but-undecoded input sitting in the
+         * input FIFO (blocked on out_empty, which just became true above but
+         * nothing re-entered the state machine to notice). mdec_dma_in/out
+         * are the only other callers of mdec_execute(), and if ch0 already
+         * finished its own word count this tick, nothing else will ever
+         * nudge decode forward again — permanently stalling it. Give it one
+         * more try here; safely a no-op if there isn't enough input yet. */
+        if (dma->mdec_out_active && !mdec_output_has_data(&inter->mdec)) {
+            mdec_execute(&inter->mdec);
+        }
     }
 
     return !dma->mdec_in_active && !dma->mdec_out_active;

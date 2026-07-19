@@ -822,6 +822,21 @@ void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
     renderer_record_vram_update(renderer, vram_data, x, y, w, h, false);
 }
 
+void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data) {
+    if (!renderer->initialized || !vram_data) return;
+    const uint8_t* rgb = renderer->vram_readback_rgb;
+    for (uint32_t i = 0; i < 1024u * 512u; i++) {
+        uint16_t r5 = (uint16_t)(rgb[i * 3 + 0] >> 3);
+        uint16_t g5 = (uint16_t)(rgb[i * 3 + 1] >> 3);
+        uint16_t b5 = (uint16_t)(rgb[i * 3 + 2] >> 3);
+        /* Preserve the existing mask bit — the RGB8 readback carries no mask info
+         * (that's Gap A, tracked separately); only the color channels come from
+         * the composited display_texture. */
+        uint16_t mask_bit = vram_data[i] & 0x8000u;
+        vram_data[i] = mask_bit | (b5 << 10) | (g5 << 5) | r5;
+    }
+}
+
 /* -------------------------------------------------------------------------
  * renderer_draw_gl — INTERNAL: called by GPU thread to execute one batch.
  * All GL calls are here; CPU thread never calls this directly.
@@ -906,6 +921,35 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
         glDrawArrays(prim, 0, vc);
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
+    } else if (!b->is_lines && b->semi_trans_enabled) {
+        /* Flat/gouraud-shaded semi-transparent primitive: no per-texel STP bit
+           to discard on (that only exists for textured sources) — the whole
+           primitive is uniformly semi-transparent, so a single blended pass
+           is correct, unlike the textured two-pass case above. */
+        if (renderer->uniform_stp_mode_loc >= 0)
+            glUniform1i(renderer->uniform_stp_mode_loc, -1);
+        glEnable(GL_BLEND);
+        switch (b->semi_trans_mode) {
+            case 0:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
+                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
+                break;
+            case 1:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_ONE, GL_ONE);
+                break;
+            case 2:
+                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+                glBlendFunc(GL_ONE, GL_ONE);
+                break;
+            case 3:
+                glBlendEquation(GL_FUNC_ADD);
+                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
+                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+                break;
+        }
+        glDrawArrays(prim, 0, vc);
     } else {
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
@@ -1347,6 +1391,24 @@ static int gpu_thread_main(void* userdata) {
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        /* GPU_GAP_ANALYSIS Gap B: read display_texture back periodically — it already
+         * composites CPU VRAM updates + GL-rasterized draws in order, so this is the
+         * single correct source for the CPU-side VRAM model too. Consumed by the main
+         * thread via renderer_apply_vram_readback(), after renderer_wait_frame_done()
+         * provides the needed happens-before. Throttled (not every frame): glGetTexImage
+         * forces a full GL pipeline sync, and 1024x512x3 every single frame measured as
+         * a severe framerate regression (WSLg-hosted GL especially). Every 6th frame
+         * (~10Hz at 60fps) keeps render-to-texture/VRAM-copy/CPU-read staleness down to
+         * ~100ms worst case — far better than "never updates" — at a fraction of the cost. */
+        {
+            static uint32_t s_readback_tick = 0;
+            if ((++s_readback_tick % 6) == 0) {
+                glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, renderer->vram_readback_rgb);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+        }
 
         {
             static int s_dump_counter = 0;

@@ -344,7 +344,7 @@ static void mdec_handle_set_scale(Mdec* m) {
 /* -------------------------------------------------------------------------
  * Main execute loop (mirrors DuckStation's Execute())
  * ---------------------------------------------------------------------- */
-static void mdec_execute(Mdec* m) {
+void mdec_execute(Mdec* m) {
     for (;;) {
         switch (m->decode_state) {
 
