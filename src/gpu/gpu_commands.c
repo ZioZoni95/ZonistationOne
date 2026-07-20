@@ -13,6 +13,7 @@
 #include "vram.h"
 #include "log.h"
 #include "interconnect.h"
+#include "lua_debug.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -1447,6 +1448,9 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
 
         gpu->gp0_words_remaining = entry.words;
         gpu->gp0_command_method  = entry.handler;
+
+        if (opcode >= 0x20 && opcode <= 0x3F) lua_debug_notify("gp0_poly");
+        else if (opcode >= 0x60 && opcode <= 0x7F) lua_debug_notify("gp0_rect");
     }
 
     gpu_push_cmd_word(gpu, word);

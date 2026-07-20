@@ -12,6 +12,7 @@
 #include "debugger.h"
 #include "ram.h"
 #include "bios.h"
+#include "gte.h"
 #include "log.h"
 
 #include <string.h>
@@ -125,6 +126,30 @@ static int l_print(lua_State* L) {
     return 0;
 }
 
+static int l_emu_cycles(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->cpu_cycle_counter);
+    return 1;
+}
+
+static int l_emu_gte_data(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    luaL_argcheck(L, i >= 0 && i < 32, 1, "GTE data register index 0-31");
+    lua_pushinteger(L, (lua_Integer)gte_read_data_register(&g_cpu->gte, (uint32_t)i));
+    return 1;
+}
+
+/* emu.disasm(addr) -> "mnemonic operands" string, via the real disassembler
+ * (src/cpu/cpu_disasm.c) — use this instead of hand-decoding hex in scripts,
+ * it's the same disassembler the Live Disasm/Exec Trace panels use. */
+static int l_emu_disasm(lua_State* L) {
+    uint32_t addr = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t v = 0;
+    if (!peek_bytes(addr, 4, &v)) return luaL_error(L, "disasm: address 0x%08x out of range", addr);
+    const char* s = disassemble_mips(v, addr);
+    lua_pushstring(L, s ? s : "?");
+    return 1;
+}
+
 static int l_emu_pc(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)(uint32_t)g_cpu->current_pc);
     return 1;
@@ -223,6 +248,9 @@ static int l_emu_on_event(lua_State* L) {
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
+    {"cycles",            l_emu_cycles},
+    {"gte_data",          l_emu_gte_data},
+    {"disasm",            l_emu_disasm},
     {"reg",               l_emu_reg},
     {"read_u8",           l_emu_read_u8},
     {"read_u16",          l_emu_read_u16},
