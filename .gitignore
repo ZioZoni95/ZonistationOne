@@ -9,8 +9,12 @@ emulator_log.txt
 logs/
 *.txt
 
-# ROM files (do not distribute)
+# ROM files / BIOS images (copyrighted — do not distribute)
 roms/
+*.BIN
+*.bin
+roms/SCPH1001.BIN
+roms/SCPH-7502*.BIN
 
 # Game disc images (do not distribute)
 games/*.bin
