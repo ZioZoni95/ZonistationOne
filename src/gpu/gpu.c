@@ -125,6 +125,11 @@ static void gp1_reset_command_buffer(Gpu* gpu, uint32_t value) {
 static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
     (void)value;
     gpu->interrupt = false;
+    /* Deassert the GPU IRQ line so the edge detector can latch the next
+     * GP0(0x1F) — pairs with the raise in gp0_interrupt_request. Matches
+     * DuckStation's GP1(02) handler (SetLineState(IRQ::GPU, false)). */
+    if (gpu->inter)
+        interconnect_set_irq_line(gpu->inter, IRQ_GPU, false);
     LOG_GPU_DEBUG("[GPU] GPU: Acknowledge IRQ (GP1 0x02)");
 }
 

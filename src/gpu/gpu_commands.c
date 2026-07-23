@@ -381,6 +381,15 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
 // ---------------------------------------------------------------------------
 static void gp0_interrupt_request(Gpu* gpu) {
     gpu->interrupt = true;
+    /* Assert the GPU IRQ line (I_STAT bit 1). Previously this only set the
+     * GPUSTAT.24 status flag and never notified the interrupt controller, so
+     * any code waiting on the GPU interrupt (games/BIOS place GP0(0x1F) inside
+     * an ordering table to fire when the GPU processes that point, then wait on
+     * the GPU IRQ / its kernel event to sync frames) would hang. Edge-triggered
+     * line, lowered by the GP1(02) acknowledge — matches DuckStation's
+     * HandleInterruptRequestCommand (SetLineState(IRQ::GPU, true)). */
+    if (gpu->inter)
+        interconnect_set_irq_line(gpu->inter, IRQ_GPU, true);
     LOG_GPU_DEBUG("[GPU] GP0(0x1F): Interrupt Request");
 }
 
@@ -1457,6 +1466,8 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
     gpu->gp0_words_remaining--;
 
     if (gpu->gp0_words_remaining == 0) {
+        if (gpu->gp0_current_opcode >= 0x20 && gpu->gp0_current_opcode <= 0x3F)
+            lua_debug_notify("gp0_poly_complete");
         if (gpu->gp0_command_method)
             gpu->gp0_command_method(gpu);
         if (gpu->gp0_mode == GP0_MODE_COMMAND)
