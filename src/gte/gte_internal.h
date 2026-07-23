@@ -176,9 +176,18 @@ static inline void push_rgb_from_mac(Gte* gte) {
     uint32_t r = truncate_rgb(gte, 1, gte->data[GTE_REG_MAC1]);
     uint32_t g = truncate_rgb(gte, 2, gte->data[GTE_REG_MAC2]);
     uint32_t b = truncate_rgb(gte, 3, gte->data[GTE_REG_MAC3]);
+    /* Preserve the CODE byte (bits 24-31) from the RGBC input register when
+     * pushing the computed colour into the RGB FIFO. Real hardware copies
+     * RGBC.code into RGB2's high byte — dropping it (leaving it 0) breaks
+     * software renderers that read the pushed colour word back as a GP0
+     * primitive: the GP0 command byte lives in bits 24-31, so a zero CODE
+     * makes the packet decode as opcode 0x00 and get discarded. This is what
+     * hid the PS boot logo (its Gouraud prims went out with opcode 0).
+     * Matches DuckStation PushRGBFromMAC: dr32[22] = r|g<<8|b<<16|c<<24. */
+    uint32_t code = ((uint32_t)gte->data[GTE_REG_RGBC] >> 24) & 0xFFu;
     gte->data[GTE_REG_RGB0] = gte->data[GTE_REG_RGB1];
     gte->data[GTE_REG_RGB1] = gte->data[GTE_REG_RGB2];
-    gte->data[GTE_REG_RGB2] = r | (g << 8) | (b << 16);
+    gte->data[GTE_REG_RGB2] = r | (g << 8) | (b << 16) | (code << 24);
 }
 
 static inline void push_sz(Gte* gte, int32_t value) {
