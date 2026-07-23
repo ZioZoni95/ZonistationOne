@@ -243,19 +243,38 @@ static void hw_irq_write(Interconnect* inter, uint32_t addr, uint32_t val, BusSi
 }
 
 // --- DMA (0x1F801080-0x1F8010FF) ---
+/* DMA registers are 32-bit, but sub-word access to them is legal and real
+ * software uses it — the BIOS shell enables the DMA completion IRQs with a
+ * byte write to DICR+2 (0x1F8010F6). Both reference emulators service such
+ * accesses through the containing word (DuckStation's FIXUP_WORD_OFFSET;
+ * PCSX-Redux lists 0x1F8010F0-0x1F8010F7 as byte-addressable register space),
+ * so the offset must be word-aligned before it reaches dma_read/dma_write —
+ * passing 0x76 straight through fell into their default cases instead. */
 static uint32_t hw_dma_read(Interconnect* inter, uint32_t addr, BusSize sz) {
     uint32_t off = addr - DMA_START;
-    uint32_t v32 = dma_read(&inter->dma, off);
+    uint32_t v32 = dma_read(&inter->dma, off & ~3u);
     if (sz == BUS_WORD)  return v32;
-    if (sz == BUS_HWORD) return (uint16_t)(v32 >> ((addr & 2) << 3));
-    return (uint8_t)(v32 >> ((addr & 3) << 3));
+    if (sz == BUS_HWORD) return (uint16_t)(v32 >> ((off & 2) << 3));
+    return (uint8_t)(v32 >> ((off & 3) << 3));
 }
 
 static void hw_dma_write(Interconnect* inter, uint32_t addr, uint32_t val, BusSize sz) {
     uint32_t off = addr - DMA_START;
     if (sz != BUS_WORD) {
-        LOG_DMA_WARN("[DMA] Non-word write at 0x%08x sz=%d", addr, sz);
-        return;
+        /* Merge the written lane into the current register value rather than
+         * shifting it into an otherwise-zero word: that preserves the lanes
+         * this access doesn't touch (PCSX-Redux's byte-array semantics), which
+         * matters for CHCR, where software may poke only the high byte to set
+         * the start bit. */
+        const uint32_t shift = (off & 3) << 3;
+        const uint32_t lane  = ((sz == BUS_BYTE) ? 0xFFu : 0xFFFFu) << shift;
+        off &= ~3u;
+        uint32_t preserve = dma_read(&inter->dma, off) & ~lane;
+        /* DICR bits 24-31 are write-1-to-clear IRQ flags: never feed the
+         * current flags back through the merge, or a sub-word write to a
+         * lower lane would acknowledge interrupts the program never wrote. */
+        if (off == 0x74) preserve &= ~0xFF000000u;
+        val = preserve | ((val << shift) & lane);
     }
     bool channel_became_active = dma_write(&inter->dma, off, val);
     if (channel_became_active) {
