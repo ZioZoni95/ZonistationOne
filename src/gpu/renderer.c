@@ -593,12 +593,16 @@ bool renderer_init(Renderer* renderer) {
             "uniform ivec2 u_disp_off;\n"    /* display start (VRAM halfword x, line y) */
             "uniform ivec2 u_disp_size;\n"   /* display size in output pixels */
             "uniform int   u_depth24;\n"
-            /* Recover the raw PS1 halfword from the 5:5:5:1-expanded RGBA8 texel. */
+            /* Recover the raw PS1 halfword from the 5:5:5:1-expanded RGBA8 texel.
+             * Bit 15 must come back too: in 24bpp it is a data bit of the packed
+             * byte stream, not a mask flag, so dropping it corrupts every pixel
+             * whose high byte is >= 0x80. */
             "uint to16(vec4 t){\n"
             "  uint r = uint(t.r*255.0+0.5)>>3;\n"
             "  uint g = uint(t.g*255.0+0.5)>>3;\n"
             "  uint b = uint(t.b*255.0+0.5)>>3;\n"
-            "  return r | (g<<5) | (b<<10);\n"
+            "  uint a = (t.a > 0.5) ? 1u : 0u;\n"
+            "  return r | (g<<5) | (b<<10) | (a<<15);\n"
             "}\n"
             "void main(){\n"
             "  int px = int(v_uv.x * float(u_disp_size.x));\n"
@@ -1501,10 +1505,15 @@ static void renderer_execute_one_vram_update(Renderer* renderer, const GpuVramUp
                 *dst++ = (uint8_t)((b5 << 3) | (b5 >> 2));
                 *dst++ = (raw & 0x8000u) ? 255u : 0u;   /* mask bit */
             }
+            /* vram_tex is the bound FBO's colour attachment; writing it with
+             * glTexSubImage2D while that FBO is bound is undefined in GL, so
+             * detach first (drivers silently drop the write otherwise). */
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
             glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
                             GL_RGBA, GL_UNSIGNED_BYTE, rgba_buf);
             glBindTexture(GL_TEXTURE_2D, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
         }
     }
 }
