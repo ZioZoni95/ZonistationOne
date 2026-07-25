@@ -342,24 +342,6 @@ int main(int argc, char* argv[]) {
         /* Wait for GPU to finish the previous frame's rendering. */
         renderer_wait_frame_done(&inter.gpu.renderer);
 
-        /* GPU_GAP_ANALYSIS Gap B fix (VRAM readback) — DISABLED, live-tested regression:
-         * display_texture only holds real content for regions actually GL-rasterized
-         * this session. Off-screen VRAM regions used purely as CPU-upload texture/font
-         * storage (GP0(0xA0), never drawn as a primitive) stay at GL's initial/clear
-         * color there. A full 1024x512 readback-and-overwrite of gpu->vram.data — even
-         * with correct before-CPU-execution ordering — clobbers that real, valid
-         * CPU-uploaded texture data with black for every such off-screen region,
-         * corrupting subsequent textured draws that sample it (live-observed: SONY
-         * splash text turned to solid black rectangles). Needs a properly scoped fix
-         * (e.g. dirty-rect tracking limited to the actual GL-rasterized bounding box
-         * per frame) before re-enabling — see GPU_GAP_ANALYSIS_2026-07-15.md Gap B and
-         * check how DuckStation/PCSX-Redux avoid this (likely: one unified VRAM texture
-         * used for CPU uploads, GL rasterization target, AND texture sampling all at
-         * once, rather than this project's split vram_texture/display_texture). */
-#if 0
-        renderer_apply_vram_readback(&inter.gpu.renderer, (uint16_t*)inter.gpu.vram.data);
-#endif
-
         /* Host-side frame pacing budget follows the GPU's video mode. */
         cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
         frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *

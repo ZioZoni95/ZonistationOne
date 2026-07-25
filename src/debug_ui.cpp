@@ -965,18 +965,15 @@ static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         if (texture_id && inter) {
-            // Crop FBO to the active display region.
-            // FBO is 1024x512; vertex shader maps PSX y=0 → GL clip +1 → FBO top.
-            // GL texture v = 1.0 - psx_y / 512.0
-            uint16_t vx = inter->gpu.crtc.display_vram_x;
-            uint16_t vy = inter->gpu.crtc.display_vram_y;
+            // The scanout pass already extracted the CRTC display window out of
+            // the unified VRAM (and unpacked 15/24bpp) into scanout_texture's
+            // lower-left corner, upright — so just show that sub-rect 1:1.
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
             uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
 
-            float u0 = (float)vx        / 1024.0f;
-            float u1 = (float)(vx + vw) / 1024.0f;
-            float v0 = 1.0f - (float)vy        / 512.0f;
-            float v1 = 1.0f - (float)(vy + vh) / 512.0f;
+            texture_id = renderer_get_scanout_texture(&inter->gpu.renderer);
+            float u0 = 0.0f, u1 = (float)vw / 1024.0f;
+            float v0 = 0.0f, v1 = (float)vh / 512.0f;
 
             // Letterbox at 4:3 — PSX always outputs to a 4:3 TV regardless of pixel count.
             const float psx_aspect = 4.0f / 3.0f;

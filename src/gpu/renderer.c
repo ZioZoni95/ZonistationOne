@@ -40,10 +40,8 @@ typedef struct {
 
 typedef struct {
     uint16_t x, y, w, h;
-    uint16_t dst_x;             /* display_texture column (differs from x in 24bpp) */
     uint32_t data_offset;       /* byte offset into s_vram_pool[slot] */
-    bool     update_display;    /* true → also update display_texture (R16UI→RGB) */
-    bool     depth24;           /* true → rect holds packed 24bpp display data */
+    bool     update_display;    /* true → a real VRAM write: also store into vram_tex */
     bool     full_upload;       /* unused, kept for alignment */
     bool     is_viewer;         /* true → upload to vram_viewer_texture (RGBA8) */
 } GpuVramUpdate;
@@ -67,6 +65,7 @@ typedef struct {
     uint32_t       op_count;
     void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
     uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
+    bool           disp_depth24;     /* snapshot of GPUSTAT.21 for the scanout pass */
 } GpuFrame;
 
 /* Record submission order for the GPU thread — see GpuOp comment above. */
@@ -142,10 +141,13 @@ const char* vertex_shader_source =
     // If p.x = 0, xpos = -1.0. If p.x = width, xpos = 1.0.
     "    float xpos = (float(p.x) / screen_scale.x) - 1.0;\n"
     "\n"
-    // Convert Y coordinate from PSX VRAM (0..511, top-to-bottom) to OpenGL NDC (-1.0..+1.0, bottom-to-top)
-    // ypos = 1.0 - (p.y / (height/2)) = 1.0 - (2*p.y / height)
-    // If p.y = 0, ypos = 1.0. If p.y = height, ypos = -1.0.
-    "    float ypos = 1.0 - (float(p.y) / screen_scale.y); // Flip Y axis\n"
+    // Y is NOT flipped: the render target is the unified VRAM texture, whose
+    // texel row N must be PSX VRAM line N — the same row a CPU/MDEC upload
+    // writes with glTexSubImage2D, and the same row the scanout pass reads.
+    // (Rendering flipped while uploading unflipped is what made FMV frames and
+    // rasterized output disagree about where a scanline lives.)
+    // If p.y = 0, ypos = -1.0 (texel row 0). If p.y = height, ypos = +1.0.
+    "    float ypos = (float(p.y) / screen_scale.y) - 1.0;\n"
     "\n"
     // Set the final position for this vertex. Z=0 (2D), W=1 (position).
     "    gl_Position = vec4(xpos, ypos, 0.0, 1.0);\n"
@@ -538,22 +540,27 @@ bool renderer_init(Renderer* renderer) {
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("[RENDERER] VRAM Texture created (ID: %u) as R16UI.", renderer->vram_texture);
 
-    // --- Create Off-screen Display FBO (PCSX-Redux pattern) ---
+    // --- Unified VRAM texture: the FBO colour attachment (DuckStation GPU_HW) ---
+    // Rasterization renders into this; CPU/MDEC uploads write into this; the
+    // scanout pass reads this. One object, so uploaded content is displayable
+    // by construction.
     glGenFramebuffers(1, &renderer->display_fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
 
-    glGenTextures(1, &renderer->display_texture);
-    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+    glGenTextures(1, &renderer->vram_tex);
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderer->display_texture, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderer->vram_tex, 0);
+    renderer->display_texture = renderer->vram_tex;  /* legacy accessor alias */
 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        LOG_RENDERER_ERROR("[RENDERER] Renderer Init Failed: Display FBO is not complete.");
+        LOG_RENDERER_ERROR("[RENDERER] Renderer Init Failed: VRAM FBO is not complete.");
         return false;
     }
-    LOG_RENDERER_DEBUG("[RENDERER] Display FBO created successfully (FBO: %u, Texture: %u).", renderer->display_fbo, renderer->display_texture);
+    LOG_RENDERER_DEBUG("[RENDERER] Unified VRAM FBO created (FBO: %u, VRAM tex: %u).",
+                       renderer->display_fbo, renderer->vram_tex);
     // Note: We leave display_fbo bound so all PSX rendering goes here!
 
     // --- VRAM viewer texture (RGBA8, updated on CPU each frame) ---
@@ -564,6 +571,80 @@ bool renderer_init(Renderer* renderer) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("[RENDERER] VRAM viewer texture created (ID: %u).", renderer->vram_viewer_texture);
+
+    // --- Scanout-extract pass ---
+    // Fullscreen triangle that reads the CRTC display window out of the unified
+    // VRAM texture and unpacks it for the active depth, mirroring DuckStation's
+    // GenerateVRAMExtractFragmentShader / GPU_SW::CopyOut15Bit|CopyOut24Bit.
+    {
+        static const char* scanout_vs =
+            "#version 330 core\n"
+            "out vec2 v_uv;\n"
+            "void main(){\n"
+            "  vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2));\n"
+            "  v_uv = p;\n"
+            "  gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);\n"
+            "}\n";
+        static const char* scanout_fs =
+            "#version 330 core\n"
+            "in vec2 v_uv;\n"
+            "out vec4 o_col;\n"
+            "uniform sampler2D u_vram;\n"
+            "uniform ivec2 u_disp_off;\n"    /* display start (VRAM halfword x, line y) */
+            "uniform ivec2 u_disp_size;\n"   /* display size in output pixels */
+            "uniform int   u_depth24;\n"
+            /* Recover the raw PS1 halfword from the 5:5:5:1-expanded RGBA8 texel. */
+            "uint to16(vec4 t){\n"
+            "  uint r = uint(t.r*255.0+0.5)>>3;\n"
+            "  uint g = uint(t.g*255.0+0.5)>>3;\n"
+            "  uint b = uint(t.b*255.0+0.5)>>3;\n"
+            "  return r | (g<<5) | (b<<10);\n"
+            "}\n"
+            "void main(){\n"
+            "  int px = int(v_uv.x * float(u_disp_size.x));\n"
+            "  int py = int(v_uv.y * float(u_disp_size.y));\n"
+            "  int y  = u_disp_off.y + py;\n"
+            "  if (u_depth24 == 1) {\n"
+            /* 24bpp: 3 bytes per pixel spanning 1.5 halfwords — recombine two
+             * texels and byte-shift on odd pixels (DuckStation SampleVRAM24). */
+            "    int hx = u_disp_off.x + (px*3)/2;\n"
+            "    uint s0 = to16(texelFetch(u_vram, ivec2(hx,   y), 0));\n"
+            "    uint s1 = to16(texelFetch(u_vram, ivec2(hx+1, y), 0));\n"
+            "    uint c  = ((s1<<16)|s0) >> (uint(px&1)*8u);\n"
+            "    o_col = vec4(float(c&0xFFu), float((c>>8)&0xFFu), float((c>>16)&0xFFu), 255.0)/255.0;\n"
+            "  } else {\n"
+            /* 15bpp: the texel already holds the expanded colour. */
+            "    o_col = vec4(texelFetch(u_vram, ivec2(u_disp_off.x+px, y), 0).rgb, 1.0);\n"
+            "  }\n"
+            "}\n";
+        GLuint svs = compile_shader(scanout_vs, GL_VERTEX_SHADER);
+        GLuint sfs = compile_shader(scanout_fs, GL_FRAGMENT_SHADER);
+        renderer->scanout_program = link_program(svs, sfs);
+        glDeleteShader(svs); glDeleteShader(sfs);
+        renderer->scanout_vram_loc = glGetUniformLocation(renderer->scanout_program, "u_vram");
+        renderer->scanout_off_loc  = glGetUniformLocation(renderer->scanout_program, "u_disp_off");
+        renderer->scanout_size_loc = glGetUniformLocation(renderer->scanout_program, "u_disp_size");
+        renderer->scanout_d24_loc  = glGetUniformLocation(renderer->scanout_program, "u_depth24");
+
+        glGenTextures(1, &renderer->scanout_texture);
+        glBindTexture(GL_TEXTURE_2D, renderer->scanout_texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glGenFramebuffers(1, &renderer->scanout_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, renderer->scanout_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                               renderer->scanout_texture, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            LOG_RENDERER_ERROR("[RENDERER] Scanout FBO incomplete");
+        glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);  /* restore */
+
+        glGenVertexArrays(1, &renderer->dummy_vao);
+        LOG_RENDERER_DEBUG("[RENDERER] Scanout pass ready (prog %u, tex %u).",
+                           renderer->scanout_program, renderer->scanout_texture);
+    }
 
     renderer->uniform_use_texture_loc = glGetUniformLocation(renderer->shader_program, "use_texture");
     renderer->uniform_raw_texture_loc = glGetUniformLocation(renderer->shader_program, "raw_texture");
@@ -817,18 +898,7 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
     u->h              = h;
     u->data_offset    = s_vram_pool_used[wi];
     u->update_display = update_display;
-    u->depth24        = renderer->display_depth24;
     u->full_upload    = false;
-    /* In 24bpp the VRAM halfword grid and the pixel grid run at different
-     * rates (3 bytes per pixel = 1.5 halfwords), so a rect starting N
-     * halfwords into the display area holds pixel (N*2)/3, not pixel N.
-     * Games upload FMV frames as narrow vertical strips (Ace Combat 2: 24
-     * halfwords = 16 pixels each), so writing each strip at its halfword x
-     * smears the frame progressively further right across the screen. */
-    u->dst_x = x;
-    if (u->depth24 && update_display && x >= renderer->display_x)
-        u->dst_x = (uint16_t)(renderer->display_x +
-                              ((uint32_t)(x - renderer->display_x) * 2u) / 3u);
     s_vram_pool_used[wi] += aligned;
     if (s_vram_pool_used[wi] > s_vram_pool_peak) s_vram_pool_peak = s_vram_pool_used[wi];
     gpu_frame_record_op(frame, GPU_OP_VRAM_UPDATE, idx);
@@ -859,21 +929,6 @@ void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
      * never showed up at all. Only the uploaded rect is stamped, so this does
      * not clobber rasterized pixels outside it. */
     renderer_record_vram_update(renderer, vram_data, x, y, w, h, true);
-}
-
-void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data) {
-    if (!renderer->initialized || !vram_data) return;
-    const uint8_t* rgb = renderer->vram_readback_rgb;
-    for (uint32_t i = 0; i < 1024u * 512u; i++) {
-        uint16_t r5 = (uint16_t)(rgb[i * 3 + 0] >> 3);
-        uint16_t g5 = (uint16_t)(rgb[i * 3 + 1] >> 3);
-        uint16_t b5 = (uint16_t)(rgb[i * 3 + 2] >> 3);
-        /* Preserve the existing mask bit — the RGB8 readback carries no mask info
-         * (that's Gap A, tracked separately); only the color channels come from
-         * the composited display_texture. */
-        uint16_t mask_bit = vram_data[i] & 0x8000u;
-        vram_data[i] = mask_bit | (b5 << 10) | (g5 << 5) | r5;
-    }
 }
 
 /* -------------------------------------------------------------------------
@@ -1172,7 +1227,9 @@ void renderer_set_drawing_area(Renderer* renderer, uint16_t left, uint16_t top,
     if (clip_w <= 0) clip_w = 1;
     if (clip_h <= 0) clip_h = 1;
 
-    int gl_y = 512 - gl_bot;
+    /* Scissor Y is a texel row, and the vertex shader no longer flips Y, so the
+     * PSX top edge is the low row — no 512-gl_bot inversion. */
+    int gl_y = gl_top;
     if (gl_y < 0) gl_y = 0;
 
     /* Cache scissor — applied per-batch on GPU thread */
@@ -1271,6 +1328,11 @@ GLuint renderer_get_display_texture(Renderer* renderer) {
     return renderer->display_texture;
 }
 
+GLuint renderer_get_scanout_texture(Renderer* renderer) {
+    if (!renderer || !renderer->initialized) return 0;
+    return renderer->scanout_texture;
+}
+
 void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) {
     if (!renderer->initialized) return;
 
@@ -1355,10 +1417,8 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
     u->y              = 0;
     u->w              = 1024;
     u->h              = 512;
-    u->dst_x          = 0;
     u->data_offset    = s_vram_pool_used[wi];
     u->update_display = false;
-    u->depth24        = false;
     u->full_upload    = false;
     u->is_viewer      = true;
     s_vram_pool_used[wi] += bytes_needed;
@@ -1417,42 +1477,34 @@ static void renderer_execute_one_vram_update(Renderer* renderer, const GpuVramUp
                         GL_RED_INTEGER, GL_UNSIGNED_SHORT, data);
         glBindTexture(GL_TEXTURE_2D, 0);
 
+        /* Write real VRAM writes (GP0 A0 upload, GP0 80 copy, fill) into the
+         * unified VRAM texture as 5:5:5:1-expanded RGBA8, so CPU/MDEC content
+         * lands in the object the scanout reads. The expansion ((v<<3)|(v>>2))
+         * is exactly invertible, so to16() recovers the halfword bit-for-bit.
+         *
+         * Guarded on update_display: the every-frame full-VRAM sync
+         * (renderer_upload_vram) exists only to refresh the R16UI sampling
+         * mirror from gpu.vram.data, which does NOT contain GL-rasterized
+         * pixels — blitting it into the unified texture would erase everything
+         * rasterized that frame (black/flickering screen). */
         if (u->update_display) {
-            /* Convert R16UI rect to RGB and upload to display_texture */
-            static uint8_t rgb_buf[1024 * 512 * 3];
+            static uint8_t rgba_buf[1024 * 512 * 4];
             const uint16_t* src = (const uint16_t*)data;
-            uint16_t out_w = u->w;
-
-            if (u->depth24) {
-                /* GPUSTAT.21 set: the display area holds packed 24bpp pixels —
-                 * three consecutive bytes per pixel spanning halfword
-                 * boundaries, so w halfwords carry (w*2)/3 pixels (DuckStation
-                 * GPU_SW::CopyOut24Bit). MDEC FMV output is written this way. */
-                out_w = (uint16_t)((uint32_t)u->w * 2u / 3u);
-                if (out_w == 0) return;
-                for (uint16_t row = 0; row < u->h; row++) {
-                    const uint8_t* srow = (const uint8_t*)(src + (uint32_t)row * u->w);
-                    uint8_t* dst = rgb_buf + (uint32_t)row * out_w * 3u;
-                    memcpy(dst, srow, (size_t)out_w * 3u);
-                }
-            } else {
-                for (uint16_t row = 0; row < u->h; row++) {
-                    uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
-                    for (uint16_t col = 0; col < u->w; col++) {
-                        uint16_t raw = src[(uint32_t)row * u->w + col];
-                        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
-                        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
-                        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
-                    }
-                }
+            uint8_t* dst = rgba_buf;
+            for (uint32_t i = 0, n = (uint32_t)u->w * u->h; i < n; i++) {
+                uint16_t raw = src[i];
+                uint8_t r5 = (uint8_t)(raw & 0x1Fu);
+                uint8_t g5 = (uint8_t)((raw >> 5) & 0x1Fu);
+                uint8_t b5 = (uint8_t)((raw >> 10) & 0x1Fu);
+                *dst++ = (uint8_t)((r5 << 3) | (r5 >> 2));
+                *dst++ = (uint8_t)((g5 << 3) | (g5 >> 2));
+                *dst++ = (uint8_t)((b5 << 3) | (b5 >> 2));
+                *dst++ = (raw & 0x8000u) ? 255u : 0u;   /* mask bit */
             }
-
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, u->dst_x, u->y, out_w, u->h,
-                            GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
+            glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+                            GL_RGBA, GL_UNSIGNED_BYTE, rgba_buf);
             glBindTexture(GL_TEXTURE_2D, 0);
-            glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
         }
     }
 }
@@ -1505,25 +1557,31 @@ static int gpu_thread_main(void* userdata) {
                 renderer_draw_gl(renderer, &s_frame[ri].batches[op->index], ri);
         }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        /* GPU_GAP_ANALYSIS Gap B: read display_texture back periodically — it already
-         * composites CPU VRAM updates + GL-rasterized draws in order, so this is the
-         * single correct source for the CPU-side VRAM model too. Consumed by the main
-         * thread via renderer_apply_vram_readback(), after renderer_wait_frame_done()
-         * provides the needed happens-before. Throttled (not every frame): glGetTexImage
-         * forces a full GL pipeline sync, and 1024x512x3 every single frame measured as
-         * a severe framerate regression (WSLg-hosted GL especially). Every 6th frame
-         * (~10Hz at 60fps) keeps render-to-texture/VRAM-copy/CPU-read staleness down to
-         * ~100ms worst case — far better than "never updates" — at a fraction of the cost. */
+        /* Scanout: extract the CRTC display window from the unified VRAM into
+         * scanout_texture, unpacking for the active depth. This is the single
+         * path by which anything reaches the screen. */
         {
-            static uint32_t s_readback_tick = 0;
-            if ((++s_readback_tick % 6) == 0) {
-                glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, renderer->vram_readback_rgb);
-                glBindTexture(GL_TEXTURE_2D, 0);
-            }
+            uint16_t dw = s_frame[ri].disp_w ? s_frame[ri].disp_w : 320;
+            uint16_t dh = s_frame[ri].disp_h ? s_frame[ri].disp_h : 240;
+            glBindFramebuffer(GL_FRAMEBUFFER, renderer->scanout_fbo);
+            glViewport(0, 0, dw, dh);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_BLEND);
+            glUseProgram(renderer->scanout_program);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+            glUniform1i(renderer->scanout_vram_loc, 0);
+            glUniform2i(renderer->scanout_off_loc,  (GLint)s_frame[ri].disp_x, (GLint)s_frame[ri].disp_y);
+            glUniform2i(renderer->scanout_size_loc, (GLint)dw, (GLint)dh);
+            glUniform1i(renderer->scanout_d24_loc,  s_frame[ri].disp_depth24 ? 1 : 0);
+            glBindVertexArray(renderer->dummy_vao);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+            glUseProgram(0);
+            glBindTexture(GL_TEXTURE_2D, 0);
         }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         {
             static int s_dump_counter = 0;
@@ -1533,14 +1591,18 @@ static int gpu_thread_main(void* userdata) {
                 const char* target_env = getenv("ZS1_DUMP_FRAME_N");
                 if (target_env) target = atoi(target_env);
                 if (s_dump_counter == target) {
+                    /* Dump what the screen shows (scanout) by default; set
+                     * ZS1_DUMP_VRAM=1 to dump the whole unified VRAM instead. */
+                    GLuint dtex = getenv("ZS1_DUMP_VRAM") ? renderer->vram_tex
+                                                          : renderer->scanout_texture;
                     unsigned char* buf = (unsigned char*)malloc(1024 * 512 * 3);
-                    glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
+                    glBindTexture(GL_TEXTURE_2D, dtex);
                     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, buf);
                     glBindTexture(GL_TEXTURE_2D, 0);
                     FILE* f = fopen(dump_path, "wb");
                     if (f) { fwrite(buf, 1, 1024 * 512 * 3, f); fclose(f); }
                     free(buf);
-                    LOG_RENDERER_INFO("[GPU-THREAD] Dumped display_texture frame %d to %s", s_dump_counter, dump_path);
+                    LOG_RENDERER_INFO("[GPU-THREAD] Dumped frame %d to %s", s_dump_counter, dump_path);
                 }
                 s_dump_counter++;
             }
@@ -1670,6 +1732,7 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     f->disp_y = renderer->display_y;
     f->disp_w = renderer->display_w;
     f->disp_h = renderer->display_h;
+    f->disp_depth24 = renderer->display_depth24;
     renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
     renderer->frames_pending = 1;
     SDL_CondSignal(renderer->frame_ready);

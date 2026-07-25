@@ -69,9 +69,26 @@ typedef struct {
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
     GLuint vram_texture;    // Texture object for VRAM
 
-    // Off-screen rendering (PCSX-Redux pattern)
-    GLuint display_fbo;     // Framebuffer Object for the main display
-    GLuint display_texture; // Texture attached to the display FBO
+    // --- Unified VRAM (DuckStation GPU_HW pattern) ---
+    // ONE RGBA8 texture is the rasterization target, the CPU/MDEC upload
+    // target, and the scanout source, so anything written to VRAM is on screen
+    // by construction. PSX 16-bit halfwords are stored 5:5:5:1 expanded to 8
+    // bits per channel ((v<<3)|(v>>2)), which round-trips losslessly, so CLUT
+    // index bits survive for texture sampling.
+    GLuint display_fbo;     // FBO whose colour attachment is vram_tex
+    GLuint vram_tex;        // RGBA8 1024x512 — the one VRAM
+    GLuint display_texture; // legacy alias target (kept until Phase 2b)
+
+    // Scanout-extract pass: renders the CRTC display window out of vram_tex,
+    // unpacking per depth (15bpp direct / 24bpp packed triplets).
+    GLuint scanout_fbo;
+    GLuint scanout_texture;   // RGB8 display-ready image
+    GLuint scanout_program;
+    GLuint dummy_vao;         // attribute-less VAO for the fullscreen triangle
+    GLint  scanout_vram_loc;
+    GLint  scanout_off_loc;
+    GLint  scanout_size_loc;
+    GLint  scanout_d24_loc;
 
     GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
     VramViewParams vram_view;   // how the viewer decodes VRAM (set from the UI)
@@ -124,17 +141,6 @@ typedef struct {
     SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
     SDL_GLContext gl_context;   /* moved from main thread to GPU thread */
 
-    /* GPU-thread-owned VRAM readback (GPU_GAP_ANALYSIS Gap B). display_texture
-     * already composites BOTH CPU-driven VRAM updates and GL-rasterized draws
-     * (see renderer_execute_one_vram_update's update_display path) in correct
-     * submission order — reading it back here makes it the single source of
-     * truth for gpu->vram.data too, instead of vram.data only ever reflecting
-     * CPU-side Fill/Copy/Upload and staying stale for anything GL-rasterized.
-     * Written by the GPU thread at the end of each frame (gpu_thread_main,
-     * after the batch/VRAM-update replay loop); read by the main thread via
-     * renderer_apply_vram_readback() after renderer_wait_frame_done() — that
-     * wait is what makes the cross-thread read safe without extra locking. */
-    uint8_t vram_readback_rgb[1024 * 512 * 3];
 } Renderer;
 
 // --- Function Prototypes ---
@@ -179,6 +185,8 @@ void renderer_wait_frame_done(Renderer* renderer);
  * @return OpenGL texture ID.
  */
 GLuint renderer_get_display_texture(Renderer* renderer);
+/* The display-ready image produced by the scanout pass (what the screen shows). */
+GLuint renderer_get_scanout_texture(Renderer* renderer);
 void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
@@ -239,19 +247,6 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
  * @param offset_y Texture window Y offset (5 bits).
  */
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
-
-/**
- * @brief Merges the last frame's GPU-thread VRAM readback (display_texture, which
- * already composites CPU uploads + GL-rasterized draws) into a CPU-side VRAM
- * buffer. Call once per frame from the main thread, after renderer_wait_frame_done()
- * (that wait provides the cross-thread happens-before needed to read the buffer
- * safely) and before renderer_upload_vram() re-uploads it for the next frame's
- * texture sampling. Fixes GPU_GAP_ANALYSIS Gap B (rasterized output never visible
- * to subsequent VRAM-copy/CPU-read/texture-sample operations).
- * @param renderer Pointer to the Renderer instance.
- * @param vram_data Pointer to the 1024x512 uint16_t CPU-side VRAM buffer to update.
- */
-void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data);
 
 /**
  * @brief Uploads VRAM data to the GPU texture (full 1024x512).
