@@ -27,8 +27,10 @@ void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
 // For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
 }
 
-// Add this prototype at the top of the file
-static void timer_force_bios_boot_config(Timers* timers);
+// Derived-counter model forward declarations (definitions further down).
+static uint32_t timer_rate_cycles(Timers* timers, Timer* t, int i);
+static void timers_catch_up_one(Timers* timers, int i);
+static void timer_rebase(Timers* timers, int i);
 
 /**
  * @brief Recomputes counting_enabled from sync_enable/sync_mode/gate.
@@ -68,25 +70,33 @@ void timers_set_gate(Timers* timers, int timer_index, bool state) {
     if (timer_index < 0 || timer_index > 2) return;
     Timer* t = &timers->timers[timer_index];
     if (t->gate == state) return;
+
+    /* Freeze the live counter into t->counter before the gate edge changes
+     * counting/reset state, so the derived value doesn't jump. */
+    timers_catch_up_one(timers, timer_index);
     t->gate = state;
 
-    if (!t->sync_enable) return;
-
-    switch (t->sync_mode) {
-        case 0: /* PauseWhileGateActive: no counter change on edge */
-            break;
-        case 1: /* ResetOnGateEnd: reset while gate is active */
-            t->counter = state ? t->counter : 0;
-            break;
-        case 2: /* ResetAndRunOnGateStart: reset at gate-active edge */
-            t->counter = state ? 0 : t->counter;
-            break;
-        case 3: /* FreeRunOnGateEnd: sync_enable latches off once gate clears */
-            t->sync_enable = t->sync_enable && state;
-            break;
+    if (t->sync_enable) {
+        switch (t->sync_mode) {
+            case 0: /* PauseWhileGateActive: no counter change on edge */
+                break;
+            case 1: /* ResetOnGateEnd: reset while gate is active */
+                t->counter = state ? t->counter : 0;
+                break;
+            case 2: /* ResetAndRunOnGateStart: reset at gate-active edge */
+                t->counter = state ? 0 : t->counter;
+                break;
+            case 3: /* FreeRunOnGateEnd: sync_enable latches off once gate clears */
+                t->sync_enable = t->sync_enable && state;
+                break;
+        }
+        timer_update_counting_enabled(t, timer_index);
     }
 
-    timer_update_counting_enabled(t, timer_index);
+    /* Re-anchor to the (possibly reset) counter and re-arm — or, if the gate
+     * just paused the timer, timers_reschedule no-ops and it stays frozen. */
+    timer_rebase(timers, timer_index);
+    timers_reschedule(timers, timer_index);
 }
 
 /**
@@ -172,8 +182,9 @@ uint16_t timer_read16(Timers* timers, int timer_index, uint32_t offset) {
 
     switch (offset) {
         case TMR_REG_VAL: // 0x0: Counter Value
-            // For Timer1 in dotclock/hblank mode, BIOS/games may use retry/median filtering for accuracy
-            // (see PSX-Spex/nocash). Emulator could optionally implement this for lightgun support.
+            // Catch up to the current cycle so a busy-poll sees a live value
+            // (derived from cycle_start), not one frozen until the next event.
+            timers_catch_up_one(timers, timer_index);
             return t->counter;
         case TMR_REG_MODE: // 0x4: Mode Register
             {
@@ -221,42 +232,54 @@ uint32_t timer_read32(Timers* timers, int timer_index, uint32_t offset) {
  * @param offset Register offset (0x0, 0x4, 0x8).
  * @param value The 16-bit value to write.
  */
+/* Re-anchor cycle_start so the derived counter equals t->counter at "now". */
+static void timer_rebase(Timers* timers, int i) {
+    Timer* t = &timers->timers[i];
+    if (!timers->inter) { return; }
+    uint32_t rate = timer_rate_cycles(timers, t, i);
+    if (rate == 0) rate = 1;
+    t->rate = rate;
+    t->cycle_start = timers->inter->cpu_cycle_counter - (uint32_t)t->counter * rate;
+}
+
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
     Timer* t = &timers->timers[timer_index];
-if (offset == TIMER_MODE_OFFSET) {
+    /* Catch up to the exact write cycle before applying, so the change takes
+     * effect from now (DuckStation/Redux both sync on register writes). */
+    timers_catch_up_one(timers, timer_index);
+
+    if (offset == TIMER_MODE_OFFSET) {
         LOG_TIMER_DEBUG("[TIMER] Timer%d mode <- 0x%04x (sync=%d clkSrc=%d irqTarget=%d irqOverflow=%d)",
                         timer_index, value,
                         (value & 1) != 0, (value >> 8) & 3,
                         (value >> 4) & 1, (value >> 5) & 1);
         t->mode = value;
-        t->counter = 0;
+        t->counter = 0;                 /* mode write resets the counter */
         t->interrupt_requested = false;
         t->reached_target_flag = false;
         t->reached_ffff_flag = false;
-        t->mode &= ~(1 << 10); // Clear IRQ request bit
+        t->mode &= ~(1 << 10);          /* clear IRQ request bit */
         timer_update_internal_state(timers, t, timer_index);
-        /* Re-assert if counter already at target/overflow when mode is written */
-        if ((t->irq_on_target && t->counter == t->target) ||
-            (t->irq_on_ffff   && t->counter == 0xFFFF)) {
-            t->interrupt_requested = true;
-            t->mode |= (1 << 10);
-            interconnect_request_irq(timers->inter, t->irq, "Timer re-assert after mode write");
-        }
-        // Schedule next event so IRQ fires at the right time
-        timers_schedule_next_event(timers, timer_index);
+        timer_rebase(timers, timer_index);
+        timers_reschedule(timers, timer_index);
         return;
     }
     switch (offset) {
         case TMR_REG_VAL:
             t->counter = value;
+            timer_rebase(timers, timer_index);
+            timers_reschedule(timers, timer_index);
             break;
         case TMR_REG_MODE:
             t->mode = value;
             timer_update_internal_state(timers, t, timer_index);
-break;
+            timer_rebase(timers, timer_index);
+            timers_reschedule(timers, timer_index);
+            break;
         case TMR_REG_TARGET:
-            t->target = value;
-break;
+            t->target = value;          /* period changed → re-arm */
+            timers_reschedule(timers, timer_index);
+            break;
         default:
             LOG_TIMER_ERROR("[TIMER] Timer Write Error: Unhandled timer%d offset 0x%x", timer_index, offset);
             break;
@@ -276,140 +299,129 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
     timer_write16(timers, timer_index, offset, (uint16_t)value);
 }
 
-/**
- * @brief Steps the timers forward by a number of elapsed CPU clock cycles.
- * Updates counters based on selected clock source, checks for target/overflow,
- * and requests interrupts via the interconnect. Uses fractional accumulation.
- * @param timers Pointer to the Timers structure.
- * @param cpu_cycles Number of CPU clock cycles presumed to have passed since last call.
- */
-void timers_step(Timers* timers, uint32_t cpu_cycles) {
-    if (cpu_cycles == 0) return;
-    static int frame_counter = 0;
-    frame_counter++;
-    // For each timer, step according to its clock source and mode
-    for (int i = 0; i < 3; ++i) {
-        Timer* t = &timers->timers[i];
-        if (!t->counting_enabled) continue; // sync-mode gate holds this timer paused
-        double ticks_to_add = timers->fractional_ticks[i];
-        double timer_clock_hz = 0.0;
-        bool use_hblank = false, use_dotclock = false, use_div8 = false;
+/* =========================================================================
+ * Derived-counter timer model (interpreter-native, PCSX-Redux style).
+ *
+ * The counter is NOT stepped tick-by-tick. Its live value is DERIVED from the
+ * global cpu_cycle_counter: counter = (now - cycle_start) / rate. The IRQ/reset
+ * fires from the scheduled EVQ_TIMER event (armed at the next target/overflow),
+ * and any register read/write catches the timer up to "now" on demand — so a
+ * busy-poll always sees a continuously-advancing value with no per-tick loop.
+ * See pcsx-redux Counters::readCounterInternal / update / set (psxcounters.cc).
+ * ====================================================================== */
 
-        // --- Clock source selection per PSX-SPX ---
-        // Per spec, both values in each pair map to the same clock:
-        //   Timer0: 0/1 = sysclock,   2/3 = dotclock
-        //   Timer1: 0/1 = sysclock,   2/3 = hblank
-        //   Timer2: 0/1 = sysclock,   2/3 = sysclock/8
-        switch (i) {
-            case 0: // Timer0
-                if (t->clock_source <= 1) {
-                    timer_clock_hz = PSX_SYSCLK_HZ;
-                } else {
-                    timer_clock_hz = DOTCLOCK_NTSC_HZ;
-                    use_dotclock = true;
-                }
-                break;
-            case 1: // Timer1
-                if (t->clock_source <= 1) {
-                    timer_clock_hz = PSX_SYSCLK_HZ;
-                } else {
-                    use_hblank = true;
-                }
-                break;
-            case 2: // Timer2
-                if (t->clock_source <= 1) {
-                    timer_clock_hz = PSX_SYSCLK_HZ;
-                } else {
-                    timer_clock_hz = PSX_SYSCLK_HZ / 8.0;
-                    use_div8 = true;
-                }
-                break;
+/* CPU cycles per timer tick for this timer's clock source (integer, >=1,
+ * like Redux's Rcnt.rate). Dotclock (Timer0) and hblank (Timer1) derive from
+ * the GPU's active video mode (PAL/NTSC) — see gpu_dotclock_hz/gpu_hblank_hz. */
+static uint32_t timer_rate_cycles(Timers* timers, Timer* t, int i) {
+    if (t->clock_source <= 1) return 1;             /* sysclock */
+    const Gpu* gpu = timers->inter ? &timers->inter->gpu : NULL;
+    switch (i) {
+        case 0: { /* Timer0 dotclock */
+            double hz = gpu ? gpu_dotclock_hz(gpu) : DOTCLOCK_NTSC_HZ;
+            uint32_t r = (uint32_t)(PSX_CPU_HZ / hz + 0.5);
+            return r ? r : 1;
         }
-
-        // --- Stepping logic ---
-        if (use_hblank) {
-            // HBlank: increment by number of HBlanks in cpu_cycles
-            // HBlank rate: 33868800 / (263 * 60) = ~21477 Hz (NTSC)
-            double hblank_cycles = PSX_CPU_HZ / (60.0 * 263.0);
-            double hblanks = (double)cpu_cycles / hblank_cycles;
-            ticks_to_add += hblanks;
-        } else if (timer_clock_hz > 0.0) {
-            // System clock or dotclock or div8
-            ticks_to_add += (double)cpu_cycles * (timer_clock_hz / PSX_CPU_HZ);
-        } else {
-            // Unused clock source, skip
-            timers->fractional_ticks[i] = ticks_to_add;
-            continue;
+        case 1: { /* Timer1 hblank: one tick per scanline */
+            double hz = gpu ? gpu_hblank_hz(gpu) : (PSX_CPU_HZ / (60.0 * 263.0));
+            uint32_t r = (uint32_t)(PSX_CPU_HZ / hz + 0.5);
+            return r ? r : 1;
         }
-
-        uint32_t whole_ticks = (uint32_t)floor(ticks_to_add);
-        timers->fractional_ticks[i] = ticks_to_add - (double)whole_ticks;
-        if (whole_ticks == 0)
-            continue;
-
-        /* --- Main counter increment and event logic --- */
-        for (uint32_t tick = 0; tick < whole_ticks; ++tick) {
-            t->counter++;
-
-            bool hit_target   = t->reset_on_target && t->target != 0 && t->counter == t->target;
-            bool hit_overflow = !hit_target && (t->counter == 0);
-
-            if (hit_target) t->reached_target_flag = true;
-            if (hit_overflow) t->reached_ffff_flag = true;
-
-            bool should_irq = (hit_target && t->irq_on_target) ||
-                              (hit_overflow && t->irq_on_ffff);
-
-            if (should_irq) {
-                /* Only fire if not already pending in I_STAT (avoids duplicate edges) */
-                bool already_pending = timers->inter &&
-                    (timers->inter->irq_status & (1u << t->irq)) != 0;
-
-                if (t->irq_pulse) {
-                    /* Toggle mode: bit10 flips; IRQ only on 0→1 transition */
-                    if (t->mode & (1 << 10)) {
-                        t->mode &= ~(1 << 10); /* 1→0, no CPU interrupt */
-                    } else {
-                        t->mode |= (1 << 10);  /* 0→1, fire CPU interrupt */
-                        LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ toggle→1 (hit_target=%d hit_ov=%d)", i, hit_target, hit_overflow);
-                        if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (toggle)");
-                    }
-                } else {
-                    /* Pulse mode: set bit10, fire IRQ if not already pending */
-                    t->mode |= (1 << 10);
-                    LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ pulse (hit_target=%d hit_ov=%d)", i, hit_target, hit_overflow);
-                    if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (pulse)");
-                }
-
-                /* One-shot (irq_repeat=0): disable after first fire */
-                if (!t->irq_repeat) {
-                    t->irq_on_target = false;
-                    t->irq_on_ffff   = false;
-                    t->mode &= ~((1 << 4) | (1 << 5));
-                }
-            }
-
-            if (hit_target) { t->counter = 0; continue; }
-            if (hit_overflow) t->counter = 0;
-        }
+        default: return 8;                          /* Timer2 sysclock/8 */
     }
 }
 
-// --- Event scheduling for timers ---
-void timers_schedule_next_event(Timers* timers, int timer_index) {
-    Timer* t = &timers->timers[timer_index];
-    uint32_t cycles_until_event = 0;
-    if (t->reset_on_target && t->target != 0) {
-        if (t->counter < t->target)
-            cycles_until_event = t->target - t->counter;
-        else
-            cycles_until_event = 0x10000 - t->counter + t->target;
+/* Tick distance from counter==0 back to the reset point. reset_on_target with
+ * a non-zero target resets at target; otherwise it wraps at 0x10000. */
+static uint32_t timer_period_ticks(const Timer* t) {
+    if (t->reset_on_target && t->target != 0) return (uint32_t)t->target;
+    return 0x10000u;
+}
+
+/* Fire the timer IRQ, honoring pulse/toggle mode, the already-pending guard,
+ * and one-shot (irq_repeat==0) disable. Extracted so the event handler and the
+ * on-read catch-up share ONE path (the old code had two conflicting guards). */
+static void timer_fire_irq(Timers* timers, Timer* t, int i, bool hit_target, bool hit_overflow) {
+    bool already_pending = timers->inter &&
+        (timers->inter->irq_status & (1u << t->irq)) != 0;
+
+    if (t->irq_pulse) {
+        /* Toggle mode: bit10 flips; CPU IRQ only on the 0->1 transition. */
+        if (t->mode & (1 << 10)) {
+            t->mode &= ~(1 << 10);
+        } else {
+            t->mode |= (1 << 10);
+            LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ toggle->1 (tgt=%d ov=%d)", i, hit_target, hit_overflow);
+            if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (toggle)");
+        }
     } else {
-        cycles_until_event = 0x10000 - t->counter;
+        t->mode |= (1 << 10);
+        LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ pulse (tgt=%d ov=%d)", i, hit_target, hit_overflow);
+        if (!already_pending) interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (pulse)");
     }
-    double clock_div = (t->rate == 8) ? 8.0 : (t->rate == 5) ? 5.0 : 1.0;
-    uint32_t cpu_cycles = (uint32_t)(cycles_until_event * clock_div);
-    eventq_schedule(timers->inter, EVQ_TIMER0 + timer_index, cpu_cycles);
+
+    if (!t->irq_repeat) {  /* one-shot: disable after first fire */
+        t->irq_on_target = false;
+        t->irq_on_ffff   = false;
+        t->mode &= ~((1 << 4) | (1 << 5));
+    }
+}
+
+/* Catch a single timer up to the current cycle: cross any elapsed boundaries
+ * (firing IRQ + rebasing cycle_start each time), then refresh the cached
+ * counter value. Idempotent — re-entry after a boundary sees ticks<period and
+ * does nothing, so the read path and the event path can both call it without
+ * double-firing. No effect while paused (sync gate) or before inter is wired. */
+static void timers_catch_up_one(Timers* timers, int i) {
+    Timer* t = &timers->timers[i];
+    if (!timers->inter || !t->counting_enabled) return;
+    uint32_t rate = timer_rate_cycles(timers, t, i);
+    if (rate == 0) rate = 1;
+    t->rate = rate;
+
+    uint32_t now = timers->inter->cpu_cycle_counter;
+    for (;;) {
+        uint32_t elapsed = (now - t->cycle_start) / rate;   /* ticks since last base */
+        uint32_t period  = timer_period_ticks(t);
+        if (elapsed < period) { t->counter = (uint16_t)elapsed; break; }
+
+        /* Boundary crossed. */
+        bool hit_target   = (t->reset_on_target && t->target != 0);
+        bool hit_overflow = !hit_target;
+        if (hit_target)   t->reached_target_flag = true;
+        if (hit_overflow) t->reached_ffff_flag   = true;
+        if ((hit_target && t->irq_on_target) || (hit_overflow && t->irq_on_ffff))
+            timer_fire_irq(timers, t, i, hit_target, hit_overflow);
+
+        t->cycle_start += period * rate;   /* rebase to the boundary (counter->0) */
+        t->counter = 0;
+    }
+}
+
+/* Arm EVQ_TIMER{i} to fire at this timer's next target/overflow. Skipped while
+ * the timer is gated off (no event ⇒ it simply won't fire until re-enabled). */
+void timers_reschedule(Timers* timers, int i) {
+    Timer* t = &timers->timers[i];
+    if (!timers->inter || !t->counting_enabled) return;
+    uint32_t rate = timer_rate_cycles(timers, t, i);
+    if (rate == 0) rate = 1;
+    t->rate = rate;
+    uint32_t period    = timer_period_ticks(t);
+    uint32_t remaining = (t->counter < period) ? (period - t->counter) : 1;
+    eventq_schedule(timers->inter, EVQ_TIMER0 + i, remaining * rate);
+}
+
+/* Legacy name kept for the write path; now just reschedules. */
+void timers_schedule_next_event(Timers* timers, int timer_index) {
+    timers_reschedule(timers, timer_index);
+}
+
+/* Anchor all three timers at the current cycle and arm their first events. */
+void timers_start(Timers* timers) {
+    for (int i = 0; i < 3; i++) {
+        timer_rebase(timers, i);
+        timers_reschedule(timers, i);
+    }
 }
 
 // --- Frame/line timing functions ---
@@ -431,61 +443,15 @@ static inline float timer0_to_x_coord(uint16_t timer0, bool is_ntsc) {
     return base * (is_ntsc ? 0.198166f : 0.196358f);
 }
 
-// --- BIOS Boot Helper: Force Timer0 Configuration ---
-// Per PSX-Spex/nocash, if the BIOS doesn't configure Timer0 for VBlank IRQ0,
-// we need to force it to prevent the BIOS from getting stuck in a loop.
-static void timer_force_bios_boot_config(Timers* timers) {
-    Timer* t0 = &timers->timers[0];
-    
-    // Force configuration if Timer0 is not properly configured for VBlank IRQ0
-    // (mode doesn't have IRQ enable bit set, or target is zero)
-    if ((t0->mode & 0x0100) == 0 || t0->target == 0x0000) {
-        LOG_TIMER_INFO("[TIMER] BIOS Boot Helper: Forcing Timer0 configuration for VBlank IRQ0");
-        
-        // Configure Timer0 for VBlank IRQ0 (NTSC timing)
-        // Mode: Enable counting, enable IRQ, IRQ on target
-        t0->mode = 0x0110;  // Bit 8: IRQ enable, Bit 4: IRQ on target, Bit 0: Timer enable
-        t0->target = 0xFFFF; // Target for VBlank timing
-        t0->counter = 0x0000; // Start from 0
-        
-        // Update internal state
-        timer_update_internal_state(timers, t0, 0);
-        
-        LOG_TIMER_INFO("[TIMER] Forced config: mode=0x%04x, target=0x%04x [PSX-Spex: VBlank IRQ0 enabled]", t0->mode, t0->target);
-    }
-}
-
 // --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
 // Copyright (c) PCSX ReARMed authors. Used under open source license.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
-    Timer* t = &timers->timers[timer_index];
-    // Set sticky flag for target or overflow
-    if (t->reset_on_target && t->target != 0 && t->counter == t->target) {
-        t->reached_target_flag = true;
-    }
-    if (t->counter == 0xFFFF) {
-        t->reached_ffff_flag = true;
-    }
-    /* Only request IRQ if not already requested and enabled */
-    bool irq_enabled = (t->irq_on_target && t->reached_target_flag) || (t->irq_on_ffff && t->reached_ffff_flag);
-    if (irq_enabled && !t->interrupt_requested) {
-        t->interrupt_requested = true;
-        t->mode |= (1 << 10);
-        LOG_TIMER_DEBUG("[TIMER] Timer%d IRQ triggered by event handler", timer_index);
-        interconnect_request_irq(timers->inter, t->irq, "Timer event handler");
-    }
-    // Reset counter if needed
-    if (t->reset_on_target && t->reached_target_flag) {
-        t->counter = 0;
-        t->reached_target_flag = false;
-    } else if (!t->reset_on_target && t->reached_ffff_flag) {
-        // CRITICAL FIX: When reset_on_target=0, counter resets on FFFFh overflow
-        t->counter = 0;
-        t->reached_ffff_flag = false;
-    }
-    // Schedule next event
-    timers_schedule_next_event(timers, timer_index);
+    /* The event fires at the timer's next boundary: catch it up (which crosses
+     * the boundary, sets sticky flags, and fires the IRQ through the single
+     * shared path), then re-arm for the following boundary. */
+    timers_catch_up_one(timers, timer_index);
+    timers_reschedule(timers, timer_index);
 }
 
 // Expose C-callable wrappers for event_scheduler.c
@@ -494,26 +460,3 @@ void timer1_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->
 void timer2_event_handler(struct Interconnect* sys) { timer_event_handler(&sys->timers_state, 2); }
 // --- END: PCSX ReARMed-inspired Timer Event Handlers ---
 
-// VBlank event handler for event_scheduler.c
-void timers_on_vblank(Timers* timers) {
-
-    Timer* t0 = &timers->timers[0];
-    t0->counter = 0;
-    t0->reached_target_flag = false;
-    
-    // Only clear interrupt_requested if the IRQ was acknowledged
-    if (t0->interrupt_requested) {
-        t0->interrupt_requested = false;
-    }
-    
-    // If Timer0 IRQ is enabled, request IRQ0 only if not already requested
-    if ((t0->mode & 0x0100) && (t0->mode & 0x0010) && !t0->interrupt_requested) {
-        if (timers->inter) {
-            interconnect_request_irq(timers->inter, 0, "VBlank");
-        } else {
-            LOG_TIMER_ERROR("[TIMER] ERROR: timers->inter is NULL!");
-        }
-        t0->interrupt_requested = true;
-        t0->reached_target_flag = true;
-    }
-}

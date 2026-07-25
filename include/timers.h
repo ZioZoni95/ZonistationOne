@@ -134,14 +134,6 @@ void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t va
 void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t value);
 
 /**
- * @brief Steps the timers forward by a number of elapsed master clock cycles.
- * Updates counters, checks for target/overflow, and requests interrupts.
- * @param timers Pointer to the Timers structure.
- * @param cycles Number of master clock cycles that have passed.
- */
-void timers_step(Timers* timers, uint32_t cycles);
-
-/**
  * @brief Sets the external gate line level for a timer (Timer0=hblank,
  * Timer1=vblank) and applies the PS1 sync-mode edge behavior (counter
  * reset/pause per mode), matching DuckStation's Timers::SetGate model.
@@ -155,12 +147,11 @@ void timers_schedule_next(Timers* timers);  // Schedule next timer event
 uint32_t timers_calculate_frame_cycles(void);  // Frame timing
 uint32_t timers_calculate_line_cycles(void);   // Line timing
 
-// --- BEGIN: PCSX ReARMed-inspired logic ---
-// Called on every VBlank to reset Timer0 and schedule its event, ensuring correct VBlank/Timer0/IRQ0 coupling as required by the PS1 BIOS.
-void timers_on_vblank(Timers* timers);
-// --- END: PCSX ReARMed-inspired logic ---
-
 void timers_schedule_next_event(Timers* timers, int timer_index);
+/* Arm EVQ_TIMER{i} at the timer's next target/overflow (derived-counter model). */
+void timers_reschedule(Timers* timers, int timer_index);
+/* Seed all three timer events after init (call once from system_init). */
+void timers_start(Timers* timers);
 
 // --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
 void timer0_event_handler(struct Interconnect* sys);

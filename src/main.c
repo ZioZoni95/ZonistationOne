@@ -24,6 +24,7 @@
 #include "debugger.h"
 #include "spu.h"
 #include "lua_debug.h"
+#include "system.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -308,8 +309,7 @@ int main(int argc, char* argv[]) {
     audio_init(&inter.spu);
     spu_thread_start(&inter.spu, &inter);
 
-    eventq_schedule(&inter, EVQ_VBLANK, gpu_cycles_per_frame(&inter.gpu));
-    eventq_schedule(&inter, EVQ_TIMER0, 1024);
+    system_init(&inter, &cpu);
 
     g_cpu_for_trace = &cpu;
     signal(SIGINT,  sighandler_dump_trace);
@@ -360,45 +360,13 @@ int main(int argc, char* argv[]) {
         renderer_apply_vram_readback(&inter.gpu.renderer, (uint16_t*)inter.gpu.vram.data);
 #endif
 
+        /* Host-side frame pacing budget follows the GPU's video mode. */
         cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
         frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
                                  (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
 
-        Debugger* dbg = &inter.debugger;
-        if (!dbg->paused) {
-            uint32_t cycles_run = 0;
-            while (cycles_run < cycles_per_frame) {
-                uint32_t left  = cycles_per_frame - cycles_run;
-                uint32_t chunk = eventq_cycles_until_next(&inter);
-                if (chunk == 0) chunk = 1;
-                if (chunk > left) chunk = left;
-
-                /* chunk is a target CYCLE distance (until the next event or frame boundary),
-                 * not an instruction count — per-instruction cost varies (BIOS ROM/EXP1
-                 * fetches cost several extra cycles, see cpu_icache.c), so bound the inner
-                 * loop by real elapsed cycles from cpu_cycle_counter, not by instructions
-                 * run. Without this, a chunk sized for "cycles until next event" but used as
-                 * an instruction count could run far past the intended cycle target when
-                 * instructions are expensive, overshooting frame pacing by many multiples.
-                 * Event dispatch itself is already correct regardless of this loop's
-                 * granularity (cpu_run_next_instruction checks downcount after every
-                 * instruction) — this only fixes frame-pacing/timer bookkeeping. */
-                uint32_t cycles_before = inter.cpu_cycle_counter;
-                while (inter.cpu_cycle_counter - cycles_before < chunk) {
-                    cpu_run_next_instruction(&cpu);
-                    if (dbg->paused) goto frame_done;
-                }
-                uint32_t elapsed = inter.cpu_cycle_counter - cycles_before;
-                timers_step(&inter.timers_state, elapsed);
-                cycles_run += elapsed;
-            }
-        } else if (debug_ui_step_requested()) {
-            dbg->step_skip_bp = true;
-            dbg->paused = false;
-            cpu_run_next_instruction(&cpu);
-            dbg->paused = true;
-        }
-        frame_done:;
+        /* Run the machine for one video frame (or one debugger step). */
+        system_run_frame(&inter, &cpu);
 
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);

@@ -79,6 +79,34 @@ uint32_t gpu_cycles_per_frame(const Gpu* gpu) {
     return (gpu->vmode == Pal) ? 680823u : 566203u;
 }
 
+/* CRTC (video) clock in Hz for the active video mode — the source both the
+ * dotclock and the hblank/line clock divide down from. DuckStation gpu.cpp:
+ * NTSC 53'693'175, PAL 53'203'425. */
+static double gpu_crtc_hz(const Gpu* gpu) {
+    return (gpu->vmode == Pal) ? 53203425.0 : 53693175.0;
+}
+
+/* Timer0 dotclock rate. dot = CRTC / divider, divider chosen by the GPUSTAT
+ * horizontal-resolution field (DuckStation dot_clock_dividers {10,8,5,4,7}). */
+double gpu_dotclock_hz(const Gpu* gpu) {
+    uint32_t hres = (uint32_t)gpu->hres_raw.hr1 | ((uint32_t)gpu->hres_raw.hr2 << 2);
+    uint32_t div;
+    switch (hres) {
+        case 0: div = 10; break;   /* 256 */
+        case 1: div = 8;  break;   /* 320 */
+        case 2: div = 5;  break;   /* 512 */
+        case 3: div = 4;  break;   /* 640 */
+        default: div = 7; break;   /* 368 (hr2 set) */
+    }
+    return gpu_crtc_hz(gpu) / (double)div;
+}
+
+/* Timer1 hblank rate = scanline rate = CRTC / ticks-per-line
+ * (DuckStation NTSC_TICKS_PER_LINE 3413 / PAL_TICKS_PER_LINE 3406). */
+double gpu_hblank_hz(const Gpu* gpu) {
+    return gpu_crtc_hz(gpu) / ((gpu->vmode == Pal) ? 3406.0 : 3413.0);
+}
+
 void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
     // Update vertical total from current video mode
     gpu->crtc.vertical_total = (gpu->vmode == Pal) ? 314 : 263;

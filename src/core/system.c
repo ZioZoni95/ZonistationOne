@@ -1,0 +1,60 @@
+/*
+ * system.c — core per-frame execution driver.
+ *
+ * Extracted from main.c's inline loop so main.c can be a thin host shell.
+ * The machine runs until the VBlank event marks the frame boundary
+ * (inter->frame_complete); the CPU's downcount already dispatches every due
+ * scheduled event (VBlank/CDROM/DMA/SIO/MDEC) inside cpu_run_next_instruction,
+ * so there is no manual chunk-sizing here beyond bounding each inner burst by
+ * "cycles until the next event" (still needed while timers are stepped by hand
+ * — that hand-stepping goes away in the timer rewrite step).
+ */
+
+#include "system.h"
+#include "interconnect.h"
+#include "cpu.h"
+#include "event_scheduler.h"
+#include "timers.h"
+#include "gpu.h"
+#include "debugger.h"
+#include "debug_ui.h"
+
+void system_init(Interconnect* inter, Cpu* cpu) {
+    (void)cpu;
+    inter->frame_complete = false;
+    /* VBlank is the frame boundary and self-reschedules. Timers arm their own
+     * EVQ_TIMER{0,1,2} events at their first target/overflow. */
+    eventq_schedule(inter, EVQ_VBLANK, gpu_cycles_per_frame(&inter->gpu));
+    timers_start(&inter->timers_state);
+}
+
+void system_run_frame(Interconnect* inter, Cpu* cpu) {
+    Debugger* dbg = &inter->debugger;
+
+    /* Paused: service at most one single-step request, then let main render. */
+    if (dbg->paused) {
+        if (debug_ui_step_requested()) {
+            dbg->step_skip_bp = true;
+            dbg->paused = false;
+            cpu_run_next_instruction(cpu);
+            dbg->paused = true;
+        }
+        return;
+    }
+
+    inter->frame_complete = false;
+
+    /* Safety bound: if VBlank ever stops firing, never spin forever — cap a
+     * frame at ~2x its cycle budget and bail (a bug elsewhere, but not a hang). */
+    const uint32_t start = inter->cpu_cycle_counter;
+    const uint32_t cap   = 2u * gpu_cycles_per_frame(&inter->gpu);
+
+    while (!inter->frame_complete) {
+        /* Just run the CPU: cpu_run_next_instruction dispatches every due
+         * scheduled event (VBlank, timers, CDROM, DMA, ...) via its downcount
+         * check, and timers now catch up on-read/on-event — no manual stepping. */
+        cpu_run_next_instruction(cpu);
+        if (dbg->paused) return;                       /* breakpoint hit mid-frame */
+        if (inter->cpu_cycle_counter - start >= cap) break;  /* safety */
+    }
+}
