@@ -1,43 +1,36 @@
--- Timer-liveness probe (Phase 3.x — timing gap)
--- Measures whether the game reads timers during the FMV, and whether the
--- counter value is stale between reads (advances far less than the elapsed
--- CPU cycles would imply). DuckStation catches the counter up to the current
--- tick on every read; ours only advances in coarse main-loop chunks.
+-- Where does the decoded FMV go? (post timer-unification)
+-- The decoder now produces bright blocks (peak luma ~189) but the screen is
+-- black. This traces the hand-off: for each GP0(0xA0) upload during the FMV,
+-- compare the ch1 (MDEC-out) DMA destination against the upload source region,
+-- and report the peak byte actually landing in VRAM. If VRAM stays ~0 while the
+-- decoder is bright, the bright output never reaches the uploaded region.
 
-local reads = { [0] = 0, [1] = 0, [2] = 0 }
-local last_cyc = { [0] = 0, [1] = 0, [2] = 0 }
-local last_val = { [0] = -1, [1] = -1, [2] = -1 }
-local stale_hits = { [0] = 0, [1] = 0, [2] = 0 }
-local samples = 0
-
-local function on_read(idx)
-    reads[idx] = reads[idx] + 1
-    local val, src, en = emu.timer(idx)
-    local cyc = emu.cycles()
-    -- "stale": consecutive reads at different cycles returning the identical
-    -- counter — i.e. the timer did not advance though time passed.
-    if last_val[idx] == val and cyc ~= last_cyc[idx] then
-        stale_hits[idx] = stale_hits[idx] + 1
-    end
-    last_val[idx] = val
-    last_cyc[idx] = cyc
-
-    samples = samples + 1
-    if samples <= 24 then
-        print(string.format("  T%d read: counter=%5d src=%d en=%s cyc=%d",
-            idx, val, src, tostring(en), cyc))
-    end
-    if samples % 20000 == 0 then
-        print(string.format("[TIMER-LIVE] reads T0=%d T1=%d T2=%d | stale T0=%d T1=%d T2=%d",
-            reads[0], reads[1], reads[2], stale_hits[0], stale_hits[1], stale_hits[2]))
-    end
-end
+local uploads     = 0
+local vram_peak   = 0
+local vram_peak_c = 0
 
 emu.on_event(function(name)
-    if     name == "timer0_read" then on_read(0)
-    elseif name == "timer1_read" then on_read(1)
-    elseif name == "timer2_read" then on_read(2)
+    if name ~= "gp0_vram_upload" then return end
+    if ((emu.gpustat() >> 21) & 1) ~= 1 then return end   -- FMV only (24bpp)
+    uploads = uploads + 1
+
+    local x, y, w, h = emu.vram_upload_rect()
+    local peak = 0
+    for row = 0, h - 1, 4 do
+        for col = 0, w - 1 do
+            local v = emu.vram16(x + col, y + row) or 0
+            local lo, hi = v & 0xFF, (v >> 8) & 0xFF
+            if lo > peak then peak = lo end
+            if hi > peak then peak = hi end
+        end
+    end
+    if peak > vram_peak then vram_peak = peak; vram_peak_c = emu.cycles() end
+
+    if uploads % 300 == 0 then
+        local in_a, in_r, out_a, out_r = emu.mdec_dma()
+        print(string.format("[VRAM-DEST] %d uploads | rect=(%d,%d) %dx%d | VRAM peak byte=0x%02X @cyc %d | ch1_out=0x%06X",
+            uploads, x, y, w, h, vram_peak, vram_peak_c, out_a))
     end
 end)
 
-print("[TIMER LIVENESS PROBE] armed")
+print("[VRAM DEST PROBE] armed")
