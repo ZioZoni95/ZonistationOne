@@ -13,6 +13,7 @@ void debug_ui_process_event(SDL_Event* event);
 void debug_ui_render(void* cpu_ptr, void* interconnect_ptr);
 void debug_ui_shutdown(void);
 bool debug_ui_step_requested(void); // Consumed once per call (edge-triggered)
+bool debug_ui_vram_viewer_open(void); // Snapshotting VRAM for it costs 2 MB/frame
 
 #ifdef __cplusplus
 }

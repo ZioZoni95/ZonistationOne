@@ -28,8 +28,10 @@
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
 
-#define VBLANK_CYCLES 564480
-#define CYCLES_PER_FRAME (33868800 / 60)
+/* Emulated-frame length and host frame pacing both follow the GPU's video mode
+ * (gpu_cycles_per_frame): 566203 cy / 59.82 Hz NTSC, 680823 cy / 49.75 Hz PAL.
+ * Both were previously pinned to NTSC 60 Hz, which ran PAL discs ~20% fast.
+ * PSX_SYSCLK_HZ comes from cdrom_disc.h. */
 
 // --- Argument config ---
 typedef struct {
@@ -306,7 +308,7 @@ int main(int argc, char* argv[]) {
     audio_init(&inter.spu);
     spu_thread_start(&inter.spu, &inter);
 
-    eventq_schedule(&inter, EVQ_VBLANK, VBLANK_CYCLES);
+    eventq_schedule(&inter, EVQ_VBLANK, gpu_cycles_per_frame(&inter.gpu));
     eventq_schedule(&inter, EVQ_TIMER0, 1024);
 
     g_cpu_for_trace = &cpu;
@@ -320,7 +322,11 @@ int main(int argc, char* argv[]) {
     bool quit = false;
     SDL_Event ev;
 
-    const uint64_t frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() / 60.0);
+    /* Re-derived each frame: a game may switch video mode via GP1(08) at any
+     * point (and the BIOS boots NTSC before a PAL disc's shell switches it). */
+    uint32_t cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
+    uint64_t frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
+                                      (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
     uint64_t next_frame = SDL_GetPerformanceCounter() + frame_ticks;
 
     while (!quit) {
@@ -354,11 +360,15 @@ int main(int argc, char* argv[]) {
         renderer_apply_vram_readback(&inter.gpu.renderer, (uint16_t*)inter.gpu.vram.data);
 #endif
 
+        cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
+        frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
+                                 (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
+
         Debugger* dbg = &inter.debugger;
         if (!dbg->paused) {
             uint32_t cycles_run = 0;
-            while (cycles_run < CYCLES_PER_FRAME) {
-                uint32_t left  = CYCLES_PER_FRAME - cycles_run;
+            while (cycles_run < cycles_per_frame) {
+                uint32_t left  = cycles_per_frame - cycles_run;
                 uint32_t chunk = eventq_cycles_until_next(&inter);
                 if (chunk == 0) chunk = 1;
                 if (chunk > left) chunk = left;
@@ -398,13 +408,16 @@ int main(int argc, char* argv[]) {
          * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
         renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
 
-        /* Snapshot VRAM into viewer texture before submitting */
-        renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+        /* Snapshot VRAM into viewer texture before submitting. Converting the
+         * whole 1024x512 buffer to RGBA8 costs 2 MB of staging pool per frame,
+         * so only pay it while the viewer window is actually open. */
+        if (debug_ui_vram_viewer_open())
+            renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
 
         /* Submit frame to GPU thread: swap buffers, wake renderer */
         renderer_submit_frame(&inter.gpu.renderer, debug_ui_get_draw_data());
 
-        // 60 Hz cap
+        // Frame-rate cap at the emulated refresh rate (59.82 NTSC / 49.75 PAL)
         uint64_t now = SDL_GetPerformanceCounter();
         if (now < next_frame) {
             uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();

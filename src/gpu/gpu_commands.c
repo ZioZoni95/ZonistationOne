@@ -1136,6 +1136,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
                               dst_x, dst_y, w, h);
     gpu->vram_dirty = false;
+    lua_debug_notify("gp0_vram_copy");
 }
 
 /** GP0(0xA0): Copy Rectangle CPU/DMA → VRAM (setup) */
@@ -1175,6 +1176,7 @@ static void gp0_image_load(Gpu* gpu) {
     gpu->gp0_words_remaining = words;
     gpu->gp0_mode = GP0_MODE_IMAGE_LOAD;
     gpu->vram_load_count = 0;
+    lua_debug_notify("gp0_image_start");
 }
 
 /** GP0(0xC0): Copy Rectangle VRAM → CPU (setup) */
@@ -1427,6 +1429,7 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
                                       gpu->vram_load_x, gpu->vram_load_y,
                                       gpu->vram_load_w, gpu->vram_load_h);
             gpu->vram_dirty = false;
+            lua_debug_notify("gp0_vram_upload");
             LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
                          gpu->vram_load_x, gpu->vram_load_y,
                          gpu->vram_load_w, gpu->vram_load_h);

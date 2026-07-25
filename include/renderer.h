@@ -39,6 +39,25 @@ typedef struct {
 // Adjust as needed for performance/memory trade-offs. (Guide uses 64*1024)
 #define VERTEX_BUFFER_LEN (64 * 1024)
 
+/* VRAM viewer decode modes, mirroring PCSX-Redux's vram-viewer widget: VRAM is
+ * a raw 1024x512 halfword store that games address as 4bpp/8bpp indexed,
+ * 16bpp direct or 24bpp packed depending on the region, so the viewer has to
+ * be told how to read the bytes it is being asked to show. */
+typedef enum {
+    VRAM_VIEW_4BPP = 0,
+    VRAM_VIEW_8BPP,
+    VRAM_VIEW_16BPP,
+    VRAM_VIEW_24BPP
+} VramViewMode;
+
+typedef struct {
+    VramViewMode mode;
+    int      shift24;         /* 0-3: byte phase for 24bpp unpacking */
+    bool     greyscale;
+    bool     show_alpha;      /* render the mask bit (bit 15) as intensity */
+    uint16_t clut_x, clut_y;  /* CLUT position for the indexed modes */
+} VramViewParams;
+
 // Structure holding the state of the OpenGL renderer
 typedef struct {
     // OpenGL Object IDs
@@ -55,6 +74,7 @@ typedef struct {
     GLuint display_texture; // Texture attached to the display FBO
 
     GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
+    VramViewParams vram_view;   // how the viewer decodes VRAM (set from the UI)
 
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
@@ -91,6 +111,7 @@ typedef struct {
 
     /* Display region — cropped from CRTC state, passed to GPU thread blit */
     uint16_t display_x, display_y, display_w, display_h;
+    bool     display_depth24;   /* GPUSTAT.21 — display area is packed 24bpp */
 
     /* GPU render thread (Phase 2 threading refactor) */
     SDL_Thread*  gpu_thread;
@@ -158,6 +179,7 @@ void renderer_wait_frame_done(Renderer* renderer);
  * @return OpenGL texture ID.
  */
 GLuint renderer_get_display_texture(Renderer* renderer);
+void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
 
@@ -346,5 +368,11 @@ void renderer_set_dither_mode(Renderer* renderer, bool enabled);
  * Thread-safe to call from CPU thread — snapshotted into GpuFrame at submit time.
  */
 void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void renderer_set_display_depth24(Renderer* renderer, bool depth24);
+
+/* Staging-pool telemetry for the Lua console (bytes used in the current write
+ * slot, all-time single-frame peak, queued updates, rects dropped for space). */
+void renderer_get_pool_stats(Renderer* renderer, uint32_t* used, uint32_t* peak,
+                             uint32_t* updates, uint32_t* skips);
 
 #endif // RENDERER_H

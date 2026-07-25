@@ -132,19 +132,23 @@ uint32_t eventq_cycles_until_next(const struct Interconnect* sys) {
 
 // --- Event Handlers ---
 
-#define VBLANK_CYCLES 564480 // NTSC: 33868800 / 60
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed
 
 static void evq_handle_vblank(struct Interconnect* sys) {
     static uint32_t vblank_count = 0;
     vblank_count++;
 
-    gpu_crtc_tick(&sys->gpu, VBLANK_CYCLES);
+    /* Period follows the GPU's current video mode — see gpu_cycles_per_frame().
+     * A fixed NTSC period here ran PAL titles ~20% fast. */
+    const uint32_t vblank_cycles = gpu_cycles_per_frame(&sys->gpu);
+
+    gpu_crtc_tick(&sys->gpu, vblank_cycles);
 
     if (vblank_count <= 5 || vblank_count % 60 == 0)
-        LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u)", vblank_count, sys->cpu_cycle_counter);
+        LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u, period=%u)",
+                        vblank_count, sys->cpu_cycle_counter, vblank_cycles);
 
-    eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
+    eventq_schedule(sys, EVQ_VBLANK, vblank_cycles);
 
     if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
         LOG_EVENT_ERROR("[EVQ] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);

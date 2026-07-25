@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "log.h"
+#include "lua_debug.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,8 +15,12 @@
  * ========================================================================= */
 
 #define GPU_MAX_BATCHES        1024
-#define GPU_MAX_VRAM_UPDATES   256
-#define GPU_VRAM_POOL_SIZE     (4 * 1024 * 1024)  /* 4 MB per slot */
+/* An FMV frame arrives as dozens of narrow VRAM upload strips per frame, on
+ * top of the 2 MB VRAM-viewer snapshot and any full-VRAM upload, so both the
+ * update count and the staging pool have to carry a whole frame's worth or
+ * the tail of every frame is dropped ("VRAM pool full — skipping rect"). */
+#define GPU_MAX_VRAM_UPDATES   1024
+#define GPU_VRAM_POOL_SIZE     (16 * 1024 * 1024)  /* 16 MB per slot */
 
 typedef struct {
     uint32_t vertex_start;      /* index into s_pos/col/tex/tpg pools */
@@ -35,8 +40,10 @@ typedef struct {
 
 typedef struct {
     uint16_t x, y, w, h;
+    uint16_t dst_x;             /* display_texture column (differs from x in 24bpp) */
     uint32_t data_offset;       /* byte offset into s_vram_pool[slot] */
     bool     update_display;    /* true → also update display_texture (R16UI→RGB) */
+    bool     depth24;           /* true → rect holds packed 24bpp display data */
     bool     full_upload;       /* unused, kept for alignment */
     bool     is_viewer;         /* true → upload to vram_viewer_texture (RGBA8) */
 } GpuVramUpdate;
@@ -78,6 +85,8 @@ static uint32_t         s_vtx[2];   /* vertex pool write position per slot */
 /* Double-buffered VRAM copy pools */
 static uint8_t   s_vram_pool[2][GPU_VRAM_POOL_SIZE];
 static uint32_t  s_vram_pool_used[2];
+static uint32_t  s_vram_pool_skips;      /* rects dropped because the pool was full */
+static uint32_t  s_vram_pool_peak;       /* high-water mark of a single frame's usage */
 
 /* Frame command lists */
 static GpuFrame  s_frame[2];
@@ -788,7 +797,9 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
     uint32_t bytes_needed = (uint32_t)w * h * sizeof(uint16_t);
     uint32_t aligned = (bytes_needed + 3u) & ~3u;
     if (s_vram_pool_used[wi] + aligned > GPU_VRAM_POOL_SIZE) {
-        LOG_RENDERER_WARN("[RENDERER] VRAM pool full — skipping rect");
+        s_vram_pool_skips++;
+        LOG_RENDERER_WARN("[RENDERER] VRAM pool full — skipping %ux%u rect (%u KB needed, %u KB used)",
+                          w, h, aligned >> 10, s_vram_pool_used[wi] >> 10);
         return;
     }
 
@@ -806,20 +817,48 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
     u->h              = h;
     u->data_offset    = s_vram_pool_used[wi];
     u->update_display = update_display;
+    u->depth24        = renderer->display_depth24;
     u->full_upload    = false;
+    /* In 24bpp the VRAM halfword grid and the pixel grid run at different
+     * rates (3 bytes per pixel = 1.5 halfwords), so a rect starting N
+     * halfwords into the display area holds pixel (N*2)/3, not pixel N.
+     * Games upload FMV frames as narrow vertical strips (Ace Combat 2: 24
+     * halfwords = 16 pixels each), so writing each strip at its halfword x
+     * smears the frame progressively further right across the screen. */
+    u->dst_x = x;
+    if (u->depth24 && update_display && x >= renderer->display_x)
+        u->dst_x = (uint16_t)(renderer->display_x +
+                              ((uint32_t)(x - renderer->display_x) * 2u) / 3u);
     s_vram_pool_used[wi] += aligned;
+    if (s_vram_pool_used[wi] > s_vram_pool_peak) s_vram_pool_peak = s_vram_pool_used[wi];
     gpu_frame_record_op(frame, GPU_OP_VRAM_UPDATE, idx);
+}
+
+void renderer_get_pool_stats(Renderer* renderer, uint32_t* used, uint32_t* peak,
+                             uint32_t* updates, uint32_t* skips) {
+    int wi = renderer->write_idx;
+    if (used)    *used    = s_vram_pool_used[wi];
+    if (peak)    *peak    = s_vram_pool_peak;
+    if (updates) *updates = s_frame[wi].vram_update_count;
+    if (skips)   *skips   = s_vram_pool_skips;
 }
 
 void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
     if (!renderer->initialized) return;
+    lua_debug_notify("vram_full_upload");
     renderer_record_vram_update(renderer, vram_data, 0, 0, 1024, 512, false);
 }
 
 void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
                                 uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (!renderer->initialized || w == 0 || h == 0) return;
-    renderer_record_vram_update(renderer, vram_data, x, y, w, h, false);
+    /* Mirror the rect into display_texture too. On real hardware a CPU/DMA
+     * write straight into the displayed VRAM area is immediately visible;
+     * display_texture only ever carried GL-rasterized pixels, so anything a
+     * game paints by uploading (FMV frames decoded by the MDEC, 2D backdrops)
+     * never showed up at all. Only the uploaded rect is stamped, so this does
+     * not clobber rasterized pixels outside it. */
+    renderer_record_vram_update(renderer, vram_data, x, y, w, h, true);
 }
 
 void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data) {
@@ -1245,12 +1284,69 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
 
     uint8_t* dst = s_vram_pool[wi] + s_vram_pool_used[wi];
     const uint16_t* src = (const uint16_t*)vram_bytes;
-    for (int i = 0; i < 1024 * 512; i++) {
+    const VramViewParams* vp = &renderer->vram_view;
+
+    /* Every mode writes one RGBA8 texel per VRAM *halfword* slot, so the
+     * viewer image always stays 1024x512 and VRAM coordinates map 1:1 to
+     * texels regardless of the decode mode — the sub-modes just reinterpret
+     * what each slot's bytes mean (PCSX-Redux does the same, in a shader). */
+    for (uint32_t i = 0; i < 1024u * 512u; i++) {
         uint16_t raw = src[i];
-        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
-        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
-        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
-        *dst++ = 255;
+        uint8_t r, g, b;
+
+        switch (vp->mode) {
+            case VRAM_VIEW_4BPP: {
+                /* Four 4-bit indices per halfword; look each up in the CLUT
+                 * row and average them into this slot's texel so the whole
+                 * page stays visible at 1:1 scale. */
+                uint32_t clut_base = (uint32_t)vp->clut_y * 1024u + vp->clut_x;
+                uint32_t sr = 0, sg = 0, sb = 0;
+                for (int n = 0; n < 4; n++) {
+                    uint16_t entry = src[(clut_base + ((raw >> (n * 4)) & 0xFu)) & 0x7FFFFu];
+                    sr += (uint32_t)((entry      ) & 0x1Fu) << 3;
+                    sg += (uint32_t)((entry >>  5) & 0x1Fu) << 3;
+                    sb += (uint32_t)((entry >> 10) & 0x1Fu) << 3;
+                }
+                r = (uint8_t)(sr / 4); g = (uint8_t)(sg / 4); b = (uint8_t)(sb / 4);
+                break;
+            }
+            case VRAM_VIEW_8BPP: {
+                uint32_t clut_base = (uint32_t)vp->clut_y * 1024u + vp->clut_x;
+                uint16_t e0 = src[(clut_base + (raw & 0xFFu)) & 0x7FFFFu];
+                uint16_t e1 = src[(clut_base + ((raw >> 8) & 0xFFu)) & 0x7FFFFu];
+                r = (uint8_t)(((((e0      ) & 0x1Fu) + ((e1      ) & 0x1Fu)) << 3) / 2);
+                g = (uint8_t)(((((e0 >>  5) & 0x1Fu) + ((e1 >>  5) & 0x1Fu)) << 3) / 2);
+                b = (uint8_t)(((((e0 >> 10) & 0x1Fu) + ((e1 >> 10) & 0x1Fu)) << 3) / 2);
+                break;
+            }
+            case VRAM_VIEW_24BPP: {
+                /* 3 bytes per pixel straddling halfword boundaries: read the
+                 * byte stream directly at this slot, offset by the phase. */
+                const uint8_t* bytes = (const uint8_t*)src;
+                uint32_t off = i * 2u + (uint32_t)vp->shift24;
+                r = bytes[(off    ) & 0xFFFFFu];
+                g = bytes[(off + 1) & 0xFFFFFu];
+                b = bytes[(off + 2) & 0xFFFFFu];
+                break;
+            }
+            case VRAM_VIEW_16BPP:
+            default:
+                r = (uint8_t)((raw & 0x1Fu) << 3);
+                g = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+                b = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+                break;
+        }
+
+        if (vp->show_alpha) {
+            /* Mask bit only — makes it obvious which pixels are write-protected. */
+            uint8_t a = (raw & 0x8000u) ? 255 : 0;
+            r = g = b = a;
+        } else if (vp->greyscale) {
+            uint8_t y = (uint8_t)(((uint32_t)r * 77u + (uint32_t)g * 150u + (uint32_t)b * 29u) >> 8);
+            r = g = b = y;
+        }
+
+        *dst++ = r; *dst++ = g; *dst++ = b; *dst++ = 255;
     }
 
     uint32_t viewer_idx = frame->vram_update_count++;
@@ -1259,8 +1355,10 @@ void renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes) 
     u->y              = 0;
     u->w              = 1024;
     u->h              = 512;
+    u->dst_x          = 0;
     u->data_offset    = s_vram_pool_used[wi];
     u->update_display = false;
+    u->depth24        = false;
     u->full_upload    = false;
     u->is_viewer      = true;
     s_vram_pool_used[wi] += bytes_needed;
@@ -1323,18 +1421,35 @@ static void renderer_execute_one_vram_update(Renderer* renderer, const GpuVramUp
             /* Convert R16UI rect to RGB and upload to display_texture */
             static uint8_t rgb_buf[1024 * 512 * 3];
             const uint16_t* src = (const uint16_t*)data;
-            for (uint16_t row = 0; row < u->h; row++) {
-                uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
-                for (uint16_t col = 0; col < u->w; col++) {
-                    uint16_t raw = src[(uint32_t)row * u->w + col];
-                    *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
-                    *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
-                    *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+            uint16_t out_w = u->w;
+
+            if (u->depth24) {
+                /* GPUSTAT.21 set: the display area holds packed 24bpp pixels —
+                 * three consecutive bytes per pixel spanning halfword
+                 * boundaries, so w halfwords carry (w*2)/3 pixels (DuckStation
+                 * GPU_SW::CopyOut24Bit). MDEC FMV output is written this way. */
+                out_w = (uint16_t)((uint32_t)u->w * 2u / 3u);
+                if (out_w == 0) return;
+                for (uint16_t row = 0; row < u->h; row++) {
+                    const uint8_t* srow = (const uint8_t*)(src + (uint32_t)row * u->w);
+                    uint8_t* dst = rgb_buf + (uint32_t)row * out_w * 3u;
+                    memcpy(dst, srow, (size_t)out_w * 3u);
+                }
+            } else {
+                for (uint16_t row = 0; row < u->h; row++) {
+                    uint8_t* dst = rgb_buf + (uint32_t)row * u->w * 3u;
+                    for (uint16_t col = 0; col < u->w; col++) {
+                        uint16_t raw = src[(uint32_t)row * u->w + col];
+                        *dst++ = (uint8_t)((raw & 0x1Fu) << 3);
+                        *dst++ = (uint8_t)(((raw >> 5) & 0x1Fu) << 3);
+                        *dst++ = (uint8_t)(((raw >> 10) & 0x1Fu) << 3);
+                    }
                 }
             }
+
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glBindTexture(GL_TEXTURE_2D, renderer->display_texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, u->x, u->y, u->w, u->h,
+            glTexSubImage2D(GL_TEXTURE_2D, 0, u->dst_x, u->y, out_w, u->h,
                             GL_RGB, GL_UNSIGNED_BYTE, rgb_buf);
             glBindTexture(GL_TEXTURE_2D, 0);
             glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
@@ -1528,6 +1643,14 @@ void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uin
     renderer->display_y = y;
     renderer->display_w = w;
     renderer->display_h = h;
+}
+
+void renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p) {
+    if (p) renderer->vram_view = *p;
+}
+
+void renderer_set_display_depth24(Renderer* renderer, bool depth24) {
+    renderer->display_depth24 = depth24;
 }
 
 void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {

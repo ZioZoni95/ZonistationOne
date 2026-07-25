@@ -606,6 +606,21 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 #define DMA_SLICE_WORDS  64    /* GPU commands per slice before yielding */
 #define DMA_SLICE_CYCLES 1000  /* EVQ cycles between slices (~30µs) */
 
+/* MDEC DMA pacing. Real DMA reaches RAM in DRAM hyper-page mode: ~1 cycle per
+ * word plus a row-load per 16 (DuckStation Bus::GetDMARAMTickCount). Pacing
+ * MDEC's ch0/ch1 slices with the GPU path's flat 64-words-per-1000-cycles
+ * instead works out to ~15.6 cycles/word — slow enough that libmdec's
+ * DecDCTinSync/DecDCToutSync spin loops give up mid-FMV, which the game
+ * reports on the TTY as "MDEC_in_sync timeout:" / "time out in decoding !".
+ * Slice size mirrors DuckStation's SLICE_SIZE_WHEN_DECODING_MDEC (it caps MDEC
+ * slices low on purpose so an oversized FIFO can't swallow kilobytes at once
+ * and starve other interrupts), and the stall between slices is the real cost
+ * of the words actually moved, not a fixed quantum. */
+#define MDEC_SLICE_WORDS   100  /* DuckStation SLICE_SIZE_WHEN_DECODING_MDEC */
+#define MDEC_IDLE_BACKOFF  100  /* DuckStation DEFAULT_DMA_HALT_TICKS */
+
+static uint32_t dma_ram_ticks(uint32_t words) { return words + (words + 15u) / 16u; }
+
 /* Signal DMA ch2 completion IRQ */
 static void dma_ch2_signal_done(Interconnect* inter) {
     DmaChannel* ch = &inter->dma.channels[2];
@@ -726,14 +741,15 @@ static void dma_mdec_signal_done(Interconnect* inter, uint32_t channel) {
 /* Run one slice of MDEC input (ch0) / output (ch1) DMA, each gated on MDEC's
  * own FIFO readiness rather than blasting the whole burst through unconditionally
  * — see the comment on Dma.mdec_in_active in dma.h for why this matters. */
-static bool dma_mdec_run_slice(Interconnect* inter) {
+static bool dma_mdec_run_slice(Interconnect* inter, uint32_t* words_moved) {
     Dma* dma = &inter->dma;
+    *words_moved = 0;
 
     if (dma->mdec_in_active) {
         uint32_t addr = dma->mdec_in_addr;
         uint32_t remaining = dma->mdec_in_remaining;
         uint32_t words_done = 0;
-        while (words_done < DMA_SLICE_WORDS && remaining > 0 && mdec_input_has_space(&inter->mdec)) {
+        while (words_done < MDEC_SLICE_WORDS && remaining > 0 && mdec_input_has_space(&inter->mdec)) {
             uint32_t cur = addr & 0x00FFFFFC;
             if (cur >= RAM_SIZE) {
                 LOG_DMA_ERROR("[DMA] MDEC in: addr 0x%08x out of bounds", cur);
@@ -748,13 +764,14 @@ static bool dma_mdec_run_slice(Interconnect* inter) {
         dma->mdec_in_addr = addr;
         dma->mdec_in_remaining = remaining;
         if (remaining == 0) dma->mdec_in_active = false;
+        *words_moved += words_done;
     }
 
     if (dma->mdec_out_active) {
         uint32_t addr = dma->mdec_out_addr;
         uint32_t remaining = dma->mdec_out_remaining;
         uint32_t words_done = 0;
-        while (words_done < DMA_SLICE_WORDS && remaining > 0 && mdec_output_has_data(&inter->mdec)) {
+        while (words_done < MDEC_SLICE_WORDS && remaining > 0 && mdec_output_has_data(&inter->mdec)) {
             uint32_t cur = addr & 0x00FFFFFC;
             if (cur >= RAM_SIZE) {
                 LOG_DMA_ERROR("[DMA] MDEC out: addr 0x%08x out of bounds", cur);
@@ -769,6 +786,7 @@ static bool dma_mdec_run_slice(Interconnect* inter) {
         dma->mdec_out_addr = addr;
         dma->mdec_out_remaining = remaining;
         if (remaining == 0) dma->mdec_out_active = false;
+        *words_moved += words_done;
 
         /* If ch1 is still expecting output but none is ready, decode may be
          * stuck mid-command with buffered-but-undecoded input sitting in the
@@ -790,12 +808,17 @@ static bool dma_mdec_run_slice(Interconnect* inter) {
 void dma_mdec_resume(struct Interconnect* inter) {
     bool was_in  = inter->dma.mdec_in_active;
     bool was_out = inter->dma.mdec_out_active;
-    bool done = dma_mdec_run_slice(inter);
+    uint32_t words = 0;
+    bool done = dma_mdec_run_slice(inter, &words);
     if (was_in  && !inter->dma.mdec_in_active)  dma_mdec_signal_done(inter, 0);
     if (was_out && !inter->dma.mdec_out_active) dma_mdec_signal_done(inter, 1);
     if (!done) {
-        if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
-        eventq_schedule(inter, EVQ_MDEC, DMA_SLICE_CYCLES);
+        /* Charge the real transfer cost; if the slice moved nothing (MDEC's
+         * FIFOs blocked in both directions) back off instead of respinning
+         * the event every cycle. */
+        uint32_t ticks = words ? dma_ram_ticks(words) : MDEC_IDLE_BACKOFF;
+        if (inter->cpu) inter->cpu->downcount -= (int32_t)ticks;
+        eventq_schedule(inter, EVQ_MDEC, ticks);
     }
 }
 
@@ -811,9 +834,36 @@ static uint32_t dma_get_transfer_size_words(DmaChannel* ch) {
     return bs * bc;
 }
 
+/* True while a sliced, event-scheduled transfer for this channel is still
+ * mid-flight (its remaining word count and address live in Dma, not in the
+ * channel registers). */
+static bool dma_slice_in_flight(const Dma* dma, uint32_t channel_index) {
+    switch (channel_index) {
+        case 0:  return dma->mdec_in_active;
+        case 1:  return dma->mdec_out_active;
+        case 2:  return dma->gpu_ll_active || dma->gpu_req_active;
+        default: return false;
+    }
+}
+
 static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index) {
     if (channel_index >= 7) {
         LOG_DMA_ERROR("[DMA] Invalid channel index %u", channel_index);
+        return;
+    }
+
+    /* A channel stays enable/busy for the whole of a sliced transfer, so every
+     * later kick that inspects "is this channel active?" — a DPCR write
+     * unblocking channels, or software re-poking CHCR — would otherwise
+     * restart the transfer from base_addr and re-send the entire payload.
+     * DuckStation's TransferChannel() is resumable for exactly this reason
+     * (it advances base_address/block_control as it goes and re-entry
+     * continues rather than rewinds). Ours resumes off the event scheduler,
+     * so a re-kick has to be a no-op. This was corrupting FMV playback: the
+     * duplicate GPU ch2 payload arrived with no GP0(0xA0) in front of it, so
+     * MDEC pixel words were decoded as GP0 commands. */
+    if (dma_slice_in_flight(&inter->dma, channel_index)) {
+        LOG_DMA_DEBUG("[DMA] ch%u kick ignored — sliced transfer already in flight", channel_index);
         return;
     }
 

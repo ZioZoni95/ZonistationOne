@@ -7,6 +7,7 @@
 
 #include "mdec.h"
 #include "log.h"
+#include "lua_debug.h"
 #include <string.h>
 
 /* -------------------------------------------------------------------------
@@ -305,6 +306,7 @@ static bool mdec_decode_macroblock(Mdec* m) {
         mdec_yuv_to_rgb(m, 8, 0, m->blocks[0], m->blocks[1], m->blocks[3]);
         mdec_yuv_to_rgb(m, 0, 8, m->blocks[0], m->blocks[1], m->blocks[4]);
         mdec_yuv_to_rgb(m, 8, 8, m->blocks[0], m->blocks[1], m->blocks[5]);
+        lua_debug_notify("mdec_macroblock");
         mdec_copy_out_block(m);
         return true;
     }
@@ -334,9 +336,24 @@ static void mdec_handle_set_qtable(Mdec* m) {
 }
 
 static void mdec_handle_set_scale(Mdec* m) {
-    /* 64 halfwords = 64 × int16_t */
+    /* 64 halfwords = 64 × int16_t, stored TRANSPOSED.
+     *
+     * The IDCT reads the matrix as scale_table[y*8 + u] (frequency u -> output
+     * position y), but the table arrives from the game in the opposite
+     * orientation, so it has to be flipped on the way in — DuckStation does
+     * exactly this in SetScaleMatrix() (mdec.cpp), which the rest of this file
+     * was ported from while this one step was missed.
+     *
+     * Without the transpose the IDCT basis is wrong for every block: a DC-only
+     * macroblock, which must decode to a flat patch of colour, instead comes
+     * out as a smooth blob that fades to the block edges — so FMV frames
+     * rendered as a regular grid of blobs, one per macroblock. */
+    uint16_t packed[64];
     for (int i = 0; i < 64; i++)
-        m->scale_table[i] = (int16_t)in_pop(m);
+        packed[i] = in_pop(m);
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            m->scale_table[y * 8 + x] = (int16_t)packed[x * 8 + y];
     m->remaining_halfwords -= 64;
     LOG_MDEC_DEBUG("[MDEC] SetScale done");
 }
