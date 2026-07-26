@@ -6,6 +6,7 @@
 #include "cdrom.h"
 #include "interconnect.h"
 #include "log.h"
+#include "lua_debug.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -676,6 +677,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
             cdrom->interrupt_flag = CDROM_INT_DATA_READY;
             if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+            lua_debug_notify("cdrom_int1");
 
             cdrom->current_lba++;
             if (cdrom->drive_state == DRIVE_READING)

@@ -10,6 +10,7 @@
 #include "gpu.h"           // For GPU DMA transfer
 #include "timers.h"        // For timer event handler prototypes
 #include "sio.h"           // For sio_execute_event
+#include "lua_debug.h"     // For the Lua "vblank" probe hook
 
 // ===============================
 // Event Scheduler Implementation
@@ -156,6 +157,11 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     if (vblank_count <= 5 || vblank_count % 60 == 0)
         LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u, period=%u)",
                         vblank_count, sys->cpu_cycle_counter, vblank_cycles);
+
+    /* Periodic probe point for debug scripts: the one event that keeps firing
+     * no matter what the guest is doing, so a script can sample state (PC, DMA,
+     * display) even while the guest is stuck in a wait loop. */
+    lua_debug_notify("vblank");
 
     eventq_schedule(sys, EVQ_VBLANK, vblank_cycles);
 
