@@ -854,9 +854,28 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
      * so a re-kick has to be a no-op. This was corrupting FMV playback: the
      * duplicate GPU ch2 payload arrived with no GP0(0xA0) in front of it, so
      * MDEC pixel words were decoded as GP0 commands. */
+    /* A kick that arrives while this channel still has a sliced transfer in
+     * flight used to be dropped outright, which silently lost a whole transfer:
+     * during FMV playback the movie player kicks the next column upload while a
+     * GPU linked list is still draining, and that column stayed black on
+     * screen. Real hardware cannot lose the transfer — the channel is busy, so
+     * the guest's write lands on a channel that finishes what it is doing.
+     * Drain the outstanding slices here, then run the new transfer. */
     if (dma_slice_in_flight(&inter->dma, channel_index)) {
-        LOG_DMA_DEBUG("[DMA] ch%u kick ignored — sliced transfer already in flight", channel_index);
-        return;
+        if (channel_index != 2) {
+            /* MDEC's two channels gate on each other's FIFO readiness, so a
+             * synchronous drain here deadlocks (it hangs the emulator at the
+             * first FMV frame). Leave those kicks dropped until the MDEC path
+             * itself can queue them. */
+            LOG_DMA_DEBUG("[DMA] ch%u kick ignored — sliced transfer already in flight", channel_index);
+            return;
+        }
+        LOG_DMA_DEBUG("[DMA] ch2 kick while slice in flight — draining first");
+        uint32_t guard = 0;
+        while (!dma_gpu_run_slice(inter) && ++guard < 65536) { /* drain */ }
+        if (guard >= 65536)
+            LOG_DMA_ERROR("[DMA] ch2 drain gave up after %u slices", guard);
+        dma_ch2_signal_done(inter);
     }
 
     LOG_DMA_DEBUG("[DMA] ch%d start", channel_index);
@@ -888,16 +907,36 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
             uint32_t addr = ch->base_addr & 0x00FFFFFC;
             int32_t  step = (ch->step == INCREMENT) ? 4 : -4;
 
-            /* GPU FROM_RAM: slice via EVQ to avoid stalling CPU */
+            /* GPU block FROM_RAM: read the source NOW, in one go.
+             *
+             * This used to be sliced across EVQ ticks like the linked-list
+             * path, which sampled guest RAM long after the guest had kicked the
+             * transfer. FMV playback exposed it: the movie player owns just two
+             * staging buffers and refills one as soon as its transfer is
+             * kicked, so a deferred read picked up the NEXT column's pixels and
+             * VRAM ended up holding two payloads repeated across all twenty
+             * 16-pixel columns — the striping visible on screen. A block
+             * transfer must consume the buffer at kick time; both references do
+             * it that way (DuckStation delays only the completion, never the
+             * data read; PCSX-Redux copies immediately and schedules just the
+             * IRQ). The linked list below stays sliced: its node chain is built
+             * before the kick and is not rewritten under us. */
             if (channel_index == 2 && ch->direction == FROM_RAM) {
-                LOG_DMA_DEBUG("[DMA] GPU REQUEST/MANUAL FROM_RAM: %u words (sliced)", words_to_transfer);
-                inter->dma.gpu_req_addr      = addr;
-                inter->dma.gpu_req_remaining = words_to_transfer;
-                inter->dma.gpu_req_step      = step;
-                inter->dma.gpu_req_active    = true;
-                inter->dma.gpu_ll_active     = false;
-                dma_gpu_resume(inter);
-                return;  /* done/IRQ handled by dma_gpu_resume */
+                LOG_DMA_DEBUG("[DMA] GPU REQUEST/MANUAL FROM_RAM: %u words", words_to_transfer);
+                inter->dma.gpu_ll_active  = false;
+                inter->dma.gpu_req_active = false;
+                uint32_t cur_addr = addr;
+                for (uint32_t i = 0; i < words_to_transfer; i++) {
+                    uint32_t cur = cur_addr & 0x00FFFFFC;
+                    if (cur >= RAM_SIZE) {
+                        LOG_DMA_ERROR("[DMA] GPU req: addr 0x%08x out of bounds", cur);
+                        break;
+                    }
+                    gpu_gp0(&inter->gpu, interconnect_load32(inter, cur));
+                    cur_addr = (uint32_t)((int32_t)cur_addr + step);
+                }
+                dma_ch2_signal_done(inter);
+                return;
             }
 
             /* MDEC input (ch0) / output (ch1): slice via EVQ, gated on MDEC's own
