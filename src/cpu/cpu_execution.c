@@ -60,14 +60,6 @@ void cpu_run_next_instruction(Cpu* cpu) {
     cpu->current_pc = cpu->pc;
     cpu->in_delay_slot = cpu->branch_taken;
 
-    // --- Breakpoint check (before executing the instruction) ---
-    if (!cpu->inter->debugger.step_skip_bp) {
-        debugger_check_breakpoint(&cpu->inter->debugger, cpu);
-        if (cpu->inter->debugger.paused) return;
-    } else {
-        cpu->inter->debugger.step_skip_bp = false;
-    }
-
     // --- 2. Check for pending interrupt ---
     if (CheckPendingInterrupt(cpu)) {
         return; // Exception raised, PC already updated
@@ -101,6 +93,18 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 5. Commit Register State ---
     memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs));
     cpu->regs[REG_ZERO] = 0;
+
+    // --- Breakpoint check (before executing the instruction, after the prior
+    // instruction's register commit above so cpu->regs reflects fully-settled
+    // state — checking any earlier misses this commit and shows a debugger
+    // callback stale-by-one-instruction register values for whatever the
+    // immediately preceding instruction just wrote). ---
+    if (!cpu->inter->debugger.step_skip_bp) {
+        debugger_check_breakpoint(&cpu->inter->debugger, cpu);
+        if (cpu->inter->debugger.paused) return;
+    } else {
+        cpu->inter->debugger.step_skip_bp = false;
+    }
 
     // --- BIOS syscall side-channel capture (A0h/B0h/C0h) ---
     // Must fire here, once control actually reaches the vector address, NOT
