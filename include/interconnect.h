@@ -140,6 +140,7 @@ typedef struct Interconnect {
     uint32_t evq_target_cycle[EVQ_MAX_EVENTS];   // Target cycle for each event
     uint32_t evq_next_cycle;                     // Cycle of the next scheduled event
     uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
+    bool     frame_complete;                     // Set by the VBlank event; ends system_run_frame()
     // --------------------------------
 
     // --- BIOS TTY line buffer (DuckStation-style EXP2 offset 0x23 capture) ---

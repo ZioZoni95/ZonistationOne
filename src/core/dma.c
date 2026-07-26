@@ -1,6 +1,7 @@
 #include "dma.h"
 #include <stdio.h> // For fprintf, stderr
 #include "log.h"
+#include "lua_debug.h"
 #include "event_scheduler.h" // For eventq_schedule
 #include "interconnect.h"   // For Interconnect struct (needed for event system)
 
@@ -65,6 +66,39 @@ static uint32_t estimate_dma_cycles(DmaChannel* ch) {
     uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
     if (words == 0) words = 1;
     return words * 2; // 2 cycles per word (tune as needed)
+}
+
+/* Recompute DICR's master flag and drive the DMA interrupt LINE from it.
+ *
+ * This is the single place allowed to touch the IRQ3 line, mirroring
+ * DuckStation's DMA::UpdateIRQ (dma.cpp:500-507: UpdateMasterFlag() then
+ * InterruptController::SetLineState(IRQ::DMA, master_flag)).
+ *
+ * Why the line, and not just I_STAT: interconnect_set_irq_line only latches
+ * I_STAT on a low->high edge. Completion sites used to poke the line high
+ * directly while the DICR acknowledge path cleared only irq_status — leaving
+ * irq_line_state stuck high, so every later completion was swallowed with no
+ * edge and its interrupt was lost forever. Driving the line down whenever the
+ * master flag clears is what makes the next completion a fresh edge. */
+void dma_update_irq(Dma* dma) {
+    const bool prev = dma->master_irq_flag;
+    dma->master_irq_flag = dma->force_irq ||
+        (dma->master_irq_enable &&
+         (dma->channel_irq_flags & dma->channel_irq_enable) != 0);
+
+    if (!dma->inter) return;
+
+    /* Act on the TRANSITION only. Re-asserting a line that is already logically
+     * high would restart the interrupt each time this runs, and since
+     * hw_irq_write clears irq_line_state when the CPU acknowledges I_STAT (so a
+     * device can re-fire), that would trap the CPU in the handler forever —
+     * the failure the old "re-raise on DICR write" hack produced. */
+    if (!prev && dma->master_irq_flag) {
+        interconnect_set_irq_line(dma->inter, IRQ_DMA, true);
+    } else if (prev && !dma->master_irq_flag) {
+        interconnect_set_irq_line(dma->inter, IRQ_DMA, false);
+        dma->inter->irq_status &= ~(1u << IRQ_DMA);
+    }
 }
 
 // Initializes the DMA state to reset values.
@@ -207,15 +241,13 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                     LOG_DMA_DEBUG("[DMA] DICR IRQ ack: channels 0x%02x cleared, flags now 0x%02x",
                                   ack_flags, (uint8_t)(dma->channel_irq_flags & ~ack_flags));
                     dma->channel_irq_flags &= ~ack_flags;
-                    // Recompute master_irq_flag after ACK
-                    dma->master_irq_flag = dma->force_irq ||
-                        (dma->master_irq_enable &&
-                         (dma->channel_irq_flags & dma->channel_irq_enable) != 0);
-                    // If no enabled channels remain pending, clear I_STAT[3]
-                    if (!dma->master_irq_flag && dma->inter) {
-                        dma->inter->irq_status &= ~(1u << 3);
-                    }
                 }
+                /* Always re-evaluate: besides acknowledging, this write may have
+                 * just ENABLED a channel whose transfer already finished — games
+                 * legitimately program DICR after CHCR (DuckStation calls
+                 * UpdateIRQ() on every DICR write for exactly that reason,
+                 * dma.cpp:457, see its Lagnacure Legend note at dma.cpp:401). */
+                dma_update_irq(dma);
                 break;
             default:
                 LOG_DMA_ERROR("[DMA] Error: Unhandled DMA Main register write at offset 0x%x = 0x%08x", offset, value);

@@ -39,6 +39,25 @@ typedef struct {
 // Adjust as needed for performance/memory trade-offs. (Guide uses 64*1024)
 #define VERTEX_BUFFER_LEN (64 * 1024)
 
+/* VRAM viewer decode modes, mirroring PCSX-Redux's vram-viewer widget: VRAM is
+ * a raw 1024x512 halfword store that games address as 4bpp/8bpp indexed,
+ * 16bpp direct or 24bpp packed depending on the region, so the viewer has to
+ * be told how to read the bytes it is being asked to show. */
+typedef enum {
+    VRAM_VIEW_4BPP = 0,
+    VRAM_VIEW_8BPP,
+    VRAM_VIEW_16BPP,
+    VRAM_VIEW_24BPP
+} VramViewMode;
+
+typedef struct {
+    VramViewMode mode;
+    int      shift24;         /* 0-3: byte phase for 24bpp unpacking */
+    bool     greyscale;
+    bool     show_alpha;      /* render the mask bit (bit 15) as intensity */
+    uint16_t clut_x, clut_y;  /* CLUT position for the indexed modes */
+} VramViewParams;
+
 // Structure holding the state of the OpenGL renderer
 typedef struct {
     // OpenGL Object IDs
@@ -50,11 +69,29 @@ typedef struct {
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
     GLuint vram_texture;    // Texture object for VRAM
 
-    // Off-screen rendering (PCSX-Redux pattern)
-    GLuint display_fbo;     // Framebuffer Object for the main display
-    GLuint display_texture; // Texture attached to the display FBO
+    // --- Unified VRAM (DuckStation GPU_HW pattern) ---
+    // ONE RGBA8 texture is the rasterization target, the CPU/MDEC upload
+    // target, and the scanout source, so anything written to VRAM is on screen
+    // by construction. PSX 16-bit halfwords are stored 5:5:5:1 expanded to 8
+    // bits per channel ((v<<3)|(v>>2)), which round-trips losslessly, so CLUT
+    // index bits survive for texture sampling.
+    GLuint display_fbo;     // FBO whose colour attachment is vram_tex
+    GLuint vram_tex;        // RGBA8 1024x512 — the one VRAM
+    GLuint display_texture; // legacy alias target (kept until Phase 2b)
+
+    // Scanout-extract pass: renders the CRTC display window out of vram_tex,
+    // unpacking per depth (15bpp direct / 24bpp packed triplets).
+    GLuint scanout_fbo;
+    GLuint scanout_texture;   // RGB8 display-ready image
+    GLuint scanout_program;
+    GLuint dummy_vao;         // attribute-less VAO for the fullscreen triangle
+    GLint  scanout_vram_loc;
+    GLint  scanout_off_loc;
+    GLint  scanout_size_loc;
+    GLint  scanout_d24_loc;
 
     GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
+    VramViewParams vram_view;   // how the viewer decodes VRAM (set from the UI)
 
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
@@ -91,6 +128,7 @@ typedef struct {
 
     /* Display region — cropped from CRTC state, passed to GPU thread blit */
     uint16_t display_x, display_y, display_w, display_h;
+    bool     display_depth24;   /* GPUSTAT.21 — display area is packed 24bpp */
 
     /* GPU render thread (Phase 2 threading refactor) */
     SDL_Thread*  gpu_thread;
@@ -103,17 +141,6 @@ typedef struct {
     SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
     SDL_GLContext gl_context;   /* moved from main thread to GPU thread */
 
-    /* GPU-thread-owned VRAM readback (GPU_GAP_ANALYSIS Gap B). display_texture
-     * already composites BOTH CPU-driven VRAM updates and GL-rasterized draws
-     * (see renderer_execute_one_vram_update's update_display path) in correct
-     * submission order — reading it back here makes it the single source of
-     * truth for gpu->vram.data too, instead of vram.data only ever reflecting
-     * CPU-side Fill/Copy/Upload and staying stale for anything GL-rasterized.
-     * Written by the GPU thread at the end of each frame (gpu_thread_main,
-     * after the batch/VRAM-update replay loop); read by the main thread via
-     * renderer_apply_vram_readback() after renderer_wait_frame_done() — that
-     * wait is what makes the cross-thread read safe without extra locking. */
-    uint8_t vram_readback_rgb[1024 * 512 * 3];
 } Renderer;
 
 // --- Function Prototypes ---
@@ -158,6 +185,9 @@ void renderer_wait_frame_done(Renderer* renderer);
  * @return OpenGL texture ID.
  */
 GLuint renderer_get_display_texture(Renderer* renderer);
+/* The display-ready image produced by the scanout pass (what the screen shows). */
+GLuint renderer_get_scanout_texture(Renderer* renderer);
+void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
 
@@ -217,19 +247,6 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
  * @param offset_y Texture window Y offset (5 bits).
  */
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
-
-/**
- * @brief Merges the last frame's GPU-thread VRAM readback (display_texture, which
- * already composites CPU uploads + GL-rasterized draws) into a CPU-side VRAM
- * buffer. Call once per frame from the main thread, after renderer_wait_frame_done()
- * (that wait provides the cross-thread happens-before needed to read the buffer
- * safely) and before renderer_upload_vram() re-uploads it for the next frame's
- * texture sampling. Fixes GPU_GAP_ANALYSIS Gap B (rasterized output never visible
- * to subsequent VRAM-copy/CPU-read/texture-sample operations).
- * @param renderer Pointer to the Renderer instance.
- * @param vram_data Pointer to the 1024x512 uint16_t CPU-side VRAM buffer to update.
- */
-void renderer_apply_vram_readback(Renderer* renderer, uint16_t* vram_data);
 
 /**
  * @brief Uploads VRAM data to the GPU texture (full 1024x512).
@@ -346,5 +363,11 @@ void renderer_set_dither_mode(Renderer* renderer, bool enabled);
  * Thread-safe to call from CPU thread — snapshotted into GpuFrame at submit time.
  */
 void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+void renderer_set_display_depth24(Renderer* renderer, bool depth24);
+
+/* Staging-pool telemetry for the Lua console (bytes used in the current write
+ * slot, all-time single-frame peak, queued updates, rects dropped for space). */
+void renderer_get_pool_stats(Renderer* renderer, uint32_t* used, uint32_t* peak,
+                             uint32_t* updates, uint32_t* skips);
 
 #endif // RENDERER_H

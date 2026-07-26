@@ -204,6 +204,12 @@ void gpu_soft_reset(Gpu* gpu);
 // Advance the CRTC scanline counter and update STAT[31] / in_vblank.
 // Call once per VBlank with the number of CPU cycles elapsed since the last call.
 void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed);
+/* CPU cycles per video frame for the active video mode (PAL is ~20% longer). */
+uint32_t gpu_cycles_per_frame(const Gpu* gpu);
+/* Timer clock-source rates (Hz) for the active video mode, derived from the
+ * CRTC clock — Timer0 dotclock and Timer1 hblank. See gpu.c. */
+double gpu_dotclock_hz(const Gpu* gpu);
+double gpu_hblank_hz(const Gpu* gpu);
 
 // --- Internal helpers shared between gpu.c and gpu_commands.c ---
 // These are non-static to allow cross-file access; not part of the public API.

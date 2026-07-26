@@ -10,6 +10,7 @@
 #include "gpu.h"           // For GPU DMA transfer
 #include "timers.h"        // For timer event handler prototypes
 #include "sio.h"           // For sio_execute_event
+#include "lua_debug.h"     // For the Lua "vblank" probe hook
 
 // ===============================
 // Event Scheduler Implementation
@@ -56,8 +57,12 @@ void eventq_schedule(struct Interconnect* sys, EventQueueType event, uint32_t cy
     sys->evq_pending |= (1u << event);
     sys->evq_target_cycle[event] = sys->cpu_cycle_counter + cycles_from_now;
 
-    // Update the next event cycle if this event is sooner
-    if (sys->evq_next_cycle > sys->evq_target_cycle[event] || sys->evq_next_cycle <= sys->cpu_cycle_counter) {
+    // Update the next event cycle if this event is sooner, or the stored next
+    // has already passed. Signed-delta compares (not absolute >/<=) so this is
+    // correct across the uint32 cpu_cycle_counter wrap (~every 127 s).
+    int32_t d_target = (int32_t)(sys->evq_next_cycle - sys->evq_target_cycle[event]); // >0: target sooner
+    int32_t d_stale  = (int32_t)(sys->evq_next_cycle - sys->cpu_cycle_counter);       // <=0: next passed
+    if (d_target > 0 || d_stale <= 0) {
         sys->evq_next_cycle = sys->evq_target_cycle[event];
         // Immediately truncate CPU downcount so the CPU wakes up at the right time
         if (sys->cpu) {
@@ -93,12 +98,17 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         // After firing, update now in case event handler advanced cycles
         now = sys->cpu_cycle_counter;
     }
-    // Recalculate the next event cycle
+    // Recalculate the next event cycle as the nearest still-future pending
+    // target. Track the minimum signed delta from now (wrap-safe), not the
+    // absolute cycle value.
     uint32_t soonest = UINT32_MAX;
+    int32_t  best_delta = INT32_MAX;
     for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
         if (sys->evq_pending & (1u << event)) {
             uint32_t target = sys->evq_target_cycle[event];
-            if (target > now && target < soonest) {
+            int32_t  delta  = (int32_t)(target - now);
+            if (delta > 0 && delta < best_delta) {
+                best_delta = delta;
                 soonest = target;
             }
         }
@@ -132,19 +142,28 @@ uint32_t eventq_cycles_until_next(const struct Interconnect* sys) {
 
 // --- Event Handlers ---
 
-#define VBLANK_CYCLES 564480 // NTSC: 33868800 / 60
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed
 
 static void evq_handle_vblank(struct Interconnect* sys) {
     static uint32_t vblank_count = 0;
     vblank_count++;
 
-    gpu_crtc_tick(&sys->gpu, VBLANK_CYCLES);
+    /* Period follows the GPU's current video mode — see gpu_cycles_per_frame().
+     * A fixed NTSC period here ran PAL titles ~20% fast. */
+    const uint32_t vblank_cycles = gpu_cycles_per_frame(&sys->gpu);
+
+    gpu_crtc_tick(&sys->gpu, vblank_cycles);
 
     if (vblank_count <= 5 || vblank_count % 60 == 0)
-        LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u)", vblank_count, sys->cpu_cycle_counter);
+        LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u, period=%u)",
+                        vblank_count, sys->cpu_cycle_counter, vblank_cycles);
 
-    eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES);
+    /* Periodic probe point for debug scripts: the one event that keeps firing
+     * no matter what the guest is doing, so a script can sample state (PC, DMA,
+     * display) even while the guest is stuck in a wait loop. */
+    lua_debug_notify("vblank");
+
+    eventq_schedule(sys, EVQ_VBLANK, vblank_cycles);
 
     if (!(sys->evq_pending & (1u << EVQ_VBLANK))) {
         LOG_EVENT_ERROR("[EVQ] CRITICAL: VBlank not rescheduled! pending=0x%X", sys->evq_pending);
@@ -153,6 +172,9 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     // Trigger VBlank interrupt (IRQ0 per PSX-SPX)
     interconnect_request_irq(sys, 0, "VBlank");
 
+    // The VBlank event is the frame boundary — end the current system_run_frame().
+    sys->frame_complete = true;
+
     // NOTE: renderer_blit_vram disabled — FBO already contains correctly rendered content
     // from OpenGL primitive draws (polys, rects, lines). The blit read from vram_texture
     // (CPU-side R16UI buffer) had a UV wrap bug: fragment shader masks v with &0xFF, so
@@ -160,14 +182,27 @@ static void evq_handle_vblank(struct Interconnect* sys) {
     // draw_ps1_display() now crops the FBO to crtc.display_vram_y/display_height directly.
 }
 
+/* Periodic firing log (first few + every 512th) so the real timer cadence is
+ * visible without flooding — same style as the VBlank counter above. */
+static void evq_log_timer_fire(int idx, uint32_t cycle) {
+    static uint32_t n[3] = {0, 0, 0};
+    uint32_t c = ++n[idx];
+    if (c <= 5 || (c % 512) == 0)
+        LOG_EVENT_DEBUG("[EVQ] Timer%d fired #%u (cycle=%u)", idx, c, cycle);
+}
+
 static void evq_handle_timer0(struct Interconnect* sys) {
-    static int timer0_dispatch_count = 0;
-    if (timer0_dispatch_count++ < 3)
-        LOG_EVENT_DEBUG("[EVQ] Timer0 fired (#%d)", timer0_dispatch_count);
+    evq_log_timer_fire(0, sys->cpu_cycle_counter);
     timer0_event_handler(sys);
 }
-static void evq_handle_timer1(struct Interconnect* sys) { timer1_event_handler(sys); }
-static void evq_handle_timer2(struct Interconnect* sys) { timer2_event_handler(sys); }
+static void evq_handle_timer1(struct Interconnect* sys) {
+    evq_log_timer_fire(1, sys->cpu_cycle_counter);
+    timer1_event_handler(sys);
+}
+static void evq_handle_timer2(struct Interconnect* sys) {
+    evq_log_timer_fire(2, sys->cpu_cycle_counter);
+    timer2_event_handler(sys);
+}
 
 static void evq_handle_dma_gpu(struct Interconnect* sys) {
     /* Resume GPU DMA slice — sets up next slice or signals completion */

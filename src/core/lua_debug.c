@@ -245,6 +245,153 @@ static int l_emu_on_event(lua_State* L) {
     return 0;
 }
 
+static int l_emu_gp0_opcode(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->gpu.gp0_current_opcode);
+    return 1;
+}
+
+static int l_emu_gp0_word_count(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->gpu.gp0_command_buffer.count);
+    return 1;
+}
+
+static int l_emu_gp0_word(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    luaL_argcheck(L, i >= 0 && i < MAX_GPU_COMMAND_WORDS, 1, "gp0 word index out of range");
+    lua_pushinteger(L, (lua_Integer)g_inter->gpu.gp0_command_buffer.buffer[i]);
+    return 1;
+}
+
+/* One pixel of the macroblock MDEC has just finished decoding: block_rgb is the
+ * 16x16 RGB result, before the output FIFO / DMA / VRAM ever see it, so this
+ * isolates "is the decoder producing a real image?" from every downstream
+ * placement question. Index 0..255, row-major within the 16x16 block. */
+static int l_emu_mdec_block(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    luaL_argcheck(L, i >= 0 && i < 256, 1, "mdec block index out of range");
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.block_rgb[i]);
+    return 1;
+}
+
+/* Live timer counter + mode/source, without a bus read (bypasses side effects).
+ * counter is whatever timers_step last left — lets a script see how stale it is
+ * between chunks. */
+static int l_emu_timer(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    luaL_argcheck(L, i >= 0 && i < 3, 1, "timer index out of range");
+    const Timer* t = &g_inter->timers_state.timers[i];
+    lua_pushinteger(L, (lua_Integer)t->counter);
+    lua_pushinteger(L, (lua_Integer)t->clock_source);
+    lua_pushboolean(L, t->counting_enabled);
+    return 3;
+}
+
+/* Read one VRAM halfword directly from the CPU-side buffer at (x,y), same
+ * store the viewer's readout uses — for checking whether A0 uploads actually
+ * landed. */
+static int l_emu_vram16(lua_State* L) {
+    lua_Integer x = luaL_checkinteger(L, 1);
+    lua_Integer y = luaL_checkinteger(L, 2);
+    if (x < 0 || x >= 1024 || y < 0 || y >= 512) { lua_pushnil(L); return 1; }
+    const uint16_t* v = (const uint16_t*)g_inter->gpu.vram.data;
+    lua_pushinteger(L, (lua_Integer)v[(size_t)y * 1024 + (size_t)x]);
+    return 1;
+}
+
+/* Peek the MDEC input FIFO without consuming it: index 0 is the next halfword
+ * the RLE decoder will read. Lets a script see the raw compressed stream as
+ * MDEC sees it, to tell a bad bitstream apart from a bad decoder. */
+static int l_emu_mdec_in_peek(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    const Mdec* m = &g_inter->mdec;
+    if (i < 0 || (uint32_t)i >= m->in_count) { lua_pushnil(L); return 1; }
+    lua_pushinteger(L, (lua_Integer)m->in_buf[(m->in_head + (uint32_t)i) % MDEC_IN_FIFO_HW]);
+    return 1;
+}
+
+static int l_emu_mdec_in_count(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.in_count);
+    return 1;
+}
+
+/* Live MDEC DMA cursors: where ch0 is reading the compressed stream from and
+ * where ch1 is writing decoded output to, plus words left on each. Lets a
+ * script read the same RAM the DMA is feeding MDEC and compare. */
+static int l_emu_mdec_dma(lua_State* L) {
+    const Dma* d = &g_inter->dma;
+    lua_pushinteger(L, (lua_Integer)d->mdec_in_addr);
+    lua_pushinteger(L, (lua_Integer)d->mdec_in_remaining);
+    lua_pushinteger(L, (lua_Integer)d->mdec_out_addr);
+    lua_pushinteger(L, (lua_Integer)d->mdec_out_remaining);
+    return 4;
+}
+
+/* MDEC decode context: output depth, halfwords left in the command, and the
+ * quant/scale tables the IDCT is running with. */
+static int l_emu_mdec_info(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.output_depth);
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.remaining_halfwords);
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.current_q_scale);
+    return 3;
+}
+
+static int l_emu_mdec_scale(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    luaL_argcheck(L, i >= 0 && i < 64, 1, "scale table index out of range");
+    lua_pushinteger(L, (lua_Integer)g_inter->mdec.scale_table[i]);
+    return 1;
+}
+
+static int l_emu_mdec_qtable(lua_State* L) {
+    lua_Integer i = luaL_checkinteger(L, 1);
+    int chroma = lua_toboolean(L, 2);
+    luaL_argcheck(L, i >= 0 && i < 64, 1, "quant table index out of range");
+    lua_pushinteger(L, (lua_Integer)(chroma ? g_inter->mdec.iq_uv[i]
+                                            : g_inter->mdec.iq_y[i]));
+    return 1;
+}
+
+/* Renderer staging-pool telemetry: used, peak, queued updates, dropped rects. */
+static int l_emu_gpu_pool(lua_State* L) {
+    uint32_t used = 0, peak = 0, updates = 0, skips = 0;
+    renderer_get_pool_stats(&g_inter->gpu.renderer, &used, &peak, &updates, &skips);
+    lua_pushinteger(L, (lua_Integer)used);
+    lua_pushinteger(L, (lua_Integer)peak);
+    lua_pushinteger(L, (lua_Integer)updates);
+    lua_pushinteger(L, (lua_Integer)skips);
+    return 4;
+}
+
+/* Geometry of the most recent GP0(0xA0) CPU/DMA→VRAM upload, in VRAM
+ * halfword units — pairs with the "gp0_vram_upload" event. */
+static int l_emu_vram_upload_rect(lua_State* L) {
+    Gpu* g = &g_inter->gpu;
+    lua_pushinteger(L, (lua_Integer)g->vram_load_x);
+    lua_pushinteger(L, (lua_Integer)g->vram_load_y);
+    lua_pushinteger(L, (lua_Integer)g->vram_load_w);
+    lua_pushinteger(L, (lua_Integer)g->vram_load_h);
+    return 4;
+}
+
+/* GPUSTAT as the CPU would read it — display depth (bit 21), video mode,
+ * resolution, display-disable etc. without having to breakpoint the port read. */
+static int l_emu_gpustat(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)gpu_read_status(&g_inter->gpu));
+    return 1;
+}
+
+/* Display area origin/size as programmed by GP1(05)/(06)/(07). */
+static int l_emu_display_area(lua_State* L) {
+    Gpu* g = &g_inter->gpu;
+    lua_pushinteger(L, (lua_Integer)g->display_vram_x_start);
+    lua_pushinteger(L, (lua_Integer)g->display_vram_y_start);
+    lua_pushinteger(L, (lua_Integer)g->display_horiz_start);
+    lua_pushinteger(L, (lua_Integer)g->display_horiz_end);
+    lua_pushinteger(L, (lua_Integer)g->display_line_start);
+    lua_pushinteger(L, (lua_Integer)g->display_line_end);
+    return 6;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
@@ -266,6 +413,22 @@ static const luaL_Reg s_emu_funcs[] = {
     {"is_paused",         l_emu_is_paused},
     {"on_break",          l_emu_on_break},
     {"on_event",          l_emu_on_event},
+    {"gp0_opcode",        l_emu_gp0_opcode},
+    {"gp0_word_count",    l_emu_gp0_word_count},
+    {"gp0_word",          l_emu_gp0_word},
+    {"gpustat",           l_emu_gpustat},
+    {"vram_upload_rect",  l_emu_vram_upload_rect},
+    {"gpu_pool",          l_emu_gpu_pool},
+    {"mdec_block",        l_emu_mdec_block},
+    {"mdec_in_peek",      l_emu_mdec_in_peek},
+    {"mdec_in_count",     l_emu_mdec_in_count},
+    {"mdec_dma",          l_emu_mdec_dma},
+    {"vram16",            l_emu_vram16},
+    {"timer",             l_emu_timer},
+    {"mdec_info",         l_emu_mdec_info},
+    {"mdec_scale",        l_emu_mdec_scale},
+    {"mdec_qtable",       l_emu_mdec_qtable},
+    {"display_area",      l_emu_display_area},
     {NULL, NULL}
 };
 

@@ -5,7 +5,11 @@
 #include <stdint.h>
 
 // --- Global State ---
-LogLevel current_log_level = LOG_LEVEL_DEBUG;
+/* INFO by default (what CLAUDE.md documents). DEBUG had drifted in as the
+ * default and costs real wall-clock time: the hot paths log per DMA transfer,
+ * per GP0 command and per MDEC macroblock, which is thousands of formatted
+ * lines per frame during FMV playback. Raise it per run with ZS1_LOG_LEVEL. */
+LogLevel current_log_level = LOG_LEVEL_INFO;
 static LogCategoryState category_states[LOG_CAT_COUNT];
 static bool log_initialized = false;
 static FILE* log_file_handle = NULL;

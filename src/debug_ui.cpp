@@ -747,23 +747,209 @@ static void draw_lua_console_window(void) {
 // VRAM Viewer window
 // ---------------------------------------------------------------------------
 
-static void draw_vram_viewer_window(Renderer* renderer) {
+// VRAM viewer state — mirrors PCSX-Redux's vram-viewer widget controls.
+static VramViewParams g_vram_view = { VRAM_VIEW_16BPP, 0, false, false, 0, 0 };
+static float  g_vram_zoom     = 1.0f;
+static ImVec2 g_vram_pan      = ImVec2(0, 0);   // in VRAM pixels, top-left of view
+static bool   g_vram_grid     = false;          // 16x16 pixel grid
+static bool   g_vram_tpage    = true;           // 64x256 texture-page grid
+static bool   g_vram_magnify  = false;
+static float  g_vram_mag_amt  = 6.0f;
+static float  g_vram_mag_rad  = 120.0f;
+static bool   g_vram_show_disp = true;          // outline the active display area
+
+bool debug_ui_vram_viewer_open(void) { return g_show_vram_viewer; }
+
+static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
     if (!g_show_vram_viewer || !renderer) return;
+
+    renderer_set_vram_view_params(renderer, &g_vram_view);
     GLuint tex = renderer_get_vram_viewer_texture(renderer);
-    ImGui::SetNextWindowSize(ImVec2(1024, 520), ImGuiCond_FirstUseEver);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    if (ImGui::Begin("VRAM Viewer", &g_show_vram_viewer,
-                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+
+    ImGui::SetNextWindowSize(ImVec2(1060, 620), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("VRAM Viewer", &g_show_vram_viewer)) {
+        // --- Toolbar -------------------------------------------------------
+        const char* modes[] = { "4 bpp (CLUT)", "8 bpp (CLUT)", "16 bpp", "24 bpp" };
+        int mode = (int)g_vram_view.mode;
+        ImGui::SetNextItemWidth(130);
+        if (ImGui::Combo("##mode", &mode, modes, IM_ARRAYSIZE(modes)))
+            g_vram_view.mode = (VramViewMode)mode;
+
+        if (g_vram_view.mode == VRAM_VIEW_24BPP) {
+            ImGui::SameLine(); ImGui::SetNextItemWidth(90);
+            ImGui::SliderInt("shift", &g_vram_view.shift24, 0, 3);
+        }
+        if (g_vram_view.mode == VRAM_VIEW_4BPP || g_vram_view.mode == VRAM_VIEW_8BPP) {
+            int cx = g_vram_view.clut_x, cy = g_vram_view.clut_y;
+            ImGui::SameLine(); ImGui::SetNextItemWidth(70);
+            if (ImGui::DragInt("clut x", &cx, 1, 0, 1023)) g_vram_view.clut_x = (uint16_t)cx;
+            ImGui::SameLine(); ImGui::SetNextItemWidth(70);
+            if (ImGui::DragInt("clut y", &cy, 1, 0, 511))  g_vram_view.clut_y = (uint16_t)cy;
+        }
+
+        ImGui::SameLine(); ImGui::Checkbox("Grey", &g_vram_view.greyscale);
+        ImGui::SameLine(); ImGui::Checkbox("Mask", &g_vram_view.show_alpha);
+        ImGui::SameLine(); ImGui::Checkbox("Grid", &g_vram_grid);
+        ImGui::SameLine(); ImGui::Checkbox("TPage", &g_vram_tpage);
+        ImGui::SameLine(); ImGui::Checkbox("Display", &g_vram_show_disp);
+        ImGui::SameLine(); ImGui::Checkbox("Magnify", &g_vram_magnify);
+
+        ImGui::SetNextItemWidth(120);
+        ImGui::SliderFloat("zoom", &g_vram_zoom, 0.25f, 8.0f, "%.2fx");
+        ImGui::SameLine();
+        if (ImGui::Button("Fit")) { g_vram_zoom = 0.0f; g_vram_pan = ImVec2(0, 0); }
+        if (g_vram_magnify) {
+            ImGui::SameLine(); ImGui::SetNextItemWidth(90);
+            ImGui::SliderFloat("lens", &g_vram_mag_amt, 2.0f, 16.0f, "%.0fx");
+        }
+
+        // --- Image ---------------------------------------------------------
+        // Everything below is guarded rather than early-returned: this runs
+        // inside the DockHost's Begin/End pair, so bailing out of the function
+        // here would leave ImGui's window stack unbalanced (which hangs the
+        // frame instead of failing loudly).
         ImVec2 avail = ImGui::GetContentRegionAvail();
-        float scale = avail.x / 1024.0f;
-        ImVec2 img_size = ImVec2(avail.x, 512.0f * scale);
-        if (tex)
-            ImGui::Image((void*)(intptr_t)tex, img_size, ImVec2(0, 1), ImVec2(1, 0));
-        else
-            ImGui::TextDisabled("VRAM not ready");
+        bool drawable = (avail.x >= 16.0f && avail.y >= 16.0f && tex != 0);
+        if (!tex) ImGui::TextDisabled("VRAM not ready");
+        if (drawable) {
+        if (g_vram_zoom <= 0.0f) g_vram_zoom = avail.x / 1024.0f;   // "Fit" request
+
+        // Visible VRAM rect, derived from zoom/pan and clamped inside VRAM.
+        float view_w = avail.x / g_vram_zoom;
+        float view_h = avail.y / g_vram_zoom;
+        if (view_w > 1024.0f) view_w = 1024.0f;
+        if (view_h > 512.0f)  view_h = 512.0f;
+        if (g_vram_pan.x > 1024.0f - view_w) g_vram_pan.x = 1024.0f - view_w;
+        if (g_vram_pan.y > 512.0f  - view_h) g_vram_pan.y = 512.0f  - view_h;
+        if (g_vram_pan.x < 0) g_vram_pan.x = 0;
+        if (g_vram_pan.y < 0) g_vram_pan.y = 0;
+
+        ImVec2 img_size = ImVec2(view_w * g_vram_zoom, view_h * g_vram_zoom);
+        ImVec2 origin   = ImGui::GetCursorScreenPos();
+
+        // No v flip: unlike display_texture (an FBO the GL rasterizer writes in
+        // y-up clip space), the viewer texture is a straight CPU upload of VRAM
+        // rows 0..511 in order, so v=0 already is VRAM y=0. The old viewer
+        // passed (0,1)-(1,0) here and showed all of VRAM upside down.
+        ImVec2 uv0 = ImVec2(g_vram_pan.x / 1024.0f, g_vram_pan.y / 512.0f);
+        ImVec2 uv1 = ImVec2((g_vram_pan.x + view_w) / 1024.0f,
+                            (g_vram_pan.y + view_h) / 512.0f);
+        ImGui::Image((void*)(intptr_t)tex, img_size, uv0, uv1);
+
+        bool hovered = ImGui::IsItemHovered();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->PushClipRect(origin, ImVec2(origin.x + img_size.x, origin.y + img_size.y), true);
+
+        // Texture-page grid (64 halfwords wide, 256 tall — the GP0 tpage unit).
+        if (g_vram_tpage) {
+            const ImU32 col = IM_COL32(230, 230, 230, 90);
+            for (float x = 0; x <= 1024.0f; x += 64.0f) {
+                float sx = origin.x + (x - g_vram_pan.x) * g_vram_zoom;
+                if (sx >= origin.x && sx <= origin.x + img_size.x)
+                    dl->AddLine(ImVec2(sx, origin.y), ImVec2(sx, origin.y + img_size.y), col);
+            }
+            for (float y = 0; y <= 512.0f; y += 256.0f) {
+                float sy = origin.y + (y - g_vram_pan.y) * g_vram_zoom;
+                if (sy >= origin.y && sy <= origin.y + img_size.y)
+                    dl->AddLine(ImVec2(origin.x, sy), ImVec2(origin.x + img_size.x, sy), col);
+            }
+        }
+        // Fine pixel grid — only legible once a VRAM pixel is several screen px.
+        if (g_vram_grid && g_vram_zoom >= 3.0f) {
+            const ImU32 col = IM_COL32(128, 128, 128, 70);
+            for (float x = floorf(g_vram_pan.x); x <= g_vram_pan.x + view_w; x += 1.0f) {
+                float sx = origin.x + (x - g_vram_pan.x) * g_vram_zoom;
+                dl->AddLine(ImVec2(sx, origin.y), ImVec2(sx, origin.y + img_size.y), col);
+            }
+            for (float y = floorf(g_vram_pan.y); y <= g_vram_pan.y + view_h; y += 1.0f) {
+                float sy = origin.y + (y - g_vram_pan.y) * g_vram_zoom;
+                dl->AddLine(ImVec2(origin.x, sy), ImVec2(origin.x + img_size.x, sy), col);
+            }
+        }
+        // Active display area, straight from CRTC state.
+        if (g_vram_show_disp && inter) {
+            float dx = (float)inter->gpu.crtc.display_vram_x;
+            float dy = (float)inter->gpu.crtc.display_vram_y;
+            float dw = (float)inter->gpu.crtc.display_width;
+            float dh = (float)inter->gpu.crtc.display_height;
+            /* 24bpp packs 3 bytes per pixel, so the area covers fewer VRAM
+             * halfword columns than it has pixels. */
+            if (inter->gpu.display_depth == D24Bits) dw = dw * 3.0f / 2.0f;
+            ImVec2 p0 = ImVec2(origin.x + (dx - g_vram_pan.x) * g_vram_zoom,
+                               origin.y + (dy - g_vram_pan.y) * g_vram_zoom);
+            ImVec2 p1 = ImVec2(p0.x + dw * g_vram_zoom, p0.y + dh * g_vram_zoom);
+            dl->AddRect(p0, p1, IM_COL32(255, 200, 0, 200), 0.0f, 0, 2.0f);
+        }
+        dl->PopClipRect();
+
+        // --- Interaction ---------------------------------------------------
+        if (hovered) {
+            ImGuiIO& io = ImGui::GetIO();
+            ImVec2 m = io.MousePos;
+            float vx = g_vram_pan.x + (m.x - origin.x) / g_vram_zoom;
+            float vy = g_vram_pan.y + (m.y - origin.y) / g_vram_zoom;
+            int ix = (int)vx, iy = (int)vy;
+
+            // Wheel zooms about the cursor so the pixel under it stays put.
+            if (io.MouseWheel != 0.0f) {
+                float old = g_vram_zoom;
+                g_vram_zoom *= (io.MouseWheel > 0) ? 1.25f : 0.8f;
+                if (g_vram_zoom < 0.25f) g_vram_zoom = 0.25f;
+                if (g_vram_zoom > 32.0f) g_vram_zoom = 32.0f;
+                if (g_vram_zoom != old) {
+                    g_vram_pan.x = vx - (m.x - origin.x) / g_vram_zoom;
+                    g_vram_pan.y = vy - (m.y - origin.y) / g_vram_zoom;
+                }
+            }
+            // Drag pans.
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+                ImGui::ResetMouseDragDelta(ImGuiMouseButton_Left);
+                g_vram_pan.x -= d.x / g_vram_zoom;
+                g_vram_pan.y -= d.y / g_vram_zoom;
+            }
+            // Right-click picks the CLUT position for the indexed modes.
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+                ix >= 0 && ix < 1024 && iy >= 0 && iy < 512) {
+                g_vram_view.clut_x = (uint16_t)ix;
+                g_vram_view.clut_y = (uint16_t)iy;
+            }
+
+            if (g_vram_magnify) {
+                ImGui::BeginTooltip();
+                float r = g_vram_mag_rad;
+                float span = r / (g_vram_zoom * g_vram_mag_amt);  // VRAM px shown
+                ImVec2 c0 = ImVec2((vx - span) / 1024.0f, (vy - span) / 512.0f);
+                ImVec2 c1 = ImVec2((vx + span) / 1024.0f, (vy + span) / 512.0f);
+                ImGui::Image((void*)(intptr_t)tex, ImVec2(r * 2, r * 2), c0, c1);
+                ImGui::EndTooltip();
+            }
+
+            // Exact pixel readout, straight from the CPU-side VRAM buffer —
+            // no GL readback, so it is the real emulated value.
+            if (inter && ix >= 0 && ix < 1024 && iy >= 0 && iy < 512) {
+                const uint16_t* v = (const uint16_t*)inter->gpu.vram.data;
+                uint16_t raw = v[(size_t)iy * 1024 + ix];
+                const uint8_t* bytes = (const uint8_t*)v;
+                size_t boff = ((size_t)iy * 1024 + ix) * 2;
+                ImGui::Text("(%4d,%3d)  raw=0x%04X  555=(%2u,%2u,%2u) mask=%u  bytes=%02X %02X"
+                            "  24bpp=(%3u,%3u,%3u)  tpage=(%d,%d)",
+                            ix, iy, raw,
+                            (unsigned)(raw & 0x1F), (unsigned)((raw >> 5) & 0x1F),
+                            (unsigned)((raw >> 10) & 0x1F), (unsigned)((raw >> 15) & 1),
+                            bytes[boff], bytes[boff + 1],
+                            bytes[boff], bytes[boff + 1],
+                            (boff + 2 < 1024u * 512u * 2u) ? bytes[boff + 2] : 0,
+                            ix / 64, iy / 256);
+            }
+        } else {
+            ImGui::Text("view=(%.0f,%.0f) %.0fx%.0f @ %.2fx   —   wheel: zoom, drag: pan, "
+                        "right-click: set CLUT",
+                        g_vram_pan.x, g_vram_pan.y, view_w, view_h, g_vram_zoom);
+        }
+        }  // if (drawable)
     }
     ImGui::End();
-    ImGui::PopStyleVar();
 }
 
 // ---------------------------------------------------------------------------
@@ -779,18 +965,15 @@ static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         if (texture_id && inter) {
-            // Crop FBO to the active display region.
-            // FBO is 1024x512; vertex shader maps PSX y=0 → GL clip +1 → FBO top.
-            // GL texture v = 1.0 - psx_y / 512.0
-            uint16_t vx = inter->gpu.crtc.display_vram_x;
-            uint16_t vy = inter->gpu.crtc.display_vram_y;
+            // The scanout pass already extracted the CRTC display window out of
+            // the unified VRAM (and unpacked 15/24bpp) into scanout_texture's
+            // lower-left corner, upright — so just show that sub-rect 1:1.
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
             uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
 
-            float u0 = (float)vx        / 1024.0f;
-            float u1 = (float)(vx + vw) / 1024.0f;
-            float v0 = 1.0f - (float)vy        / 512.0f;
-            float v1 = 1.0f - (float)(vy + vh) / 512.0f;
+            texture_id = renderer_get_scanout_texture(&inter->gpu.renderer);
+            float u0 = 0.0f, u1 = (float)vw / 1024.0f;
+            float v0 = 0.0f, v1 = (float)vh / 512.0f;
 
             // Letterbox at 4:3 — PSX always outputs to a 4:3 TV regardless of pixel count.
             const float psx_aspect = 4.0f / 3.0f;
@@ -1004,7 +1187,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     GLuint tex_id = 0;
     if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
     draw_ps1_display(tex_id, inter);
-    if (inter) draw_vram_viewer_window(&inter->gpu.renderer);
+    if (inter) draw_vram_viewer_window(&inter->gpu.renderer, inter);
     draw_lua_console_window();
 
     ImGui::End(); // DockHost

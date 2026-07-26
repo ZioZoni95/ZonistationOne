@@ -85,6 +85,11 @@ typedef struct {
 } Dma;
 
 // --- Function Prototypes ---
+/* Recompute DICR's master flag and drive the IRQ3 line from it. Call after any
+ * change to the channel IRQ flags or enables — it is the only place that may
+ * assert or deassert the DMA interrupt line. */
+void dma_update_irq(Dma* dma);
+
 void dma_init(Dma* dma, struct Interconnect* inter);
 uint32_t dma_read(Dma* dma, uint32_t offset);
 bool dma_write(Dma* dma, uint32_t offset, uint32_t value);

@@ -24,12 +24,15 @@
 #include "debugger.h"
 #include "spu.h"
 #include "lua_debug.h"
+#include "system.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
 
-#define VBLANK_CYCLES 564480
-#define CYCLES_PER_FRAME (33868800 / 60)
+/* Emulated-frame length and host frame pacing both follow the GPU's video mode
+ * (gpu_cycles_per_frame): 566203 cy / 59.82 Hz NTSC, 680823 cy / 49.75 Hz PAL.
+ * Both were previously pinned to NTSC 60 Hz, which ran PAL discs ~20% fast.
+ * PSX_SYSCLK_HZ comes from cdrom_disc.h. */
 
 // --- Argument config ---
 typedef struct {
@@ -246,6 +249,20 @@ int main(int argc, char* argv[]) {
     log_init();
     if (getenv("ZS1_LOG_STDERR")) log_set_stderr_quiet(false);
     if (getenv("ZS1_LOG_TRACE"))  log_set_level(LOG_LEVEL_TRACE);
+    /* ZS1_LOG_LEVEL=silent|error|warn|info|debug|trace — the level is a real
+     * performance knob (DEBUG formats thousands of lines per FMV frame), so it
+     * is settable per run instead of only at compile time. */
+    {
+        const char* lvl = getenv("ZS1_LOG_LEVEL");
+        if (lvl) {
+            if      (!strcmp(lvl, "silent")) log_set_level(LOG_LEVEL_SILENT);
+            else if (!strcmp(lvl, "error"))  log_set_level(LOG_LEVEL_ERROR);
+            else if (!strcmp(lvl, "warn"))   log_set_level(LOG_LEVEL_WARN);
+            else if (!strcmp(lvl, "info"))   log_set_level(LOG_LEVEL_INFO);
+            else if (!strcmp(lvl, "debug"))  log_set_level(LOG_LEVEL_DEBUG);
+            else if (!strcmp(lvl, "trace"))  log_set_level(LOG_LEVEL_TRACE);
+        }
+    }
     LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
 
     SdlCtx sdl;
@@ -306,8 +323,7 @@ int main(int argc, char* argv[]) {
     audio_init(&inter.spu);
     spu_thread_start(&inter.spu, &inter);
 
-    eventq_schedule(&inter, EVQ_VBLANK, VBLANK_CYCLES);
-    eventq_schedule(&inter, EVQ_TIMER0, 1024);
+    system_init(&inter, &cpu);
 
     g_cpu_for_trace = &cpu;
     signal(SIGINT,  sighandler_dump_trace);
@@ -320,7 +336,11 @@ int main(int argc, char* argv[]) {
     bool quit = false;
     SDL_Event ev;
 
-    const uint64_t frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() / 60.0);
+    /* Re-derived each frame: a game may switch video mode via GP1(08) at any
+     * point (and the BIOS boots NTSC before a PAL disc's shell switches it). */
+    uint32_t cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
+    uint64_t frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
+                                      (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
     uint64_t next_frame = SDL_GetPerformanceCounter() + frame_ticks;
 
     while (!quit) {
@@ -336,59 +356,13 @@ int main(int argc, char* argv[]) {
         /* Wait for GPU to finish the previous frame's rendering. */
         renderer_wait_frame_done(&inter.gpu.renderer);
 
-        /* GPU_GAP_ANALYSIS Gap B fix (VRAM readback) — DISABLED, live-tested regression:
-         * display_texture only holds real content for regions actually GL-rasterized
-         * this session. Off-screen VRAM regions used purely as CPU-upload texture/font
-         * storage (GP0(0xA0), never drawn as a primitive) stay at GL's initial/clear
-         * color there. A full 1024x512 readback-and-overwrite of gpu->vram.data — even
-         * with correct before-CPU-execution ordering — clobbers that real, valid
-         * CPU-uploaded texture data with black for every such off-screen region,
-         * corrupting subsequent textured draws that sample it (live-observed: SONY
-         * splash text turned to solid black rectangles). Needs a properly scoped fix
-         * (e.g. dirty-rect tracking limited to the actual GL-rasterized bounding box
-         * per frame) before re-enabling — see GPU_GAP_ANALYSIS_2026-07-15.md Gap B and
-         * check how DuckStation/PCSX-Redux avoid this (likely: one unified VRAM texture
-         * used for CPU uploads, GL rasterization target, AND texture sampling all at
-         * once, rather than this project's split vram_texture/display_texture). */
-#if 0
-        renderer_apply_vram_readback(&inter.gpu.renderer, (uint16_t*)inter.gpu.vram.data);
-#endif
+        /* Host-side frame pacing budget follows the GPU's video mode. */
+        cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
+        frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
+                                 (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
 
-        Debugger* dbg = &inter.debugger;
-        if (!dbg->paused) {
-            uint32_t cycles_run = 0;
-            while (cycles_run < CYCLES_PER_FRAME) {
-                uint32_t left  = CYCLES_PER_FRAME - cycles_run;
-                uint32_t chunk = eventq_cycles_until_next(&inter);
-                if (chunk == 0) chunk = 1;
-                if (chunk > left) chunk = left;
-
-                /* chunk is a target CYCLE distance (until the next event or frame boundary),
-                 * not an instruction count — per-instruction cost varies (BIOS ROM/EXP1
-                 * fetches cost several extra cycles, see cpu_icache.c), so bound the inner
-                 * loop by real elapsed cycles from cpu_cycle_counter, not by instructions
-                 * run. Without this, a chunk sized for "cycles until next event" but used as
-                 * an instruction count could run far past the intended cycle target when
-                 * instructions are expensive, overshooting frame pacing by many multiples.
-                 * Event dispatch itself is already correct regardless of this loop's
-                 * granularity (cpu_run_next_instruction checks downcount after every
-                 * instruction) — this only fixes frame-pacing/timer bookkeeping. */
-                uint32_t cycles_before = inter.cpu_cycle_counter;
-                while (inter.cpu_cycle_counter - cycles_before < chunk) {
-                    cpu_run_next_instruction(&cpu);
-                    if (dbg->paused) goto frame_done;
-                }
-                uint32_t elapsed = inter.cpu_cycle_counter - cycles_before;
-                timers_step(&inter.timers_state, elapsed);
-                cycles_run += elapsed;
-            }
-        } else if (debug_ui_step_requested()) {
-            dbg->step_skip_bp = true;
-            dbg->paused = false;
-            cpu_run_next_instruction(&cpu);
-            dbg->paused = true;
-        }
-        frame_done:;
+        /* Run the machine for one video frame (or one debugger step). */
+        system_run_frame(&inter, &cpu);
 
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
@@ -398,13 +372,16 @@ int main(int argc, char* argv[]) {
          * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
         renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
 
-        /* Snapshot VRAM into viewer texture before submitting */
-        renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+        /* Snapshot VRAM into viewer texture before submitting. Converting the
+         * whole 1024x512 buffer to RGBA8 costs 2 MB of staging pool per frame,
+         * so only pay it while the viewer window is actually open. */
+        if (debug_ui_vram_viewer_open())
+            renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
 
         /* Submit frame to GPU thread: swap buffers, wake renderer */
         renderer_submit_frame(&inter.gpu.renderer, debug_ui_get_draw_data());
 
-        // 60 Hz cap
+        // Frame-rate cap at the emulated refresh rate (59.82 NTSC / 49.75 PAL)
         uint64_t now = SDL_GetPerformanceCounter();
         if (now < next_frame) {
             uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();
