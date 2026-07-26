@@ -249,6 +249,20 @@ int main(int argc, char* argv[]) {
     log_init();
     if (getenv("ZS1_LOG_STDERR")) log_set_stderr_quiet(false);
     if (getenv("ZS1_LOG_TRACE"))  log_set_level(LOG_LEVEL_TRACE);
+    /* ZS1_LOG_LEVEL=silent|error|warn|info|debug|trace — the level is a real
+     * performance knob (DEBUG formats thousands of lines per FMV frame), so it
+     * is settable per run instead of only at compile time. */
+    {
+        const char* lvl = getenv("ZS1_LOG_LEVEL");
+        if (lvl) {
+            if      (!strcmp(lvl, "silent")) log_set_level(LOG_LEVEL_SILENT);
+            else if (!strcmp(lvl, "error"))  log_set_level(LOG_LEVEL_ERROR);
+            else if (!strcmp(lvl, "warn"))   log_set_level(LOG_LEVEL_WARN);
+            else if (!strcmp(lvl, "info"))   log_set_level(LOG_LEVEL_INFO);
+            else if (!strcmp(lvl, "debug"))  log_set_level(LOG_LEVEL_DEBUG);
+            else if (!strcmp(lvl, "trace"))  log_set_level(LOG_LEVEL_TRACE);
+        }
+    }
     LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
 
     SdlCtx sdl;
