@@ -630,11 +630,7 @@ static void dma_ch2_signal_done(Interconnect* inter) {
 
     if (inter->dma.channel_irq_enable & (1u << 2)) {
         inter->dma.channel_irq_flags |= (1u << 2);
-        inter->dma.master_irq_flag = inter->dma.force_irq ||
-            (inter->dma.master_irq_enable &&
-             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
-        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
-            interconnect_request_irq(inter, IRQ_DMA, "DMA ch2 done");
+        dma_update_irq(&inter->dma);
     }
     lua_debug_notify("dma_ch2_done");
 }
@@ -729,11 +725,7 @@ static void dma_mdec_signal_done(Interconnect* inter, uint32_t channel) {
     dma_channel_done(ch);
     if (inter->dma.channel_irq_enable & (1u << channel)) {
         inter->dma.channel_irq_flags |= (1u << channel);
-        inter->dma.master_irq_flag = inter->dma.force_irq ||
-            (inter->dma.master_irq_enable &&
-             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
-        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
-            interconnect_request_irq(inter, IRQ_DMA, channel == 0 ? "DMA ch0 done" : "DMA ch1 done");
+        dma_update_irq(&inter->dma);
     }
     if (channel == 1) lua_debug_notify("mdec_ch1_done");
 }
@@ -1003,11 +995,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
     // DMA completion IRQ (IRQ3)
     if (inter->dma.channel_irq_enable & (1u << channel_index)) {
         inter->dma.channel_irq_flags |= (1u << channel_index);
-        inter->dma.master_irq_flag = inter->dma.force_irq ||
-            (inter->dma.master_irq_enable &&
-             (inter->dma.channel_irq_flags & inter->dma.channel_irq_enable) != 0);
-        if (inter->dma.master_irq_flag && !(inter->irq_status & (1u << IRQ_DMA)))
-            interconnect_request_irq(inter, IRQ_DMA, "DMA channel done");
+        dma_update_irq(&inter->dma);
     }
 }
 
