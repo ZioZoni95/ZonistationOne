@@ -903,6 +903,13 @@ static void renderer_record_vram_update(Renderer* renderer, const uint16_t* vram
     u->data_offset    = s_vram_pool_used[wi];
     u->update_display = update_display;
     u->full_upload    = false;
+    /* Every field has to be written here: the GpuVramUpdate array is reused
+     * frame after frame, so an entry whose index once held the VRAM-viewer
+     * snapshot would still say is_viewer, and the GPU thread would push this
+     * rect into the debug viewer texture instead of VRAM — the column never
+     * reaches vram_tex and the display keeps showing the previous frame there
+     * (FMV playback showed a fixed set of stale vertical bars). */
+    u->is_viewer      = false;
     s_vram_pool_used[wi] += aligned;
     if (s_vram_pool_used[wi] > s_vram_pool_peak) s_vram_pool_peak = s_vram_pool_used[wi];
     gpu_frame_record_op(frame, GPU_OP_VRAM_UPDATE, idx);
