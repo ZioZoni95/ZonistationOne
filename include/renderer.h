@@ -102,6 +102,7 @@ typedef struct {
     GLint uniform_tex_window_loc;   // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
     GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
     GLint uniform_stp_mode_loc;     /* -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0) */
+    GLint uniform_set_mask_loc;     /* Location for u_set_mask (GP0(E6).0) */
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -120,6 +121,7 @@ typedef struct {
     bool semi_trans_enabled;    // Whether semi-transparency blending is active
     uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
     bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
+    bool set_mask_enabled;      // GP0(E6).0 — force bit 15 set on every pixel drawn
 
     /* Cached pipeline state — snapshot into each batch for GPU thread replay */
     int16_t  cached_offset_x, cached_offset_y;
@@ -356,6 +358,18 @@ void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode
  * @param enabled   True to enable dithering.
  */
 void renderer_set_dither_mode(Renderer* renderer, bool enabled);
+
+/**
+ * @brief Sets GP0(0xE6) bit 0 — force the mask bit set on every pixel drawn.
+ * The unified VRAM texture keeps the PSX mask bit in its alpha channel, so a
+ * rasterized pixel has to carry the same bit 15 a CPU write would: 0 normally,
+ * 1 when this is enabled (or when a textured pixel's source texel has it set).
+ * In 24bpp display modes that bit is picture data, so getting it wrong tints
+ * whole areas of the screen.
+ * @param renderer  Pointer to the Renderer.
+ * @param enabled   True when GP0(E6).0 is set.
+ */
+void renderer_set_mask_mode(Renderer* renderer, bool enabled);
 
 /**
  * @brief Sets the PSX display region to crop from the FBO when blitting to screen.

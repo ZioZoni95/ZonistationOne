@@ -292,6 +292,7 @@ static void gp0_fill_rectangle(Gpu* gpu) {
         }
     }
     gpu->vram_dirty = true;
+    lua_debug_notify("gp0_fill");
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +375,10 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
     gpu->preserve_masked_pixels  = ((value >> 1) & 1) != 0;
     LOG_GPU_DEBUG("[GPU] GP0(0xE6): Mask Bit force=%d preserve=%d",
                   gpu->force_set_mask_bit, gpu->preserve_masked_pixels);
+    /* The rasterizer writes bit 15 through the texture's alpha channel, so the
+     * force-set flag has to follow the drawing state, not just the CPU-side
+     * vram_write_masked() path. */
+    renderer_set_mask_mode(&gpu->renderer, gpu->force_set_mask_bit);
 }
 
 // ---------------------------------------------------------------------------

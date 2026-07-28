@@ -31,6 +31,7 @@ typedef struct {
     bool raw_texture_enabled;
     bool semi_trans_enabled;
     bool dither_enabled;
+    bool set_mask_enabled;      /* GP0(E6).0 — force bit 15 on drawn pixels */
     uint8_t semi_trans_mode;
     float screen_w, screen_h;
     int16_t offset_x, offset_y;
@@ -177,6 +178,7 @@ const char* fragment_shader_source =
     "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
     "uniform int u_dither_enable; // 1 = apply PSX 4x4 dither before 15-bit quantization\n"
     "uniform int u_stp_mode;     // -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0)\n"
+    "uniform int u_set_mask;     // GP0(E6).0 — force bit 15 set on every pixel drawn\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
@@ -190,7 +192,15 @@ const char* fragment_shader_source =
     "}\n"
     "\n"
     "void main() {\n"
-    "    vec4 final_color = vec4(color, 1.0);\n"
+    /* Alpha is not opacity here: the unified VRAM texture stores the PSX mask
+     * bit (bit 15) in it, so a drawn pixel must carry the same bit a CPU write
+     * would. Untextured primitives write 0 unless GP0(E6).0 forces it; textured
+     * ones copy the source texel's bit 15 (the STP bit), OR'd with the force
+     * flag — PSX-SPX "Mask bit". Writing a constant 1.0 here made every
+     * rasterized pixel come back as 0x8000, which 24bpp scanout reads as
+     * picture data (black areas turned green). */
+    "    float mask_a = (u_set_mask != 0) ? 1.0 : 0.0;\n"
+    "    vec4 final_color = vec4(color, mask_a);\n"
     "    if (use_texture == 1) {\n"
     // "        frag_color = vec4(1.0, 0.0, 0.0, 1.0); return;\n" // DEBUG: Uncomment to verify geometry
     "        uint clut = tpage_info.x;\n"
@@ -246,10 +256,11 @@ const char* fragment_shader_source =
     "            tex_rgb = psx_to_rgb(raw_color);\n"
     "        }\n"
     "\n"
+    "        if ((raw_color & 0x8000u) != 0u) mask_a = 1.0;\n"
     "        if (raw_texture == 1) {\n"
-    "            final_color = vec4(tex_rgb, 1.0);\n"
+    "            final_color = vec4(tex_rgb, mask_a);\n"
     "        } else {\n"
-    "            final_color = vec4(tex_rgb * color * 2.0, 1.0);\n"
+    "            final_color = vec4(tex_rgb * color * 2.0, mask_a);\n"
     "        }\n"
     "    }\n"
     // PSX 4x4 dithering matrix (applied before 24-to-15bit quantization).
@@ -667,6 +678,8 @@ bool renderer_init(Renderer* renderer) {
     if (renderer->uniform_tex_window_loc >= 0) glUniform4i(renderer->uniform_tex_window_loc, 0xFF, 0xFF, 0, 0);
     renderer->uniform_stp_mode_loc = glGetUniformLocation(renderer->shader_program, "u_stp_mode");
     if (renderer->uniform_stp_mode_loc >= 0) glUniform1i(renderer->uniform_stp_mode_loc, -1);
+    renderer->uniform_set_mask_loc = glGetUniformLocation(renderer->shader_program, "u_set_mask");
+    if (renderer->uniform_set_mask_loc >= 0) glUniform1i(renderer->uniform_set_mask_loc, 0);
     if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
     if (renderer->uniform_dither_loc >= 0) glUniform1i(renderer->uniform_dither_loc, 0);
     glUseProgram(0);
@@ -942,6 +955,30 @@ void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
     renderer_record_vram_update(renderer, vram_data, x, y, w, h, true);
 }
 
+/* Semi-transparency blend setup for one of the four PSX modes. The alpha
+ * channel is NOT blended: it carries the PSX mask bit, and hardware writes the
+ * source pixel's mask bit as-is, whatever the colour blend does. */
+static void apply_semi_trans_blend(uint8_t mode) {
+    GLenum src = GL_ONE, dst = GL_ONE, eq = GL_FUNC_ADD;
+    switch (mode) {
+        case 0:  /* B/2 + F/2 */
+            src = GL_CONSTANT_ALPHA; dst = GL_CONSTANT_ALPHA;
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
+            break;
+        case 1:  /* B + F */
+            break;
+        case 2:  /* B - F */
+            eq = GL_FUNC_REVERSE_SUBTRACT;
+            break;
+        case 3:  /* B + F/4 */
+            src = GL_CONSTANT_ALPHA; dst = GL_ONE;
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+            break;
+    }
+    glBlendEquationSeparate(eq, GL_FUNC_ADD);
+    glBlendFuncSeparate(src, dst, GL_ONE, GL_ZERO);
+}
+
 /* -------------------------------------------------------------------------
  * renderer_draw_gl — INTERNAL: called by GPU thread to execute one batch.
  * All GL calls are here; CPU thread never calls this directly.
@@ -963,6 +1000,8 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
                     b->tex_window[2], b->tex_window[3]);
     if (renderer->uniform_dither_loc >= 0)
         glUniform1i(renderer->uniform_dither_loc, b->dither_enabled ? 1 : 0);
+    if (renderer->uniform_set_mask_loc >= 0)
+        glUniform1i(renderer->uniform_set_mask_loc, b->set_mask_enabled ? 1 : 0);
     glUniform1i(renderer->uniform_use_texture_loc, b->texture_enabled ? 1 : 0);
     if (renderer->uniform_raw_texture_loc >= 0)
         glUniform1i(renderer->uniform_raw_texture_loc, b->raw_texture_enabled ? 1 : 0);
@@ -1001,26 +1040,7 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
         glDrawArrays(prim, 0, vc);
 
         glEnable(GL_BLEND);
-        switch (b->semi_trans_mode) {
-            case 0:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
-                break;
-            case 1:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 2:
-                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 3:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
-                break;
-        }
+        apply_semi_trans_blend(b->semi_trans_mode);
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, 1);
         glDrawArrays(prim, 0, vc);
@@ -1034,26 +1054,7 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
         glEnable(GL_BLEND);
-        switch (b->semi_trans_mode) {
-            case 0:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
-                break;
-            case 1:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 2:
-                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 3:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
-                break;
-        }
+        apply_semi_trans_blend(b->semi_trans_mode);
         glDrawArrays(prim, 0, vc);
     } else {
         if (renderer->uniform_stp_mode_loc >= 0)
@@ -1109,6 +1110,7 @@ void renderer_draw(Renderer* renderer) {
     b->semi_trans_enabled = renderer->semi_trans_enabled;
     b->semi_trans_mode    = renderer->semi_trans_mode;
     b->dither_enabled     = renderer->dither_enabled;
+    b->set_mask_enabled   = renderer->set_mask_enabled;
     b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
     b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;
     b->offset_x           = renderer->cached_offset_x;
@@ -1263,6 +1265,19 @@ void renderer_set_dither_mode(Renderer* renderer, bool enabled)
     // Uniform is set per-draw in renderer_draw(); no immediate GL call needed.
 }
 
+// ---------------------------------------------------------------------------
+// renderer_set_mask_mode — GP0(0xE6).0, force the mask bit on drawn pixels.
+// The unified texture keeps bit 15 in alpha, so this has to be batch state.
+// ---------------------------------------------------------------------------
+void renderer_set_mask_mode(Renderer* renderer, bool enabled)
+{
+    if (!renderer->initialized) return;
+    if (renderer->set_mask_enabled == enabled) return;
+
+    renderer_draw(renderer); // flush before changing mask state
+    renderer->set_mask_enabled = enabled;
+}
+
 // renderer_set_semi_trans_mode — enable/disable GL blending for semi-trans
 // ---------------------------------------------------------------------------
 void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode)
@@ -1317,6 +1332,7 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     b->raw_texture_enabled = false;
     b->semi_trans_enabled = false;
     b->dither_enabled     = renderer->dither_enabled;
+    b->set_mask_enabled   = renderer->set_mask_enabled;
     b->semi_trans_mode    = 0;
     b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
     b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;

@@ -392,6 +392,21 @@ static int l_emu_display_area(lua_State* L) {
     return 6;
 }
 
+/* Drawing area (GP0 E3/E4) and drawing offset (GP0 E5). The GL path scissors
+ * every batch to this area, so it decides which primitives can reach the
+ * unified VRAM texture — a fill written unclipped into the CPU-side VRAM can
+ * still be clipped away on its way to the texture. */
+static int l_emu_draw_area(lua_State* L) {
+    Gpu* g = &g_inter->gpu;
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_left);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_top);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_right);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_bottom);
+    lua_pushinteger(L, (lua_Integer)g->drawing_x_offset);
+    lua_pushinteger(L, (lua_Integer)g->drawing_y_offset);
+    return 6;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
@@ -417,6 +432,7 @@ static const luaL_Reg s_emu_funcs[] = {
     {"gp0_word_count",    l_emu_gp0_word_count},
     {"gp0_word",          l_emu_gp0_word},
     {"gpustat",           l_emu_gpustat},
+    {"draw_area",         l_emu_draw_area},
     {"vram_upload_rect",  l_emu_vram_upload_rect},
     {"gpu_pool",          l_emu_gpu_pool},
     {"mdec_block",        l_emu_mdec_block},

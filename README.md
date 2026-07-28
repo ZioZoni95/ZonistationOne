@@ -13,7 +13,7 @@ The grey vertical bands are gone: the movie now reaches the screen as it exists 
 
 Localised by reading the unified VRAM texture back on the GPU thread and comparing each upload rect against the CPU halfwords staged for it: 13 of 20 macroblock columns mismatched on every FMV frame (3840/3840 pixels each), while the same rects' staging data was provably unchanged between execution and check, and the immediate post-upload readback of the rects that *did* take the VRAM path was byte-identical. After the fix: 0/20 mismatches, on both double-buffer halves.
 
-**Still open**: the areas of the 320×240 CRTC window outside the 320×160 movie (the top/bottom and edge bands) still show stale VRAM rather than black.
+The green bands around the movie went the same day, and were a second, unrelated defect: the unified VRAM texture keeps the PSX mask bit (bit 15) in its alpha channel, but the fragment shader wrote `alpha = 1.0` for every rasterized pixel, so anything the GPU drew came back out of VRAM as `0x8000 | colour`. In 15bpp that bit is ignored on scanout; in 24bpp it is picture data, so areas the game had painted black decoded as mid-green. The shader now writes the real mask bit — 0 normally, 1 when GP0(E6).0 forces it or when a textured pixel's texel has bit 15 set — and semi-transparency blending leaves the alpha channel alone.
 
 ### Ace Combat 2 (Europe) — the FMV intro decodes and reaches VRAM (July 26 2026)
 ![FMV decoded in VRAM, display area still striped](Screenshot%202026-07-26%20230210.png)
