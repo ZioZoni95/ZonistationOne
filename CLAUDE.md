@@ -10,18 +10,24 @@ PS1 emulator written in C. SDL2 + OpenGL 3.3 (GLEW). Early development.
 make                    # build
 make clean && make      # clean build
 make test               # run cpu_minimal_test
-./myps1_emu roms/SCPH1001.BIN                              # BIOS menu
-./myps1_emu roms/SCPH1001.BIN "games/Ace Combat 2 (Europe).cue"  # game
+./myps1_emu roms/SCPH1001.BIN                                           # BIOS menu
+./myps1_emu "roms/SCPH-7502 (3).BIN" --game="games/Ace Combat 2 (Europe).cue"
 ```
 
-BIOS used: SCPH-1001 (US). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
+The game path must be passed as `--game=<cue>`; a bare positional path is rejected. Run PAL discs
+with the PAL BIOS (`SCPH-7502`) — region mismatch is detected and rejected as on hardware.
+
+Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as well as the ImGui
+windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`.
+
+BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
 
 ---
 
 ## Architecture
 
 ```
-src/main.c                     — SDL loop, 33868800/60 cycles/frame, ImGui DockSpace host
+src/main.c                     — host shell: SDL, GL context, audio device, threads, frame cap
 
 src/cpu/
   cpu_execution.c              — main CPU loop (DuckStation-style downcount)
@@ -40,21 +46,23 @@ src/core/
   bus_irq.c                    — IRQ edge-triggered controller (I_STAT / I_MASK)
   ram.c                        — 2 MB RAM
   bios.c                       — BIOS ROM load
-  dma.c                        — DMA channels (GPU ch2, OTC ch6)
+  dma.c                        — DMA channels 0-6, linked-list + block, completion IRQ
   timers.c                     — PSX timers 0/1/2
   sio.c                        — SIO / JOY controller protocol
   controller.c                 — keyboard → PSX gamepad mapping
-  mdec.c                       — Motion DECoder (stub)
+  mdec.c                       — Motion DECoder (working: RLE/IDCT/YUV→RGB, FMV verified)
   pcdrv.c                      — PC drive side-channel
-  event_scheduler.c            — DuckStation-style event dispatch (VBlank, timers, CDROM)
+  event_scheduler.c            — the single scheduling authority (VBlank, timers, CDROM, DMA slices)
+  system.c                     — "run one frame": the machine's timing loop
+  debugger.c                   — breakpoints, watchpoints, execution trace
+  lua_debug.c                  — Lua scripting surface (emu.*) for live debugging
 
 src/gpu/
   gpu.c                        — GPU init/reset/GP1/GPUSTAT
   gpu_commands.c               — GP0 256-entry dispatch table, all draw commands
   gpu_helpers.c                — GP0 helper utilities
-  renderer.c                   — OpenGL 3.3 renderer (VAO, shaders, VRAM blit)
+  renderer.c                   — OpenGL 3.3 renderer, unified VRAM texture, GPU thread
   vram.c                       — 1024×512 VRAM buffer management
-  debugger.c                   — GPU debugger overlay
 
 src/gte/
   gte.c                        — GTE register I/O, command dispatch
@@ -112,13 +120,13 @@ tests/cpu_minimal_test.c       — minimal CPU integration test
 
 ## Logging
 
-16 categories: `SYSTEM CPU IRQ DMA GPU CDROM TIMER BIOS INTERCONNECT RENDERER EVENT GTE VRAM RAM DEBUG MDEC`  
+17 categories: `SYSTEM CPU IRQ DMA GPU CDROM TIMER BIOS INTERCONNECT RENDERER EVENT GTE VRAM RAM DEBUG MDEC SPU`  
 6 levels: `SILENT ERROR WARN INFO DEBUG TRACE`  
 Default runtime level: **INFO** (`src/utils/log.c`). All ImGui log windows open at startup.
 
 Macro pattern: `LOG_<CATEGORY>_<LEVEL>(fmt, ...)` e.g. `LOG_GPU_DEBUG("gp0=0x%08x", v)`
 
-**DuckStation log philosophy**:
+**Log level policy**:
 - ERROR: hardware faults, invalid state
 - WARN: recoverable anomalies, dropped commands
 - INFO: init, major state changes only
@@ -148,11 +156,27 @@ Key format conventions:
 
 ## Known Working
 
-- BIOS boot sequence (SCPH-1001): logo → menu → cursor → navigation
-- GPU: polygons, rects, textured, VRAM double-buffer, draw offset, scissor
-- DMA: linked-list + block/request (GPU ch2, OTC ch6)
-- Timers 0/1/2: counter + interrupt
-- CDROM: command handling, disc read, IRQ delivery
-- SIO: digital pad protocol, keyboard input (WASD/SPACE/E/C/Z/X)
-- GTE: geometry transforms, load delay slots
+- BIOS boot to menu (US and PAL), full 3D boot logo
+- `Ace Combat 2 (Europe)`: boots, plays its FMV intro, reaches the textured menu and 3D engine
+- GPU: polygons, rects, lines, textured/CLUT, semi-transparency, scissor, unified VRAM texture,
+  15bpp and 24bpp display
+- MDEC: full decode pipeline, verified against real FMV playback
+- DMA: all channels, linked-list + block, completion interrupts
+- Timers 0/1/2: derived counters, sync modes, video-mode-derived rates
+- CDROM: async command/response, disc region detection, XA audio decode
+- SIO: digital pad, both memory card slots
+- GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
+
+## Known Broken / Absent
+
+- **SPU audio**: DSP is complete but sample generation runs on wall-clock time instead of emulated
+  time (`spu_step()` is the correct producer and has no caller). Sound is unusable.
+- **Savestates**: not implemented.
+- GPU: mask-bit *test* not applied to rasterized primitives; GP0(C0)/GP0(80) read the CPU-side VRAM;
+  texture sampling reads a separate mirror; CRTC ticks once per frame.
+- No analog pad, no multitap.
+
+See `GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
+`GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
+over this file for status.

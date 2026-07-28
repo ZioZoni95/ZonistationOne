@@ -1,55 +1,55 @@
 # ZoniStation One
 
-PlayStation 1 emulator written in C99. SDL2 + OpenGL 3.3 Core (GLEW). Early development.
+A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 renderer and a built-in
+debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
+boots them.
+
+SDL2 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. Early development, but real commercial
+discs boot, play their FMV intros and reach their menus and 3D engines.
 
 ---
 
 ## Screenshots
 
-### Ace Combat 2 (Europe) — the FMV intro plays on the main display (July 27 2026)
+### Ace Combat 2 (Europe) — FMV intro playing on the main display (July 27 2026)
 ![FMV intro playing on the PS1 display](Screenshot%202026-07-27%20215006.png)
 
-The grey vertical bands are gone: the movie now reaches the screen as it exists in VRAM. The defect was in the renderer's frame-command recording, not in decoding or in the CRTC — `renderer_record_vram_update` never initialised `GpuVramUpdate.is_viewer`, and that array is reused every frame, so any index that had once carried the 2 MB VRAM-Viewer snapshot kept `is_viewer = true` forever. Every later upload rect landing on such an index was pushed into the debug viewer texture instead of the unified VRAM texture, so those columns simply never updated and the display kept showing the previous frame there — a fixed set of stale bars, growing as more indices got poisoned during boot.
+The full chain works end to end: CD-XA sector delivery, the game's own software bitstream decode, the
+MDEC, the output DMA, the CPU→VRAM upload, and 24bpp scanout. Two defects stood between a correct
+frame in VRAM and a correct frame on screen, and both were found by reading the GPU-side texture back
+and comparing it against what the CPU had staged for it:
 
-Localised by reading the unified VRAM texture back on the GPU thread and comparing each upload rect against the CPU halfwords staged for it: 13 of 20 macroblock columns mismatched on every FMV frame (3840/3840 pixels each), while the same rects' staging data was provably unchanged between execution and check, and the immediate post-upload readback of the rects that *did* take the VRAM path was byte-identical. After the fix: 0/20 mismatches, on both double-buffer halves.
-
-The green bands around the movie went the same day, and were a second, unrelated defect: the unified VRAM texture keeps the PSX mask bit (bit 15) in its alpha channel, but the fragment shader wrote `alpha = 1.0` for every rasterized pixel, so anything the GPU drew came back out of VRAM as `0x8000 | colour`. In 15bpp that bit is ignored on scanout; in 24bpp it is picture data, so areas the game had painted black decoded as mid-green. The shader now writes the real mask bit — 0 normally, 1 when GP0(E6).0 forces it or when a textured pixel's texel has bit 15 set — and semi-transparency blending leaves the alpha channel alone.
+- 13 of the 20 macroblock columns per frame were being uploaded into the debug VRAM-Viewer texture
+  instead of VRAM, because a reused per-frame command record kept a stale flag from an earlier frame.
+- Everything the rasterizer drew came back out of VRAM with bit 15 set, because the fragment shader
+  wrote a constant alpha — and in the unified VRAM texture, alpha *is* the PSX mask bit. Invisible at
+  15bpp, but at 24bpp bit 15 is picture data, so black areas decoded as green.
 
 ### Ace Combat 2 (Europe) — the FMV intro decodes and reaches VRAM (July 26 2026)
-![FMV decoded in VRAM, display area still striped](Screenshot%202026-07-26%20230210.png)
+![FMV decoded in VRAM](Screenshot%202026-07-26%20230210.png)
 
-The intro movie now plays instead of dying two seconds in. The VRAM Viewer (right panel, 24bpp decode) shows a **clean, complete FMV frame** — jets on the deck, no blobs, no green cast — which means the whole chain works end to end: CD-XA sector delivery, the game's software VLC decode, MDEC, the MDEC-out DMA and the CPU→VRAM upload.
+Before that, the movie died two seconds in. Two DMA bugs: completion interrupts were lost after the
+first acknowledge (the interrupt line was never brought low, so no later completion produced an edge,
+and the player's frame queue froze after 49 of 1905 frames), and block transfers on the GPU channel
+read guest RAM lazily across scheduled slices — the movie player refills its staging buffer the moment
+it kicks a transfer, so the deferred read picked up the *next* column's pixels.
 
-Two DMA bugs were in the way. The movie died after 49 of its 1905 frames because DMA completion interrupts were being lost: `interconnect_set_irq_line` only latches I_STAT on a low→high edge, but the DICR acknowledge path cleared `irq_status` while leaving the line state high, so after the first acknowledge every later completion produced no edge at all. The player's sector descriptors stayed in "transfer running" forever and its decoder spun waiting for them. Second, the GPU block DMA read guest RAM lazily across scheduled slices; the movie player owns only two staging buffers and refills one as soon as it kicks the transfer, so the deferred read picked up the *next* column's pixels and VRAM ended up holding two payloads repeated across all twenty 16-pixel columns.
-
-**Still open at the time**: the main PS1 Display area was dirty — grey vertical bands replaced columns that were present and correct in VRAM. Resolved on July 27 2026 (see the screenshot above): the uploads for those columns were being routed into the debug VRAM-Viewer texture by a stale `is_viewer` flag.
-
-### Full 3D PlayStation boot logo now renders (July 2026)
+### Full 3D PlayStation boot logo (July 2026)
 ![3D PlayStation boot logo](Screenshot%202026-07-23%20214744.png)
 
-The spinning 3D PlayStation logo (the red "P" and its coloured base) now draws correctly, not just the "PlayStation / Licensed by SCEE" text. This closed a multi-session blocker (Phase 2.7): the logo's Gouraud-lit polygons were being built and transformed by the GTE, but a bug in the GTE colour FIFO (`push_rgb_from_mac` dropped the `RGBC` CODE byte) meant every logo primitive went out with GP0 opcode `0x00` and was discarded by the BIOS shell's software ordering-table renderer. Fixed by copying `RGBC.code` into the pushed colour's high byte, matching real hardware.
+The spinning logo and its coloured base, not just the "Licensed by SCEE" text. This was a multi-session
+blocker with a one-byte cause: the GTE's colour FIFO dropped the CODE byte when pushing a computed
+colour, and the BIOS shell's software ordering-table renderer reads that byte back as the GP0 opcode —
+so every lit logo primitive was discarded as opcode `0x00`.
 
-### Ace Combat 2 (Europe) — correct SCEE boot logo (July 2026)
-![SCEE boot logo](Screenshot%202026-07-14%20191115.png)
-
-As of July 2026, `games/Ace Combat 2 (Europe).cue` boots past the license screen into the game itself — a real commercial disc, not just the BIOS menu.
-
-### Ace Combat 2 (Europe) — past the Namco publisher screen, FMV blocker visible (July 2026)
-![Produced by Namco](Screenshot%202026-07-18%20115008.png)
-![Black screen, VRAM filling with asset data](Screenshot%202026-07-18%20115014.png)
-
-Boot now reaches the "Presented by Namco" publisher screen and progresses further — the VRAM Viewer (right panel, second screenshot) shows real texture/asset data being written by the game immediately after, but the display itself goes black. This matches the current top blocker: the FMV intro that plays here needs a working MDEC pipeline that isn't wired into the event scheduler yet (see "Current Status" below).
-
-### Ace Combat 2 (Europe) — real main menu + in-engine 3D rendering (July 2026)
+### Ace Combat 2 (Europe) — real main menu and in-engine 3D
 ![Ace Combat 2 main menu](Screenshot%202026-07-18%20125937.png)
 ![In-engine 3D cockpit view](Screenshot%202026-07-18%20125717.png)
 
-Milestone: after fixing a stack-overflow crash, a CDROM IRQ edge-detection gap, and an MDEC input-FIFO overflow (all July 2026), boot now reaches `Ace Combat 2`'s real, fully-textured main menu — logo, background, "START GAME / LOAD / OPTION" — and a real in-engine 3D-rendered view (cockpit HUD, lit instrument panels) is reachable from there. The FMV intro that plays before this is still skipped/not working and GPU rendering accuracy is still rough in places (see `GPU_GAP_ANALYSIS_2026-07-15.md`) — this is progress on booting a real commercial game to its actual menu/engine, not a claim of finished gameplay.
-
-### BIOS Menu + ImGui Debug IDE (May 2026)
+### Earlier milestones
+![SCEE boot logo](Screenshot%202026-07-14%20191115.png)
+![Produced by Namco](Screenshot%202026-07-18%20115008.png)
 ![BIOS Menu with Debug UI](screenshots/Screenshot%202026-05-02%20212421.png)
-
-### Sony Logo (Feb 2026)
 ![Sony Logo](screenshots/Screenshot%202026-02-22%20153306.png)
 
 ---
@@ -62,132 +62,141 @@ make
 ./myps1_emu roms/SCPH1001.BIN --game="games/Ace Combat 2 (Europe).cue"  # game
 ```
 
-Requirements: `gcc`, `g++`, `SDL2`, `OpenGL`, `GLEW`
+Requirements: `gcc`, `g++`, `SDL2`, `OpenGL`, `GLEW`.
 
-BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL)
+BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL). Run PAL games with the PAL BIOS — a region mismatch is
+detected and rejected exactly as hardware does.
+
+Useful environment variables:
+
+| Variable | Effect |
+|---|---|
+| `ZS1_LOG_LEVEL=silent\|error\|warn\|info\|debug\|trace` | Log level for the run (default `info`; the hot paths are genuinely expensive above it) |
+| `ZS1_LOG_STDERR=1` | Also write the log to stderr, not just the in-app windows |
+| `ZS1_LUA_SCRIPT=scripts/x.lua` | Run a Lua debug script at startup |
+| `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 
 ---
 
-## Current Status (July 2026)
+## Current status (July 28 2026)
 
-The full 3D PlayStation boot logo now renders (July 23 2026 — see the top screenshot), after three GTE/DMA/GPU fixes landed the same day: the GTE colour-FIFO CODE-byte bug that discarded every logo primitive (the multi-session Phase 2.7 blocker), dropped sub-word writes to the DMA registers (the shell enables its DMA-completion IRQs with a byte write to `DICR+2`), and the previously-unwired GPU IRQ line (GP0(0x1F) never asserted I_STAT bit 1). BIOS boots to the interactive menu, and real commercial discs now boot substantially further than ever before — `Ace Combat 2 (Europe)` reaches its real, fully-textured main menu and an in-engine 3D-rendered cockpit view, after a string of July 2026 fixes: a CDROM sector-buffer bug (Request Register resetting the read pointer on the wrong arm/disarm transition), a stack-overflow crash (multi-MB structs declared as stack locals in `main()`), a CDROM IRQ edge-detection gap, MEMCTRL registers gaining real backing storage instead of hardcoded readback values, and an MDEC input-FIFO overflow (channels 0/1 now interleave via the event scheduler instead of one channel blasting through synchronously and dropping data). **Still rough**: the FMV intro that plays before the main menu is skipped/not working (MDEC decodes real bitstream data but doesn't yet run a full frame to completion or reliably reach the display), GPU rendering accuracy has known gaps (see `GPU_GAP_ANALYSIS_2026-07-15.md`), and the emulator is not yet stable enough to call this reliable end-to-end gameplay. GPU, DMA, timers, CDROM, SIO, GTE, I-Cache, SPU, and a from-scratch MDEC (ported from DuckStation's reference algorithms) are all implemented. The renderer has a full ImGui IDE-style debug interface with CPU disassembler, breakpoint manager, execution tracer, and per-component log windows — including a BIOS/game TTY log with real `printf`-style argument substitution.
+The BIOS boots to its menu. `Ace Combat 2 (Europe)` boots from a real disc image, plays its FMV intro
+correctly, and reaches its textured main menu and an in-engine 3D cockpit view.
 
-**FMV update (July 26 2026)**: the intro movie now decodes and plays — a clean frame is visible in VRAM (top screenshot). Two DMA bugs were responsible for the previous "black/blob FMV": lost completion interrupts (the IRQ3 line was never deasserted on a DICR-only acknowledge, so after the first one every completion was swallowed and the player's frame queue froze after 49 of 1905 frames), and block transfers on the GPU channel reading guest RAM lazily across slices, which duplicated two staging buffers across all twenty columns of each frame. **FMV update (July 27 2026)**: the movie now also *displays* correctly. The remaining grey bands were a renderer bookkeeping bug — `GpuVramUpdate.is_viewer` was never initialised when recording an upload rect, and the per-frame command array is reused, so any index that had once carried the VRAM-Viewer snapshot kept the flag set and every later rect on that index went into the debug viewer texture instead of the unified VRAM texture (13 of 20 macroblock columns per frame, measured by reading the texture back and comparing against the staged CPU halfwords; 0 after the fix).
+**Sound does not work.** The SPU's DSP is complete — 24 voices with ADPCM decode and Gaussian
+interpolation, the full ADSR state machine, the 32-register reverb, noise, pitch modulation, DMA and
+the IRQ address watch — but sample generation is driven by wall-clock time on its own thread instead
+of by emulated time, while the game writes its registers on the emulation thread. The two clocks drift
+apart permanently, so envelopes, note lengths and CD audio are all wrong. The emulated-time producer
+already exists in the code and simply has no caller. This is the next thing being fixed.
 
-Outstanding: the parts of the CRTC display window outside the movie still show stale VRAM instead of black. GPU mask-bit handling and VRAM readback have known gaps affecting some rendering techniques (see `GPU_GAP_ANALYSIS_2026-07-15.md`). SPU audio sync has minor timing issues. Overall stability is still fragile — this is early confirmation a real commercial disc *can* reach its menu/engine, not a claim of solid end-to-end play.
+**Savestates do not exist yet.**
 
-### Component Status
+Known rendering gaps: the mask-bit *test* (don't overwrite masked pixels) is not applied to rasterized
+primitives, VRAM readback and VRAM→VRAM copy still read the CPU-side VRAM model, and texture sampling
+reads a separate mirror — so render-to-texture effects don't work. The CRTC advances once per frame
+rather than per scanline, which also leaves Timer0's hblank gate unwired. Details and priorities in
+`GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `GPU_GAP_ANALYSIS_2026-07-15.md`.
 
-| Component         | Status       | Notes |
-|-------------------|--------------|-------|
-| CPU (MIPS R3000A) | Complete     | All instructions, COP0, exceptions, load delay, branch delay |
-| I-Cache           | Complete     | 256-line 4-word with tag/valid bits |
-| RAM               | Complete     | 2 MB main + 1 KB scratchpad |
-| BIOS ROM          | Complete     | SCPH-1001/SCPH-7502; boot → menu → real game working |
-| IRQ Controller    | Complete     | Edge-triggered I_STAT/I_MASK, CPU Cause.IP2 |
-| Event Scheduler   | Complete     | DuckStation-style downcount; VBlank, timers, CDROM, DMA |
-| DMA               | Good         | Ch2 (GPU linked-list + block), Ch3 (CDROM), Ch4 (SPU), Ch6 (OTC) complete; Ch0/1 (MDEC) wired, lightly tested |
-| Timers 0/1/2      | Good         | Correct clock sources (sysclk, dotclock, hblank, sysclk/8), IRQ; sync-mode gating not yet implemented |
-| CDROM             | Good         | Async event-driven; GetStat, SetMode, GetID, disc region detection, real-game file reads verified |
-| SIO / Controller  | Good         | Digital pad protocol; keyboard→gamepad (WASD/SPACE/E/C/Z/X); memory card slots 1+2 |
-| GTE               | Good         | All 22 opcodes, correct math/saturation/UNR-divide; per-op cycle cost not yet enforced on the CPU |
-| GPU               | Good         | Polygons, rects, lines, textured, VRAM double-buffer, GP0 FIFO, CLUT; mask-bit + VRAM-readback gaps on rasterized primitives |
-| Renderer          | Good         | OpenGL 3.3, threaded double-buffered submission, 4-mode semi-transparency, texture-window masking |
-| Debugger / UI     | Good         | ImGui disassembler, breakpoints, exec trace, registers, per-category log windows |
-| SPU               | Good         | 24 voices, XA-ADPCM, ADSR, reverb, DMA, IRQ, SDL audio output |
-| MDEC              | Implemented  | IDCT/YUV-RGB/macroblock decode ported from DuckStation; not yet exercised by a real FMV game |
-| PCDrv             | Implemented  | Host filesystem side-channel for homebrew/dev builds |
+This is a real disc booting to its menu and playing its movies — not a claim of finished, stable
+gameplay.
+
+### Component status
+
+| Component | Status | Notes |
+|---|---|---|
+| CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch/load delay, MULT/DIV and GTE stalls |
+| I-Cache | Working | 256 lines × 4 words, tag + per-word valid bits |
+| RAM / BIOS ROM | Working | 2 MB + 1 KB scratchpad; SCPH-1001 and SCPH-7502 |
+| IRQ controller | Working | Edge-triggered I_STAT/I_MASK, every source wired |
+| Event scheduler | Working | Single authority; wrap-safe scheduling |
+| DMA | Working | All channels; linked-list and block transfers, completion interrupts |
+| Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
+| CDROM | Working | Async command/response model, disc region detection, XA audio decode |
+| SIO / controllers | Working | Digital pad, both memory card slots. No analog pad or multitap yet |
+| GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
+| GPU / renderer | Working | Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp display |
+| MDEC | Working | Full decode pipeline, exercised by real FMV playback |
+| PCDrv | Working | Host filesystem side-channel for homebrew |
+| Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
+| **SPU / audio** | **Broken** | DSP complete, sample clock wrong — see above |
+| Savestates | **Absent** | Not started |
 
 ---
 
 ## Debug UI
 
-The main SDL2 window is an ImGui DockSpace. All output goes through ImGui — no terminal logging.
+The SDL2 window is an ImGui dockspace; all output goes to windows inside it, nothing to the terminal.
 
-- **PS1 Display** — FBO rendered into a dockable/floatable ImGui window
-- **Disassembly** — Virtual 128-row list; PC highlight (yellow), breakpoint highlight (dark red), clickable BP dots, Go-To-Address, live execution trace with dump-to-file
-- **CPU Registers** — PC / SR / Cause / EPC / HI / LO + 32 GPRs with MIPS names; non-zero highlighted
-- **Breakpoints** — Add/remove/enable/disable breakpoints by address; click to jump disassembly
-- **Per-category log windows** — One per hardware category (CPU, GPU, CDROM, BIOS, DMA, IRQ, SPU, …); individually dockable, live level selector
-- **BIOS/game TTY** — Real printf-style output with argument substitution ($a1-$a3 + stack, MIPS o32 varargs)
-- **Keyboard shortcuts** — F5 run/pause, F11 single step
-- **Options menu** — Live log level selector (TRACE → SILENT)
-
-Multi-viewport enabled: any window can be dragged outside the main SDL2 window.
+- **PS1 Display** — the emulated video output, dockable and floatable
+- **VRAM Viewer** — the full 1024×512 VRAM with selectable decode (4/8/16/24 bpp), 24bpp byte-phase
+  shift, CLUT picking, mask-bit and greyscale views, pixel/texture-page grids, the active display area
+  outlined, zoom, pan, magnifier and an exact per-pixel readout
+- **Disassembly** — virtual list with PC and breakpoint highlighting, clickable breakpoint dots,
+  go-to-address, live execution trace with dump-to-file
+- **CPU Registers** — PC/SR/Cause/EPC/HI/LO and all 32 GPRs with ABI names
+- **Breakpoints** — address breakpoints plus read/write watchpoints
+- **Lua console** — scriptable debugging: breakpoints and watchpoints with callbacks, register and
+  memory reads, VRAM inspection, GPU/MDEC/DMA probe events. Scripts live in `scripts/`
+- **Per-category log windows** — one per hardware category, each with its own level selector
+- **BIOS/game TTY** — real `printf`-style output with argument substitution (o32 varargs)
+- **Shortcuts** — F5 run/pause, F11 single step. Multi-viewport: any window can be dragged out
 
 ---
 
 ## Architecture
 
 ```
-src/main.c                — SDL loop, 33868800/60 cycles/frame, ImGui DockSpace host
-
-src/cpu/
-  cpu_execution.c          — main CPU loop (DuckStation-style downcount)
-  cpu_instructions.c       — MIPS R3000A instruction execute
-  cpu_decode.c              — instruction decode
-  cpu_disasm.c              — disassembler
-  cpu_init.c                — CPU init, register reset
-  cpu_registers.c            — register file helpers
-  cpu_exceptions.c          — EXCEPTION_* handler, EPC/SR/Cause
-  cpu_bios.c                — A0/B0 syscall side-channel (LLE TTY capture + printf substitution)
-  cpu_icache.c               — 256-line 4-word instruction cache
+src/main.c                — host shell: SDL, GL context, audio device, threads, frame cap
+src/debug_ui.cpp          — ImGui debug interface (the only C++ in the project)
 
 src/core/
-  interconnect.c            — init, CDROM event scheduling, TTY buffer
-  bus.c                      — memory routing: load/store 32/16/8
-  bus_irq.c                  — IRQ edge-triggered controller (I_STAT / I_MASK)
-  ram.c                      — 2 MB RAM
-  bios.c                     — BIOS ROM load
-  dma.c                      — DMA channels (GPU ch2, CDROM ch3, SPU ch4, OTC ch6, MDEC ch0/1)
-  timers.c                   — PSX timers 0/1/2
-  sio.c                      — SIO / JOY controller protocol
-  controller.c               — keyboard → PSX gamepad mapping
-  mdec.c                     — Motion DECoder (IDCT/YUV-RGB, ported from DuckStation)
-  pcdrv.c                    — PC drive side-channel
-  debugger.c                 — CPU/memory breakpoint + watchpoint debugger
-  event_scheduler.c          — DuckStation-style event dispatch (VBlank, timers, CDROM)
+  system.c                — "run one frame": the machine's timing loop
+  interconnect.c          — machine wiring, TTY buffer
+  bus.c                   — memory routing + 256-entry hardware register dispatch
+  bus_irq.c               — edge-triggered interrupt controller
+  event_scheduler.c       — the single scheduling authority
+  dma.c                   — 7 DMA channels, linked-list and block transfers
+  timers.c                — timers 0/1/2, derived counters, sync modes
+  sio.c                   — controller and memory card protocol
+  controller.c            — keyboard to pad mapping
+  mdec.c                  — macroblock decoder
+  debugger.c              — breakpoints, watchpoints, execution trace
+  lua_debug.c             — Lua scripting surface for live debugging
+  pcdrv.c                 — host filesystem side-channel
+  ram.c / bios.c          — main RAM, BIOS ROM
+
+src/cpu/
+  cpu_execution.c         — instruction loop, downcount, interrupt checks
+  cpu_instructions.c      — R3000A instruction implementations
+  cpu_decode.c            — dispatch tables
+  cpu_exceptions.c        — exception entry, SR mode stack, EPC/Cause
+  cpu_icache.c            — instruction cache
+  cpu_bios.c              — BIOS syscall observation (TTY capture, call tracing)
+  cpu_disasm.c            — disassembler
+  cpu_init.c / cpu_registers.c
 
 src/gpu/
-  gpu.c                      — GPU init/reset/GP1/GPUSTAT
-  gpu_commands.c              — GP0 256-entry dispatch table, all draw commands
-  gpu_helpers.c                — GP0 helper utilities
-  renderer.c                   — OpenGL 3.3 renderer (VAO, shaders, VRAM blit)
-  vram.c                       — 1024×512 VRAM buffer management
+  gpu.c                   — GP1, GPUSTAT, CRTC, display mapping
+  gpu_commands.c          — GP0 dispatch table and every draw command
+  gpu_helpers.c           — command helpers
+  renderer.c              — OpenGL renderer, unified VRAM texture, GPU thread
+  vram.c                  — CPU-side VRAM model
 
-src/gte/
-  gte.c                        — GTE register I/O, command dispatch
-  gte_ops.c                     — all GTE operations
-
-src/cdrom/
-  cdrom.c                       — CDROM controller + command dispatch
-  cdrom_commands.c              — all CDROM command handlers
-  cdrom_disc.c                  — disc image read (CUE/BIN)
-  cdrom_audio.c                 — CDROM audio (XA/CDDA)
-
-src/spu/
-  spu.c                         — SPU init/register I/O
-  spu_voice.c                   — 24-voice management
-  spu_adsr.c                    — ADSR envelope
-  spu_mixing.c                  — stereo mix output
-  spu_dma.c                     — SPU DMA transfers
-  spu_irq.c                     — SPU IRQ logic
-
-src/utils/
-  log.c                         — 17-category / 6-level logger
-  rxi_log.c                     — rxi log backend
-
-src/debug_ui.cpp                — ImGui debug UI (C++)
+src/gte/                  — geometry transformation engine (registers + all 22 operations)
+src/cdrom/                — controller, commands, disc images (CUE/BIN), XA/CDDA audio
+src/spu/                  — voices, ADSR, reverb/mixing, DMA, IRQ
+src/utils/                — logging
 ```
 
-### Memory Map (physical addresses)
+### Memory map (physical addresses)
 
 | Region | Range |
 |--------|-------|
 | RAM | 0x00000000 – 0x001FFFFF |
 | Scratchpad | 0x1F800000 – 0x1F8003FF |
 | SIO / JOY | 0x1F801040 – 0x1F80104F |
-| IRQ regs | 0x1F801070 – 0x1F801077 |
+| IRQ registers | 0x1F801070 – 0x1F801077 |
 | DMA | 0x1F801080 – 0x1F8010FF |
 | Timers | 0x1F801100 – 0x1F80112F |
 | CDROM | 0x1F801800 – 0x1F801803 |
@@ -196,32 +205,49 @@ src/debug_ui.cpp                — ImGui debug UI (C++)
 | EXP2 (BIOS TTY) | 0x1F802000 – 0x1F803FFF |
 | BIOS ROM | 0x1FC00000 – 0x1FC7FFFF |
 
+### Design notes
+
+- **Pure C99**, no allocation in hot paths, structs embedded rather than heap-allocated. The only C++
+  is the ImGui wrapper.
+- **One timing authority**: `system.c` runs the machine until the VBlank event closes the frame.
+  Everything with a deadline — timers, CDROM, DMA slices, VBlank — is a scheduled event.
+- **Counters are derived, not stepped**: a timer's value is computed from the global cycle counter on
+  read, so a game polling it always sees continuous motion and there is no per-tick loop.
+- **One VRAM**: a single GPU texture is the rasterization target, the upload destination and the
+  scanout source, with the PSX mask bit carried in its alpha channel.
+- **Threads**: emulation on the main thread, GL on a render thread, audio on its own thread. Frames
+  are handed over as double-buffered command lists.
+- **LLE throughout**: BIOS syscalls run for real; the A0/B0/C0 hooks only watch.
+
 ---
 
 ## Logging
 
-17 categories: `SYSTEM CPU IRQ DMA GPU CDROM TIMER BIOS INTERCONNECT RENDERER EVENT GTE VRAM RAM DEBUG MDEC SPU`
+17 categories: `SYSTEM CPU IRQ DMA GPU CDROM TIMER BIOS INTERCONNECT RENDERER EVENT GTE VRAM RAM
+DEBUG MDEC SPU` — 6 levels: `SILENT ERROR WARN INFO DEBUG TRACE`.
 
-6 levels: `SILENT ERROR WARN INFO DEBUG TRACE`
+Macro pattern: `LOG_<CATEGORY>_<LEVEL>(fmt, ...)`, e.g. `LOG_GPU_DEBUG("gp0=0x%08x", v)`. The default
+level is INFO because DEBUG and TRACE log per DMA transfer, per GP0 command and per macroblock.
 
-Macro pattern: `LOG_<CATEGORY>_<LEVEL>(fmt, ...)` — e.g. `LOG_GPU_DEBUG("gp0=0x%08x", v)`
+---
+
+## Documentation in this repo
+
+- `GAP_ANALYSIS_REFACTOR_2026-07-13.md` — per-subsystem state, open gaps, and the work queue
+- `GPU_GAP_ANALYSIS_2026-07-15.md` — GPU deep dive: renderer architecture, invariants, gaps
+- `CHANGELOG.md` — what changed and why, including the root cause of each non-obvious fix
+- `DOCS/` — the hardware documentation this implementation is written against
 
 ---
 
 ## References
 
-### Documentation
-- [PSX-SPX (Nocash)](https://psx-spx.consoledev.net/) — primary hardware reference: CPU, GPU, DMA, timers, CDROM, SPU, memory map
-- [Nocash PSX](http://problemkaputt.de/psx.htm) — alternate mirror + additional undocumented register notes
+Hardware behaviour is implemented from the documentation in `DOCS/` (PSX-SPX and related notes) and
+from Lionel Flandrin's *PlayStation Emulation Guide*. Where hardware documentation was ambiguous, the
+DuckStation and PCSX-Redux sources were consulted as a second opinion on intended behaviour.
 
-### Reference Emulators
-- [DuckStation](https://github.com/stenzek/duckstation) — CPU cycle model (downcount), event scheduler architecture, MFHI/MFLO stall latencies, GPU command dispatch table pattern, MDEC algorithms, CDROM sector-buffer semantics
-- [PCSX-Redux](https://github.com/grumpycoders/pcsx-redux) — ImGui IDE-style debug UI architecture, FBO display pattern, disassembler window design
-
-### Guide
-- *PlayStation Emulation Guide* by Lionel Flandrin (`guide.tex`, ~11K lines) — primary implementation reference used throughout: CPU, DMA, GPU commands, OpenGL renderer, debugger, I-cache. Original emulator written in Rust ([simias/psx-rs](https://github.com/simias/psx-rs)); ZonistationOne adapted to C.
-
-*Reference emulators used for understanding hardware behavior only. All code is original.*
+The MDEC's transform stage (IDCT, RLE decode, YUV→RGB) is ported from DuckStation, with attribution in
+the file header. Everything else is this project's own implementation.
 
 ---
 
