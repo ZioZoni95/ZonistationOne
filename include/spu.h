@@ -15,6 +15,9 @@ struct Interconnect;
 #define ADPCM_BLOCK_SIZE        16          /* bytes per ADPCM block */
 #define SAMPLE_RATE             44100       /* output sample rate */
 #define CPU_TICKS_PER_SPU_TICK  768         /* 0x300 at 33.8688MHz */
+/* Scheduled SPU event period: 64 samples (~1.45 ms). Register accesses catch up
+ * on demand, so this bounds ring drain only, not accuracy. */
+#define SPU_EVENT_PERIOD_CYCLES (CPU_TICKS_PER_SPU_TICK * 64)
 #define TRANSFER_TICKS_PER_HALFWORD 16
 #define CAPTURE_BUFFER_SIZE     0x400       /* halfwords per channel */
 #define NUM_CAPTURE_CHANNELS    4
@@ -275,7 +278,9 @@ typedef struct Spu {
     int      sample_buf_head;   /* read position (consumer) */
     int      sample_buf_tail;   /* write position (producer) */
     int      sample_buf_count;  /* approximate count — debug display only */
-    uint64_t spu_tick_counter;  /* accumulated CPU cycles for SPU timing */
+    uint64_t spu_tick_counter;  /* leftover CPU cycles below one sample period */
+    uint32_t last_update_cycle; /* cpu_cycle_counter at the last catch-up */
+    uint32_t dropped_samples;   /* generated but discarded: output ring was full */
 
     /* Debug/logging */
     uint32_t total_samples_generated;
@@ -283,9 +288,6 @@ typedef struct Spu {
     int32_t  peak_level_left;   /* peak level for audio meter */
     int32_t  peak_level_right;
 
-    /* SPU dedicated thread (Phase 1 threading refactor) */
-    SDL_Thread*  spu_thread;
-    SDL_atomic_t spu_stop;     /* set to 1 to signal thread exit */
 } Spu;
 
 /* --- Public API --- */
@@ -330,8 +332,11 @@ void     spu_voice_sweep_tick(SpuVoice* voice);
 int      spu_adsr_mix(SpuVoice* voice);
 
 /* SPU dedicated thread management */
-void     spu_thread_start(Spu* spu, struct Interconnect* inter);
-void     spu_thread_stop(Spu* spu);
+/* Generate every sample owed since the last call, from the emulated clock.
+ * Call before mutating or reading SPU state (flush-before-mutate) and from the
+ * scheduled SPU event; both run on the emulation thread, so voice registers and
+ * the key-on/key-off latch are never read while another thread writes them. */
+void     spu_catch_up(struct Interconnect* inter);
 
 /* SPU sample buffer management (legacy: was driven by EVQ_SPU; now used internally by SPU thread) */
 void     spu_step(struct Interconnect* inter, uint32_t cpu_cycles);

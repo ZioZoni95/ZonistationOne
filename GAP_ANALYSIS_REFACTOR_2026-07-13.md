@@ -29,14 +29,14 @@ correctness or its ability to run software.
 | GPU / renderer | Working | Mask-bit *test*, GP0(C0)/(80) readback, coarse CRTC, no FIFO timing, GPUSTAT h-res bit order |
 | GTE | Working | — |
 | CDROM | Working | Async pacing is coarse |
-| **SPU / audio** | **Broken** | **Sample generation is wall-clock driven; the emulated-time path is dead code** |
+| SPU / audio | Working | Emulated-clock generation landed 2026-07-28; output quality not yet surveyed |
 | MDEC | Working | — |
 | PCDRV | Working | — |
 | Savestates | **Absent** | Whole feature |
 
 Live status: the BIOS boots to its menu; `Ace Combat 2 (Europe)` boots, plays its FMV intro
-correctly, and reaches its textured main menu and in-engine 3D view. Sound is the one subsystem that
-does not work at all.
+correctly, and reaches its textured main menu and in-engine 3D view. Audio generation is now paced by
+the emulated clock; how it actually *sounds* across a range of games has not been surveyed yet.
 
 ---
 
@@ -165,12 +165,11 @@ SIO, three CDROM events (command/first response, drive tick, second response), M
 Scheduling comparisons use signed deltas so they stay correct across the 32-bit cycle-counter wrap
 (~127 s).
 
-Two slots are intentionally inert and should stay documented rather than "fixed": `EVQ_DMA_CDROM`
-(the CDROM transfer itself is synchronous; the event only exists as a completion marker) and
-`EVQ_SPU` (sample generation currently lives on its own thread — see §11, where that is the problem).
-`EVQ_MDEC` is likewise unused: MDEC is driven entirely by its DMA channels.
+`EVQ_SPU` drives SPU sample generation in 64-sample batches (§11). `EVQ_DMA_CDROM` is intentionally
+inert and should stay documented rather than "fixed": the CDROM transfer itself is synchronous, and the
+event exists only as a completion marker. `EVQ_MDEC` resumes sliced MDEC DMA.
 
-**Open**: none as a scheduler defect. `EVQ_SPU` becomes live work as part of §11.
+**Open**: none tracked.
 
 ---
 
@@ -283,54 +282,41 @@ resampling from 37800/18900 Hz into the 44100 Hz audio FIFO.
 
 ---
 
-## 11. SPU / audio — **the one broken subsystem**
+## 11. SPU / audio
 
-**Files**: `spu_mixing.c` (454L), `spu.c` (374L), `spu_voice.c` (319L), `spu_adsr.c` (163L),
+**Files**: `spu_mixing.c` (363L), `spu.c` (374L), `spu_voice.c` (319L), `spu_adsr.c` (163L),
 `spu_dma.c` (125L), `spu_irq.c` (50L).
 
-**What is implemented is genuinely complete**: 24 voices with ADPCM decode and Gaussian
-interpolation, the full ADSR state machine with linear/exponential phases and the rate tables, the
-32-register reverb (IIR filters, accumulator taps, feedback comb, correct SPU-RAM delay-line
-addressing), noise generation with the per-voice noise mode, pitch modulation, SPU DMA in both
-directions, and the IRQ9 address watch. None of it is stubbed.
+**State**: 24 voices with ADPCM decode and Gaussian interpolation, the full ADSR state machine with
+linear/exponential phases and the rate tables, the 32-register reverb (IIR filters, accumulator taps,
+feedback comb, correct SPU-RAM delay-line addressing), noise with the per-voice noise mode, pitch
+modulation, SPU DMA both directions, and the IRQ9 address watch. None of it is stubbed.
 
-**The defect is the clock, not the DSP.** There are two sample producers and the correct one is dead:
+Sample generation is driven by the emulated clock (2026-07-28): one stereo sample per 768 CPU cycles,
+produced by a scheduled `EVQ_SPU` event in 64-sample batches, plus `spu_catch_up()` at every SPU
+register read and write so a write flushes everything it owes at the old register values before
+mutating state. Production and register access are therefore on the same thread, which removes the
+key-on/key-off latch race entirely and makes the CD-audio FIFO single-threaded end to end. Output
+reaches SDL through a single-producer/single-consumer ring; a sample is still generated when that ring
+is full, because the DSP state has to advance regardless — only the audible result is dropped, counted
+in `dropped_samples`.
 
-- `spu_step(inter, cpu_cycles)` (`spu_mixing.c:333`) is the emulated-time producer: one stereo sample
-  per 768 CPU cycles (`CPU_TICKS_PER_SPU_TICK`, i.e. 33.8688 MHz / 44100). **It has zero call sites.**
-- The live producer is `spu_thread_main` (`spu_mixing.c:276`), started from `main.c`. It is
-  wall-clock: it looks at the free space in the output ring, generates up to 512 samples, and sleeps
-  1 ms when the ring is nearly full.
+**What it replaced**, kept because the shape of the bug is instructive: two producers existed and the
+correct one was dead. `spu_step()` had zero call sites, while a wall-clock thread generated whatever
+the output ring had room for and slept 1 ms. Everything that advances per sample therefore advanced at
+the host's rate while the guest wrote registers at the emulated rate — two clocks, drifting
+permanently. Measured after the fix: 106368 samples per 81 698 760 emulated cycles against 106378
+expected (−0.01%), ring occupancy steady at 192-512 of 4096, no drops after the start-up transient.
 
-Consequences, all of which match the symptom "sound is completely broken":
+**Open**:
+1. **Output quality is unsurveyed.** The clock is right and the DSP is complete, but nobody has
+   listened critically across a range of titles yet. `emu.spu_stats()` and `scripts/spu_rate.lua`
+   are the instruments for the pacing side; the DSP side needs ears.
+2. **Start-up transient drops samples** (~2200 in the measured run, all in one burst before the audio
+   device starts draining). Harmless, but a cleaner start would prime the ring or delay the first SPU
+   event until the device is running.
 
-1. **Voice state advances at host rate, not guest rate.** ADSR envelopes, ADPCM sample positions, the
-   reverb delay line and the CD-audio FIFO all step once per generated sample, and samples are
-   generated as fast as the audio device drains them. Register writes, key-on and key-off arrive from
-   the CPU thread at *emulated* rate. The two clocks are independent and drift permanently, so note
-   lengths and envelope shapes are wrong whenever the emulator is not at exactly 100% of real time
-   (measured ≈87% during FMV playback).
-2. **No flush-before-mutate.** A register write should first generate the samples owed up to the
-   current cycle, then change state. With no cycle-driven generation there is nothing to flush, so
-   every write applies to whatever the audio thread happens to be producing.
-3. **Key-on/key-off has no atomic hand-off.** The audio thread reads voice registers without a lock
-   while the CPU writes them. For volume or pitch a stale read is harmless; for the KON/KOFF latch it
-   means a note can be missed entirely or triggered twice.
-4. **CD audio inherits the same problem** — the XA/CDDA FIFO is filled at emulated rate and drained
-   once per generated sample at host rate.
-
-The SDL side is fine and is not the cause: callback-driven output, 44100 Hz, `AUDIO_S16SYS`, stereo,
-512-frame buffer, silence padding on underrun.
-
-**Fix direction**: generate samples from emulated time — either a scheduled event every 768 cycles
-(the `EVQ_SPU` slot that exists for exactly this) or a per-frame batch sized from elapsed cycles —
-reusing `spu_step`, which is already written and correct. The ring buffer stays and becomes a true
-single-producer/single-consumer queue between the emulation thread and the SDL callback; the
-wall-clock thread goes away; register writes generate pending samples first. Host pacing is then the
-frame limiter's job, with the ring absorbing jitter.
-
-**Priority**: **Critical** — the only subsystem with a known structural defect and a full user-visible
-symptom.
+**Priority**: Medium — verification, not repair.
 
 ---
 
@@ -398,15 +384,16 @@ on another thread, so a save has to read it back and a load has to re-upload it)
 | Timing unified: derived-counter timers, `system.c` frame driver (`df37550`) | 2026-07-25 |
 | MDEC scale-matrix transpose; DMA IRQ3 line (`7923c52`); block transfers read at kick (`7bf783e`) | 2026-07-26 |
 | FMV reaches the display: stale `is_viewer` flag (`43bbb0e`); real mask bit from the rasterizer (`124e675`) | 2026-07-27 |
+| SPU sample generation moved onto the emulated clock; wall-clock audio thread removed | 2026-07-28 |
 
 ### Open, in the order they should be picked up
 
-1. **SPU on emulated time** (§11) — Critical. The only broken subsystem.
-2. **Savestates** (§14) — High. Also unlocks reproducible testing.
-3. **GPU: mask-bit test, GP0(C0)/(80) readback, texture read-shadow** (§8.1-8.3) — High.
+1. **Savestates** (§14) — High. Also unlocks reproducible testing.
+2. **GPU: mask-bit test, GP0(C0)/(80) readback, texture read-shadow** (§8.1-8.3) — High.
    All three are the same underlying job: give the GL side a way to read the unified texture back.
-4. **Per-scanline CRTC** (§8.4) — Medium. Unblocks Timer0's hblank gate (§5) and is a prerequisite
+3. **Per-scanline CRTC** (§8.4) — Medium. Unblocks Timer0's hblank gate (§5) and is a prerequisite
    for any GPU timing model.
+4. **Audio quality survey** (§11.1) — Medium.
 5. **GPUSTAT h-resolution bit order** (§8.6) — Medium, small and self-contained.
 6. **Analog pad** (§7.1) — Medium, once a game needs it.
 7. **MDEC channel kick queueing** (§4.1) — Medium.

@@ -83,12 +83,15 @@ Useful environment variables:
 The BIOS boots to its menu. `Ace Combat 2 (Europe)` boots from a real disc image, plays its FMV intro
 correctly, and reaches its textured main menu and an in-engine 3D cockpit view.
 
-**Sound does not work.** The SPU's DSP is complete — 24 voices with ADPCM decode and Gaussian
-interpolation, the full ADSR state machine, the 32-register reverb, noise, pitch modulation, DMA and
-the IRQ address watch — but sample generation is driven by wall-clock time on its own thread instead
-of by emulated time, while the game writes its registers on the emulation thread. The two clocks drift
-apart permanently, so envelopes, note lengths and CD audio are all wrong. The emulated-time producer
-already exists in the code and simply has no caller. This is the next thing being fixed.
+**Audio now runs on the emulated clock** (July 28 2026). The SPU's DSP was already complete — 24
+voices with ADPCM decode and Gaussian interpolation, the full ADSR state machine, the 32-register
+reverb, noise, pitch modulation, DMA and the IRQ address watch — but sample generation was driven by
+wall-clock time on its own thread while the game wrote its registers on the emulation thread, so the
+two clocks drifted apart permanently and envelopes, note lengths and CD audio were all wrong.
+Generation is now driven by emulated time: a scheduled event in 64-sample batches, plus a catch-up on
+every SPU register access so a write flushes the audio it owes before changing state. Measured after
+the change: 106368 samples per 81 698 760 emulated cycles, against 106378 expected — 0.01% off.
+Output quality across a range of games is still to be evaluated.
 
 **Savestates do not exist yet.**
 
@@ -119,7 +122,7 @@ gameplay.
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
-| **SPU / audio** | **Broken** | DSP complete, sample clock wrong — see above |
+| SPU / audio | Working | Emulated-clock sample generation; output quality not yet surveyed |
 | Savestates | **Absent** | Not started |
 
 ---

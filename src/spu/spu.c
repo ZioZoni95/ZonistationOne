@@ -142,6 +142,9 @@ void spu_set_control(Spu* spu, uint16_t value) {
 
 uint16_t spu_read16(struct Interconnect* inter, uint32_t addr) {
     Spu* spu = &inter->spu;
+    /* Bring the DSP up to now before reporting anything derived from it:
+     * envelope volumes, the transfer address, the status bits. */
+    spu_catch_up(inter);
     int off = spu_offset_for_addr(addr);
     if (off < 0) return 0;
 
@@ -280,6 +283,10 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
 
 void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
     Spu* spu = &inter->spu;
+    /* Flush before mutate: everything owed up to this cycle is generated with
+     * the old register values, so a write cannot retroactively change audio the
+     * guest already asked for. */
+    spu_catch_up(inter);
     int off = spu_offset_for_addr(addr);
     if (off < 0) return;
 

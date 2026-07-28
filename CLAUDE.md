@@ -167,11 +167,10 @@ Key format conventions:
 - SIO: digital pad, both memory card slots
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
+- SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
 
 ## Known Broken / Absent
 
-- **SPU audio**: DSP is complete but sample generation runs on wall-clock time instead of emulated
-  time (`spu_step()` is the correct producer and has no caller). Sound is unusable.
 - **Savestates**: not implemented.
 - GPU: mask-bit *test* not applied to rasterized primitives; GP0(C0)/GP0(80) read the CPU-side VRAM;
   texture sampling reads a separate mirror; CRTC ticks once per frame.

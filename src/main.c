@@ -321,7 +321,6 @@ int main(int argc, char* argv[]) {
     sio_set_controller_connected(&inter.sio, true);
 
     audio_init(&inter.spu);
-    spu_thread_start(&inter.spu, &inter);
 
     system_init(&inter, &cpu);
 
@@ -395,7 +394,6 @@ int main(int argc, char* argv[]) {
 
     // --- Cleanup ---
     cpu_dump_exec_trace(&cpu, "logs/exec_trace.log");
-    spu_thread_stop(&inter.spu);
     audio_shutdown();
     renderer_stop_gpu_thread(&inter.gpu.renderer);
     /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */

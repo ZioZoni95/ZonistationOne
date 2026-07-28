@@ -8,6 +8,7 @@
  */
 #include "lua_debug.h"
 #include "interconnect.h"
+#include "spu.h"
 #include "cpu.h"
 #include "debugger.h"
 #include "ram.h"
@@ -407,6 +408,22 @@ static int l_emu_draw_area(lua_State* L) {
     return 6;
 }
 
+/* SPU output-path health: samples produced from the emulated clock, samples
+ * dropped because the output ring was full, and how full that ring is right
+ * now. Sample count against emulated time is the direct check that generation
+ * is paced by the guest and not by the host. */
+static int l_emu_spu_stats(lua_State* L) {
+    Spu* spu = &g_inter->spu;
+    int head = spu->sample_buf_head, tail = spu->sample_buf_tail;
+    int used = (tail - head + SPU_SAMPLE_BUFFER_SIZE) % SPU_SAMPLE_BUFFER_SIZE;
+    lua_pushinteger(L, (lua_Integer)spu->total_samples_generated);
+    lua_pushinteger(L, (lua_Integer)spu->dropped_samples);
+    lua_pushinteger(L, (lua_Integer)used);
+    lua_pushinteger(L, (lua_Integer)SPU_SAMPLE_BUFFER_SIZE);
+    lua_pushinteger(L, (lua_Integer)spu->total_key_on_events);
+    return 5;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
@@ -433,6 +450,7 @@ static const luaL_Reg s_emu_funcs[] = {
     {"gp0_word",          l_emu_gp0_word},
     {"gpustat",           l_emu_gpustat},
     {"draw_area",         l_emu_draw_area},
+    {"spu_stats",         l_emu_spu_stats},
     {"vram_upload_rect",  l_emu_vram_upload_rect},
     {"gpu_pool",          l_emu_gpu_pool},
     {"mdec_block",        l_emu_mdec_block},
