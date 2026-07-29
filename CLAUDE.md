@@ -179,3 +179,50 @@ Key format conventions:
 See `GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
 over this file for status.
+
+---
+
+## Picking this up on another machine
+
+Development moved off WSL because the debug interface could not keep real time there — the emulation
+core could, with the panels closed. On a native Linux box, re-measure before assuming anything about
+speed.
+
+**Build dependencies** (Ubuntu/Debian):
+
+```sh
+sudo apt install build-essential libsdl2-dev libglew-dev libgl1-mesa-dev
+make clean && make
+```
+
+Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
+`duckstation_ref/` and `pcsx-redux/` as submodules — they are consulted for behaviour, never linked.
+
+**State as of 2026-07-29** (branch `debug`):
+
+- Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly, and the
+  audio stream handed to the sound device is clean.
+- The last session fixed seven documented defects across CDROM and SPU (commit `0121813`) and rewrote
+  the SPU reverb from the hardware documentation (`73542de`).
+- Read `docs/study/README.md` first: it carries the combined work queue from a full documentation
+  study of the CDROM and SPU subsystems, ordered by impact per unit of effort, plus the list of things
+  already verified correct so they are not re-investigated.
+- `GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `GPU_GAP_ANALYSIS_2026-07-15.md` hold per-subsystem state.
+  `docs/ui/` holds the interface direction the debug UI is being rebuilt against.
+
+**Next up, in order**: the VSync timeout mechanism (item 9 of the study queue — it explains the
+compressed boot sequence and points at the parked CPU memory-timing cost model), then savestates, then
+the three GPU items that are really one job (cross-thread GL readback).
+
+**Traps that have each cost a session**:
+
+- The Makefile has no header dependency tracking. After editing anything in `include/`, run
+  `make clean && make` — an incremental build after a struct change produces a binary with mixed
+  layouts, which segfaults or misbehaves silently.
+- Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
+  active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
+  time" that was later withdrawn.
+- The BIOS must match the disc's region. A PAL disc with the US BIOS is rejected exactly as on
+  hardware, and the symptom — sitting at the BIOS menu — looks like a boot regression.
+- `include/renderer.h` is CRLF. Editing it with a script that rewrites the whole file converts it to
+  LF and produces a 750-line diff.

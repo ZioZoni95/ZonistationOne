@@ -60,10 +60,21 @@ expected — that one belongs to item 9.
 
 8. **Drive pacing model** — the drive must keep delivering while an interrupt is pending, sectors must
    be able to be missed, and the readable buffer must advance at INT1 delivery rather than at load.
-9. **VSync / VBlank delivery** — the lead for the compressed boot sequence.
+9. **VSync's timeout expires every call** — the lead for the compressed boot sequence, now with a
+   mechanism. The shell's VSync waits for the kernel's vblank counter to reach a target, with a
+   timeout of **32768 loop iterations** (`li t6, 0x8000` at `0x80067918`, decremented at `0x80067944`,
+   the printf reached at `0x8006795c`). The loop body is about six instructions, and the CPU charges
+   roughly one cycle per instruction because the memory-access cost model is the one parked in §1 of
+   the gap analysis — so the timeout expires after ≈196 000 cycles where a PAL frame lasts 680 823.
+   It therefore fires on every call, VSync returns early, and every frame-counted animation runs fast.
+   Measured symptom: 1032-3051 `VSync: timeout` messages per run, and the interrupt chain itself is
+   healthy (I_STAT latches and is acknowledged, I_MASK bit 0 set, SR.IEc and SR.IM2 set). The
+   arithmetic is a hypothesis until the loop's real cycle cost is measured.
 10. **Host audio when below 100% of real time** — DuckStation's answer is SoundTouch time-stretch
     driven by buffer fullness (tempo changes, pitch does not); Redux's is to pace the emulator from the
-    device. We currently have neither.
+    device. We currently have neither. Worth having as insurance, but it is no longer the explanation
+    for the crackle heard during this session: that was the debug interface under WSL, and the core
+    keeps real time with the panels closed.
 11. **Capture buffers into SPU RAM** — four 1 KB regions at 0x000-0xFFF that games read for lip-sync;
     we write them to a private array with a byte/halfword indexing confusion.
 12. **SPU transfer timing** — DMA4 moves whole blocks instantly, so SPUSTAT's busy and DMA-request bits

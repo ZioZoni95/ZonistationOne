@@ -74,7 +74,8 @@ Ordered so that each phase is independently useful and the risky parts come last
 | 5 | VRAM CPU-vs-GPU diff | the cross-thread GL readback already tracked in `GPU_GAP_ANALYSIS_2026-07-15.md` §3.2 |
 | 6 | Pinned Lua watches | per-frame evaluation with error and cost containment |
 
-**Standing constraint**: the emulator currently runs at 85-95% of real time, and every panel that
-samples something per frame spends part of the budget that is already short. New views must either
-read counters that exist anyway or do their work only while visible — the pattern the VRAM viewer
-already follows.
+**Standing constraint**: the debug interface is what costs, not the core. With every panel closed the
+emulator keeps real time; with the log windows and inspectors open under WSL it does not, and audio
+underruns follow. So new views must either read counters that exist anyway or do their work only while
+visible — the pattern the VRAM viewer already follows — and the panel set as a whole needs a measured
+per-frame budget rather than an assumed one.

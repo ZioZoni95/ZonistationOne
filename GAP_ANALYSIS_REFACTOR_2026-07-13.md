@@ -35,8 +35,14 @@ correctness or its ability to run software.
 | Savestates | **Absent** | Whole feature |
 
 Live status: the BIOS boots to its menu; `Ace Combat 2 (Europe)` boots, plays its FMV intro
-correctly, and reaches its textured main menu and in-engine 3D view. Audio generation is now paced by
-the emulated clock; how it actually *sounds* across a range of games has not been surveyed yet.
+correctly, and reaches its textured main menu and in-engine 3D view. Audio generation is paced by the
+emulated clock, and the output stream is clean after the 2026-07-29 fixes; how it sounds across a
+range of games has not been surveyed.
+
+**Speed**: real time is kept with the debug interface closed. With the log windows and inspector
+panels open under WSL it is not, and audio then underruns. A "85-95% of real time" figure recorded
+earlier was measured with stderr logging and per-vblank Lua probes running and has been withdrawn —
+it described the instrumentation, not the emulator.
 
 ---
 

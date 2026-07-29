@@ -100,11 +100,13 @@ claimed eight times their real sample count, so most of what reached the audio q
 playback was undecoded buffer contents. What the emulator hands the sound device is now clean — a
 capture of it plays back correctly end to end.
 
-**What is not solved**: the emulator runs at roughly 85-95% of real time on the development machine,
-so it produces fewer than 44100 samples per real second and the device's callback pads the difference
-with silence, heard as crackle. That is a throughput problem, not an audio one — profiling puts
-19.5 ms of a 20.1 ms PAL frame inside the emulation core itself, with the debug UI and logging
-measured as negligible.
+**On speed**: the emulator keeps real time with the debug interface closed. Running it with the log
+windows and inspector panels open, on WSL, does not — and when audio falls behind, the device's
+callback pads the difference with silence, heard as crackle. Earlier notes here quoted "85-95% of real
+time" as if that were the emulator's speed; that figure was measured with stderr logging and
+per-vblank probes active, which cost more than the thing they were measuring, and it has been
+withdrawn. What the debug interface costs when open, on a machine that is not WSL, has not been
+measured yet.
 
 **Savestates do not exist yet.**
 

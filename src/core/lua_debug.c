@@ -451,6 +451,18 @@ static int l_emu_host_ms(lua_State* L) {
     return 1;
 }
 
+/* Interrupt controller state: I_STAT (latched requests), I_MASK (enables), and
+ * the per-source line levels. A source that latches in I_STAT but is masked, or
+ * that stays latched forever, means the guest's handler is not running — which
+ * looks from the guest's side like an event that never arrives. */
+static int l_emu_irq(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->irq_status);
+    lua_pushinteger(L, (lua_Integer)g_inter->irq_mask);
+    lua_pushinteger(L, (lua_Integer)(uint32_t)g_cpu->sr);
+    lua_pushinteger(L, (lua_Integer)(uint32_t)g_cpu->cause);
+    return 4;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
@@ -480,6 +492,7 @@ static const luaL_Reg s_emu_funcs[] = {
     {"spu_stats",         l_emu_spu_stats},
     {"cd_audio",          l_emu_cd_audio},
     {"host_ms",           l_emu_host_ms},
+    {"irq",               l_emu_irq},
     {"vram_upload_rect",  l_emu_vram_upload_rect},
     {"gpu_pool",          l_emu_gpu_pool},
     {"mdec_block",        l_emu_mdec_block},
