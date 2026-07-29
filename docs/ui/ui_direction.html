@@ -1,0 +1,556 @@
+<title>ZoniStation One — UI direction</title>
+<style>
+  :root {
+    --ground: #0E1117;
+    --panel: #161B24;
+    --panel-2: #1B2130;
+    --line: #242C3A;
+    --line-soft: #1E2532;
+    --text: #DDE4F0;
+    --muted: #8792A6;
+    --faint: #5C6579;
+    --data: #35C3F0;
+    --audio: #FF5C8A;
+    --ok: #4CC38A;
+    --warn: #E8B33A;
+    --crit: #E5484D;
+    --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", "SF Mono", Consolas, monospace;
+    --ui: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font-family: var(--ui);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 1320px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  .intro { margin-bottom: 28px; max-width: 68ch; }
+  .intro h1 {
+    font-size: 21px; font-weight: 620; letter-spacing: -0.01em; margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .intro p { margin: 0; color: var(--muted); font-size: 13.5px; }
+  .intro .note { margin-top: 10px; font-size: 12.5px; color: var(--faint); }
+
+  .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.11em;
+    color: var(--faint); font-weight: 600;
+  }
+
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---- app shell ---- */
+  .app {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--panel);
+    box-shadow: 0 24px 60px -30px #000;
+  }
+
+  /* machine bar */
+  .machinebar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 9px 14px;
+    background: linear-gradient(180deg, #1A2130, #141A25);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand b { font-weight: 650; letter-spacing: -0.01em; }
+  .brand span { font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 11px;
+    padding: 2px 7px; border-radius: 3px;
+    border: 1px solid var(--line); background: #10151E; color: var(--muted);
+  }
+  .chip b { color: var(--text); font-weight: 500; }
+
+  .vitals { margin-left: auto; display: flex; gap: 16px; align-items: center; }
+  .vital { display: flex; flex-direction: column; gap: 2px; min-width: 78px; }
+  .vital .v { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .vital .bar { height: 3px; background: var(--line-soft); border-radius: 2px; overflow: hidden; }
+  .vital .bar i { display: block; height: 100%; }
+
+  .v.warnv { color: var(--warn); }
+  .v.okv { color: var(--ok); }
+  .v.audiov { color: var(--audio); }
+
+  /* body grid */
+  .grid {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr) 300px;
+    min-height: 560px;
+  }
+
+  /* mode rail */
+  .rail { background: #12161F; border-right: 1px solid var(--line); padding: 10px 8px; }
+  .rail .lbl { padding: 0 8px 8px; display: block; }
+  .mode {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 9px; border-radius: 4px; color: var(--muted);
+    font-size: 13px; cursor: default; border-left: 2px solid transparent;
+  }
+  .mode .k { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-left: auto; }
+  .mode.on { background: #1B2434; color: var(--text); border-left-color: var(--data); }
+  .mode.audio.on { border-left-color: var(--audio); }
+  .mode:hover { background: #171E2B; }
+
+  /* stage */
+  .stage { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+  /* viewport — the emulated screen, present in every mode */
+  .viewport {
+    display: grid; grid-template-columns: minmax(0, 1fr) 168px; gap: 12px;
+    align-items: start;
+  }
+  .screen {
+    position: relative; aspect-ratio: 4 / 3; border: 1px solid var(--line);
+    border-radius: 4px; overflow: hidden; background: #05070B;
+  }
+  /* stand-in for the emulated picture: sky over a deck, letterboxed 320x160 */
+  .screen .pic {
+    position: absolute; inset: 16.7% 0;      /* 40 of 240 lines top and bottom */
+    background:
+      linear-gradient(180deg, #1B3550 0%, #35597C 42%, #7C93A6 68%, #52606B 69%, #3A454E 100%);
+  }
+  .screen .pic::after {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 60% at 62% 34%, #C9D6E0 0 6%, transparent 55%),
+      linear-gradient(94deg, transparent 38%, #16202B 39% 41%, transparent 42%);
+    opacity: .8;
+  }
+  .screen .bands { position: absolute; inset: 0; }
+  .screen .bands i { position: absolute; left: 0; right: 0; height: 16.7%; background: #000; }
+  .screen .bands i.t { top: 0; } .screen .bands i.b { bottom: 0; }
+  .screen .scan {
+    position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(180deg, #0000 0 2px, #00000055 2px 3px);
+    mix-blend-mode: multiply;
+  }
+  .screen .osd {
+    position: absolute; left: 8px; bottom: 8px; display: flex; gap: 6px;
+    font-family: var(--mono); font-size: 10px; color: #C9D6E0;
+  }
+  .screen .osd span { background: #000A; padding: 1px 5px; border-radius: 2px; }
+  .screen .corner {
+    position: absolute; right: 8px; top: 8px; font-family: var(--mono);
+    font-size: 10px; color: var(--ok); background: #000A; padding: 1px 5px; border-radius: 2px;
+  }
+
+  .vpside { display: flex; flex-direction: column; gap: 8px; }
+  .vpside .card .body { padding: 8px 9px; }
+  .vpbtns { display: flex; gap: 4px; }
+  .vpbtn {
+    flex: 1; text-align: center; font-size: 11px; color: var(--muted);
+    border: 1px solid var(--line); background: #10151E; border-radius: 3px; padding: 4px 0;
+  }
+  .vpbtn.on { color: var(--text); background: #1D2635; border-color: #2C374A; }
+
+  .stagehead { display: flex; align-items: center; gap: 10px; }
+  .stagehead h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+  .stagehead .sub { color: var(--faint); font-size: 12px; }
+  .seg { margin-left: auto; display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .seg span { padding: 3px 9px; font-size: 11.5px; color: var(--muted); background: #10151E; }
+  .seg span.on { background: #1D2635; color: var(--text); }
+
+  /* pipeline */
+  .pipe {
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0;
+    border: 1px solid var(--line); border-radius: 5px; background: #12161F;
+  }
+  .node { padding: 12px 12px 11px; position: relative; border-right: 1px solid var(--line-soft); min-width: 0; }
+  .node:last-child { border-right: 0; }
+  .node .name { font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .node .rate { font-family: var(--mono); font-size: 17px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .node .unit { font-size: 10.5px; color: var(--faint); }
+  .node .meta { margin-top: 7px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+  .flow {
+    position: absolute; top: 50%; right: -1px; width: 1px; height: 0;
+  }
+  .node .link {
+    position: absolute; right: -7px; top: 20px; width: 14px; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--data));
+    opacity: .55;
+  }
+  .node.aud .link { background: linear-gradient(90deg, transparent, var(--audio)); }
+
+  /* timeline */
+  .tl { border: 1px solid var(--line); border-radius: 5px; background: #12161F; padding: 11px 12px 13px; }
+  .tl .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .tl .rowlbl { width: 84px; font-size: 11px; color: var(--muted); flex: none; }
+  .track { flex: 1; height: 14px; background: #0D1119; border-radius: 2px; position: relative; overflow: hidden; }
+  .track i { position: absolute; top: 0; bottom: 0; border-radius: 1px; }
+  .track i.up { background: var(--data); opacity: .8; }
+  .track i.batch { background: #4C6EF5; opacity: .75; }
+  .track i.flip { background: var(--ok); width: 2px !important; }
+  .track i.xa { background: var(--audio); opacity: .8; }
+  .track i.spu { background: var(--audio); opacity: .35; }
+  .tl .axis { display: flex; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--faint); font-family: var(--mono); }
+
+  /* inspector */
+  .insp { background: #12161F; border-left: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 5px; background: var(--panel-2); }
+  .card h3 {
+    margin: 0; padding: 8px 10px; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 7px;
+  }
+  .card .body { padding: 10px; }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 12px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .diff { display: flex; gap: 8px; align-items: center; }
+  .swatch { width: 74px; height: 52px; border: 1px solid var(--line); border-radius: 3px; position: relative; overflow: hidden; }
+  .swatch span { position: absolute; bottom: 0; left: 0; right: 0; font-size: 9px; text-align: center; background: #0009; color: var(--muted); }
+  .verdict { font-size: 12px; color: var(--ok); display: flex; align-items: center; gap: 6px; }
+
+  /* dock */
+  .dock { border-top: 1px solid var(--line); background: #10151E; }
+  .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+  .tab {
+    padding: 7px 11px; font-size: 12px; color: var(--muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab.on { color: var(--text); border-bottom-color: var(--data); }
+  .tab .count { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-left: 5px; }
+  .console { padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; }
+  .console .l { display: flex; gap: 10px; }
+  .console .t { color: var(--faint); }
+  .console .cat { color: var(--data); width: 62px; flex: none; }
+  .console .cat.a { color: var(--audio); }
+  .console .cat.w { color: var(--warn); }
+  .console .msg { color: #C3CCDC; }
+  .console .msg em { color: var(--text); font-style: normal; }
+
+  /* watches */
+  .watch { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .watch .expr { font-family: var(--mono); color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .watch .val { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* spark */
+  .spark { display: block; width: 100%; height: 34px; }
+
+  /* notes under the mock */
+  .notes { margin-top: 34px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
+  .note h4 { margin: 0 0 5px; font-size: 13px; font-weight: 620; }
+  .note p { margin: 0; font-size: 13px; color: var(--muted); }
+  .note .tagline { color: var(--data); }
+  .note.aud .tagline { color: var(--audio); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 11.5px; color: var(--muted); }
+  .legend b { font-weight: 500; color: var(--text); }
+  .legend .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+    .rail { display: none; }
+    .insp { border-left: 0; border-top: 1px solid var(--line); }
+    .pipe { grid-template-columns: repeat(2, 1fr); }
+    .viewport { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="intro">
+    <h1>ZoniStation One — interface direction</h1>
+    <p>Same debug visibility as today, organised around what this emulator is actually used for: watching data cross subsystem boundaries. The panels below hold real measurements from the current build.</p>
+    <p class="note">Static mockup. Dark by design — this is an instrument, not a document. The emulated screen stays on stage in every mode; "Display only" expands it and folds the panels away.</p>
+  </div>
+
+  <div class="app">
+
+    <div class="machinebar">
+      <div class="brand"><b>ZoniStation One</b><span>PAL · 49.75 Hz</span></div>
+      <div class="chips">
+        <span class="chip">BIOS <b>SCPH-7502</b></span>
+        <span class="chip">DISC <b>Ace Combat 2 (Europe)</b></span>
+        <span class="chip">PC <b>0x8016DC38</b></span>
+      </div>
+      <div class="vitals">
+        <div class="vital">
+          <span class="lbl">Speed</span>
+          <span class="v warnv num">87%</span>
+          <span class="bar"><i style="width:87%; background: var(--warn);"></i></span>
+        </div>
+        <div class="vital">
+          <span class="lbl">Frame</span>
+          <span class="v num">19.5 <span class="unit" style="font-size:10px;color:var(--faint)">ms</span></span>
+          <span class="bar"><i style="width:97%; background: var(--warn);"></i></span>
+        </div>
+        <div class="vital">
+          <span class="lbl">Audio queue</span>
+          <span class="v audiov num">320</span>
+          <span class="bar"><i style="width:8%; background: var(--audio);"></i></span>
+        </div>
+        <div class="vital">
+          <span class="lbl">Drift</span>
+          <span class="v okv num">−0.01%</span>
+          <span class="bar"><i style="width:50%; background: var(--ok);"></i></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <nav class="rail">
+        <span class="lbl">View</span>
+        <div class="mode on">Pipeline <span class="k">F1</span></div>
+        <div class="mode">Display <span class="k">F2</span></div>
+        <div class="mode">Frame <span class="k">F3</span></div>
+        <div class="mode">Code <span class="k">F4</span></div>
+        <div class="mode">Memory <span class="k">F5</span></div>
+        <div class="mode audio">Audio <span class="k">F6</span></div>
+        <div class="mode">VRAM <span class="k">F7</span></div>
+        <div class="mode">Script <span class="k">F8</span></div>
+      </nav>
+
+      <main class="stage">
+
+        <section class="viewport">
+          <div class="screen">
+            <div class="pic"></div>
+            <div class="bands"><i class="t"></i><i class="b"></i></div>
+            <div class="scan"></div>
+            <span class="corner">running</span>
+            <div class="osd">
+              <span>320×240</span><span>24bpp</span><span>PAL 49.75 Hz</span><span>frame 2 032</span>
+            </div>
+          </div>
+
+          <div class="vpside">
+            <div class="vpbtns">
+              <span class="vpbtn on">1×</span><span class="vpbtn">2×</span><span class="vpbtn">Fit</span>
+            </div>
+            <div class="card">
+              <h3 style="padding:6px 9px">Scanout</h3>
+              <div class="body">
+                <dl class="kv" style="font-size:11.5px">
+                  <dt>Origin</dt><dd>512, 240</dd>
+                  <dt>Window</dt><dd>320×240</dd>
+                  <dt>Depth</dt><dd>24bpp</dd>
+                  <dt>Movie</dt><dd>320×160</dd>
+                </dl>
+              </div>
+            </div>
+            <div class="card">
+              <h3 style="padding:6px 9px">Input</h3>
+              <div class="body">
+                <dl class="kv" style="font-size:11.5px">
+                  <dt>Pad 1</dt><dd>digital</dd>
+                  <dt>Card 1</dt><dd>loaded</dd>
+                  <dt>Card 2</dt><dd>loaded</dd>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="stagehead">
+          <h2>Pipeline</h2>
+          <span class="sub">one movie frame, end to end</span>
+          <div class="seg">
+            <span class="on">Live</span><span>Per frame</span><span>Since boot</span>
+          </div>
+        </div>
+
+        <section class="pipe">
+          <div class="node">
+            <div class="name"><i class="dot" style="background:var(--data)"></i>CD drive</div>
+            <div class="rate">149.2<span class="unit"> sect/s</span></div>
+            <div class="meta">2× · seek 0<br>XA 18.9/s</div>
+            <i class="link"></i>
+          </div>
+          <div class="node aud">
+            <div class="name"><i class="dot" style="background:var(--audio)"></i>XA decode</div>
+            <div class="rate">44 688<span class="unit"> smp/s</span></div>
+            <div class="meta">37800 Hz st<br>queue 1 504</div>
+            <i class="link"></i>
+          </div>
+          <div class="node">
+            <div class="name"><i class="dot" style="background:var(--data)"></i>MDEC</div>
+            <div class="rate">200<span class="unit"> mb/frame</span></div>
+            <div class="meta">24bpp · 320×160<br>in 2 048 · out 768</div>
+            <i class="link"></i>
+          </div>
+          <div class="node">
+            <div class="name"><i class="dot" style="background:var(--data)"></i>DMA ch2</div>
+            <div class="rate">20<span class="unit"> uploads</span></div>
+            <div class="meta">block @ kick<br>24×160 halfwords</div>
+            <i class="link"></i>
+          </div>
+          <div class="node">
+            <div class="name"><i class="dot" style="background:var(--ok)"></i>VRAM → scanout</div>
+            <div class="rate">20 / 20</div>
+            <div class="meta">verified against<br>staged halfwords</div>
+          </div>
+        </section>
+
+        <section class="tl">
+          <div class="stagehead" style="margin-bottom:2px">
+            <h2 style="font-size:12px">Frame 2 032</h2>
+            <span class="sub">display (512,240) · 24bpp · 22 ops</span>
+          </div>
+
+          <div class="row">
+            <span class="rowlbl">VRAM uploads</span>
+            <span class="track">
+              <i class="up" style="left:4%;  width:3.4%"></i><i class="up" style="left:8.5%;width:3.4%"></i>
+              <i class="up" style="left:13%; width:3.4%"></i><i class="up" style="left:17.5%;width:3.4%"></i>
+              <i class="up" style="left:22%; width:3.4%"></i><i class="up" style="left:26.5%;width:3.4%"></i>
+              <i class="up" style="left:31%; width:3.4%"></i><i class="up" style="left:35.5%;width:3.4%"></i>
+              <i class="up" style="left:40%; width:3.4%"></i><i class="up" style="left:44.5%;width:3.4%"></i>
+              <i class="up" style="left:49%; width:3.4%"></i><i class="up" style="left:53.5%;width:3.4%"></i>
+              <i class="up" style="left:58%; width:3.4%"></i><i class="up" style="left:62.5%;width:3.4%"></i>
+              <i class="up" style="left:67%; width:3.4%"></i><i class="up" style="left:71.5%;width:3.4%"></i>
+              <i class="up" style="left:76%; width:3.4%"></i><i class="up" style="left:80.5%;width:3.4%"></i>
+              <i class="up" style="left:85%; width:3.4%"></i><i class="up" style="left:89.5%;width:3.4%"></i>
+            </span>
+          </div>
+
+          <div class="row">
+            <span class="rowlbl">Draw batches</span>
+            <span class="track"><i class="batch" style="left:0; width:0"></i></span>
+          </div>
+
+          <div class="row">
+            <span class="rowlbl">XA sectors</span>
+            <span class="track">
+              <i class="xa" style="left:6%;width:1.6%"></i><i class="xa" style="left:26%;width:1.6%"></i>
+              <i class="xa" style="left:46%;width:1.6%"></i><i class="xa" style="left:66%;width:1.6%"></i>
+              <i class="xa" style="left:86%;width:1.6%"></i>
+            </span>
+          </div>
+
+          <div class="row">
+            <span class="rowlbl">SPU samples</span>
+            <span class="track"><i class="spu" style="left:0; width:100%"></i></span>
+          </div>
+
+          <div class="row">
+            <span class="rowlbl">Display flip</span>
+            <span class="track"><i class="flip" style="left:99%"></i></span>
+          </div>
+
+          <div class="axis"><span>0 ms</span><span>10 ms</span><span>20.1 ms · VBlank</span></div>
+        </section>
+
+        <div class="legend">
+          <span><i class="sw" style="background:var(--data)"></i><b>Video path</b> CD → MDEC → DMA → VRAM</span>
+          <span><i class="sw" style="background:var(--audio)"></i><b>Audio path</b> XA → SPU → device</span>
+          <span><i class="sw" style="background:var(--ok)"></i><b>Verified</b> read back and compared</span>
+        </div>
+
+      </main>
+
+      <aside class="insp">
+
+        <div class="card">
+          <h3><i class="dot" style="background:var(--ok)"></i>VRAM: CPU vs GPU</h3>
+          <div class="body">
+            <div class="diff">
+              <div class="swatch" style="background:
+                repeating-linear-gradient(90deg,#2A3B52 0 6px,#31465F 6px 12px);"><span>CPU model</span></div>
+              <div class="swatch" style="background:
+                repeating-linear-gradient(90deg,#2A3B52 0 6px,#31465F 6px 12px);"><span>GPU texture</span></div>
+            </div>
+            <p class="verdict" style="margin:9px 0 0"><i class="dot" style="background:var(--ok)"></i>0 of 76 800 texels differ</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3><i class="dot" style="background:var(--audio)"></i>Audio</h3>
+          <div class="body">
+            <svg class="spark" viewBox="0 0 240 34" preserveAspectRatio="none" role="img" aria-label="Output queue depth over the last four seconds, oscillating between 128 and 512 samples">
+              <defs>
+                <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#FF5C8A" stop-opacity=".35"/>
+                  <stop offset="1" stop-color="#FF5C8A" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path d="M0,26 L20,18 L40,24 L60,12 L80,22 L100,16 L120,27 L140,14 L160,21 L180,10 L200,23 L220,17 L240,20 L240,34 L0,34 Z" fill="url(#ag)"/>
+              <path d="M0,26 L20,18 L40,24 L60,12 L80,22 L100,16 L120,27 L140,14 L160,21 L180,10 L200,23 L220,17 L240,20"
+                    fill="none" stroke="#FF5C8A" stroke-width="1.4"/>
+              <circle cx="240" cy="20" r="2.2" fill="#FF5C8A"/>
+            </svg>
+            <dl class="kv" style="margin:8px 0 0">
+              <dt>Queue</dt><dd>320 / 4 096</dd>
+              <dt>Produced</dt><dd>44 352 /s</dd>
+              <dt>Consumed</dt><dd>44 100 /s</dd>
+              <dt>Dropped</dt><dd style="color:var(--ok)">0</dd>
+              <dt>Reverb</dt><dd>off (SPUCNT c001)</dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Pinned watches</h3>
+          <div class="body" style="display:flex; flex-direction:column; gap:7px">
+            <div class="watch"><span class="expr">emu.spu_stats().ring</span><span class="val">320</span></div>
+            <div class="watch"><span class="expr">emu.display_area().y</span><span class="val">240</span></div>
+            <div class="watch"><span class="expr">cd.fifo.depth</span><span class="val">1 504</span></div>
+            <div class="watch"><span class="expr">mdec.blocks_this_frame</span><span class="val">200</span></div>
+          </div>
+        </div>
+
+      </aside>
+
+    </div>
+
+    <div class="dock">
+      <div class="tabs">
+        <span class="tab on">Console<span class="count">lua</span></span>
+        <span class="tab">TTY<span class="count">142</span></span>
+        <span class="tab">CDROM<span class="count">88</span></span>
+        <span class="tab">SPU<span class="count">31</span></span>
+        <span class="tab">DMA<span class="count">4.2k</span></span>
+        <span class="tab">GPU<span class="count">1.1k</span></span>
+      </div>
+      <div class="console">
+        <div class="l"><span class="t">18:21:07</span><span class="cat a">SPU</span><span class="msg">reverb <em>22050 Hz</em>, buffer base 0x3F00 — writes bounded to work area</span></div>
+        <div class="l"><span class="t">18:21:07</span><span class="cat">CDROM</span><span class="msg">XA sector f=1 ch=0 · 37800 Hz stereo · <em>2 352</em> frames → queue 1 504</span></div>
+        <div class="l"><span class="t">18:21:08</span><span class="cat w">WARN</span><span class="msg">host below real time: <em>87%</em> — device drained 44 100, produced 38 533</span></div>
+        <div class="l"><span class="t">18:21:08</span><span class="cat">GPU</span><span class="msg">frame 2 032 · 20 uploads verified against staged halfwords · <em>0 mismatches</em></span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h4><span class="tagline">Pipeline</span> — the view no other emulator has</h4>
+      <p>Every bug this project has spent a session on lived between two subsystems, not inside one. This puts the whole chain on one row with live rates, so a stage that stops feeding the next one is visible instead of deduced.</p>
+    </div>
+    <div class="note">
+      <h4><span class="tagline">Frame</span> — ops on a time axis</h4>
+      <p>Uploads, draw batches, XA sectors and the display flip against the 20.1 ms frame. "Thirteen columns never arrived" reads off the track directly.</p>
+    </div>
+    <div class="note aud">
+      <h4><span class="tagline">Audio</span> — queue as a first-class signal</h4>
+      <p>Produced against consumed, queue depth over time, and drops. The difference between a DSP bug and a delivery problem is the difference between these two numbers.</p>
+    </div>
+    <div class="note">
+      <h4>The screen is the anchor</h4>
+      <p>It does not become a tab you switch away from. Every mode is arranged under it, so you never lose sight of the machine while reading its instruments — and "Display only" gives it the whole stage when you just want to play.</p>
+    </div>
+    <div class="note">
+      <h4>What stays</h4>
+      <p>Disassembly, registers, breakpoints, watchpoints, VRAM viewer with its decode modes, per-category logs, Lua console — same depth, moved into modes instead of a floating panel grid, with any Lua expression pinnable as a live watch.</p>
+    </div>
+  </div>
+
+</div>
