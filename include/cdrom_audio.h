@@ -5,9 +5,19 @@
 #include <stdbool.h>
 
 #define AUDIO_FIFO_CAPACITY (44100 * 4)   /* ~2 s stereo at 44100 Hz */
+/* Standing latency allowed in the XA queue. Sectors arrive in interleave bursts
+ * (a movie's audio sectors come a few at a time between video sectors), so some
+ * buffering is required, but letting the queue grow to its full capacity puts
+ * hundreds of milliseconds between the picture and its sound. Four sectors'
+ * worth (2352 output frames each) rides out the interleave and keeps the delay
+ * around 200 ms worst case. */
+#define AUDIO_FIFO_MAX_LATENCY (2352 * 4)
 
 typedef struct {
     uint32_t data[AUDIO_FIFO_CAPACITY];   /* packed: lo16=left, hi16=right */
+    /* Health counters: pushed/popped tell whether the drive is feeding the SPU
+     * at the rate the SPU consumes, dropped means the FIFO overflowed. */
+    uint32_t total_pushed, total_popped, total_dropped;
     uint32_t head, tail, count;
 } AudioFifo;
 

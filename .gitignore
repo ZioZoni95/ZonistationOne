@@ -51,3 +51,7 @@ Screenshot*.png
 # Misc
 Hack.zip
 guide.tex
+
+# Audio captures from ZS1_AUDIO_DUMP (diagnostic output)
+*.wav
+*.raw

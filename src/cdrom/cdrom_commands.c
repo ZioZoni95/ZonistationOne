@@ -624,6 +624,8 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         sb->lba   = cdrom->current_lba;
         sb->valid = true;
 
+        cdrom->sectors_read_total++;
+
         /* Check XA subheader: submode byte at offset 18 */
         uint8_t submode = raw[18];
         bool is_xa_audio = (submode & 0x04) != 0;  /* bit 2 = AUDIO */
@@ -637,6 +639,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
                                && raw[17] == cdrom->xa_filter_channel);
 
         if (cdrom->xa_adpcm_enable && is_xa_audio && is_realtime && file_match) {
+            cdrom->xa_sectors_total++;
             /* XA-ADPCM sector: decode to audio FIFO — NO INT1 */
             cdrom_audio_decode_xa(&cdrom->xa_adpcm_state, &cdrom->audio_fifo,
                                    raw + 24, xa_stereo, xa_8bit, xa_18900,

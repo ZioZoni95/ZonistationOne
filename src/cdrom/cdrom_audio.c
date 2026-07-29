@@ -16,7 +16,16 @@ void cdrom_audio_init(AudioFifo *fifo, XaAdpcmState *xa) {
 }
 
 void cdrom_audio_fifo_push(AudioFifo *fifo, int16_t left, int16_t right) {
-    if (fifo->count >= AUDIO_FIFO_CAPACITY) return;
+    if (fifo->count >= AUDIO_FIFO_CAPACITY) { fifo->total_dropped++; return; }
+    /* Keep the queue's standing latency bounded: past the limit, drop the
+     * oldest frame rather than the newest, so the delay stops growing while the
+     * stream stays continuous. */
+    if (fifo->count >= AUDIO_FIFO_MAX_LATENCY) {
+        fifo->head = (fifo->head + 1) % AUDIO_FIFO_CAPACITY;
+        fifo->count--;
+        fifo->total_dropped++;
+    }
+    fifo->total_pushed++;
     uint32_t packed = (uint32_t)(uint16_t)left | ((uint32_t)(uint16_t)right << 16);
     fifo->data[fifo->tail] = packed;
     fifo->tail = (fifo->tail + 1) % AUDIO_FIFO_CAPACITY;
@@ -25,6 +34,7 @@ void cdrom_audio_fifo_push(AudioFifo *fifo, int16_t left, int16_t right) {
 
 bool cdrom_audio_fifo_pop(AudioFifo *fifo, int16_t *left, int16_t *right) {
     if (fifo->count == 0) return false;
+    fifo->total_popped++;
     uint32_t packed = fifo->data[fifo->head];
     fifo->head = (fifo->head + 1) % AUDIO_FIFO_CAPACITY;
     fifo->count--;
@@ -208,10 +218,16 @@ static void resample_xa_18900(XaAdpcmState *xa, AudioFifo *fifo,
 
 void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_data,
                             bool stereo, bool bits8, bool rate_18900, bool muted) {
-    if (fifo->count > 2048) return;
+    /* One 128-byte sound group holds num_blocks blocks of 28 samples: 224 for
+     * 4-bit XA, 112 for 8-bit. There is no further multiplier — an extra factor
+     * of 8 here made every sector claim 18816 output frames instead of 2352, so
+     * seven eighths of what reached the audio FIFO was whatever happened to be
+     * left in the decode buffer, i.e. noise, and the surplus also swamped the
+     * queue. A whole XA sector is 18 groups: 4032 mono samples, 2016 stereo
+     * frames, which at 37800 Hz is exactly one sector's worth of playback. */
     const int num_blocks = bits8 ? 4 : 8;
     const int words_per_block = 28;
-    const int samples_per_chunk = num_blocks * words_per_block * (bits8 ? 4 : 8);
+    const int samples_per_chunk = num_blocks * words_per_block;
     const int frames_per_chunk = stereo ? samples_per_chunk / 2 : samples_per_chunk;
     static int16_t sample_buf[18 * 8 * 28 * 8];
     int32_t prev[2][2];

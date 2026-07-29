@@ -257,6 +257,10 @@ typedef struct Cdrom {
 
     /* --- Audio --- */
     AudioFifo    audio_fifo;
+    /* Sector pacing counters: the XA stream only stays in sync with the SPU if
+     * audio sectors arrive at the rate their sample count implies. */
+    uint32_t     sectors_read_total;
+    uint32_t     xa_sectors_total;
     XaAdpcmState xa_adpcm_state;
 
     /* Volume matrix (L←CDL, L←CDR, R←CDL, R←CDR) — default 0x80 each.

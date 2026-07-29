@@ -18,6 +18,12 @@ struct Interconnect;
 /* Scheduled SPU event period: 64 samples (~1.45 ms). Register accesses catch up
  * on demand, so this bounds ring drain only, not accuracy. */
 #define SPU_EVENT_PERIOD_CYCLES (CPU_TICKS_PER_SPU_TICK * 64)
+/* Output latency the host loop aims to keep queued, in stereo samples. The
+ * device drains 44100 per real second while the emulator produces 44100 per
+ * emulated second; without a cushion any jitter in frame pacing empties the
+ * ring and the callback plays silence. ~46 ms is small enough not to be felt
+ * and large enough to ride out a frame's worth of scheduling noise. */
+#define SPU_RING_TARGET_SAMPLES 2048
 #define TRANSFER_TICKS_PER_HALFWORD 16
 #define CAPTURE_BUFFER_SIZE     0x400       /* halfwords per channel */
 #define NUM_CAPTURE_CHANNELS    4
@@ -241,6 +247,11 @@ typedef struct Spu {
     uint16_t reverb_base;           /* word-aligned (×4) */
     uint16_t reverb_regs[NUM_REVERB_REGS];
     uint32_t reverb_current_addr;
+    /* Reverb runs at 22050 Hz — one step per two output samples. These carry the
+     * input accumulated over a pair and the output held across it. */
+    int      reverb_phase;
+    int32_t  reverb_in_l, reverb_in_r;
+    int32_t  reverb_out_l, reverb_out_r;
 
     /* Noise generator */
     uint32_t noise_clock;
@@ -337,6 +348,9 @@ int      spu_adsr_mix(SpuVoice* voice);
  * scheduled SPU event; both run on the emulation thread, so voice registers and
  * the key-on/key-off latch are never read while another thread writes them. */
 void     spu_catch_up(struct Interconnect* inter);
+
+/* Samples currently queued for the audio device (producer side view). */
+int      spu_ring_used(const Spu* spu);
 
 /* SPU sample buffer management (legacy: was driven by EVQ_SPU; now used internally by SPU thread) */
 void     spu_step(struct Interconnect* inter, uint32_t cpu_cycles);

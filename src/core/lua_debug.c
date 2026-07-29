@@ -9,12 +9,14 @@
 #include "lua_debug.h"
 #include "interconnect.h"
 #include "spu.h"
+#include "cdrom.h"
 #include "cpu.h"
 #include "debugger.h"
 #include "ram.h"
 #include "bios.h"
 #include "gte.h"
 #include "log.h"
+#include <SDL2/SDL.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -424,6 +426,31 @@ static int l_emu_spu_stats(lua_State* L) {
     return 5;
 }
 
+/* CD audio path health: FIFO depth, samples the drive has fed in, samples the
+ * SPU has taken out, and samples lost to overflow. During FMV playback the XA
+ * stream is the audio source, so a starving or overflowing FIFO here is heard
+ * directly. Also reports SPUCNT, whose reverb/CD-audio enables decide what the
+ * mixer is even supposed to be doing. */
+static int l_emu_cd_audio(lua_State* L) {
+    Cdrom* cd = &g_inter->cdrom;
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.count);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_pushed);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_popped);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_dropped);
+    lua_pushinteger(L, (lua_Integer)g_inter->spu.control);
+    lua_pushinteger(L, (lua_Integer)cd->sectors_read_total);
+    lua_pushinteger(L, (lua_Integer)cd->xa_sectors_total);
+    return 7;
+}
+
+/* Host wall-clock milliseconds. Emulated cycles against this is the emulator's
+ * real-time speed, which is what decides whether the audio device can be fed at
+ * the rate it drains. */
+static int l_emu_host_ms(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)SDL_GetTicks());
+    return 1;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
     {"pc",                l_emu_pc},
@@ -451,6 +478,8 @@ static const luaL_Reg s_emu_funcs[] = {
     {"gpustat",           l_emu_gpustat},
     {"draw_area",         l_emu_draw_area},
     {"spu_stats",         l_emu_spu_stats},
+    {"cd_audio",          l_emu_cd_audio},
+    {"host_ms",           l_emu_host_ms},
     {"vram_upload_rect",  l_emu_vram_upload_rect},
     {"gpu_pool",          l_emu_gpu_pool},
     {"mdec_block",        l_emu_mdec_block},

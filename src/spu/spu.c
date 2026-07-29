@@ -331,7 +331,11 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
         case SPU_REG_NOISE_H: spu->noise_mode = (spu->noise_mode & ~0xFFFF0000) | ((uint32_t)value << 16); break;
         case SPU_REG_REVERB_L: spu->reverb_on = (spu->reverb_on & ~0xFFFF) | value; break;
         case SPU_REG_REVERB_H: spu->reverb_on = (spu->reverb_on & ~0xFFFF0000) | ((uint32_t)value << 16); break;
-        case SPU_REG_REVERB_BASE: spu->reverb_base = value & 0x3FFF; break;
+        case SPU_REG_REVERB_BASE:
+            /* Writing mBASE also sets the current buffer address (PSX-SPX). */
+            spu->reverb_base = value & 0x3FFF;
+            spu->reverb_current_addr = (uint32_t)spu->reverb_base * 4u;
+            break;
         case SPU_REG_IRQ_ADDR:
             spu->irq_addr = value;
             spu_update_irq_addr(spu, inter);

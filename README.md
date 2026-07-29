@@ -58,14 +58,15 @@ so every lit logo primitive was discarded as opcode `0x00`.
 
 ```sh
 make
-./myps1_emu roms/SCPH1001.BIN                                          # BIOS menu
-./myps1_emu roms/SCPH1001.BIN --game="games/Ace Combat 2 (Europe).cue"  # game
+./myps1_emu roms/SCPH1001.BIN                                                    # BIOS menu
+./myps1_emu "roms/SCPH-7502 (3).BIN" --game="games/Ace Combat 2 (Europe).cue"    # PAL game
 ```
 
 Requirements: `gcc`, `g++`, `SDL2`, `OpenGL`, `GLEW`.
 
-BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL). Run PAL games with the PAL BIOS — a region mismatch is
-detected and rejected exactly as hardware does.
+The BIOS must match the disc's region, as on hardware: a PAL disc booted with the US BIOS is rejected
+and you are left at the BIOS menu. BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL). The game path has to
+be passed as `--game=<cue>`; a bare positional path is treated as the BIOS path.
 
 Useful environment variables:
 
@@ -75,6 +76,9 @@ Useful environment variables:
 | `ZS1_LOG_STDERR=1` | Also write the log to stderr, not just the in-app windows |
 | `ZS1_LUA_SCRIPT=scripts/x.lua` | Run a Lua debug script at startup |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
+| `ZS1_AUDIO_DUMP=path` | Record exactly what is handed to the sound device, as raw interleaved 16-bit stereo |
+| `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging where an artefact comes from |
+| `ZS1_FRAME_PROFILE=1` | Log where each frame's wall-clock time goes (emulation, VRAM upload, viewer, submit) |
 
 ---
 
@@ -89,9 +93,18 @@ reverb, noise, pitch modulation, DMA and the IRQ address watch — but sample ge
 wall-clock time on its own thread while the game wrote its registers on the emulation thread, so the
 two clocks drifted apart permanently and envelopes, note lengths and CD audio were all wrong.
 Generation is now driven by emulated time: a scheduled event in 64-sample batches, plus a catch-up on
-every SPU register access so a write flushes the audio it owes before changing state. Measured after
-the change: 106368 samples per 81 698 760 emulated cycles, against 106378 expected — 0.01% off.
-Output quality across a range of games is still to be evaluated.
+every SPU register access so a write flushes the audio it owes before changing state. Two DSP defects
+came out from under that fix and are also gone: the reverb ran at twice its hardware rate and resolved
+its buffer addresses four times too close, writing over the voices' own sample data, and XA sectors
+claimed eight times their real sample count, so most of what reached the audio queue during FMV
+playback was undecoded buffer contents. What the emulator hands the sound device is now clean — a
+capture of it plays back correctly end to end.
+
+**What is not solved**: the emulator runs at roughly 85-95% of real time on the development machine,
+so it produces fewer than 44100 samples per real second and the device's callback pads the difference
+with silence, heard as crackle. That is a throughput problem, not an audio one — profiling puts
+19.5 ms of a 20.1 ms PAL frame inside the emulation core itself, with the debug UI and logging
+measured as negligible.
 
 **Savestates do not exist yet.**
 

@@ -360,8 +360,18 @@ int main(int argc, char* argv[]) {
         frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
                                  (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
 
+        /* ZS1_FRAME_PROFILE=1: where the frame's wall-clock time actually goes.
+         * The emulator has to deliver 44100 audio samples per real second, so
+         * any millisecond spent outside emulation is a millisecond of audio the
+         * device will not get. */
+        static int s_prof = -1;
+        if (s_prof < 0) s_prof = getenv("ZS1_FRAME_PROFILE") ? 1 : 0;
+        uint64_t t_freq = SDL_GetPerformanceFrequency(), t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
+        if (s_prof) t0 = SDL_GetPerformanceCounter();
+
         /* Run the machine for one video frame (or one debugger step). */
         system_run_frame(&inter, &cpu);
+        if (s_prof) t1 = SDL_GetPerformanceCounter();
 
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
@@ -370,25 +380,59 @@ int main(int argc, char* argv[]) {
          * GP0(A0) sprite loads cleared vram_dirty (preventing upload_vram_if_dirty in draw cmds).
          * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
         renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
+        if (s_prof) t2 = SDL_GetPerformanceCounter();
 
         /* Snapshot VRAM into viewer texture before submitting. Converting the
          * whole 1024x512 buffer to RGBA8 costs 2 MB of staging pool per frame,
          * so only pay it while the viewer window is actually open. */
         if (debug_ui_vram_viewer_open())
             renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+        if (s_prof) t3 = SDL_GetPerformanceCounter();
 
         /* Submit frame to GPU thread: swap buffers, wake renderer */
         renderer_submit_frame(&inter.gpu.renderer, debug_ui_get_draw_data());
+        if (s_prof) {
+            t4 = SDL_GetPerformanceCounter();
+            extern uint64_t g_spu_gen_ticks;
+            static int frames = 0; static double a_emu, a_up, a_view, a_sub, a_spu;
+            a_spu += (double)g_spu_gen_ticks * 1000.0 / (double)t_freq; g_spu_gen_ticks = 0;
+            a_emu  += (double)(t1 - t0) * 1000.0 / (double)t_freq;
+            a_up   += (double)(t2 - t1) * 1000.0 / (double)t_freq;
+            a_view += (double)(t3 - t2) * 1000.0 / (double)t_freq;
+            a_sub  += (double)(t4 - t3) * 1000.0 / (double)t_freq;
+            if (++frames == 60) {
+                LOG_SYSTEM_INFO("[PROF] per frame: emu=%.2fms (spu %.2fms) vram_upload=%.2fms viewer=%.2fms submit=%.2fms total=%.2fms",
+                                a_emu / 60, a_spu / 60, a_up / 60, a_view / 60, a_sub / 60,
+                                (a_emu + a_up + a_view + a_sub) / 60);
+                frames = 0; a_emu = a_up = a_view = a_sub = a_spu = 0;
+            }
+        }
 
-        // Frame-rate cap at the emulated refresh rate (59.82 NTSC / 49.75 PAL)
-        uint64_t now = SDL_GetPerformanceCounter();
-        if (now < next_frame) {
-            uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();
-            if (ms > 1) SDL_Delay((uint32_t)(ms - 1));
-            while (SDL_GetPerformanceCounter() < next_frame) {}
-            next_frame += frame_ticks;
+        /* Pacing.
+         *
+         * With an audio device open the sound queue is the clock: the emulator
+         * runs ahead only until the SPU ring holds SPU_RING_TARGET_SAMPLES, then
+         * waits for the device to drain some. Production and consumption are
+         * then matched by construction — the emulator cannot outrun the device
+         * (dropped samples) or fall behind it (silence in the callback), and
+         * frame-pacing jitter never reaches the audio.
+         *
+         * Without a device there is nothing to synchronise to, so fall back to
+         * pacing frames against the emulated refresh rate. */
+        if (g_audio_dev) {
+            while (!quit && spu_ring_used(&inter.spu) > SPU_RING_TARGET_SAMPLES)
+                SDL_Delay(1);
+            next_frame = SDL_GetPerformanceCounter() + frame_ticks;
         } else {
-            next_frame = now + frame_ticks;
+            uint64_t now = SDL_GetPerformanceCounter();
+            if (now < next_frame) {
+                uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();
+                if (ms > 1) SDL_Delay((uint32_t)(ms - 1));
+                while (SDL_GetPerformanceCounter() < next_frame) {}
+                next_frame += frame_ticks;
+            } else {
+                next_frame = now + frame_ticks;
+            }
         }
     }
 
