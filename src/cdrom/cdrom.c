@@ -75,7 +75,10 @@ void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->second_event_pending) return;
+    /* Re-schedule rather than refuse. Dropping the new deadline made a second
+     * command's INT2 fire at the first command's time, or not at all: measured
+     * on a boot, twelve Init commands produced three second responses and a
+     * burst of ten produced one. */
     cdrom->second_event_pending = true;
     if (cdrom->inter)
         eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE, cycles);

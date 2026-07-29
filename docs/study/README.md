@@ -39,7 +39,7 @@ event-delivery path is the lead to pull.**
 
 Ordered by impact per unit of effort, not by subsystem.
 
-### Cheap fixes with large consequences
+### Cheap fixes with large consequences — **all seven done 2026-07-29**
 
 1. **XA coding-info masks** — 8-bit is bit 4, 18900 Hz is bit 2 (`cdrom_commands.c:634-636`).
 2. **SPU mBASE truncated to 14 bits** — the reverb work area lands in the ADPCM sample region
@@ -51,6 +51,10 @@ Ordered by impact per unit of effort, not by subsystem.
 6. **Volume sweep direction read from bit 7 instead of bit 13** (`spu_voice.c:284,304`), and writing a
    sweep-mode volume register destroys the current level (`spu.c:239,246`).
 7. **Setmode speed change costs nothing** (0.6-0.7 s on hardware) and **Pause 1x/2x are swapped**.
+
+All seven landed together; the audio path was re-measured afterwards (CD queue balanced at 44 688
+pushed against 44 112 consumed, zero drops, boot and FMV intact). The jingle is still short, as
+expected — that one belongs to item 9.
 
 ### Structural, each worth its own session
 

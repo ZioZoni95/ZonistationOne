@@ -233,18 +233,19 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
     SpuVoice* v = &spu->voices[voice];
 
     switch (sub) {
+        /* Fixed mode (bit15=0) sets the level directly. Sweep mode (bit15=1)
+         * describes how to *move* from wherever the level already is — writing
+         * the configuration bits into the level, as this used to, starts every
+         * sweep from a meaningless volume
+         * (DOCS/soundprocessingunitspu.md:379-383). */
         case 0x00:
             v->volume_left = value;
-            if (value & 0x8000)
-                v->vol_left = (int)(int16_t)(value & 0x7FFF);  // sweep: placeholder
-            else
-                v->vol_left = (int)(int16_t)((value & 0x7FFF) << 1);  // fixed: Volume/2 × 2
+            if (!(value & 0x8000))
+                v->vol_left = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x02:
             v->volume_right = value;
-            if (value & 0x8000)
-                v->vol_right = (int)(int16_t)(value & 0x7FFF);
-            else
+            if (!(value & 0x8000))
                 v->vol_right = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x04:
@@ -304,18 +305,14 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
     switch (reg) {
         case SPU_REG_MVOL_L:
             spu->main_vol_left = value;
-            /* Same fixed/sweep treatment as voice volumes: fixed = (bits14-0)<<1 */
-            if (value & 0x8000)
-                spu->main_vol_left_cur = (int32_t)(int16_t)(value & 0x7FFF);
-            else
+            /* Same rule as the voice volumes: only fixed mode sets the level. */
+            if (!(value & 0x8000))
                 spu->main_vol_left_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
             LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (working=%d)", value, spu->main_vol_left_cur);
             break;
         case SPU_REG_MVOL_R:
             spu->main_vol_right = value;
-            if (value & 0x8000)
-                spu->main_vol_right_cur = (int32_t)(int16_t)(value & 0x7FFF);
-            else
+            if (!(value & 0x8000))
                 spu->main_vol_right_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
             LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (working=%d)", value, spu->main_vol_right_cur);
             break;
@@ -332,8 +329,11 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
         case SPU_REG_REVERB_L: spu->reverb_on = (spu->reverb_on & ~0xFFFF) | value; break;
         case SPU_REG_REVERB_H: spu->reverb_on = (spu->reverb_on & ~0xFFFF0000) | ((uint32_t)value << 16); break;
         case SPU_REG_REVERB_BASE:
-            /* Writing mBASE also sets the current buffer address (PSX-SPX). */
-            spu->reverb_base = value & 0x3FFF;
+            /* mBASE is a full 16-bit address divided by 8, covering all 512 KB
+             * of SPU RAM; masking it to 14 bits put the work area ~384 KB too
+             * low, on top of the voices' own ADPCM data. Writing it also sets
+             * the current buffer address (DOCS/soundprocessingunitspu.md:810-814). */
+            spu->reverb_base = value;
             spu->reverb_current_addr = (uint32_t)spu->reverb_base * 4u;
             break;
         case SPU_REG_IRQ_ADDR:

@@ -97,7 +97,13 @@ static int16_t rev_rd(const Spu* spu, int32_t off_hw) {
 }
 
 /* Values written to the reverb buffer are saturated to 16 bits. */
+/* SPUCNT bit 7 disables *writes* to the reverb work area; reads keep happening
+ * and the unit keeps producing output (DOCS/soundprocessingunitspu.md:826-835,
+ * confirmed by the bus-timing table at :1113-1123). Gating the output instead —
+ * which is what this used to do — meant the reverb went on scribbling over SPU
+ * RAM while a game believed it had switched the unit off. */
 static void rev_wr(Spu* spu, int32_t off_hw, int32_t value) {
+    if (!(spu->control & SPU_CTRL_REVERB_ENABLE)) return;
     spu->ram[rev_addr(spu, off_hw)] = (uint16_t)(int16_t)clamp16(value);
 }
 
@@ -293,7 +299,7 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
         rev_r = spu->reverb_out_r;
     }
 
-    if (!s_no_reverb && (spu->control & SPU_CTRL_REVERB_ENABLE)) {
+    if (!s_no_reverb) {
         mix_l = clamp16(mix_l + rev_l);
         mix_r = clamp16(mix_r + rev_r);
     }

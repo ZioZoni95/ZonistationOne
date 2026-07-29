@@ -109,6 +109,8 @@ static void begin_seeking(Cdrom *cdrom, bool read_after, bool play_after) {
     uint32_t delay = (cdrom->target_lba == cdrom->current_lba)
         ? CDROM_SEEK_FAST_DELAY
         : cdrom_disc_get_seek_ticks(cdrom->current_lba, cdrom->target_lba);
+    delay += cdrom->pending_speed_change;   /* see Setmode */
+    cdrom->pending_speed_change = 0;
     cdrom_schedule_second_response_event(cdrom, delay);
 }
 
@@ -281,8 +283,16 @@ void cdrom_execute_command(Cdrom *cdrom) {
     /* --- 0x0E Setmode --- */
     case CDC_SETMODE: {
         uint8_t m = cdrom_pop_param(cdrom);
+        bool new_double_speed = (m & 0x80) != 0;
+        /* Changing the read speed spins the drive up or down; hardware needs
+         * about 0.6 s to go 1x->2x and 0.7 s the other way. Setmode itself only
+         * answers INT3, so the cost is carried and charged to the next seek —
+         * which is where DuckStation accounts for it too. */
+        if (new_double_speed != cdrom->double_speed)
+            cdrom->pending_speed_change = new_double_speed
+                ? CDROM_SPEED_UP_DELAY : CDROM_SPEED_DOWN_DELAY;
         cdrom->mode           = m;
-        cdrom->double_speed   = (m & 0x80) != 0;
+        cdrom->double_speed   = new_double_speed;
         cdrom->xa_adpcm_enable= (m & 0x40) != 0;
         cdrom->whole_sector   = (m & 0x20) != 0;
         cdrom->xa_filter_enable= (m & 0x08) != 0;
@@ -630,10 +640,16 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         uint8_t submode = raw[18];
         bool is_xa_audio = (submode & 0x04) != 0;  /* bit 2 = AUDIO */
         bool is_realtime = (submode & 0x40) != 0;  /* bit 6 = REALTIME */
+        /* Coding info (DOCS/cdromformat.md:664-671, DOCS/cdromdrive.md:265-278):
+         *   bits 0-1  mono / stereo
+         *   bit  2    sample rate, 0 = 37800 Hz, 1 = 18900 Hz
+         *   bit  4    bits per sample, 0 = 4-bit, 1 = 8-bit
+         * The rate and depth bits used to be read as 0x04 and 0x08, so every
+         * stream that was not 37800 Hz 4-bit decoded as noise. */
         uint8_t coding   = raw[19];
         bool xa_stereo   = (coding & 0x01) != 0;
-        bool xa_8bit     = (coding & 0x04) != 0;
-        bool xa_18900    = (coding & 0x08) != 0;
+        bool xa_18900    = (coding & 0x04) != 0;
+        bool xa_8bit     = (coding & 0x10) != 0;
         bool file_match  = !cdrom->xa_filter_enable
                            || (raw[16] == cdrom->xa_filter_file
                                && raw[17] == cdrom->xa_filter_channel);

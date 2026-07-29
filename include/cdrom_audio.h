@@ -29,7 +29,8 @@ typedef struct {
     uint8_t sixstep;
     int16_t ring18[2][32];  /* 18900 Hz resampler ring buffers */
     uint8_t ring18_p;
-    uint8_t sixstep18;
+    uint8_t sixstep18;      /* 18900 Hz: input credit, 3 per emitted output */
+    uint8_t phase18;        /* 18900 Hz: which of the 7 zigzag phases is next */
 } XaAdpcmState;
 
 void cdrom_audio_init(AudioFifo *fifo, XaAdpcmState *xa);

@@ -111,6 +111,9 @@ static void decode_xa_chunk(const uint8_t *chunk, bool stereo, bool bits8,
 
             int32_t s = nibble
                         + ((xa_prev[ch][0] * fpos + xa_prev[ch][1] * fneg + 32) >> 6);
+            /* The filter feeds back the *clamped* sample (DOCS/cdromformat.md:836-837);
+             * storing the raw value lets the IIR state run away on loud material. */
+            s = clamp16_xa(s);
             xa_prev[ch][1] = xa_prev[ch][0];
             xa_prev[ch][0] = s;
 
@@ -196,24 +199,32 @@ static void resample_xa_37800(XaAdpcmState *xa, AudioFifo *fifo,
     xa->ring_p = p; xa->sixstep = sixstep;
 }
 
+/* 18900 Hz -> 44100 Hz is 7 output samples per 3 input samples, where 37800 Hz
+ * is 7 per 6. Reusing the 37800 loop here (one input per step, seven outputs
+ * every six inputs) played 18900 Hz material an octave low at half speed. The
+ * credit counter below emits while it can afford to, so the 7:3 ratio holds
+ * across sector boundaries instead of resetting. */
 static void resample_xa_18900(XaAdpcmState *xa, AudioFifo *fifo,
                                const int16_t *frames, uint32_t num_frames, bool stereo) {
     uint8_t p = xa->ring18_p;
-    uint8_t sixstep = xa->sixstep18;
+    uint32_t credit = xa->sixstep18;
+    uint8_t phase = xa->phase18;
     for (uint32_t i = 0; i < num_frames; i++) {
         xa->ring18[0][p] = frames[stereo ? i*2 : i];
         xa->ring18[1][p] = frames[stereo ? i*2+1 : i];
         p = (p + 1) % 32;
-        if (--sixstep == 0) {
-            sixstep = 6;
-            for (int j = 0; j < 7; j++) {
-                int16_t l = zigzag_interp18(xa->ring18[0], j, p);
-                int16_t r = stereo ? zigzag_interp18(xa->ring18[1], j, p) : l;
-                cdrom_audio_fifo_push(fifo, l, r);
-            }
+        credit += 7;                       /* 7 outputs owed per 3 inputs */
+        while (credit >= 3) {
+            credit -= 3;
+            int16_t l = zigzag_interp18(xa->ring18[0], phase, p);
+            int16_t r = stereo ? zigzag_interp18(xa->ring18[1], phase, p) : l;
+            cdrom_audio_fifo_push(fifo, l, r);
+            phase = (uint8_t)((phase + 1) % 7);
         }
     }
-    xa->ring18_p = p; xa->sixstep18 = sixstep;
+    xa->ring18_p = p;
+    xa->sixstep18 = (uint8_t)credit;
+    xa->phase18 = phase;
 }
 
 void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_data,

@@ -51,10 +51,17 @@ struct Interconnect;
 #define CDROM_STOP_IDLE_DELAY    0x800                          /* motor already stopped */
 #define CDROM_STOP_SPIN_DELAY    (CDROM_SECTOR_TIME * 30u / 2u) /* spinning → stop */
 
-/* Pause — speed-dependent (pcsx-redux hardware-tested values) */
-#define CDROM_PAUSE_IDLE_DELAY    7000    /* already idle/standby */
-#define CDROM_PAUSE_1X_DELAY    1000000
-#define CDROM_PAUSE_2X_DELAY    2000000
+/* Pause — speed-dependent. Measured on hardware (DOCS/cdromdrive.md:1888-1889):
+ * 2 168 860 cycles at 1x and 1 097 107 at 2x, i.e. a faster drive pauses
+ * sooner. These two used to be the other way round. */
+#define CDROM_PAUSE_IDLE_DELAY    7000      /* already idle/standby */
+#define CDROM_PAUSE_1X_DELAY      2168860
+#define CDROM_PAUSE_2X_DELAY      1097107
+
+/* Read-speed change: the drive has to spin up or down before the next seek
+ * completes (DuckStation cdrom.cpp:1805-1810). */
+#define CDROM_SPEED_UP_DELAY      20321280  /* 1x -> 2x, 0.6 s */
+#define CDROM_SPEED_DOWN_DELAY    23708160  /* 2x -> 1x, 0.7 s */
 
 /* Aliases for readability */
 #define CDROM_READ_DELAY_1X      CDROM_SECTOR_TIME
@@ -259,6 +266,7 @@ typedef struct Cdrom {
     AudioFifo    audio_fifo;
     /* Sector pacing counters: the XA stream only stays in sync with the SPU if
      * audio sectors arrive at the rate their sample count implies. */
+    uint32_t     pending_speed_change;  /* cycles owed for a Setmode speed change */
     uint32_t     sectors_read_total;
     uint32_t     xa_sectors_total;
     XaAdpcmState xa_adpcm_state;

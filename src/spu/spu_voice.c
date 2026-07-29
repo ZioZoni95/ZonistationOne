@@ -275,13 +275,15 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
  * ========================================================================= */
 void spu_voice_sweep_tick(SpuVoice* voice) {
     /* Left channel — sweep mode (bit15=1).
-     * PSX-SPX: bit7=Direction(0=inc,1=dec), bit14=Exp(0=lin,1=exp),
-     * bits6-2=Shift(0-31), bits1-0=Step(0-3). */
+     * PSX-SPX (DOCS/soundprocessingunitspu.md:366-387): bit14=Exp(0=lin,1=exp),
+     * bit13=Direction(0=inc,1=dec), bit12=Phase, bits6-2=Shift, bits1-0=Step.
+     * Bit 7 is documented as unused; reading the direction from it made every
+     * sweep run the wrong way. */
     if (voice->volume_left & 0x8000) {
         uint16_t reg = voice->volume_left;
         int shift     = (reg >> 2) & 0x1F;
         int step_idx  = reg & 0x03;
-        int decrease  = (reg >> 7) & 1;   /* bit7=direction (was wrongly bit13) */
+        int decrease  = (reg >> 13) & 1;
         int exp_mode  = (reg >> 14) & 1;
         int threshold = (shift >= 11) ? (1 << (shift - 11)) : 1;
         if (++voice->vol_left_count >= threshold) {
@@ -301,7 +303,7 @@ void spu_voice_sweep_tick(SpuVoice* voice) {
         uint16_t reg = voice->volume_right;
         int shift     = (reg >> 2) & 0x1F;
         int step_idx  = reg & 0x03;
-        int decrease  = (reg >> 7) & 1;   /* bit7=direction */
+        int decrease  = (reg >> 13) & 1;
         int exp_mode  = (reg >> 14) & 1;
         int threshold = (shift >= 11) ? (1 << (shift - 11)) : 1;
         if (++voice->vol_right_count >= threshold) {
