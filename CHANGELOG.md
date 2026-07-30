@@ -18,6 +18,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rebuild when moving to a different CPU.
 
 ### Added
+- **SPU reverb input/output resampling (39-tap FIR)**: the reverb unit runs at 22050 Hz, and hardware
+  feeds it through a 39-tap half-band FIR — the 44100 Hz mixer signal is downsampled into the network
+  and its 22050 Hz output upsampled back. This replaced the crude "average two input samples, hold the
+  output across two" approximation the code admitted to. Coefficients and behaviour are the hardware's,
+  from `DOCS/soundprocessingunitspu.md` ("Reverb Buffer Resampling"); the implementation
+  (`rev_reverb_resample` in `src/spu/spu_mixing.c`, using the `reverb_ds_buf`/`reverb_us_buf` rings that
+  were already in the struct) is this project's own — no reference emulator code was copied. Improves the
+  reverb's quality (band-limiting, smoother tail) at an unchanged output level.
 - **`emu.reverb()` Lua binding + `scripts/reverb_boot_trace.lua`**: exposes the SPU reverb's internal
   state (SPUCNT reverb-enable, output volume, per-voice EON mask, work-area base/cursor, and the live
   input/output magnitudes) so a trace can tell "the game switched reverb off" from "the reverb network's

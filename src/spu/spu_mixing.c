@@ -185,9 +185,10 @@ static void reverb_process(Spu* spu, int32_t input_l, int32_t input_r,
         Rout = RMUL(Rout, vAPF2) + tr;
     }
 
-    /* Output volume */
-    *out_l = RMUL(clamp16(Lout), (int32_t)(int16_t)spu->reverb_vol_left);
-    *out_r = RMUL(clamp16(Rout), (int32_t)(int16_t)spu->reverb_vol_right);
+    /* Raw 22050 Hz reverb output — the output resampler and vLOUT/vROUT are
+     * applied by the caller (rev_reverb_resample). */
+    *out_l = clamp16(Lout);
+    *out_r = clamp16(Rout);
 
     /* One halfword per 22050 Hz step, wrapped inside the work area. */
     {
@@ -204,9 +205,92 @@ static void reverb_process(Spu* spu, int32_t input_l, int32_t input_r,
 #undef RA
 #undef RMUL
 
+/* =========================================================================
+ * Reverb input/output resampling (39-tap half-band FIR).
+ *
+ * The SPU reverb unit runs at 22050 Hz. Rather than the crude "average two
+ * input samples, hold the output across two" this used to do, hardware feeds
+ * the unit through a 39-tap FIR: the mixer's 44100 Hz signal is downsampled to
+ * 22050 Hz for the reverb network, and the network's 22050 Hz output is
+ * upsampled back to 44100 Hz. Skipping it left the reverb dull and quiet — the
+ * boot chime came out nearly dry. Coefficients and behaviour are the hardware's,
+ * from DOCS/soundprocessingunitspu.md ("Reverb Buffer Resampling"); the code is
+ * this project's own.
+ *
+ * The rings are stored doubled (…_buf[.. .. ] repeated at +half) so a 39/20-wide
+ * window can be read contiguously without wrapping mid-loop.
+ * ========================================================================= */
+
+static const int32_t s_rev_fir[39] = {
+    -0x0001, 0x0000,  0x0002, 0x0000, -0x000A, 0x0000,  0x0023, 0x0000,
+    -0x0067, 0x0000,  0x010A, 0x0000, -0x0268, 0x0000,  0x0534, 0x0000,
+    -0x0B90, 0x0000,  0x2806, 0x4000,  0x2806, 0x0000, -0x0B90, 0x0000,
+     0x0534, 0x0000, -0x0268, 0x0000,  0x010A, 0x0000, -0x0067, 0x0000,
+     0x0023, 0x0000, -0x000A, 0x0000,  0x0002, 0x0000, -0x0001
+};
+
+/* Downsample 44100 -> 22050: full 39-tap FIR over the input ring, window
+ * ending at the current (odd) position. >>15 for unity gain. */
+static int32_t rev_fir_down(const int16_t* ring /*[128], doubled at +64*/, int pos) {
+    int base = (pos - 38) & 0x3F;
+    int64_t acc = 0;
+    for (int k = 0; k < 39; k++)
+        acc += (int64_t)s_rev_fir[k] * ring[base + k];
+    return clamp16((int32_t)(acc >> 15));
+}
+
+/* Upsample 22050 -> 44100. Odd host samples interpolate with the 20 non-zero
+ * even taps (>>14, the polyphase gain); even host samples pass the aligned
+ * reverb sample straight through (the FIR's centre tap). */
+static int32_t rev_fir_up(const int16_t* ring /*[64], doubled at +32*/, int pos) {
+    int base = ((pos >> 1) - 19) & 0x1F;
+    if (pos & 1) {
+        int64_t acc = 0;
+        for (int k = 0; k < 20; k++)
+            acc += (int64_t)s_rev_fir[k * 2] * ring[base + k];
+        return clamp16((int32_t)(acc >> 14));
+    }
+    return ring[base + 9];
+}
+
+/* One 44100 Hz reverb sample: push input into the downsample ring; every second
+ * host sample run the reverb network on the downsampled input and store its
+ * output in the upsample ring; then reconstruct this host sample and apply the
+ * reverb output volume. */
+static void rev_reverb_resample(Spu* spu, int32_t in_l, int32_t in_r,
+                                int32_t* out_l, int32_t* out_r) {
+    int pos = (int)spu->reverb_resample_pos & 0x3F;
+    int dp = pos;                 /* 0..63 index into the 128-wide doubled ring */
+    int16_t il = (int16_t)clamp16(in_l), ir = (int16_t)clamp16(in_r);
+    spu->reverb_ds_buf[0][dp] = spu->reverb_ds_buf[0][dp + 64] = il;
+    spu->reverb_ds_buf[1][dp] = spu->reverb_ds_buf[1][dp + 64] = ir;
+
+    if (pos & 1) {
+        int32_t dl = rev_fir_down(spu->reverb_ds_buf[0], pos);
+        int32_t dr = rev_fir_down(spu->reverb_ds_buf[1], pos);
+        int32_t rl = 0, rr = 0;
+        reverb_process(spu, dl, dr, &rl, &rr);   /* raw 22050 Hz output */
+        int up = (pos >> 1) & 0x1F;
+        spu->reverb_us_buf[0][up] = spu->reverb_us_buf[0][up + 32] = (int16_t)clamp16(rl);
+        spu->reverb_us_buf[1][up] = spu->reverb_us_buf[1][up + 32] = (int16_t)clamp16(rr);
+    }
+
+    int32_t ul = rev_fir_up(spu->reverb_us_buf[0], pos);
+    int32_t ur = rev_fir_up(spu->reverb_us_buf[1], pos);
+
+    /* Reverb output volume (vLOUT/vROUT), signed 16-bit, product >>15. */
+    *out_l = clamp16(((int32_t)ul * (int32_t)spu->reverb_vol_left)  >> 15);
+    *out_r = clamp16(((int32_t)ur * (int32_t)spu->reverb_vol_right) >> 15);
+
+    spu->reverb_resample_pos = (spu->reverb_resample_pos + 1) & 0x3F;
+}
+
 void spu_reverb_init(Spu* spu) {
     spu->reverb_current_addr = 0;
     memset(spu->reverb_regs, 0, sizeof(spu->reverb_regs));
+    memset(spu->reverb_ds_buf, 0, sizeof(spu->reverb_ds_buf));
+    memset(spu->reverb_us_buf, 0, sizeof(spu->reverb_us_buf));
+    spu->reverb_resample_pos = 0;
 }
 
 /* =========================================================================
@@ -273,30 +357,17 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     static int s_no_reverb = -1;
     if (s_no_reverb < 0) s_no_reverb = getenv("ZS1_SPU_NO_REVERB") ? 1 : 0;
 
-    /* The reverb unit runs at 22050 Hz, half the output rate: one step per two
-     * samples, which is also what advances its delay line one slot. Running the
-     * whole IIR/comb network at 44100 Hz with the hardware's coefficients gives
-     * a completely different (and unstable) response — measured as 10302 sample
-     * jumps above 8000 LSB in a 30 s capture, against 11 with reverb bypassed.
-     *
-     * Input is the average of the sample pair and the output is held across
-     * both; the hardware uses FIR down/upsamplers instead, so this is an
-     * approximation of the resampling, not of the reverb network itself. */
+    /* The reverb unit runs at 22050 Hz, half the output rate. The 44100 Hz
+     * mixer signal is downsampled into the network and its output upsampled
+     * back, both through the hardware's 39-tap FIR (rev_reverb_resample), which
+     * also steps the reverb delay line once per two host samples. */
     int32_t rev_l = 0, rev_r = 0;
     if (!s_no_reverb) {
-        spu->reverb_in_l += rev_in_l;
-        spu->reverb_in_r += rev_in_r;
-        spu->reverb_phase ^= 1;
-        if (!spu->reverb_phase) {
-            int32_t rl = 0, rr = 0;
-            reverb_process(spu, spu->reverb_in_l >> 1, spu->reverb_in_r >> 1, &rl, &rr);
-            spu->reverb_out_l = rl;
-            spu->reverb_out_r = rr;
-            spu->reverb_in_l = 0;
-            spu->reverb_in_r = 0;
-        }
-        rev_l = spu->reverb_out_l;
-        rev_r = spu->reverb_out_r;
+        rev_reverb_resample(spu, rev_in_l, rev_in_r, &rev_l, &rev_r);
+        spu->reverb_in_l  = rev_in_l;   /* kept for the debug meter / emu.reverb() */
+        spu->reverb_in_r  = rev_in_r;
+        spu->reverb_out_l = rev_l;
+        spu->reverb_out_r = rev_r;
     }
 
     if (!s_no_reverb) {
