@@ -625,6 +625,7 @@ static uint32_t dma_ram_ticks(uint32_t words) { return words + (words + 15u) / 1
 static void dma_ch2_signal_done(Interconnect* inter) {
     DmaChannel* ch = &inter->dma.channels[2];
     dma_channel_done(ch);
+    inter->dma.stat_ch2_uploads++;   /* pipeline view: uploads/s (debug only) */
     /* Fixed stall per slice (exact accounting happens across EVQ_DMA_GPU reschedules) */
     if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
 

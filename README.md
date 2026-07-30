@@ -11,6 +11,18 @@ discs boot, play their FMV intros and reach their menus and 3D engines.
 
 ## Screenshots
 
+### New debug interface — the pipeline view during Ace Combat 2 in-engine 3D (July 30 2026)
+![Reorganised debug UI: machine bar, mode rail, stage and the CD→XA→MDEC→DMA→VRAM pipeline](Screenshot%202026-07-30%20192724.png)
+
+The debug interface was rebuilt around what the emulator is actually used for: watching data cross
+subsystem boundaries. A **machine bar** carries the live vitals (real-time %, frame ms, audio-queue
+depth, SPU drift) that used to need a Lua script; a **mode rail** (Pipeline / Display / Frame / Code /
+Memory / Audio / VRAM / Script, F1–F8) replaces the scattered floating panels; the emulated **screen
+stays on the stage** in every mode. The **Pipeline** view puts CD → XA → MDEC → DMA → VRAM on one row
+with live rates read from real counters, so a stage that stops feeding the next one is visible instead
+of deduced. Design and rationale in `docs/ui/`. The two accents encode the data path — cyan is video,
+rose is audio.
+
 ### Ace Combat 2 (Europe) — FMV intro playing on the main display (July 27 2026)
 ![FMV intro playing on the PS1 display](Screenshot%202026-07-27%20215006.png)
 
@@ -144,21 +156,35 @@ gameplay.
 
 ## Debug UI
 
-The SDL2 window is an ImGui dockspace; all output goes to windows inside it, nothing to the terminal.
+The SDL2 window is an ImGui workspace; all output goes to it, nothing to the terminal. It is organised
+around a **machine bar**, a **mode rail**, a **stage** and a docked **log console** rather than a grid
+of floating panels — the direction and its rationale live in `docs/ui/`.
 
-- **PS1 Display** — the emulated video output, dockable and floatable
-- **VRAM Viewer** — the full 1024×512 VRAM with selectable decode (4/8/16/24 bpp), 24bpp byte-phase
-  shift, CLUT picking, mask-bit and greyscale views, pixel/texture-page grids, the active display area
-  outlined, zoom, pan, magnifier and an exact per-pixel readout
-- **Disassembly** — virtual list with PC and breakpoint highlighting, clickable breakpoint dots,
-  go-to-address, live execution trace with dump-to-file
-- **CPU Registers** — PC/SR/Cause/EPC/HI/LO and all 32 GPRs with ABI names
-- **Breakpoints** — address breakpoints plus read/write watchpoints
-- **Lua console** — scriptable debugging: breakpoints and watchpoints with callbacks, register and
-  memory reads, VRAM inspection, GPU/MDEC/DMA probe events. Scripts live in `scripts/`
-- **Per-category log windows** — one per hardware category, each with its own level selector
-- **BIOS/game TTY** — real `printf`-style output with argument substitution (o32 varargs)
-- **Shortcuts** — F5 run/pause, F11 single step. Multi-viewport: any window can be dragged out
+- **Machine bar** — BIOS, disc, live PC, and the vitals that used to need a Lua script: real-time %,
+  frame ms, audio-queue depth and SPU drift, read once per frame from counters that exist anyway. A
+  **Controls** popup folds in pause/step, the log level and the log windows.
+- **Mode rail (F1–F8)** — one mode replaces a cluster of windows:
+  - **Pipeline** — CD → XA → MDEC → DMA → VRAM/scanout on one row with live rates, plus a contextual
+    inspector (VRAM CPU-vs-GPU status, audio meters, pinned watches)
+  - **Display** — the emulated screen given the whole stage
+  - **Frame** — per-frame event timeline (chrome in place; the cycle-timestamped event ring is pending)
+  - **Code** — disassembly (PC/breakpoint highlight, clickable dots, go-to, live exec trace) with
+    registers and breakpoints in the inspector
+  - **Memory** — hex view over RAM / scratchpad / BIOS with a goto and region jumps
+  - **Audio** — the SPU voice/ADSR/reverb panel with an audio-meters inspector
+  - **VRAM** — the full 1024×512 VRAM with selectable decode (4/8/16/24 bpp), 24bpp byte-phase shift,
+    CLUT picking, mask-bit and greyscale views, pixel/texture-page grids, the active display area
+    outlined, zoom, pan, magnifier and an exact per-pixel readout
+  - **Script** — the Lua console: breakpoints/watchpoints with callbacks, register/memory reads, VRAM
+    inspection, GPU/MDEC/DMA probe events. Scripts live in `scripts/`
+- **The screen is the anchor** — the emulated output stays on the stage in every mode; Display expands
+  it to the whole stage.
+- **Log console** — per-category log windows tabbed along the bottom, each with its own level selector,
+  plus the BIOS/game TTY (`printf`-style with o32 varargs argument substitution).
+- **Identity** — a blued-graphite `ImGuiStyle`; the two accents *encode the data path* (cyan = the
+  video chain CD→MDEC→DMA→VRAM, rose = the audio chain XA→SPU→device), severity colours kept separate.
+- **Shortcuts** — F1–F8 pick the mode, Space run/pause, F11 single step, Alt+Enter fullscreen. The
+  window opens maximised with its titlebar buttons.
 
 ---
 

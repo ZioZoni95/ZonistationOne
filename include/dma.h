@@ -82,6 +82,10 @@ typedef struct {
     uint32_t mdec_out_addr;     uint32_t mdec_out_remaining;
     int32_t  mdec_out_step;     bool     mdec_out_active;
 
+    /* Pipeline view: cumulative ch2 (GPU) transfer completions. Read by the
+     * debug UI to show an uploads/s rate; never used for emulation. */
+    uint32_t stat_ch2_uploads;
+
 } Dma;
 
 // --- Function Prototypes ---

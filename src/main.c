@@ -74,9 +74,11 @@ static bool init_sdl(SdlCtx* out) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    /* Resizable so the window manager offers a maximise button; maximised
+     * after the GL context is up (see below). Alt+Enter toggles fullscreen. */
     out->win = SDL_CreateWindow("ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1280, 720, SDL_WINDOW_OPENGL);
+        1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!out->win) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_CreateWindow: %s", SDL_GetError());
         SDL_Quit();
@@ -296,6 +298,10 @@ int main(int argc, char* argv[]) {
     SDL_GL_MakeCurrent(sdl.win, NULL);
     renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
 
+    /* Fill the screen while keeping the titlebar's minimise/maximise/close
+     * buttons. Window-manager call only — no GL. */
+    SDL_MaximizeWindow(sdl.win);
+
     if (args.game_path) {
         if (!cdrom_load_disc(&inter.cdrom, args.game_path))
             LOG_SYSTEM_WARN("[SYSTEM] Disc load failed: %s — BIOS-only mode", args.game_path);
@@ -331,9 +337,28 @@ int main(int argc, char* argv[]) {
 
     LOG_SYSTEM_INFO("[SYSTEM] All components initialised — starting loop");
 
+    /* Machine-bar identity for the debug UI: the two paths' basenames. */
+    {
+        const char* bn = args.bios_path;
+        const char* dn = args.game_path ? args.game_path : "n/a";
+        for (const char* p = args.bios_path; *p; p++)
+            if (*p == '/' || *p == '\\') bn = p + 1;
+        if (args.game_path)
+            for (const char* p = args.game_path; *p; p++)
+                if (*p == '/' || *p == '\\') dn = p + 1;
+        debug_ui_set_machine_info(bn, dn);
+    }
+
     // --- Main loop ---
     bool quit = false;
     SDL_Event ev;
+
+    /* Live vitals for the machine bar. Cheap: two perf-counter reads and one
+     * SPU sample delta per frame, no logging — the instrumentation that once
+     * produced a bogus speed figure was the logging, not the counters. */
+    uint64_t vit_prev         = SDL_GetPerformanceCounter();
+    uint32_t vit_prev_samples = inter.spu.total_samples_generated;
+    double   vit_drift_ema    = 0.0;
 
     /* Re-derived each frame: a game may switch video mode via GP1(08) at any
      * point (and the BIOS boots NTSC before a PAL disc's shell switches it). */
@@ -347,6 +372,12 @@ int main(int argc, char* argv[]) {
             debug_ui_process_event(&ev);
             if (ev.type == SDL_QUIT) quit = true;
             else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) quit = true;
+            /* Alt+Enter toggles borderless desktop fullscreen. */
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_RETURN &&
+                     (ev.key.keysym.mod & KMOD_ALT)) {
+                Uint32 fs = SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+                SDL_SetWindowFullscreen(sdl.win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            }
         }
 
         sio_set_button_state(&inter.sio, controller_update_from_keyboard(&gamepad));
@@ -372,6 +403,29 @@ int main(int argc, char* argv[]) {
         /* Run the machine for one video frame (or one debugger step). */
         system_run_frame(&inter, &cpu);
         if (s_prof) t1 = SDL_GetPerformanceCounter();
+
+        /* Update machine-bar vitals from the counters we already hold. Wall
+         * time is the full loop iteration (work + pacing), so Speed reads 100%
+         * when the emulator keeps real time and drops below it when it cannot. */
+        {
+            uint64_t vit_now  = SDL_GetPerformanceCounter();
+            double   vit_freq = (double)SDL_GetPerformanceFrequency();
+            double   frame_ms = (double)(vit_now - vit_prev) * 1000.0 / vit_freq;
+            double   budget_ms = (double)cycles_per_frame * 1000.0 / (double)PSX_SYSCLK_HZ;
+            uint32_t cur_samples = inter.spu.total_samples_generated;
+            uint32_t produced = cur_samples - vit_prev_samples;
+            double   drift = 0.0;
+            double   wall_s = frame_ms / 1000.0;
+            if (wall_s > 0.0005) {
+                double expected = 44100.0 * wall_s;   /* device consumption rate */
+                if (expected > 1.0) drift = ((double)produced / expected - 1.0) * 100.0;
+            }
+            vit_drift_ema = vit_drift_ema * 0.9 + drift * 0.1;
+            debug_ui_set_vitals(frame_ms, budget_ms, spu_ring_used(&inter.spu),
+                                SPU_RING_TARGET_SAMPLES, vit_drift_ema);
+            vit_prev = vit_now;
+            vit_prev_samples = cur_samples;
+        }
 
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);

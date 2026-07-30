@@ -8,6 +8,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Debug UI rebuilt around the data path (`docs/ui/` direction, phases 1–3)**: the floating-panel grid
+  (one window per subsystem) is replaced by a **machine bar + mode rail + stage + log dock** layout,
+  because every defect that has cost a session lived *between* two subsystems, not inside one. New in
+  `src/debug_ui.cpp`:
+  - A blued-graphite `ImGuiStyle` (`apply_zonistation_style`) with the `docs/ui/` design tokens. The two
+    accents encode the data path — cyan is the video chain (CD→MDEC→DMA→VRAM), rose the audio chain
+    (XA→SPU→device); severity colours (ok/warn/crit) are kept separate.
+  - A **machine bar** (`draw_machine_bar`): BIOS/disc/PC and the live vitals — real-time %, frame ms,
+    audio-queue depth, SPU drift — fed once per frame from `debug_ui_set_vitals`/`debug_ui_set_machine_info`
+    (`include/debug_ui.h`) using counters `main.c` already holds (frame budget vs. measured wall time,
+    `spu_ring_used`, an SPU sample-delta drift). Cheap by construction: two perf-counter reads, no
+    logging. A **Controls** popup folds in pause/step, the log level and the log windows (the old menu
+    bar is gone).
+  - A **mode rail** (Pipeline / Display / Frame / Code / Memory / Audio / VRAM / Script, F1–F8) with a
+    per-mode dock layout rebuilt on switch (`rebuild_layout`). The emulated screen is pinned to the top
+    of the stage in every mode; Display gives it the whole stage.
+  - A **Pipeline** view (`draw_pipeline_view`): CD → XA → MDEC → DMA → VRAM on one bordered row with
+    live per-second rates from real counters — CD sectors (`cdrom.sectors_read_total`), XA samples
+    (`audio_fifo.total_pushed`), GPU ch2 uploads (new `Dma.stat_ch2_uploads`, incremented in
+    `dma_ch2_signal_done`), MDEC in/out queue depth — sampled over a 0.5 s window. Stages without a
+    counter yet show `n/a` rather than a fabricated number.
+  - A **Memory** hex view (`draw_memory_view`/`mem_peek`): address gutter + 16 bytes + ASCII over RAM,
+    scratchpad and BIOS, with a goto and region jumps. Reads the storage buffers directly, never an I/O
+    port, so inspecting memory has no device side effects.
+  - Frame timeline, the inspector's VRAM CPU-vs-GPU diff and pinned Lua watches are stubbed with honest
+    "pending" notes — they need the phase 4–6 work (a cycle-timestamped event ring, cross-thread GL
+    readback, per-frame Lua evaluation) called out in `docs/ui/README.md`.
+  - Host window opens maximised with its titlebar buttons (`SDL_WINDOW_RESIZABLE` + `SDL_MaximizeWindow`
+    after the GL context exists); **Alt+Enter** toggles borderless fullscreen.
 - **`src/core/system.c` / `include/system.h` — unified core "run one frame" driver**: extracted the CPU + event-scheduler timing loop out of `main.c`. `system_init()` seeds the VBlank and timer events; `system_run_frame()` runs the machine until the VBlank event marks the frame boundary (`Interconnect.frame_complete`). `main.c` is now a thin host shell (SDL/GL/audio/threads + framecap) whose per-frame work is a single `system_run_frame()` call — the ~40-line nested chunk loop is gone. Threading: the GPU render thread is started by `main.c`; the SPU's own thread was later removed when sample generation moved onto the emulated clock. Mirrors the DuckStation/PCSX-Redux split of a thin outer loop over a core that owns all timing.
 
 - **VRAM Viewer (PCSX-Redux-style)**: Rebuilt the ImGui VRAM viewer (`src/debug_ui.cpp`) to match Redux's `vram-viewer` widget: selectable decode modes (4/8/16/24 bpp), 24bpp byte-phase shift, selectable CLUT (right-click a pixel), greyscale and mask-bit views, a 16×16 pixel grid and a 64×256 texture-page grid, an outline of the active CRTC display area, cursor-anchored wheel zoom, drag-to-pan, a magnifier lens, and an exact per-pixel readout (raw / 5:5:5 / mask / bytes / 24bpp / tpage) read straight from the CPU-side VRAM buffer. Decode modes are driven through a new `VramViewParams` on the renderer (`renderer_set_vram_view_params`, `include/renderer.h`). The 2 MB/frame VRAM→RGBA8 snapshot is now only taken while the window is open (`debug_ui_vram_viewer_open`).
