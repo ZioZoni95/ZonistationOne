@@ -10,8 +10,18 @@ LIBS = -lSDL2 -lGL -lGLEW -lm -lpthread
 
 SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
 
-CFLAGS = -std=c99 -g -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
-CXXFLAGS = -std=c++11 -g -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
+# Build mode. Default is an optimised build — the emulator is an interpreter on
+# the hot path, so an unoptimised (-O0) build ran ~3-5x slower than the machine,
+# left no headroom over the frame budget and drifted the moment any debug
+# instrumentation was on. `make DEBUG=1` restores an -O0 build for stepping in gdb.
+ifdef DEBUG
+  OPT = -O0 -g
+else
+  OPT = -O3 -g -march=native -DNDEBUG
+endif
+
+CFLAGS = -std=c99 $(OPT) -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
+CXXFLAGS = -std=c++11 $(OPT) -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
 
 # --- Core / CPU ---
 EMU_CPU_SRCS = \

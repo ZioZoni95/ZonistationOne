@@ -426,6 +426,27 @@ static int l_emu_spu_stats(lua_State* L) {
     return 5;
 }
 
+/* Reverb internal state — what a register poll cannot see. Lets a Lua trace tell
+ * "the game switched reverb off" (control/vol/EON) from "the reverb network's own
+ * tail is decaying wrong" (out_l/out_r while still enabled). Returns:
+ *   control, reverb_enable(bool), vol_l, vol_r, eon_mask, base, cur_addr,
+ *   in_l, in_r, out_l, out_r */
+static int l_emu_reverb(lua_State* L) {
+    Spu* spu = &g_inter->spu;
+    lua_pushinteger(L, (lua_Integer)spu->control);
+    lua_pushboolean(L, (spu->control & (1u << 7)) != 0);      /* SPUCNT reverb master enable */
+    lua_pushinteger(L, (lua_Integer)spu->reverb_vol_left);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_vol_right);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_on);          /* per-voice EON mask */
+    lua_pushinteger(L, (lua_Integer)spu->reverb_base);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_current_addr);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_in_l);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_in_r);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_out_l);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_out_r);
+    return 11;
+}
+
 /* CD audio path health: FIFO depth, samples the drive has fed in, samples the
  * SPU has taken out, and samples lost to overflow. During FMV playback the XA
  * stream is the audio source, so a starving or overflowing FIFO here is heard
@@ -490,6 +511,7 @@ static const luaL_Reg s_emu_funcs[] = {
     {"gpustat",           l_emu_gpustat},
     {"draw_area",         l_emu_draw_area},
     {"spu_stats",         l_emu_spu_stats},
+    {"reverb",            l_emu_reverb},
     {"cd_audio",          l_emu_cd_audio},
     {"host_ms",           l_emu_host_ms},
     {"irq",               l_emu_irq},

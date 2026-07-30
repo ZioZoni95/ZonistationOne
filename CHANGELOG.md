@@ -7,7 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The default build is optimised (`-O3 -march=native`)**: the Makefile compiled with `-g -Wall
+  -Wextra` and no `-O` flag, i.e. `-O0`. For an interpreter whose hot path is the per-instruction
+  decode/execute loop that is ~2x slower than an optimised build — measured during the BIOS 3D boot
+  logo, per-frame emulation time dropped from ~15–31 ms (averaging above the 20.1 ms PAL frame budget,
+  so the core could not hold real time and any debug instrumentation tipped it into audio drift) to
+  ~7–13 ms (comfortably under budget, with headroom for the debug panels and Lua probes). `make DEBUG=1`
+  restores an `-O0 -g` build for stepping in gdb. `-march=native` tunes the binary to the build machine —
+  rebuild when moving to a different CPU.
+
 ### Added
+- **`emu.reverb()` Lua binding + `scripts/reverb_boot_trace.lua`**: exposes the SPU reverb's internal
+  state (SPUCNT reverb-enable, output volume, per-voice EON mask, work-area base/cursor, and the live
+  input/output magnitudes) so a trace can tell "the game switched reverb off" from "the reverb network's
+  own tail is decaying wrong" without adding a temporary `printf` to the mixer.
 - **Debug UI rebuilt around the data path (`docs/ui/` direction, phases 1–3)**: the floating-panel grid
   (one window per subsystem) is replaced by a **machine bar + mode rail + stage + log dock** layout,
   because every defect that has cost a session lived *between* two subsystems, not inside one. New in
