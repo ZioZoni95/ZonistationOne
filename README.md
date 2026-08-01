@@ -174,9 +174,13 @@ of floating panels — the direction and its rationale live in `docs/ui/`.
   **Controls** popup folds in pause/step, the log level and the log windows.
 - **Mode rail (F1–F8)** — one mode replaces a cluster of windows:
   - **Pipeline** — CD → XA → MDEC → DMA → VRAM/scanout on one row with live rates, plus a contextual
-    inspector (VRAM CPU-vs-GPU status, audio meters, pinned watches)
+    inspector: how many VRAM halfwords differ between the CPU model and the GPU texture (split into
+    colour bits, mask bit, and pixels only the GPU has), audio meters with underrun and drop counters,
+    and pinned watches (still to come)
   - **Display** — the emulated screen given the whole stage
-  - **Frame** — per-frame event timeline (chrome in place; the cycle-timestamped event ring is pending)
+  - **Frame** — the frame's VRAM uploads and copies, draw batches, DMA ch2 completions and XA sectors
+    plotted by CPU cycle against the frame budget, with a marker where the budget was overrun.
+    Recording is on only while this mode is showing
   - **Code** — disassembly (PC/breakpoint highlight, clickable dots, go-to, live exec trace) with
     registers and breakpoints in the inspector
   - **Memory** — hex view over RAM / scratchpad / BIOS with a goto and region jumps
@@ -297,8 +301,11 @@ level is INFO because DEBUG and TRACE log per DMA transfer, per GP0 command and 
 ## References
 
 Hardware behaviour is implemented from the documentation in `DOCS/` (PSX-SPX and related notes) and
-from Lionel Flandrin's *PlayStation Emulation Guide*. Where hardware documentation was ambiguous, the
-DuckStation and PCSX-Redux sources were consulted as a second opinion on intended behaviour.
+from Lionel Flandrin's *PlayStation Emulation Guide*. Where the documentation was ambiguous, the
+DuckStation and PCSX-Redux sources were consulted as a second opinion on what the hardware does.
+
+No code is taken from DuckStation: it is licensed CC-BY-NC-ND-4.0, which permits no derivative works,
+and it is consulted only to answer questions about behaviour.
 
 Some code is derived from other emulators rather than merely informed by them; `THIRD-PARTY.md`
 lists every instance with its upstream licence. Everything not listed there is this project's own.
@@ -307,7 +314,8 @@ lists every instance with its upstream licence. Everything not listed there is t
 
 ## License
 
-**GNU General Public License v3.0 or later** — see `LICENSE`.
+**GNU General Public License v3.0 or later** — see `LICENSE`. Every source file carries an SPDX
+header saying so.
 
 The GPL is not a "personal use only" licence: it grants anyone the right to use, study, modify and
 redistribute this code, on condition that derivative works carry the same licence and the same
