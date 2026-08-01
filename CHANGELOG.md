@@ -8,6 +8,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- **Every last DuckStation reference is gone from `src/` and `include/`**: the comments that named
+  DuckStation for behaviour or constants (timing models, dispatch tables, hardware constants,
+  "DuckStation-style" architecture) are replaced with the specification they restate — the DOT/line
+  counts and dot-clock dividers from `DOCS/graphicsprocessingunitgpu.md:1305-1306,1325-1335`, the
+  CD speed-change cost from `DOCS/cdromdrive.md:1896-1908`, the noise-LFSR generator from
+  `DOCS/soundprocessingunitspu.md:534`, the mul/div latencies from the Guide's table — or with the
+  bare hardware fact. DuckStation has been CC BY-NC-ND since 2024-09-01, so no name of it may
+  remain in the code tree. `grep -rn "DuckStation" src/ include/` is now empty; the only external
+  references left are PCSX-Redux (GPL-2.0+, compatible), credited in the SPU ports and the DMA
+  sub-word comment where they are the actual source.
 - **The default build is optimised (`-O3 -march=native`)**: the Makefile compiled with `-g -Wall
   -Wextra` and no `-O` flag, i.e. `-O0`. For an interpreter whose hot path is the per-instruction
   decode/execute loop that is ~2x slower than an optimised build — measured during the BIOS 3D boot

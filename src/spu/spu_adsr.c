@@ -156,7 +156,7 @@ static int adsr_release(SpuVoice* voice) {
 
 /* =========================================================================
  * Public: spu_adsr_mix — called once per sample from spu_voice_get_sample
- * Returns mixing volume 0-32767 (15-bit, DuckStation-compatible precision)
+ * Returns mixing volume 0-32767 (15-bit)
  * ========================================================================= */
 int spu_adsr_mix(SpuVoice* voice) {
     adsr_init_tables();

@@ -113,7 +113,7 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
         case 6: cpu->cop0_tar = value; break;   // TAR / JUMPDEST
         case 7: cpu->cop0_dcic = value; break;  // DCIC
         case 12: // SR (Status Register)
-// Apply hardware write mask (DuckStation SR::WRITE_MASK = 0xF27FFFFF).
+// Apply hardware write mask 0xF27FFFFF.
             cpu->sr = (cpu->sr & ~0xF27FFFFF) | (value & 0xF27FFFFF);
             break;
         case 13: // CAUSE
@@ -452,7 +452,8 @@ void op_sra(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, rd, (uint32_t)(value_signed >> shamt));
 }
 
-// PSX MIPS mul/div latencies (DuckStation cpu_core.cpp values)
+// PSX MIPS mul/div latencies: 7 cycles for MULT, 37 for DIV (measured on
+// hardware: Guide Table 7, DOCS/cpu.md).
 #define MULT_TICKS  7   // MULT / MULTU
 #define DIV_TICKS  37   // DIV / DIVU
 
@@ -497,7 +498,7 @@ void op_divu(Cpu* cpu, uint32_t instruction) {
 // Move From LO
 void op_mflo(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
-    // Stall until MulDiv completes (DuckStation-style)
+    // Stall MFLO until the mul/div unit reports its result is ready.
     if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
         uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
         cpu->inter->cpu_cycle_counter += stall;
@@ -536,7 +537,7 @@ void op_slt(Cpu* cpu, uint32_t instruction) {
 // Move From HI
 void op_mfhi(Cpu* cpu, uint32_t instruction) {
     uint32_t rd = instr_d(instruction);
-    // Stall until MulDiv completes (DuckStation-style)
+    // Stall MFHI until the mul/div unit reports its result is ready.
     if (cpu->inter->cpu_cycle_counter < cpu->muldiv_completion_tick) {
         uint32_t stall = cpu->muldiv_completion_tick - cpu->inter->cpu_cycle_counter;
         cpu->inter->cpu_cycle_counter += stall;
@@ -545,10 +546,10 @@ void op_mfhi(Cpu* cpu, uint32_t instruction) {
     cpu_set_reg(cpu, rd, cpu->hi);
 }
 
-// System Call - DuckStation style: just raise exception, handle in main loop
+// System Call: raise exception, handle in main loop
 void op_syscall(Cpu* cpu, uint32_t instruction) {
     (void)instruction;
-    // DuckStation just triggers the exception - the syscall is handled by BIOS code
+    // Raise the exception; the BIOS syscall handler then runs as normal code.
     // We only intercept A0/B0 syscall vectors in the main execution loop
     cpu_exception(cpu, EXCEPTION_SYSCALL);
 }
@@ -749,7 +750,7 @@ void op_cop2(Cpu* cpu, uint32_t instruction) {
     /* rs bit4 set → GTE data operation (0x10-0x1F) */
     if (rs & 0x10) {
         // Stall until any still-in-flight GTE op finishes before issuing a new
-        // one (DuckStation's StallUntilGTEComplete, called before dispatch).
+        // one (the GTE's result latch is not written mid-flight).
         if (cpu->inter->cpu_cycle_counter < cpu->gte_completion_tick) {
             uint32_t stall = cpu->gte_completion_tick - cpu->inter->cpu_cycle_counter;
             cpu->inter->cpu_cycle_counter += stall;

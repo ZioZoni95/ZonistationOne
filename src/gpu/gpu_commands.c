@@ -11,7 +11,7 @@
  * Includes command dispatch, primitive rendering (poly, rect, line),
  * VRAM transfer operations, and state-setting commands.
  *
- * Modular split from gpu.c — DuckStation-inspired architecture.
+ * Modular split from gpu.c: one file per command family.
  */
 
 #include "gpu.h"
@@ -437,8 +437,7 @@ static void gp0_interrupt_request(Gpu* gpu) {
      * any code waiting on the GPU interrupt (games/BIOS place GP0(0x1F) inside
      * an ordering table to fire when the GPU processes that point, then wait on
      * the GPU IRQ / its kernel event to sync frames) would hang. Edge-triggered
-     * line, lowered by the GP1(02) acknowledge — matches DuckStation's
-     * HandleInterruptRequestCommand (SetLineState(IRQ::GPU, true)). */
+     * line, lowered by the GP1(02) acknowledge. */
     if (gpu->inter)
         interconnect_set_irq_line(gpu->inter, IRQ_GPU, true);
     LOG_GPU_DEBUG("[GPU] GP0(0x1F): Interrupt Request");

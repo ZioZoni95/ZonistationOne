@@ -150,7 +150,7 @@ typedef struct Interconnect {
     bool     frame_complete;                     // Set by the VBlank event; ends system_run_frame()
     // --------------------------------
 
-    // --- BIOS TTY line buffer (DuckStation-style EXP2 offset 0x23 capture) ---
+    // --- BIOS TTY line buffer (EXP2 offset 0x23 capture) ---
     char tty_line_buf[256];
     int  tty_line_len;
 

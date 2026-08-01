@@ -43,7 +43,7 @@ static const uint8_t noise_freq_add[5] = { 0, 84, 140, 180, 210 };
  * `idx5 ^ idx2 ^ idx1 ^ idx0 ^ 1`. The table's second half was a copy of its
  * first, which made the parity wrong for every state with bit 15 set: half the
  * sequence. Computing it removes the whole class of transcription error, and
- * the result matches DuckStation's and PCSX-Redux's tables entry for entry. */
+ * the result matches PCSX-Redux's table entry for entry. */
 static inline uint32_t noise_parity(uint32_t level) {
     return ((level >> 15) ^ (level >> 12) ^ (level >> 11) ^ (level >> 10) ^ 1u) & 1u;
 }

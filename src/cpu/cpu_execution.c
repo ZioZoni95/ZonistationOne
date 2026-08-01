@@ -15,7 +15,7 @@
 #include "log.h"
 
 // ============================================================================
-// CPU Execution Loop - DuckStation Style
+// CPU Execution Loop
 // ============================================================================
 
 // Check for pending hardware interrupt - called once per instruction
@@ -152,7 +152,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     cpu->inter->cpu_cycle_counter++;
     cpu->downcount--;
 
-    // --- 9. Dispatch Events (DuckStation-style downcount) ---
+    // --- 9. Dispatch Events (event-scheduler downcount) ---
     if (cpu->downcount <= 0) {
         eventq_dispatch_due(cpu->inter);
         // Recalculate downcount = cycles until next scheduled event

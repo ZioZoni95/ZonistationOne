@@ -32,7 +32,7 @@
 void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
     // TODO: Implement SetRCnt logic based on BIOS arguments in cpu registers
     // Example: uint32_t timer_id = cpu_reg(cpu, 4); uint32_t mode = cpu_reg(cpu, 5);
-// For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
+// For now, just log the call. Implement full logic per DOCS/timers.md.
 }
 
 // Derived-counter model forward declarations (definitions further down).
@@ -42,9 +42,8 @@ static void timer_rebase(Timers* timers, int i);
 
 /**
  * @brief Recomputes counting_enabled from sync_enable/sync_mode/gate.
- * Matches DuckStation's Timers::UpdateCountingEnabled exactly, including
- * Timer2's gate-less special case (its sync bit selects a stop/free-run
- * behavior instead of real gating).
+ * Includes Timer2's gate-less special case (its sync bit selects a
+ * stop/free-run behavior instead of real gating).
  */
 static void timer_update_counting_enabled(Timer* t, int timer_index) {
     if (timer_index != 2) {
@@ -253,7 +252,7 @@ static void timer_rebase(Timers* timers, int i) {
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
     Timer* t = &timers->timers[timer_index];
     /* Catch up to the exact write cycle before applying, so the change takes
-     * effect from now (DuckStation/Redux both sync on register writes). */
+     * effect from now (register writes are synchronous). */
     timers_catch_up_one(timers, timer_index);
 
     if (offset == TIMER_MODE_OFFSET) {

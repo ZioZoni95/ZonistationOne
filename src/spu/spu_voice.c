@@ -175,7 +175,7 @@ static void voice_decode_block(Spu* spu, struct Interconnect* inter, SpuVoice* v
     /* The decoded sample is saturated to 16 bits *before* it becomes filter
      * state. The SPU's datapath is 16-bit, and the equivalent CD-XA decoder is
      * explicit about it (`DOCS/cdromformat.md:836-837`, already applied in
-     * `cdrom_audio.c`); DuckStation saturates here too (`spu.cpp:1930`).
+     * `cdrom_audio.c`); the sample is clamped to 16 bits on decode here too.
      * Feeding the raw prediction back lets one overflowing nibble poison the
      * remaining 27 samples of the block, and leaves out-of-range values in SB[]
      * that are only clamped much later, after the envelope and volume have
@@ -289,7 +289,7 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
         fa = voice_interpolate(voice);
     }
 
-    /* ADSR envelope mix — returns 0-32767 (15-bit, matches DuckStation precision) */
+    /* ADSR envelope mix — returns 0-32767 (15-bit) */
     int32_t adsr_vol = spu_adsr_mix(voice);
     int32_t mixed = ((int32_t)fa * adsr_vol) >> 15;
 

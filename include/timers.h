@@ -55,7 +55,7 @@ typedef struct {
     bool reached_target_flag; // Internal sticky flag mirroring Mode[11]
     bool reached_ffff_flag;   // Internal sticky flag mirroring Mode[12]
 
-    // --- Sync-mode gating (DuckStation Timers::SetGate/UpdateCountingEnabled model) ---
+    // --- Sync-mode gating (set_gate / counting_enabled) ---
     bool gate;              // External gate line level (Timer0=hblank, Timer1=vblank, Timer2=n/a)
     bool counting_enabled;  // Derived from sync_enable/sync_mode/gate; gates counter increment
 
@@ -143,8 +143,8 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
 /**
  * @brief Sets the external gate line level for a timer (Timer0=hblank,
  * Timer1=vblank) and applies the PS1 sync-mode edge behavior (counter
- * reset/pause per mode), matching DuckStation's Timers::SetGate model.
- * No-op if the level hasn't changed. Timer2 has no real gate input.
+ * reset/pause per mode). No-op if the level hasn't changed.
+ * Timer2 has no real gate input.
  */
 void timers_set_gate(Timers* timers, int timer_index, bool state);
 

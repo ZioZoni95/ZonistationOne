@@ -16,8 +16,6 @@
  *
  * These helpers implement exact PSX GPU behavior per PSX-SPX specs:
  * https://psx-spx.consoledev.net/graphicsprocessingunitgpu/
- *
- * DuckStation reference: src/core/gpu_helpers.h
  */
 
 /**

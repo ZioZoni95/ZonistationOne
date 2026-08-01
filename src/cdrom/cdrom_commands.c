@@ -292,9 +292,9 @@ void cdrom_execute_command(Cdrom *cdrom) {
         uint8_t m = cdrom_pop_param(cdrom);
         bool new_double_speed = (m & 0x80) != 0;
         /* Changing the read speed spins the drive up or down; hardware needs
-         * about 0.6 s to go 1x->2x and 0.7 s the other way. Setmode itself only
-         * answers INT3, so the cost is carried and charged to the next seek —
-         * which is where DuckStation accounts for it too. */
+         * about 0.6 s to go 1x->2x and 0.7 s the other way (DOCS/cdromdrive.md:
+         * 1896-1908). Setmode itself only answers INT3, so the cost is carried
+         * and charged to the next seek. */
         if (new_double_speed != cdrom->double_speed)
             cdrom->pending_speed_change = new_double_speed
                 ? CDROM_SPEED_UP_DELAY : CDROM_SPEED_DOWN_DELAY;

@@ -611,7 +611,7 @@ bool renderer_init(Renderer* renderer) {
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("[RENDERER] VRAM Texture created (ID: %u) as R16UI.", renderer->vram_texture);
 
-    // --- Unified VRAM texture: the FBO colour attachment (DuckStation GPU_HW) ---
+    // --- Unified VRAM texture: the FBO colour attachment (hardware-accelerated path) ---
     // Rasterization renders into this; CPU/MDEC uploads write into this; the
     // scanout pass reads this. One object, so uploaded content is displayable
     // by construction.
@@ -645,8 +645,7 @@ bool renderer_init(Renderer* renderer) {
 
     // --- Scanout-extract pass ---
     // Fullscreen triangle that reads the CRTC display window out of the unified
-    // VRAM texture and unpacks it for the active depth, mirroring DuckStation's
-    // GenerateVRAMExtractFragmentShader / GPU_SW::CopyOut15Bit|CopyOut24Bit.
+    // VRAM texture and unpacks it for the active depth (15/24bpp repacking).
     {
         static const char* scanout_vs =
             "#version 330 core\n"
@@ -680,8 +679,8 @@ bool renderer_init(Renderer* renderer) {
             "  int py = int(v_uv.y * float(u_disp_size.y));\n"
             "  int y  = u_disp_off.y + py;\n"
             "  if (u_depth24 == 1) {\n"
-            /* 24bpp: 3 bytes per pixel spanning 1.5 halfwords — recombine two
-             * texels and byte-shift on odd pixels (DuckStation SampleVRAM24). */
+             /* 24bpp: 3 bytes per pixel spanning 1.5 halfwords — recombine two
+              * texels and byte-shift on odd pixels. */
             "    int hx = u_disp_off.x + (px*3)/2;\n"
             "    uint s0 = to16(texelFetch(u_vram, ivec2(hx,   y), 0));\n"
             "    uint s1 = to16(texelFetch(u_vram, ivec2(hx+1, y), 0));\n"
@@ -914,7 +913,7 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y) {
     if (!renderer->initialized) return;
 
-    // Calculate AND/OR masks based on DuckStation/Nocash logic
+    // Calculate AND/OR masks from the GP0(0xE2) mask/offset registers:
     // Mask: 0=Don't mask, 1-31=Mask (size = 8, 16, 32... 256 pixels)
     // Offset: Base address of the window (in 8 pixel steps)
     

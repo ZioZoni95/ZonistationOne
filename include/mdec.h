@@ -18,7 +18,7 @@
  *   0x1F801820 (W): Command/Parameter   (R): Decoded Data
  *   0x1F801824 (W): Control/Reset       (R): Status
  *
- * Status register bits (per DuckStation / PSX-SPX):
+ * Status register bits (per PSX-SPX):
  *   31: data-out FIFO empty
  *   30: data-in FIFO full
  *   29: command busy

@@ -23,18 +23,18 @@
 
 // Real per-instruction BIOS ROM wait-state costing (~24-32 extra cycles/word, matching
 // MEMCTRL-configured delay registers — see bus_memctrl_recalculate() in bus.c) is
-// architecturally correct (matches DuckStation's Bus::CalculateMemoryTiming model) but
-// is DISABLED here: enabling it causes the CD-ROM command sequence to hang partway
-// through boot (confirmed via isolation testing — with this cost applied, boot never
-// reads past a same-location SeekL to LBA 23; with it disabled, boot proceeds normally
-// deep into game data). The likely cause is a BIOS interrupt-handler / CD second-response
-// IRQ timing race that becomes live once ROM-resident code takes ~25-30x longer per
-// instruction, but the exact mechanism was not fully root-caused this session (an
-// IRQ edge-detector hardening in bus_irq.c's interconnect_trigger_cdrom_irq and a
-// CDROM_SEEK_FAST_DELAY increase to match DuckStation's MIN_SEEK_TICKS were both tried
-// and did not resolve it). Keep disabled until the real interaction is found — do not
-// re-enable without re-running the same isolation test (ZS1_LOG_TRACE boot of
-// Ace Combat 2, check logs/CDROM.log progresses past LBA 23).
+// architecturally correct (the MEMCTRL delay registers exist precisely to slow these
+// regions) but is DISABLED here: enabling it causes the CD-ROM command sequence to hang
+// partway through boot (confirmed via isolation testing — with this cost applied, boot
+// never reads past a same-location SeekL to LBA 23; with it disabled, boot proceeds
+// normally deep into game data). The likely cause is a BIOS interrupt-handler / CD
+// second-response IRQ timing race that becomes live once ROM-resident code takes
+// ~25-30x longer per instruction, but the exact mechanism was not fully root-caused this
+// session (an IRQ edge-detector hardening in bus_irq.c's interconnect_trigger_cdrom_irq
+// and a CDROM_SEEK_FAST_DELAY increase were both tried and did not resolve it). Keep
+// disabled until the real interaction is found — do not re-enable without re-running the
+// same isolation test (ZS1_LOG_TRACE boot of Ace Combat 2, check logs/CDROM.log
+// progresses past LBA 23).
 #define ZS1_ENABLE_BIOS_ROM_CYCLE_COST 0
 
 static inline void charge_bios_rom_cycles(Cpu* cpu, uint32_t paddr, uint32_t word_count, bool count_cycles) {
@@ -61,9 +61,9 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
         return instruction;
     }
     // SR.IsC/SwC ("isolate/swap cache") are data-cache concerns per real R3000A semantics
-    // (confirmed against DuckStation: Bus::GetMemoryHandlers only swaps LOAD/STORE handler
-    // tables for isolate/swap, never the instruction-fetch path) — already handled at the
-    // data load/store level (see the `cpu->sr & 0x10000` checks in cpu_instructions.c).
+    // (the isolate/swap bits swap only the data LOAD/STORE handler tables, never the
+    // instruction-fetch path) — already handled at the data load/store level (see the
+    // `cpu->sr & 0x10000` checks in cpu_instructions.c).
     // Instruction fetch is correctly unaffected by either bit; no fetch-path change needed.
 
 

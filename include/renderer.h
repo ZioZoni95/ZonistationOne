@@ -76,7 +76,7 @@ typedef struct {
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
     GLuint vram_texture;    // Texture object for VRAM
 
-    // --- Unified VRAM (DuckStation GPU_HW pattern) ---
+    // --- Unified VRAM (single GL texture) ---
     // ONE RGBA8 texture is the rasterization target, the CPU/MDEC upload
     // target, and the scanout source, so anything written to VRAM is on screen
     // by construction. PSX 16-bit halfwords are stored 5:5:5:1 expanded to 8

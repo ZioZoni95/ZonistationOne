@@ -14,7 +14,7 @@
 #include <string.h>
 
 // =============================================================================
-// BIOS Syscall Side-Channel Capture (DuckStation-style LLE)
+// BIOS Syscall Side-Channel Capture (LLE)
 //
 // Called from op_jr BEFORE the CPU jumps to 0xA0 / 0xB0.
 // The BIOS still executes normally — we only read arguments to capture TTY

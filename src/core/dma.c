@@ -77,9 +77,8 @@ static uint32_t estimate_dma_cycles(DmaChannel* ch) {
 
 /* Recompute DICR's master flag and drive the DMA interrupt LINE from it.
  *
- * This is the single place allowed to touch the IRQ3 line, mirroring
- * DuckStation's DMA::UpdateIRQ (dma.cpp:500-507: UpdateMasterFlag() then
- * InterruptController::SetLineState(IRQ::DMA, master_flag)).
+ * This is the single place allowed to touch the IRQ3 line: recompute the
+ * DICR master flag, then set the line from it.
  *
  * Why the line, and not just I_STAT: interconnect_set_irq_line only latches
  * I_STAT on a low->high edge. Completion sites used to poke the line high
@@ -251,9 +250,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 }
                 /* Always re-evaluate: besides acknowledging, this write may have
                  * just ENABLED a channel whose transfer already finished — games
-                 * legitimately program DICR after CHCR (DuckStation calls
-                 * UpdateIRQ() on every DICR write for exactly that reason,
-                 * dma.cpp:457, see its Lagnacure Legend note at dma.cpp:401). */
+                 * legitimately program DICR after CHCR, so every DICR write
+                 * re-evaluates the master flag. */
                 dma_update_irq(dma);
                 break;
             default:

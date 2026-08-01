@@ -39,14 +39,14 @@ struct Interconnect;
 #define CDROM_RESET_DELAY      4100000
 
 /* Seek delays */
-/* Matches DuckStation's MIN_SEEK_TICKS (cdrom.cpp) — even a same-location "instant"
- * seek completion is never scheduled sooner than this on real hardware; BIOS's own
- * ISR for the first (INT3 command-ack) response needs enough real cycles to fully
- * run and re-enable interrupts before the second response's IRQ fires, or the second
- * IRQ can land while interrupts are still disabled and get silently dropped. The old
- * 0x800 (2048-cycle) value only worked because instructions were costed at a flat
- * 1 cycle/instruction; now that BIOS ROM fetches cost real wait-states (cpu_icache.c),
- * 2048 cycles is no longer enough headroom. */
+/* A same-location "instant" seek is never scheduled sooner than this on real
+ * hardware; BIOS's own ISR for the first (INT3 command-ack) response needs
+ * enough real cycles to fully run and re-enable interrupts before the second
+ * response's IRQ fires, or the second IRQ can land while interrupts are still
+ * disabled and get silently dropped. The old 0x800 (2048-cycle) value only
+ * worked because instructions were costed at a flat 1 cycle/instruction; now
+ * that BIOS ROM fetches cost real wait-states (cpu_icache.c), 2048 cycles is
+ * no longer enough headroom. */
 #define CDROM_SEEK_FAST_DELAY    30000  /* setloc_pending, no head movement */
 #define CDROM_SEEK_DELAY         (CDROM_SECTOR_TIME * 4u)      /* real seek base */
 #define CDROM_SEEK_CHANGE_DELAY  (CDROM_SECTOR_TIME * 30u)     /* post-location-change first read */
@@ -66,7 +66,7 @@ struct Interconnect;
 #define CDROM_PAUSE_2X_DELAY      1097107
 
 /* Read-speed change: the drive has to spin up or down before the next seek
- * completes (DuckStation cdrom.cpp:1805-1810). */
+ * completes (DOCS/cdromdrive.md:1896-1908). */
 #define CDROM_SPEED_UP_DELAY      20321280  /* 1x -> 2x, 0.6 s */
 #define CDROM_SPEED_DOWN_DELAY    23708160  /* 2x -> 1x, 0.7 s */
 

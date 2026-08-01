@@ -36,7 +36,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch);
 
 // =============================================================================
-// HW DISPATCH TABLE  (DuckStation-style, ref: bus.cpp:2046-2118)
+// HW DISPATCH TABLE  (indexed by 16-byte block)
 //
 // Hardware registers occupy 0x1F801000-0x1F801FFF (4 KB).
 // We index by (phys >> 4) & 0xFF — one entry per 16-byte block (256 entries).
@@ -258,11 +258,11 @@ static void hw_irq_write(Interconnect* inter, uint32_t addr, uint32_t val, BusSi
 // --- DMA (0x1F801080-0x1F8010FF) ---
 /* DMA registers are 32-bit, but sub-word access to them is legal and real
  * software uses it — the BIOS shell enables the DMA completion IRQs with a
- * byte write to DICR+2 (0x1F8010F6). Both reference emulators service such
- * accesses through the containing word (DuckStation's FIXUP_WORD_OFFSET;
- * PCSX-Redux lists 0x1F8010F0-0x1F8010F7 as byte-addressable register space),
- * so the offset must be word-aligned before it reaches dma_read/dma_write —
- * passing 0x76 straight through fell into their default cases instead. */
+ * byte write to DICR+2 (0x1F8010F6). Sub-word accesses are serviced through
+ * the containing word (PCSX-Redux lists 0x1F8010F0-0x1F8010F7 as
+ * byte-addressable register space), so the offset must be word-aligned before
+ * it reaches dma_read/dma_write — passing 0x76 straight through fell into
+ * their default cases instead. */
 static uint32_t hw_dma_read(Interconnect* inter, uint32_t addr, BusSize sz) {
     uint32_t off = addr - DMA_START;
     uint32_t v32 = dma_read(&inter->dma, off & ~3u);
@@ -581,9 +581,9 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     if (phys >= 0x1F000000 && phys < 0x1F800000) return; // EXP1
     if (phys >= 0x1F801000 && phys < 0x1F802000) { g_hw_write[(phys>>4)&0xFF](inter, phys, value, BUS_BYTE); return; }
     // EXP2 (0x1F802000-0x1F803FFF) — only offset 0x23/0x80 is the TTY char
-    // port (matches DuckStation's EXP2WriteHandler). The rest of the range is
-    // POST status codes and other diagnostic registers — capturing writes to
-    // those as if they were TTY text corrupts the log with garbage characters.
+    // port. The rest of the range is POST status codes and other diagnostic
+    // registers — capturing writes to those as if they were TTY text corrupts
+    // the log with garbage characters.
     if (phys >= 0x1F802000 && phys < 0x1F804000) {
         uint32_t offset = phys - 0x1F802000;
         if (offset == 0x23 || offset == 0x80) {
@@ -620,17 +620,16 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 #define DMA_SLICE_CYCLES 1000  /* EVQ cycles between slices (~30µs) */
 
 /* MDEC DMA pacing. Real DMA reaches RAM in DRAM hyper-page mode: ~1 cycle per
- * word plus a row-load per 16 (DuckStation Bus::GetDMARAMTickCount). Pacing
- * MDEC's ch0/ch1 slices with the GPU path's flat 64-words-per-1000-cycles
- * instead works out to ~15.6 cycles/word — slow enough that libmdec's
- * DecDCTinSync/DecDCToutSync spin loops give up mid-FMV, which the game
- * reports on the TTY as "MDEC_in_sync timeout:" / "time out in decoding !".
- * Slice size mirrors DuckStation's SLICE_SIZE_WHEN_DECODING_MDEC (it caps MDEC
- * slices low on purpose so an oversized FIFO can't swallow kilobytes at once
- * and starve other interrupts), and the stall between slices is the real cost
- * of the words actually moved, not a fixed quantum. */
-#define MDEC_SLICE_WORDS   100  /* DuckStation SLICE_SIZE_WHEN_DECODING_MDEC */
-#define MDEC_IDLE_BACKOFF  100  /* DuckStation DEFAULT_DMA_HALT_TICKS */
+ * word plus a row-load per 16 (DOCS/dmachannels.md). Pacing MDEC's ch0/ch1
+ * slices with the GPU path's flat 64-words-per-1000-cycles instead works out
+ * to ~15.6 cycles/word — slow enough that libmdec's DecDCTinSync/
+ * DecDCToutSync spin loops give up mid-FMV, which the game reports on the TTY
+ * as "MDEC_in_sync timeout:" / "time out in decoding !". The slice size caps
+ * MDEC slices low on purpose so an oversized FIFO can't swallow kilobytes at
+ * once and starve other interrupts, and the stall between slices is the real
+ * cost of the words actually moved, not a fixed quantum. */
+#define MDEC_SLICE_WORDS   100  /* slice size while decoding MDEC */
+#define MDEC_IDLE_BACKOFF  100  /* DMA halt ticks when the FIFO is full */
 
 static uint32_t dma_ram_ticks(uint32_t words) { return words + (words + 15u) / 16u; }
 
@@ -863,12 +862,11 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
      * later kick that inspects "is this channel active?" — a DPCR write
      * unblocking channels, or software re-poking CHCR — would otherwise
      * restart the transfer from base_addr and re-send the entire payload.
-     * DuckStation's TransferChannel() is resumable for exactly this reason
-     * (it advances base_address/block_control as it goes and re-entry
-     * continues rather than rewinds). Ours resumes off the event scheduler,
-     * so a re-kick has to be a no-op. This was corrupting FMV playback: the
-     * duplicate GPU ch2 payload arrived with no GP0(0xA0) in front of it, so
-     * MDEC pixel words were decoded as GP0 commands. */
+     * A resumable transfer advances base_address/block_control as it goes and
+     * re-entry continues rather than rewinds; ours resumes off the event
+     * scheduler, so a re-kick has to be a no-op. This was corrupting FMV
+     * playback: the duplicate GPU ch2 payload arrived with no GP0(0xA0) in
+     * front of it, so MDEC pixel words were decoded as GP0 commands. */
     /* A kick that arrives while this channel still has a sliced transfer in
      * flight used to be dropped outright, which silently lost a whole transfer:
      * during FMV playback the movie player kicks the next column upload while a
@@ -931,11 +929,10 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
              * kicked, so a deferred read picked up the NEXT column's pixels and
              * VRAM ended up holding two payloads repeated across all twenty
              * 16-pixel columns — the striping visible on screen. A block
-             * transfer must consume the buffer at kick time; both references do
-             * it that way (DuckStation delays only the completion, never the
-             * data read; PCSX-Redux copies immediately and schedules just the
-             * IRQ). The linked list below stays sliced: its node chain is built
-             * before the kick and is not rewritten under us. */
+             * transfer must consume the buffer at kick time: the data is
+             * read then, only the completion is scheduled later. The linked
+             * list below stays sliced: its node chain is built before the
+             * kick and is not rewritten under us. */
             if (channel_index == 2 && ch->direction == FROM_RAM) {
                 LOG_DMA_DEBUG("[DMA] GPU REQUEST/MANUAL FROM_RAM: %u words", words_to_transfer);
                 inter->dma.gpu_ll_active  = false;

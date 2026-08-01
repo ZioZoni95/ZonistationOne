@@ -56,7 +56,7 @@ uint32_t bios_load32(Bios* bios, uint32_t offset);
 uint16_t bios_load16(Bios* bios, uint32_t offset);
 
 // Patch BIOS ROM in memory to skip the shell (and region check).
-// DuckStation-style fast boot: replaces shell entry with display-enable + jr $ra.
+// Fast boot: replaces shell entry with display-enable + jr $ra.
 void bios_apply_fastboot_patch(Bios* bios);
 
 #endif // BIOS_H
