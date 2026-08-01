@@ -18,6 +18,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rebuild when moving to a different CPU.
 
 ### Added
+- **Every source file carries an SPDX header** (`GPL-3.0-or-later`, `SPDX-FileCopyrightText`), 76 in
+  all, with the upstream authors named in the header of the files that have them so the attribution
+  travels with the code rather than only with `THIRD-PARTY.md`. `src/utils/rxi_log.*` are marked MIT,
+  which is what they are. `CLAUDE.md` now states the constraint the tree is maintained under.
+- **The documented latched-TXEN behaviour** (`DOCS/serialinterfacessio.md:16-20`): writing TX_DATA
+  latches TXEN, and the transfer starts if either the current or the latched value is set, so
+  clearing TXEN afterwards does not cancel a transfer the write already armed. The documentation
+  names Wipeout 2097 as the title that depends on it.
+
 - **`LICENSE` (GPL-3.0) is now actually in the repository** — it existed on disk but had never been
   committed — and **`THIRD-PARTY.md`** records every component with an upstream author, its licence,
   and the parts written from `DOCS/` that have no third-party origin.
@@ -103,7 +112,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **VRAM Viewer (PCSX-Redux-style)**: Rebuilt the ImGui VRAM viewer (`src/debug_ui.cpp`) to match Redux's `vram-viewer` widget: selectable decode modes (4/8/16/24 bpp), 24bpp byte-phase shift, selectable CLUT (right-click a pixel), greyscale and mask-bit views, a 16×16 pixel grid and a 64×256 texture-page grid, an outline of the active CRTC display area, cursor-anchored wheel zoom, drag-to-pan, a magnifier lens, and an exact per-pixel readout (raw / 5:5:5 / mask / bytes / 24bpp / tpage) read straight from the CPU-side VRAM buffer. Decode modes are driven through a new `VramViewParams` on the renderer (`renderer_set_vram_view_params`, `include/renderer.h`). The 2 MB/frame VRAM→RGBA8 snapshot is now only taken while the window is open (`debug_ui_vram_viewer_open`).
 - **Lua debug bindings**: `emu.spu_stats` (samples produced, samples dropped, output-ring occupancy, key-on count — sample count against emulated time is the direct check that audio is paced by the guest), `emu.draw_area` (drawing area + drawing offset — the GL path scissors every batch to it, so it decides which primitives can reach the unified VRAM texture) and a `gp0_fill` probe point for GP0(0x02); plus `emu.gpustat`, `emu.display_area`, `emu.vram16(x,y)`, `emu.vram_upload_rect`, `emu.gpu_pool`, `emu.gp0_opcode/word/word_count`, `emu.timer(i)`, and `emu.mdec_block/info/scale/qtable/in_peek/in_count/dma` — query-only helpers (zero cost unless a script calls them) plus a few `lua_debug_notify` probe points (`mdec_macroblock`, `gp0_vram_upload/copy/image_start`, `vram_full_upload`) for live MDEC/GPU pipeline tracing.
 - **MDEC (Macroblock Decoder)**: Full implementation in `src/core/mdec.c` / `include/mdec.h`.
-  - State machine ported 1:1 from DuckStation (`IDCT_Old`, `DecodeRLE_Old`, `YUVToRGB_Old`).
+  - Decode stages implemented from `DOCS/macroblockdecodermdec.md` (rl_decode_block,
+    real_idct_core, yuv_to_rgb, y_to_mono). *(Superseded 2026-08-01: this line described the
+    earlier implementation and was corrected when the stages were rewritten against the spec.)*
   - 6-block color path (Cr,Cb,Y1-Y4) and mono path; 4-bit, 8-bit, 24-bit, 15-bit output modes.
   - DMA in/out FIFO (2048 HW in, 768 W out); integrated with DMA ch0 (MDECin) and ch1 (MDECout).
   - Status register: data-out-empty, data-in-full, command-busy, DMA-request bits.
@@ -120,6 +131,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Timing unified under one scheduler authority (interpreter-native, PCSX-Redux `Counters` model)**: timers were the only subsystem not driven by the event scheduler — they were stepped by hand in the main loop (`timers_step`) once per coarse chunk, alongside a half-wired, conflicting `EVQ_TIMER0/1/2` event path. Timers are now first-class scheduled events. The counter is **derived on read** as `(cpu_cycle_counter - cycle_start) / rate` (no per-tick increment loop, no fractional accumulator — `src/core/timers.c`, reusing the existing `cycle_start`/`rate` fields), IRQ/reset fires from the scheduled event at the next target/overflow through a single shared IRQ path, and every register read/write/gate-change catches the timer up on demand. Dotclock (Timer0) / hblank (Timer1) rates now derive from the GPU's active video mode via `gpu_dotclock_hz`/`gpu_hblank_hz` (CRTC 53'693'175 NTSC / 53'203'425 PAL, dotclock divider from GPUSTAT h-res, hblank per-scanline), not fixed NTSC constants. Not DuckStation's two-counter `pending_ticks` model — unnecessary for an interpreter whose `cpu_cycle_counter` is always "now". New `src/core/system.c` owns the per-frame run loop; `main.c` shrank to a thin host shell.
 
 ### Fixed
+- **SIO0 bus sequencing rewritten around the documented signal model.** It was structured as an
+  abstract transfer machine; it now follows what the documentation describes on the wire — /CS
+  selects a port, the first byte after assertion addresses a device
+  (`DOCS/controllersandmemorycards.md:50-67`), each byte is a full-duplex shift, and the addressed
+  device pulls /ACK low to request another (`:127-178`). The phase enum and the functions are named
+  after those signals. The device protocols themselves already followed the published sequences at
+  `:331-346` and `:2354-2400`. Verified: BIOS boots, pad input works, both memory card slots load,
+  are detected, written and saved.
 - **MDEC decode stages rewritten against the hardware documentation.** `rl_decode_block`,
   `real_idct_core`, `yuv_to_rgb` and `y_to_mono` now follow
   `DOCS/macroblockdecodermdec.md:138-158, :192-245`, and the `zagzig` table is generated by the

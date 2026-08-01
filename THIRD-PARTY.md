@@ -1,6 +1,7 @@
 # Third-party code and attribution
 
-ZoniStation One is licensed **GPL-3.0-or-later** (`LICENSE`). This file lists every part of the
+ZoniStation One is licensed **GPL-3.0-or-later** (`LICENSE`; every source file carries an
+SPDX header saying so). This file lists every part of the
 source tree that is derived from someone else's work, what its upstream licence is, and why that is
 compatible with the licence above.
 
@@ -52,7 +53,24 @@ specification, cited per line below so any claim can be checked against the sour
 | SPU 4-point Gaussian interpolation and its 512-entry table | `DOCS/soundprocessingunitspu.md:215-291` | Self-checking: the documentation notes at `:295-299` that the real table's groups of four sum to 7F7Fh..7F81h instead of 8000h, and the transcription reproduces exactly that range. |
 | SPU noise generator | `DOCS/soundprocessingunitspu.md:534` | Computed from the published parity expression rather than stored as a table, which removes the whole class of transcription error. |
 | SPU ADPCM decode saturation | `DOCS/cdromformat.md:836-837` | Same 16-bit datapath as the CD-XA decoder. |
+| SIO0 bus sequencing, controller and memory card protocols | `DOCS/serialinterfacessio.md:8-108`, `DOCS/controllersandmemorycards.md:50-67, :127-178, :331-346, :2354-2400` | Modelled on the documented signals — /CS selects a port, the first byte addresses a device, each byte is a full-duplex shift, /ACK requests the next one. |
 | Memory access timing (`calc_memory_timing_word_cycles`) | `DOCS/memorycontrol.md:37-53, :126-145` | The 1ST/SEQ/MIN arithmetic is the published pseudocode transcribed line for line. |
+
+---
+
+## Documentation this code is written against
+
+`DOCS/` is a copy of **psx-spx** (Martin "nocash" Korth and contributors). It carries no software
+licence of its own, and the upstream project states that parts of it were reconstructed from Sony
+material. This project treats it as a specification: the register layouts, cycle counts and
+pseudocode in it are facts about the console, and implementing them is not copying software. Where a
+file here cites a `DOCS/` line, that citation is the provenance of the behaviour, not a licence
+grant.
+
+Some of the earliest subsystems were written while following Lionel Flandrin's *PlayStation
+Emulation Guide* (`simias/psx-guide`), which publishes no licence. What was taken from it is the
+described behaviour and the order to build things in, not its code listings — they are Rust, and the
+project is C. It is recorded here because "we read it" should be visible rather than inferred.
 
 ---
 

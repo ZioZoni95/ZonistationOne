@@ -435,5 +435,6 @@ week-long symptom chases into single-session root causes.
 Hardware behaviour is taken from the documentation in `DOCS/` (PSX-SPX and related notes) and from
 Lionel Flandrin's PlayStation emulation guide. Where a hardware detail was ambiguous, the
 DuckStation and PCSX-Redux sources were consulted as a second opinion, and the MDEC decoder's
-transform stage was ported from DuckStation's implementation with attribution in the file header.
+transform stage is implemented from `DOCS/macroblockdecodermdec.md` (rewritten 2026-08-01; this
+line previously described an earlier implementation).
 Everything else here is this project's own implementation.

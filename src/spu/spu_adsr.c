@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: 2002 Pete Bernert and the PCSX-Redux authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /*
  * SPU ADSR envelope — ported 1:1 from pcsx-redux (Pete Bernert / PCSX-Redux authors)
  * Original: pcsx-redux/src/spu/adsr.cc  (GPL-2.0+)

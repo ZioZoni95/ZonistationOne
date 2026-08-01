@@ -1,6 +1,24 @@
-// SIO (PAD) Implementation based on DuckStation
-// Implements PSX Serial I/O controller and memory card interface
-// Based on DuckStation's pad.cpp: https://github.com/stenzek/duckstation
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
+// SIO0 — the serial bus the controller and memory card ports hang off.
+//
+// Written against the hardware documentation:
+//   DOCS/serialinterfacessio.md:8-108   TX_DATA / STAT / MODE / CTRL registers
+//   DOCS/controllersandmemorycards.md:50-67   device addressing (01h pad, 81h card)
+//   DOCS/controllersandmemorycards.md:127-178 /CS, SCK, /ACK signalling
+//   DOCS/controllersandmemorycards.md:331-346 controller communication sequence
+//   DOCS/controllersandmemorycards.md:2354-2400 memory card read/write/ID sequences
+//
+// The bus is modelled the way the documentation describes it rather than as an
+// abstract transfer machine: /CS selects a port, the first byte after assertion
+// addresses a device, each byte is a full-duplex shift, and the addressed device
+// answers by pulling /ACK low to ask for another byte. When it stops pulsing
+// /ACK the packet is over. Everything else here follows from those four facts.
 
 #include "sio.h"
 #include "interconnect.h"
@@ -15,18 +33,22 @@
 // ============================================================================
 // STATE MACHINE
 // ============================================================================
+/* Where the bus is in the byte cycle of DOCS/controllersandmemorycards.md:127-142:
+ * idle with nothing on the wire, a byte being clocked out on SCK, or the byte
+ * exchanged and the device holding /ACK low to request the next one. */
 typedef enum {
-    STATE_IDLE,
-    STATE_TRANSMITTING,
-    STATE_WAITING_FOR_ACK
-} SioState;
+    SIO_BUS_IDLE,
+    SIO_BUS_SHIFTING,
+    SIO_BUS_ACK
+} SioBusPhase;
 
+/* Which device answered the address byte (:50-67). Nothing is addressed until
+ * the host sends one after asserting /CS. */
 typedef enum {
-    ACTIVE_DEVICE_NONE,
-    ACTIVE_DEVICE_CONTROLLER,
-    ACTIVE_DEVICE_MEMCARD,
-    ACTIVE_DEVICE_MULTITAP
-} ActiveDevice;
+    SIO_DEV_NONE,
+    SIO_DEV_CONTROLLER,
+    SIO_DEV_MEMCARD
+} SioAddressedDevice;
 
 // ============================================================================
 // REGISTER BITFIELDS (PSX-SPX Reference)
@@ -81,8 +103,9 @@ typedef struct {
     uint16_t baud;
 
     // Transfer state machine
-    SioState state;
-    ActiveDevice active_device;
+    SioBusPhase bus_phase;
+    SioAddressedDevice addressed;
+    bool txen_latched;   /* DOCS/serialinterfacessio.md:16-20 */
     uint8_t transmit_value;
     uint8_t receive_buffer;
     bool receive_buffer_full;
@@ -130,16 +153,16 @@ static SioInternal sio_internal = {};
 // ============================================================================
 
 static void sio_soft_reset(void);
-static void sio_begin_transfer(void);
-static void sio_do_transfer(void);
-static void sio_do_ack(void);
-static void sio_end_transfer(void);
+static void sio_start_shift(void);
+static void sio_shift_byte(void);
+static void sio_pulse_ack(void);
+static void sio_release_bus(void);
 static void sio_update_joystat(void);
 static void sio_trigger_irq(const char* type);
 static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte);
 static uint8_t sio_memcard_transfer(uint8_t tx_byte);
-static bool sio_can_transfer(void);
-static void sio_reset_device_transfer_state(void);
+static bool sio_bus_ready(void);
+static void sio_release_cs(void);
 
 // ============================================================================
 // INITIALIZATION
@@ -157,8 +180,8 @@ void sio_init(Sio* sio) {
     sio_internal.baud = 0x0088;
 
     // Initialize state machine
-    sio_internal.state = STATE_IDLE;
-    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.bus_phase = SIO_BUS_IDLE;
+    sio_internal.addressed = SIO_DEV_NONE;
     sio_internal.transmit_buffer_full = false;
     sio_internal.receive_buffer_full = false;
 
@@ -184,7 +207,7 @@ void sio_init(Sio* sio) {
     sio->baud = sio_internal.baud;
     sio->controller_connected = sio_internal.controller_connected;
 
-    LOG_SYSTEM_INFO("[SYSTEM] SIO initialized (DuckStation-style implementation)");
+    LOG_SYSTEM_INFO("[SYSTEM] SIO0 initialized");
 }
 
 void sio_set_interconnect(Sio* sio, struct Interconnect* inter) {
@@ -195,9 +218,9 @@ void sio_set_interconnect(Sio* sio, struct Interconnect* inter) {
 // Called by EVQ_SIO event handler — executes the deferred byte transfer and
 // delivers IRQ7 if enabled. Also reschedules for chained transfers.
 void sio_execute_event(Sio* sio) {
-    sio_do_transfer();
+    sio_shift_byte();
 
-    // Deliver ACK IRQ if pending (set by sio_do_ack via sio_trigger_irq)
+    // Deliver ACK IRQ if pending (set by sio_pulse_ack via sio_trigger_irq)
     if (sio_internal.pending_irq) {
         sio->pending_irq = true;
         sio_internal.pending_irq = false;
@@ -220,7 +243,7 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
             uint8_t value = sio_internal.receive_buffer_full ? sio_internal.receive_buffer : 0xFF;
             SIO_DBG("[SIO] Read JOY_DATA = 0x%02x (full=%d, step=%d, device=%d)",
                 value, sio_internal.receive_buffer_full, sio_internal.controller_transfer_step,
-                sio_internal.active_device);
+                sio_internal.addressed);
             
             // Clear RX buffer full flag
             sio_internal.receive_buffer_full = false;
@@ -243,7 +266,9 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
 uint16_t sio_read16(Sio* sio, uint32_t offset) {
     switch (offset) {
         case 0x04: {  // JOY_STAT (1F801044h)
-            // ACK_INPUT (bit 7) is a momentary pulse — clear on read per DuckStation
+            // STAT.7 mirrors the /ACK input, which the device holds low only for a
+            // couple of microseconds (DOCS/controllersandmemorycards.md:167-169), so
+            // it reads as a pulse: report it once, then let it go high again.
             uint16_t stat = (uint16_t)sio_internal.stat;
             sio_internal.stat &= ~STAT_ACKINPUT;
             return stat;
@@ -280,6 +305,8 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
 
             sio_internal.transmit_buffer = value;
             sio_internal.transmit_buffer_full = true;
+            /* Latch TXEN as of this write — see sio_bus_ready(). */
+            sio_internal.txen_latched = (sio_internal.ctrl & CTRL_TXEN) != 0;
 
             // Fire TX interrupt if enabled
             if (sio_internal.ctrl & CTRL_TXINTEN) {
@@ -287,8 +314,8 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
             }
 
             // Start transfer if conditions allow
-            if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
-                sio_begin_transfer();
+            if (sio_internal.bus_phase == SIO_BUS_IDLE && sio_bus_ready()) {
+                sio_start_shift();
             }
             break;
 
@@ -336,17 +363,17 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
 
             // Handle SELECT deassert
             if (!(value & CTRL_SELECT)) {
-                sio_reset_device_transfer_state();
+                sio_release_cs();
             }
 
             // Handle transfer enable/disable
             if (!(value & CTRL_SELECT) || !(value & CTRL_TXEN)) {
-                if (sio_internal.state != STATE_IDLE) {
-                    sio_end_transfer();
+                if (sio_internal.bus_phase != SIO_BUS_IDLE) {
+                    sio_release_bus();
                 }
             } else {
-                if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
-                    sio_begin_transfer();
+                if (sio_internal.bus_phase == SIO_BUS_IDLE && sio_bus_ready()) {
+                    sio_start_shift();
                 }
             }
 
@@ -397,18 +424,23 @@ void sio_set_controller_connected(Sio* sio, bool connected) {
 }
 
 // ============================================================================
-// INTERNAL TRANSFER LOGIC (DuckStation-style)
+// BUS SEQUENCING — one byte of DOCS/controllersandmemorycards.md:127-142
 // ============================================================================
 
-static bool sio_can_transfer(void) {
+/* DOCS/serialinterfacessio.md:16-20: writing TX_DATA latches TXEN, and the
+ * transfer starts if the current TXEN value OR the latched one is set — so
+ * clearing TXEN after the write does not cancel a transfer that the write
+ * already armed. The documentation names Wipeout 2097 as the title that depends
+ * on it. /CS must also be asserted (CTRL.1, :91-93). */
+static bool sio_bus_ready(void) {
     return sio_internal.transmit_buffer_full &&
            (sio_internal.ctrl & CTRL_SELECT) &&
-           (sio_internal.ctrl & CTRL_TXEN);
+           ((sio_internal.ctrl & CTRL_TXEN) || sio_internal.txen_latched);
 }
 
 static void sio_soft_reset(void) {
-    if (sio_internal.state != STATE_IDLE) {
-        sio_end_transfer();
+    if (sio_internal.bus_phase != SIO_BUS_IDLE) {
+        sio_release_bus();
     }
 
     sio_internal.ctrl = 0;
@@ -418,24 +450,28 @@ static void sio_soft_reset(void) {
     sio_internal.receive_buffer_full = false;
     sio_internal.transmit_buffer = 0;
     sio_internal.transmit_buffer_full = false;
-    sio_reset_device_transfer_state();
+    sio_internal.txen_latched = false;
+    sio_release_cs();
     sio_update_joystat();
     SIO_DBG("[SIO] Soft reset");
 }
 
-static void sio_begin_transfer(void) {
+static void sio_start_shift(void) {
     SIO_DBG("[SIO] BeginTransfer");
 
-    if (sio_internal.state != STATE_IDLE || !sio_can_transfer()) {
+    if (sio_internal.bus_phase != SIO_BUS_IDLE || !sio_bus_ready()) {
         return;
     }
 
-    sio_internal.state = STATE_TRANSMITTING;
+    sio_internal.bus_phase = SIO_BUS_SHIFTING;
     sio_internal.ctrl |= CTRL_RXEN;
     sio_internal.transmit_value = sio_internal.transmit_buffer;
     sio_internal.transmit_buffer_full = false;
+    sio_internal.txen_latched = false;   /* consumed by this transfer */
 
-    // Defer transfer via event scheduler (DuckStation: BAUD*8 cycles delay).
+    // A byte is 8 SCK periods, and SCK derives from the baud reload value
+    // (DOCS/serialinterfacessio.md:105-113), so the exchange is scheduled rather
+    // than immediate.
     // This gives the BIOS time to clear stale I_STAT[7] and set up IRQ handlers
     // before the ACK IRQ arrives — required for IRQ-driven memory card access.
     if (sio_internal.inter) {
@@ -443,11 +479,11 @@ static void sio_begin_transfer(void) {
         if (delay < 128) delay = 128;
         eventq_schedule(sio_internal.inter, EVQ_SIO, delay);
     } else {
-        sio_do_transfer();  // fallback (no interconnect, e.g. unit tests)
+        sio_shift_byte();  // fallback (no interconnect, e.g. unit tests)
     }
 }
 
-static void sio_do_transfer(void) {
+static void sio_shift_byte(void) {
     SIO_DBG("[SIO] DoTransfer");
     
     uint8_t data_out = sio_internal.transmit_value;
@@ -455,12 +491,12 @@ static void sio_do_transfer(void) {
     bool ack = false;
 
     // Try to transfer to active device
-    if (sio_internal.active_device == ACTIVE_DEVICE_NONE) {
+    if (sio_internal.addressed == SIO_DEV_NONE) {
         // Memory card device select. JOY_CTRL bit 13 (CTRL_SLOT) picks which
         // physical port's card this transfer targets — mc1 when clear, mc2 when set.
         MemoryCard* target_card = (sio_internal.ctrl & CTRL_SLOT) ? sio_internal.mc2 : sio_internal.mc1;
         if (data_out == 0x81 && target_card && target_card->present) {
-            sio_internal.active_device = ACTIVE_DEVICE_MEMCARD;
+            sio_internal.addressed = SIO_DEV_MEMCARD;
             sio_internal.active_card = target_card;
             sio_internal.mc_step = 0;
             data_in = 0xFF;  // N/A per PSX-SPX spec
@@ -469,15 +505,15 @@ static void sio_do_transfer(void) {
         } else if (sio_internal.controller_connected) {
             ack = sio_controller_transfer(data_out, &data_in);
             if (ack) {
-                sio_internal.active_device = ACTIVE_DEVICE_CONTROLLER;
+                sio_internal.addressed = SIO_DEV_CONTROLLER;
                 SIO_DBG("[SIO] Controller detected");
             }
         } else {
             ack = false;
         }
-    } else if (sio_internal.active_device == ACTIVE_DEVICE_CONTROLLER) {
+    } else if (sio_internal.addressed == SIO_DEV_CONTROLLER) {
         ack = sio_controller_transfer(data_out, &data_in);
-    } else if (sio_internal.active_device == ACTIVE_DEVICE_MEMCARD) {
+    } else if (sio_internal.addressed == SIO_DEV_MEMCARD) {
         data_in = sio_memcard_transfer(data_out);
         ack = (sio_internal.mc_step != 0xFF);
     }
@@ -495,21 +531,21 @@ static void sio_do_transfer(void) {
 
     // Device no longer responding
     if (!ack) {
-        sio_internal.active_device = ACTIVE_DEVICE_NONE;
-        sio_end_transfer();
+        sio_internal.addressed = SIO_DEV_NONE;
+        sio_release_bus();
     } else {
-        // Device still responding - wait for ACK
-        // In real DuckStation this schedules state = WAITING_FOR_ACK with a timer
-        // For simplicity, we immediately mark ACK
-        sio_internal.state = STATE_WAITING_FOR_ACK;
-        // Simulate ACK delay (in real impl this would be scheduled timer)
-        sio_do_ack();
+        // The device asks for another byte by pulling /ACK low for at least 2 us
+        // (DOCS/controllersandmemorycards.md:167-168). The pulse is raised here
+        // rather than after a timer: the kernel only observes /ACK through the
+        // interrupt, so nothing the guest can see distinguishes the two.
+        sio_internal.bus_phase = SIO_BUS_ACK;
+        sio_pulse_ack();
     }
 
     sio_update_joystat();
 }
 
-static void sio_do_ack(void) {
+static void sio_pulse_ack(void) {
     SIO_DBG("[SIO] DoACK");
     
     sio_internal.stat |= STAT_ACKINPUT;
@@ -519,32 +555,33 @@ static void sio_do_ack(void) {
         sio_trigger_irq("ACK");
     }
 
-    sio_end_transfer();
+    sio_release_bus();
     sio_update_joystat();
 
     // Chain next transfer if possible
-    if (sio_can_transfer()) {
-        sio_begin_transfer();
+    if (sio_bus_ready()) {
+        sio_start_shift();
     }
 }
 
-static void sio_end_transfer(void) {
+static void sio_release_bus(void) {
     SIO_DBG("[SIO] EndTransfer");
     
-    if (sio_internal.state == STATE_IDLE) {
+    if (sio_internal.bus_phase == SIO_BUS_IDLE) {
         return;  // Already idle
     }
 
-    sio_internal.state = STATE_IDLE;
+    sio_internal.bus_phase = SIO_BUS_IDLE;
 }
 
-static void sio_reset_device_transfer_state(void) {
+static void sio_release_cs(void) {
     SIO_DBG("[SIO] ResetDeviceTransferState (step=%d)", sio_internal.controller_transfer_step);
 
-    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.addressed = SIO_DEV_NONE;
     sio_internal.active_card = NULL;
     sio_internal.mc_step = 0;
-    // Always reset controller step on CS deassert (matches DuckStation behavior)
+    // Deasserting /CS ends the packet, so the next assertion starts a fresh one
+    // beginning with an address byte (DOCS/controllersandmemorycards.md:54-57).
     sio_internal.controller_transfer_step = 0;
 }
 
@@ -559,7 +596,7 @@ static void sio_update_joystat(void) {
         sio_internal.stat |= STAT_RXFIFONEMPTY;
     }
 
-    if (!sio_internal.transmit_buffer_full && sio_internal.state == STATE_IDLE) {
+    if (!sio_internal.transmit_buffer_full && sio_internal.bus_phase == SIO_BUS_IDLE) {
         sio_internal.stat |= STAT_TXDONE;
     }
 }
@@ -666,7 +703,8 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
             s->mc_step++;
             break;
 
-        case 4:  // Addr LSB — echo MSB back (DuckStation: m_last_byte)
+        case 4:  // Addr LSB — reply is "(pre)", the previously sent byte
+                 // (DOCS/controllersandmemorycards.md:2361)
             s->mc_sector |= tx;
             s->mc_checksum ^= tx;
             resp = s->mc_last_byte;  // echo MSBadr
@@ -705,13 +743,13 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
                 // WRITE: steps 5..136
                 int pos = (int)s->mc_step - 5;
                 if (pos >= 0 && pos < 128) {                            // 128 data bytes
-                    resp = s->mc_last_byte;  // echo previous host byte (DuckStation)
+                    resp = s->mc_last_byte;  // "(pre)" — DOCS:2385-2387
                     s->mc_write_buf[pos] = tx;
                     s->mc_checksum ^= tx;
                     s->mc_last_byte = tx;
                     s->mc_step++;
                 } else if (pos == 128) {                                // host checksum
-                    resp = s->mc_last_byte;  // echo last data byte (DuckStation)
+                    resp = s->mc_last_byte;  // "(pre)" — DOCS:2385-2387
                     s->mc_write_ok = (tx == s->mc_checksum) &&
                                      (s->mc_sector < MEMCARD_SECTORS);
                     LOG_SYSTEM_DEBUG("[MC] WRITE sector=%u chk_host=0x%02x chk_card=0x%02x %s",

@@ -142,6 +142,20 @@ Key format conventions:
 
 ---
 
+## Licensing constraint
+
+The project is **GPL-3.0-or-later**; every source file carries an SPDX header and
+`THIRD-PARTY.md` is the inventory.
+
+- **Never copy code from `duckstation_ref/`.** DuckStation has been CC-BY-NC-ND-4.0 since
+  2024-09-01: no derivative works, no commercial use, incompatible with the GPL. The submodule is
+  there to answer "what does hardware do here" when `DOCS/` is ambiguous, and for nothing else.
+  Describing its behaviour in a comment is fine; reproducing its structure or its code is not.
+- `pcsx-redux/` is GPL-2.0-or-later, so code from it *can* be used — with the attribution header kept
+  intact, which is the licence condition being satisfied. Do not strip those headers.
+- Prefer `DOCS/` over both. Anything implemented from a cited `DOCS/` line carries no third-party
+  copyright, and the citation is what makes that checkable later.
+
 ## Conventions
 
 - Pure C (C99). C++ only in `src/debug_ui.cpp` (ImGui wrapper).

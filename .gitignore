@@ -65,3 +65,6 @@ savestates/
 # Screenshots captured under a non-English locale ("Schermata del ...").
 # The rule above only covers the English "Screenshot*.png" name.
 Schermata*.png
+
+# Stray third-party image, removed 2026-08-01
+maxresdefault.jpg

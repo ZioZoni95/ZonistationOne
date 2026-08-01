@@ -1,3 +1,9 @@
+/* SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2020 rxi
+ *
+ * Included in ZoniStation One (GPL-3.0-or-later); this file keeps its own
+ * MIT terms. See THIRD-PARTY.md.
+ */
 /*
  * rxi/log.c — renamed to rxi_* namespace to avoid conflicts.
  * Original: Copyright (c) 2020 rxi (MIT License)
