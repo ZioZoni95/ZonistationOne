@@ -292,6 +292,12 @@ typedef struct Spu {
     uint64_t spu_tick_counter;  /* leftover CPU cycles below one sample period */
     uint32_t last_update_cycle; /* cpu_cycle_counter at the last catch-up */
     uint32_t dropped_samples;   /* generated but discarded: output ring was full */
+    /* The device asked for more than the ring held, so the callback padded with
+     * silence. A gap inside a continuous stream (speech, music) is heard as
+     * grit or flutter, not as a dropout, which is why this was mistaken for a
+     * DSP problem. Counted so "is the emulator keeping up" stops being a guess. */
+    uint32_t underrun_events;   /* callbacks that ran short */
+    uint32_t underrun_samples;  /* stereo frames of silence inserted */
 
     /* Debug/logging */
     uint32_t total_samples_generated;

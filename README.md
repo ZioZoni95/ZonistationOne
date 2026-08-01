@@ -120,7 +120,16 @@ per-vblank probes active, which cost more than the thing they were measuring, an
 withdrawn. What the debug interface costs when open, on a machine that is not WSL, has not been
 measured yet.
 
-**Savestates do not exist yet.**
+**Savestates**: F5 writes `savestates/slot0.zst`, F8 restores it. The whole machine is captured — CPU
+with the GTE and I-cache, RAM, scratchpad, interrupt controller, event queue, GPU state and VRAM, DMA,
+timers, CDROM, SPU with its RAM, SIO, MDEC. Host-owned objects are excluded on purpose (GL names,
+threads, the open file per disc track, breakpoints); the disc's identity travels with the state, and a
+load into a machine holding a different disc, or none, is refused rather than allowed to dereference a
+file handle that is not there. Sections carry their size, so a state written by a build whose structs
+have changed shape is refused with a message instead of read into a mismatched layout. Also on the Lua
+surface as `emu.save_state(path)` / `emu.load_state(path)`, which park their request to be applied
+between frames — a script's callbacks run from inside the event dispatch, and writing the machine out
+from in there captures a state with no VBlank scheduled, which never produces another frame.
 
 Known rendering gaps: the mask-bit *test* (don't overwrite masked pixels) is not applied to rasterized
 primitives, VRAM readback and VRAM→VRAM copy still read the CPU-side VRAM model, and texture sampling
@@ -150,7 +159,7 @@ gameplay.
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 | SPU / audio | Working | Emulated-clock sample generation; output quality not yet surveyed |
-| Savestates | **Absent** | Not started |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load |
 
 ---
 
@@ -183,7 +192,8 @@ of floating panels — the direction and its rationale live in `docs/ui/`.
   plus the BIOS/game TTY (`printf`-style with o32 varargs argument substitution).
 - **Identity** — a blued-graphite `ImGuiStyle`; the two accents *encode the data path* (cyan = the
   video chain CD→MDEC→DMA→VRAM, rose = the audio chain XA→SPU→device), severity colours kept separate.
-- **Shortcuts** — F1–F8 pick the mode, Space run/pause, F11 single step, Alt+Enter fullscreen. The
+- **Shortcuts** — F1–F8 pick the mode, F10 run/pause, F11 single step, F5/F8 save and load
+  state, Alt+Enter fullscreen. Space is the pad's START button, not pause. The
   window opens maximised with its titlebar buttons.
 
 ---

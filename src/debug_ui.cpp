@@ -19,6 +19,7 @@ extern "C" {
 #include "debugger.h"
 #include "spu.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 }
 
 extern "C" const char* disassemble_mips(uint32_t instruction, uint32_t pc);
@@ -1250,9 +1251,9 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     if (ImGui::BeginPopup("##ctrl")) {
         if (dbg) {
             if (!dbg->paused) {
-                if (ImGui::MenuItem("Pause", "Space")) dbg->paused = true;
+                if (ImGui::MenuItem("Pause", "F10")) dbg->paused = true;
             } else {
-                if (ImGui::MenuItem("Run",  "Space")) { dbg->paused = false; g_disasm_follow_pc = true; }
+                if (ImGui::MenuItem("Run",  "F10")) { dbg->paused = false; g_disasm_follow_pc = true; }
                 if (ImGui::MenuItem("Step", "F11"))   g_step_pending = true;
             }
             ImGui::Separator();
@@ -1501,28 +1502,90 @@ static void draw_pipeline_view(Interconnect* inter) {
 // Frame view — the per-frame event ring with cycle timestamps does not exist
 // yet (Phase 4 in docs/ui/README.md: "the renderer records order today, not
 // time"). Draw the track chrome and say plainly what is missing.
+// Frame inspector (Phase 4): the frame's events on a time axis against its
+// cycle budget. Recording is enabled only while this view is on screen — the
+// standing constraint is that the panels cost, not the core.
 static void draw_frame_view(Interconnect* inter) {
-    (void)inter;
+    frame_events_set_enabled(true);
+
+    const FrameEventFrame* fr = frame_events_last();
+    const uint32_t budget = inter ? gpu_cycles_per_frame(&inter->gpu) : 566203u;
+    uint32_t span = fr->end_cycle - fr->start_cycle;
+    if (span == 0) span = budget;
+
+    // Header: how much of the budget the frame actually spanned, and drops.
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+        ImGui::Text("span %u cy of %u budget (%.1f%%)   events %u",
+                    span, budget, 100.0 * (double)span / (double)budget, fr->count);
+        ImGui::PopStyleColor();
+        if (fr->dropped) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+            ImGui::Text("  %u dropped (ring full)", fr->dropped);
+            ImGui::PopStyleColor();
+        }
+    }
+    ImGui::Dummy(ImVec2(0, 4));
+
+    struct Row { const char* label; FrameEventType type; ImVec4 col; };
+    static const Row ROWS[] = {
+        { "VRAM uploads", FEV_VRAM_UPLOAD, ZS_DATA  },
+        { "VRAM copies",  FEV_VRAM_COPY,   ZS_DATA  },
+        { "Draw batches", FEV_DRAW_BATCH,  ZS_OK    },
+        { "DMA ch2",      FEV_DMA_GPU,     ZS_DATA  },
+        { "XA sectors",   FEV_XA_SECTOR,   ZS_AUDIO },
+    };
+    const int NROWS = (int)(sizeof(ROWS) / sizeof(ROWS[0]));
+
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ZS_RAIL_BG);
     ImGui::BeginChild("##frame", ImVec2(0, 0), true);
-    const char* rows[] = { "VRAM uploads", "Draw batches", "XA sectors",
-                           "SPU samples", "Display flip" };
-    for (int i = 0; i < 5; i++) {
+
+    const float LABEL_W = 108.0f;
+    const float COUNT_W = 62.0f;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    for (int i = 0; i < NROWS; i++) {
         ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-        ImGui::Text("%-14s", rows[i]);
+        ImGui::TextUnformatted(ROWS[i].label);
         ImGui::PopStyleColor();
-        ImGui::SameLine();
+        ImGui::SameLine(LABEL_W);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, fr->type_count[ROWS[i].type] ? ZS_TEXT : ZS_FAINT);
+        ImGui::Text("%6u", fr->type_count[ROWS[i].type]);
+        ImGui::PopStyleColor();
+        ImGui::SameLine(LABEL_W + COUNT_W);
+
         ImVec2 p = ImGui::GetCursorScreenPos();
-        float w = ImGui::GetContentRegionAvail().x, h = 14.0f;
-        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float w = ImGui::GetContentRegionAvail().x, h = 16.0f;
+        if (w < 32.0f) w = 32.0f;
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(ZS_DOCK_BG), 2.0f);
-        ImGui::Dummy(ImVec2(w, h + 4));
+
+        // Budget marker: where the nominal frame length falls on this axis.
+        if (span > budget) {
+            float bx = p.x + w * ((float)budget / (float)span);
+            dl->AddLine(ImVec2(bx, p.y), ImVec2(bx, p.y + h), ImGui::GetColorU32(ZS_WARN), 1.0f);
+        }
+
+        ImU32 col = ImGui::GetColorU32(ROWS[i].col);
+        for (uint32_t e = 0; e < fr->count; e++) {
+            if (fr->events[e].type != ROWS[i].type) continue;
+            float t = (float)(fr->events[e].cycle - fr->start_cycle) / (float)span;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            float x = p.x + t * w;
+            dl->AddRectFilled(ImVec2(x, p.y + 2), ImVec2(x + 1.5f, p.y + h - 2), col);
+        }
+
+        ImGui::Dummy(ImVec2(w, h + 5));
     }
-    ImGui::Dummy(ImVec2(0, 8));
+
+    ImGui::Dummy(ImVec2(0, 6));
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextWrapped("Per-frame event timeline needs a cycle-timestamped event ring "
-                       "(Phase 4). The renderer records op order today, not time.");
+    ImGui::TextWrapped("Each tick is one event, placed by CPU cycle within the frame. "
+                       "The amber line marks the nominal budget when the frame overran it.");
     ImGui::PopStyleColor();
+
     ImGui::EndChild();
     ImGui::PopStyleColor();
 }
@@ -1616,6 +1679,11 @@ static void draw_audio_meters(Interconnect* inter) {
         kv("Generated", gen, ZS_TEXT);
         char pk[24]; snprintf(pk, sizeof(pk), "%d / %d", spu->peak_level_left, spu->peak_level_right);
         kv("Peak L/R", pk, ZS_TEXT);
+        char un[40];
+        snprintf(un, sizeof(un), "%u ev / %u smp", spu->underrun_events, spu->underrun_samples);
+        kv("Underruns", un, spu->underrun_events ? ZS_CRIT : ZS_OK);
+        char dr[24]; snprintf(dr, sizeof(dr), "%u", spu->dropped_samples);
+        kv("Ring drops", dr, spu->dropped_samples ? ZS_WARN : ZS_FAINT);
         bool rev = (spu->control & SPU_CTRL_REVERB_ENABLE);
         char rv[32]; snprintf(rv, sizeof(rv), "%s (SPUCNT %04X)", rev ? "on" : "off", spu->control);
         kv("Reverb", rv, rev ? ZS_AUDIO : ZS_FAINT);
@@ -1623,16 +1691,113 @@ static void draw_audio_meters(Interconnect* inter) {
     }
 }
 
+// VRAM CPU-vs-GPU comparison state (Phase 5). The readback is asynchronous:
+// we raise a request and pick the result up on a later frame, identified by a
+// sequence number, so the panel never blocks the emulation thread.
+struct VramDiffState {
+    bool     enabled      = false;
+    uint32_t last_seq     = 0;
+    bool     awaiting     = false;
+    int      cooldown     = 0;      // frames until the next automatic request
+    uint32_t total_diff   = 0;      // halfwords that differ at all
+    uint32_t colour_diff  = 0;      // ... in the 15 colour bits
+    uint32_t mask_diff    = 0;      // ... only in bit 15
+    uint32_t gpu_only     = 0;      // GPU has a pixel where the CPU model has 0
+    int      first_x      = -1;
+    int      first_y      = -1;
+};
+static VramDiffState g_vram_diff;
+
+static void update_vram_diff(Interconnect* inter) {
+    if (!inter) return;
+    Renderer* r = &inter->gpu.renderer;
+
+    uint32_t seq = 0;
+    const uint16_t* gpu_vram = renderer_get_vram_readback(&seq);
+
+    if (g_vram_diff.awaiting && seq != g_vram_diff.last_seq) {
+        g_vram_diff.last_seq = seq;
+        g_vram_diff.awaiting = false;
+
+        const uint16_t* cpu_vram = (const uint16_t*)inter->gpu.vram.data;
+        uint32_t total = 0, colour = 0, mask = 0, gpu_only = 0;
+        int fx = -1, fy = -1;
+        for (uint32_t i = 0; i < 1024u * 512u; i++) {
+            uint16_t a = cpu_vram[i], b = gpu_vram[i];
+            if (a == b) continue;
+            total++;
+            if ((a & 0x7FFF) != (b & 0x7FFF)) colour++; else mask++;
+            if (a == 0 && b != 0) gpu_only++;
+            if (fx < 0) { fx = (int)(i % 1024u); fy = (int)(i / 1024u); }
+        }
+        g_vram_diff.total_diff  = total;
+        g_vram_diff.colour_diff = colour;
+        g_vram_diff.mask_diff   = mask;
+        g_vram_diff.gpu_only    = gpu_only;
+        g_vram_diff.first_x     = fx;
+        g_vram_diff.first_y     = fy;
+    }
+
+    // A full 1024x512 compare is 512K halfwords; once every 30 frames keeps it
+    // off the profile while still tracking a moving picture.
+    if (g_vram_diff.enabled && !g_vram_diff.awaiting && --g_vram_diff.cooldown <= 0) {
+        g_vram_diff.cooldown = 30;
+        g_vram_diff.awaiting = true;
+        renderer_request_vram_readback(r);
+    }
+}
+
 // Contextual inspector (Pipeline / Script modes): VRAM diff status + audio + watches.
 static void draw_inspector_window(Interconnect* inter) {
     if (!ImGui::Begin("Inspector", nullptr)) { ImGui::End(); return; }
 
-    // VRAM: CPU vs GPU — the cross-thread readback is Phase 5, so state it.
-    card_header("VRAM: CPU vs GPU", ZS_FAINT);
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextWrapped("Cross-thread GL readback not wired (Phase 5). Cannot compare "
-                       "the CPU model against the GPU texture yet.");
-    ImGui::PopStyleColor();
+    // VRAM: CPU vs GPU. gpu.vram.data is the CPU-side model — uploads, fills and
+    // VRAM→VRAM copies land there, rasterized pixels never do. Every halfword
+    // counted here is a pixel the GL pipeline drew that GP0(0xC0) readback,
+    // GP0(0x80) copy and texture sampling cannot see. That is gaps 3.1-3.3.
+    card_header("VRAM: CPU vs GPU", g_vram_diff.total_diff ? ZS_DATA : ZS_FAINT);
+    update_vram_diff(inter);
+
+    ImGui::Checkbox("Compare (every 30 frames)", &g_vram_diff.enabled);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Sample now") && inter && !g_vram_diff.awaiting) {
+        g_vram_diff.awaiting = true;
+        renderer_request_vram_readback(&inter->gpu.renderer);
+    }
+
+    if (!g_vram_diff.last_seq) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+        ImGui::TextWrapped(g_vram_diff.awaiting ? "Waiting for the GPU thread..."
+                                                : "No sample taken yet.");
+        ImGui::PopStyleColor();
+    } else if (ImGui::BeginTable("vramdiff", 2, ImGuiTableFlags_SizingStretchProp)) {
+        auto kv = [](const char* k, const char* v, ImVec4 col) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED); ImGui::TextUnformatted(k); ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, col); ImGui::TextUnformatted(v); ImGui::PopStyleColor();
+        };
+        const uint32_t total_px = 1024u * 512u;
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%u  (%.2f%%)", g_vram_diff.total_diff,
+                 100.0 * (double)g_vram_diff.total_diff / (double)total_px);
+        kv("Differing", buf, g_vram_diff.total_diff ? ZS_DATA : ZS_TEXT);
+        snprintf(buf, sizeof(buf), "%u", g_vram_diff.colour_diff);
+        kv("Colour bits", buf, g_vram_diff.colour_diff ? ZS_DATA : ZS_FAINT);
+        snprintf(buf, sizeof(buf), "%u", g_vram_diff.mask_diff);
+        kv("Mask bit only", buf, g_vram_diff.mask_diff ? ZS_DATA : ZS_FAINT);
+        snprintf(buf, sizeof(buf), "%u", g_vram_diff.gpu_only);
+        kv("GPU-only pixels", buf, g_vram_diff.gpu_only ? ZS_DATA : ZS_FAINT);
+        if (g_vram_diff.first_x >= 0)
+            snprintf(buf, sizeof(buf), "%d, %d", g_vram_diff.first_x, g_vram_diff.first_y);
+        else
+            snprintf(buf, sizeof(buf), "none");
+        kv("First mismatch", buf, ZS_TEXT);
+        snprintf(buf, sizeof(buf), "#%u", g_vram_diff.last_seq);
+        kv("Sample", buf, ZS_FAINT);
+        ImGui::EndTable();
+    }
     ImGui::Dummy(ImVec2(0, 6));
 
     draw_audio_meters(inter);
@@ -1669,6 +1834,9 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     const char* insp = nullptr;   // right inspector window
     const char* insp2 = nullptr;
     bool full_display = false;
+    /* Event recording follows the mode, not just the window: leaving the Frame
+     * mode has to stop it even if the window object still exists in the dock. */
+    if (g_mode != MODE_FRAME) frame_events_set_enabled(false);
     switch (g_mode) {
         case MODE_PIPELINE: body = "Pipeline";    insp = "Inspector"; break;
         case MODE_DISPLAY:  full_display = true;  break;
@@ -1796,6 +1964,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             break;  // screen fills the stage
         case MODE_FRAME:
             if (ImGui::Begin("Frame", nullptr)) draw_frame_view(inter);
+            else                                 frame_events_set_enabled(false);
             ImGui::End();
             break;
         case MODE_CODE:
@@ -1828,7 +1997,10 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
 
     ImGui::End(); // DockHost
 
-    // Keyboard — F1..F8 pick the mode; Space toggles pause; F11 steps
+    // Keyboard — F1..F8 pick the mode; F10 (or Pause) toggles pause; F11 steps.
+    // Pause is NOT on Space: Space is the emulated pad's START button, and the
+    // controller reads the raw SDL keyboard state, so binding both made every
+    // press of START also halt the machine.
     if (!ImGui::GetIO().WantTextInput) {
         ImGuiKey mode_keys[MODE_COUNT] = {
             ImGuiKey_F1, ImGuiKey_F2, ImGuiKey_F3, ImGuiKey_F4,
@@ -1840,7 +2012,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             }
         if (inter) {
             Debugger* dbg = &inter->debugger;
-            if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+            if (ImGui::IsKeyPressed(ImGuiKey_F10) || ImGui::IsKeyPressed(ImGuiKey_Pause)) {
                 if (dbg->paused) { dbg->paused = false; g_disasm_follow_pc = true; }
                 else dbg->paused = true;
             }

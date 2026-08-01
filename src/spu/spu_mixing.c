@@ -558,6 +558,10 @@ void spu_fill_audio(Spu* spu, int16_t* stream, int num_stereo_samples) {
     int filled = spu_get_samples(spu, stream, num_stereo_samples);
 
     /* Fill remaining with silence if buffer underrun */
+    if (filled < num_stereo_samples) {
+        spu->underrun_events++;
+        spu->underrun_samples += (uint32_t)(num_stereo_samples - filled);
+    }
     for (int i = filled; i < num_stereo_samples; i++) {
         stream[i * 2] = 0;
         stream[i * 2 + 1] = 0;

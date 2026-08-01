@@ -193,6 +193,15 @@ void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
 
+/* --- Phase 5: cross-thread VRAM readback ---------------------------------
+ * The GPU thread owns the GL context, so the CPU cannot read vram_tex. Raise
+ * a request, then poll: the sequence number changes once the GPU thread has
+ * published a fresh copy. Asynchronous by design - the returned buffer is the
+ * VRAM as of some recent frame, not as of this instant.
+ * -------------------------------------------------------------------------- */
+void            renderer_request_vram_readback(Renderer* renderer);
+const uint16_t* renderer_get_vram_readback(uint32_t* seq_out);
+
 /**
  * @brief Buffers a triangle's vertex data for later drawing.
  * Copies position and color data into the renderer's CPU-side buffers.

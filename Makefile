@@ -34,7 +34,8 @@ EMU_CORE_SRCS = \
     src/core/bios.c src/core/interconnect.c src/core/bus.c src/core/bus_irq.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/sio.c \
     src/core/mdec.c src/core/controller.c src/core/event_scheduler.c src/core/pcdrv.c \
-    src/core/debugger.c src/core/lua_debug.c src/core/system.c
+    src/core/debugger.c src/core/lua_debug.c src/core/system.c \
+    src/core/frame_events.c src/core/savestate.c
 
 # --- Lua 5.4 (vendored source, see third_party/lua/) ---
 # lua.c/luac.c both define main() (would collide with src/main.c); loadlib.c

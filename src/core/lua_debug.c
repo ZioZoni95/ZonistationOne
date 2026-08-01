@@ -15,6 +15,8 @@
 #include "ram.h"
 #include "bios.h"
 #include "gte.h"
+#include "savestate.h"
+#include "cdrom_audio.h"
 #include "log.h"
 #include <SDL2/SDL.h>
 
@@ -484,8 +486,82 @@ static int l_emu_irq(lua_State* L) {
     return 4;
 }
 
+
+/* emu.save_state(path) / emu.load_state(path) — reach a state once by hand,
+ * then re-enter it from a script instead of replaying the boot every run. */
+static char g_pending_state_save[512];
+static bool g_have_pending_state_save;
+
+static int l_emu_save_state(lua_State* L) {
+    const char* path = luaL_optstring(L, 1, SAVESTATE_DEFAULT_PATH);
+    if (!g_inter || !g_cpu) { lua_pushboolean(L, 0); return 1; }
+    /* Deferred for the same reason as the load, and with a sharper consequence:
+     * a script's callbacks run from inside the event dispatch, and the VBlank
+     * handler re-arms itself *after* notifying scripts. Writing the machine out
+     * from in there captures a state with no VBlank scheduled, which on reload
+     * never produces another frame — black screen, silent SPU. */
+    snprintf(g_pending_state_save, sizeof(g_pending_state_save), "%s", path);
+    g_have_pending_state_save = true;
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+bool lua_debug_take_pending_state_save(char* out, size_t out_size) {
+    if (!g_have_pending_state_save) return false;
+    g_have_pending_state_save = false;
+    if (out && out_size) snprintf(out, out_size, "%s", g_pending_state_save);
+    return true;
+}
+
+/* Deferred on purpose. A script's callbacks run from inside the event dispatch,
+ * which is itself inside cpu_run_next_instruction: restoring the PC, the
+ * downcount and the whole event queue underneath that call returns into a
+ * machine that no longer matches the frame the caller is still executing. The
+ * request is parked and the host loop applies it between frames. */
+static char g_pending_state_load[512];
+static bool g_have_pending_state_load;
+
+static int l_emu_load_state(lua_State* L) {
+    const char* path = luaL_optstring(L, 1, SAVESTATE_DEFAULT_PATH);
+    if (!g_inter || !g_cpu) { lua_pushboolean(L, 0); return 1; }
+    snprintf(g_pending_state_load, sizeof(g_pending_state_load), "%s", path);
+    g_have_pending_state_load = true;
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+bool lua_debug_take_pending_state_load(char* out, size_t out_size) {
+    if (!g_have_pending_state_load) return false;
+    g_have_pending_state_load = false;
+    if (out && out_size) snprintf(out, out_size, "%s", g_pending_state_load);
+    return true;
+}
+
+/* emu.audio_stats() — the two opposite delivery failures, side by side.
+ * Returns: cd_pushed, cd_popped, cd_dropped, cd_queued,
+ *          spu_generated, spu_ring_drops, spu_underrun_events,
+ *          spu_underrun_samples, spu_ring_used */
+static int l_emu_audio_stats(lua_State* L) {
+    if (!g_inter) return 0;
+    const AudioFifo* f = &g_inter->cdrom.audio_fifo;
+    const Spu* spu = &g_inter->spu;
+    lua_pushinteger(L, (lua_Integer)f->total_pushed);
+    lua_pushinteger(L, (lua_Integer)f->total_popped);
+    lua_pushinteger(L, (lua_Integer)f->total_dropped);
+    lua_pushinteger(L, (lua_Integer)f->count);
+    lua_pushinteger(L, (lua_Integer)spu->total_samples_generated);
+    lua_pushinteger(L, (lua_Integer)spu->dropped_samples);
+    lua_pushinteger(L, (lua_Integer)spu->underrun_events);
+    lua_pushinteger(L, (lua_Integer)spu->underrun_samples);
+    lua_pushinteger(L, (lua_Integer)spu_ring_used(spu));
+    return 9;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
+    {"save_state",        l_emu_save_state},
+    {"load_state",        l_emu_load_state},
+    {"audio_stats",       l_emu_audio_stats},
     {"pc",                l_emu_pc},
     {"cycles",            l_emu_cycles},
     {"gte_data",          l_emu_gte_data},

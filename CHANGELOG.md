@@ -18,6 +18,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rebuild when moving to a different CPU.
 
 ### Added
+- **Savestates (F5 saves, F8 loads, `savestates/slot0.zst`)**: the machine can now be captured and
+  restored, so a defect that only appears twenty minutes into a game no longer costs a clean boot to
+  reach. `src/core/savestate.c` writes CPU (with the GTE and the I-cache), RAM, scratchpad, interrupt
+  controller, event queue, GPU state and VRAM, DMA, timers, CDROM, SPU with its RAM, SIO and the MDEC.
+  What is deliberately *not* written is anything the host owns rather than the guest — GL object names,
+  the GPU and CD reader threads, the open `FILE` per disc track, the debugger's breakpoints — so those
+  members are excluded by span (`offsetof`) rather than stored and restored as dead values. Sections
+  carry their size and are checked on load: a struct that changed shape is refused with a message
+  instead of being read into a mismatched layout. Also exposed to Lua as `emu.save_state(path)` /
+  `emu.load_state(path)`, and `scripts/audio_delivery_probe.lua` uses it to re-enter a state instead of
+  replaying the boot on every run.
+- **Frame inspector (debug UI phase 4)**: `include/frame_events.h` + `src/core/frame_events.c` are a
+  double-buffered per-frame event ring with CPU-cycle timestamps, recorded at VRAM uploads and copies,
+  draw batches, DMA channel 2 completions and XA sectors, and published at the frame boundary. The
+  Frame view plots each event by its cycle within the frame, with a marker where the nominal budget was
+  overrun. The renderer already recorded op *order* (it has to, or a texture page re-uploaded mid-frame
+  replays wrong); this records *time*, which is the axis "thirteen of twenty columns never arrived" is
+  a question about. Recording is enabled only while that view is the active mode — the standing
+  constraint from `docs/ui/README.md` is that the panels cost, not the core.
+- **VRAM CPU-vs-GPU comparison (debug UI phase 5)**: `renderer_request_vram_readback` /
+  `renderer_get_vram_readback` are a request/response channel across the GPU thread, which owns the GL
+  context. The Inspector reports how many VRAM halfwords differ between `gpu.vram.data` and the unified
+  texture, split into colour bits, mask bit only, and pixels the GPU has where the CPU model has none —
+  a direct measure of gaps 3.1–3.3, since every one of those is a pixel `GP0(0xC0)` readback,
+  `GP0(0x80)` copy and texture sampling cannot see. Asynchronous by design: a *synchronous* mid-frame
+  readback additionally needs a partial frame flush, and that is a change to the frame protocol.
+- **SPU underrun and ring-drop counters, shown in the Audio panel**: the SDL callback pads with silence
+  when the ring runs dry, and the SPU discards generated samples when it is full. Both insert
+  discontinuities into a continuous stream, both are heard as grit rather than as a dropout, and they
+  have opposite causes — so "is the emulator keeping up" is now read off two counters instead of being
+  argued about. Reachable from Lua as `emu.audio_stats()` alongside the CD FIFO's push/pop/drop totals.
+- **The startup log names the GPU that took the GL context** (`GL_VERSION | GL_RENDERER | GL_VENDOR`).
+  On a hybrid machine the same binary lands on the integrated or the discrete card depending on the
+  PRIME environment, and "is this a driver bug" is not answerable without knowing which.
+
 - **SPU reverb input/output resampling (39-tap FIR)**: the reverb unit runs at 22050 Hz, and hardware
   feeds it through a 39-tap half-band FIR — the 44100 Hz mixer signal is downsampled into the network
   and its 22050 Hz output upsampled back. This replaced the crude "average two input samples, hold the
@@ -81,6 +116,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Timing unified under one scheduler authority (interpreter-native, PCSX-Redux `Counters` model)**: timers were the only subsystem not driven by the event scheduler — they were stepped by hand in the main loop (`timers_step`) once per coarse chunk, alongside a half-wired, conflicting `EVQ_TIMER0/1/2` event path. Timers are now first-class scheduled events. The counter is **derived on read** as `(cpu_cycle_counter - cycle_start) / rate` (no per-tick increment loop, no fractional accumulator — `src/core/timers.c`, reusing the existing `cycle_start`/`rate` fields), IRQ/reset fires from the scheduled event at the next target/overflow through a single shared IRQ path, and every register read/write/gate-change catches the timer up on demand. Dotclock (Timer0) / hblank (Timer1) rates now derive from the GPU's active video mode via `gpu_dotclock_hz`/`gpu_hblank_hz` (CRTC 53'693'175 NTSC / 53'203'425 PAL, dotclock divider from GPUSTAT h-res, hblank per-scanline), not fixed NTSC constants. Not DuckStation's two-counter `pending_ticks` model — unnecessary for an interpreter whose `cpu_cycle_counter` is always "now". New `src/core/system.c` owns the per-frame run loop; `main.c` shrank to a thin host shell.
 
 ### Fixed
+- **A textured polygon's Texpage attribute did not persist as draw-mode state**: PSX-SPX
+  (`DOCS/graphicsprocessingunitgpu.md:356-360`) specifies that bits 0-8 of the attribute are the same as
+  `GP0(E1)` bits 0-8 — a textured polygon *is* a draw-mode write. The primitive itself sampled correctly,
+  because it carries its own texpage, but rectangles and lines take theirs from `GP0(E1)` state, so any
+  sprite drawn after a textured polygon sampled whichever page the last explicit `GP0(E1)` had set. The
+  polygon's own semi-transparency mode came from the same stale state rather than from its attribute.
+  `ZS1_GPU_NO_TEXPAGE_ATTR=1` restores the previous behaviour, so the change can be bisected against a
+  regression in a single run. Bit 11 is deliberately not applied: on a retail v0 GPU it only means
+  "texture disable" once `GP1(09h)` has enabled it, which this core treats as a no-op.
+- **Space was bound to both Pause and the pad's START button**: the debug UI took `Space` for
+  pause/resume while `controller.c` reads the same key as START from the raw SDL keyboard state, so
+  every press of START also halted the machine. Pause moved to **F10** (and the dedicated `Pause` key).
 - **XA coding-info bits were read from the wrong positions**: the sample rate is bit 2 and the bit depth is bit 4 (`DOCS/cdromformat.md:664-671`, `DOCS/cdromdrive.md:265-278`), but the decoder tested `0x04` for 8-bit and `0x08` for 18900 Hz. Every stream that was not the common 37800 Hz 4-bit case therefore decoded as noise, and 18900 Hz was never detected at all, leaving `resample_xa_18900` unreachable. That resampler was also wrong when it did run: 18900 → 44100 is **7 output samples per 3 inputs**, not the 7-per-6 of the 37800 path, so 18900 Hz material would have played an octave low at half speed. It now carries its ratio in a credit counter that survives sector boundaries. Also on the same path: the ADPCM filter now feeds back the *clamped* sample as the documentation specifies (`DOCS/cdromformat.md:836-837`) instead of the raw prediction, which could let the IIR state run away on loud material.
 - **The SPU reverb wrote into the voices' sample data, even with reverb switched off**: `mBASE` is a full 16-bit address divided by 8 covering all 512 KB of SPU RAM, but it was masked to 14 bits, putting the work area roughly 384 KB too low — for the documented "Room" preset, byte 0x1D940 instead of 0x7D940, i.e. on top of the ADPCM sample region that starts at 0x1000. Compounding it, SPUCNT bit 7 was applied to the output mix when it actually disables *writes* to the reverb buffer while reads and output continue (`DOCS/soundprocessingunitspu.md:826-835`, confirmed by the bus-timing table at `:1113-1123`). So a game that switched the unit off still had its samples overwritten. The mask is gone and the write gate moved into `rev_wr`.
 - **Volume sweeps ran in the wrong direction and started from a meaningless level**: the direction is bit 13 (`DOCS/soundprocessingunitspu.md:366-387`), not bit 7, which is documented as unused. And a sweep-mode write used to store the configuration bits into the current level, where the documentation says a sweep starts from wherever the volume already is — so both the per-voice and the main volume registers now leave the level alone unless the write is in fixed mode.

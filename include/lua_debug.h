@@ -12,6 +12,7 @@
 #define LUA_DEBUG_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 struct Interconnect;
 struct Cpu;
@@ -37,5 +38,10 @@ void lua_debug_notify(const char* event_name);
 /* Called from debugger_handle_break() — dispatches to emu.on_break(reason),
  * if registered. The callback may call emu.resume() to un-pause. */
 void lua_debug_dispatch_break(const char* reason);
+
+/* emu.load_state() parks its request instead of restoring in place — see the
+ * comment on l_emu_load_state. The host loop drains it between frames. */
+bool lua_debug_take_pending_state_load(char* out, size_t out_size);
+bool lua_debug_take_pending_state_save(char* out, size_t out_size);
 
 #endif // LUA_DEBUG_H

@@ -19,6 +19,7 @@
 #include "spu.h"
 #include "debugger.h"
 #include "debug_ui.h"
+#include "frame_events.h"
 
 void system_init(Interconnect* inter, Cpu* cpu) {
     (void)cpu;
@@ -61,4 +62,7 @@ void system_run_frame(Interconnect* inter, Cpu* cpu) {
         if (dbg->paused) return;                       /* breakpoint hit mid-frame */
         if (inter->cpu_cycle_counter - start >= cap) break;  /* safety */
     }
+
+    /* Frame boundary: publish the event ring the Frame view reads. */
+    frame_events_end_frame();
 }

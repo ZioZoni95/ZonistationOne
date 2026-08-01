@@ -54,6 +54,10 @@ void eventq_dispatch_due(struct Interconnect* sys);
  */
 uint32_t eventq_next_cycle(const struct Interconnect* sys);
 
+/* Rebuild the next-event anchor from the pending set. Needed after a
+ * savestate load, where evq_next_cycle arrives as stored data. */
+void eventq_recompute_next(struct Interconnect* sys);
+
 /**
  * @brief Returns CPU cycles until the next scheduled event.
  * Returns 0 when an event is already due, 1 when no events are pending.

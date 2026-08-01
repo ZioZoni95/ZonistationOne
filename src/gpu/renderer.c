@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "log.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -90,6 +91,58 @@ static uint32_t  s_vram_pool_peak;       /* high-water mark of a single frame's 
 
 /* Frame command lists */
 static GpuFrame  s_frame[2];
+
+/* =========================================================================
+ * Phase 5 — cross-thread VRAM readback
+ *
+ * The GPU thread owns the GL context, so nothing on the CPU side can read
+ * vram_tex directly. This is the request/response channel: the CPU raises a
+ * request, the GPU thread services it at a point in the frame where vram_tex
+ * holds every rasterized pixel, and publishes the result plus a sequence
+ * number the CPU polls.
+ *
+ * Deliberately asynchronous. A synchronous mid-frame readback — what
+ * GP0(0xC0) and GP0(0x80) will eventually need — requires a partial frame
+ * flush, because the ops the caller wants to read back are still sitting
+ * unexecuted in the CPU's write slot. That is a change to the frame protocol
+ * and is not this. What is here serves the Inspector's CPU-vs-GPU comparison,
+ * which only ever wants "the VRAM as of some recent frame".
+ * ========================================================================= */
+static SDL_atomic_t s_readback_request;   /* CPU sets 1; GPU clears when done */
+static SDL_atomic_t s_readback_seq;       /* incremented after each completed readback */
+static uint16_t     s_readback_vram[1024 * 512];   /* packed 1555, mask bit in 15 */
+static uint8_t      s_readback_rgba[1024 * 512 * 4];
+
+/* GPU thread. Unpacks vram_tex (RGBA8, 5:5:5:1 expanded as (v<<3)|(v>>2),
+ * alpha carrying the PSX mask bit) back into PSX halfwords. */
+static void renderer_service_vram_readback(Renderer* renderer) {
+    if (!SDL_AtomicGet(&s_readback_request)) return;
+
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    for (uint32_t i = 0; i < 1024u * 512u; i++) {
+        const uint8_t* p = &s_readback_rgba[i * 4];
+        s_readback_vram[i] = (uint16_t)(((uint16_t)(p[0] >> 3))
+                                      | ((uint16_t)(p[1] >> 3) << 5)
+                                      | ((uint16_t)(p[2] >> 3) << 10)
+                                      | (p[3] >= 128 ? 0x8000u : 0u));
+    }
+
+    SDL_AtomicSet(&s_readback_request, 0);
+    SDL_AtomicAdd(&s_readback_seq, 1);
+}
+
+void renderer_request_vram_readback(Renderer* renderer) {
+    if (!renderer || !renderer->gpu_thread) return;
+    SDL_AtomicSet(&s_readback_request, 1);
+}
+
+const uint16_t* renderer_get_vram_readback(uint32_t* seq_out) {
+    if (seq_out) *seq_out = (uint32_t)SDL_AtomicGet(&s_readback_seq);
+    return s_readback_vram;
+}
 
 // --- Helper: Check for OpenGL Errors ---
 void check_gl_error(const char* location) {
@@ -1092,6 +1145,8 @@ void renderer_draw(Renderer* renderer) {
         return;
     }
 
+    frame_events_record(FEV_DRAW_BATCH, vtx_count);
+
     /* Copy vertex data to pool */
     memcpy(&s_pos[wi][vtx_start], renderer->positions_data, vtx_count * sizeof(RendererPosition));
     memcpy(&s_col[wi][vtx_start], renderer->colors_data,    vtx_count * sizeof(RendererColor));
@@ -1588,6 +1643,11 @@ static int gpu_thread_main(void* userdata) {
             else
                 renderer_draw_gl(renderer, &s_frame[ri].batches[op->index], ri);
         }
+
+        /* Serviced here: every op for this frame has run, so vram_tex holds
+         * both the uploads and the rasterized pixels, and the scanout pass
+         * below does not touch it. */
+        renderer_service_vram_readback(renderer);
 
         /* Scanout: extract the CRTC display window from the unified VRAM into
          * scanout_texture, unpacking for the active depth. This is the single

@@ -25,6 +25,8 @@
 #include "spu.h"
 #include "lua_debug.h"
 #include "system.h"
+#include "frame_events.h"
+#include "savestate.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -100,7 +102,11 @@ static bool init_sdl(SdlCtx* out) {
         SDL_Quit();
         return false;
     }
-    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s", glGetString(GL_VERSION));
+    /* Which GPU actually got the context matters on hybrid machines — the same
+     * binary lands on the iGPU or the discrete card depending on the PRIME
+     * environment, and "is this a driver bug" is unanswerable without it. */
+    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s | %s | %s",
+                    glGetString(GL_VERSION), glGetString(GL_RENDERER), glGetString(GL_VENDOR));
     check_gl_error("GLEW init");
     return true;
 }
@@ -156,6 +162,19 @@ static void audio_shutdown(void) {
         SDL_CloseAudioDevice(g_audio_dev);
         g_audio_dev = 0;
     }
+}
+
+/* A savestate load rewrites structs that two other threads are reading: the GPU
+ * thread replays the previous frame out of VRAM, and the SDL audio callback
+ * reads the SPU's sample ring. Both are quiesced around the restore — the ring
+ * indices in particular are restored as a pair, and a callback landing between
+ * them would read a window that never existed. */
+static bool load_state_guarded(const char* path, Cpu* cpu, Interconnect* inter) {
+    renderer_wait_frame_done(&inter->gpu.renderer);
+    if (g_audio_dev) SDL_LockAudioDevice(g_audio_dev);
+    bool ok = savestate_load(path, cpu, inter);
+    if (g_audio_dev) SDL_UnlockAudioDevice(g_audio_dev);
+    return ok;
 }
 
 // --- PS-X EXE loader ---
@@ -315,6 +334,7 @@ int main(int argc, char* argv[]) {
 
     cpu_init(&cpu, &inter);
     interconnect_set_cpu(&inter, &cpu);
+    frame_events_bind_clock(&inter.cpu_cycle_counter);
     lua_debug_init(&inter, &cpu);
     if (getenv("ZS1_LUA_SCRIPT")) lua_debug_run_file(getenv("ZS1_LUA_SCRIPT"));
 
@@ -378,6 +398,25 @@ int main(int argc, char* argv[]) {
                 Uint32 fs = SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
                 SDL_SetWindowFullscreen(sdl.win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             }
+            /* F5 saves, F8 loads. Handled here rather than in the debug UI so
+             * they work with every panel closed, which is when the emulator is
+             * actually fast enough to reach the state worth capturing. */
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F5 && !ev.key.repeat) {
+                savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+            }
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F8 && !ev.key.repeat) {
+                load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+            }
+        }
+
+        /* A script's emu.load_state() parks its request rather than restoring
+         * from inside the event dispatch; this is where it lands. */
+        {
+            char pending[512];
+            if (lua_debug_take_pending_state_save(pending, sizeof(pending)))
+                savestate_save(pending, &cpu, &inter);
+            if (lua_debug_take_pending_state_load(pending, sizeof(pending)))
+                load_state_guarded(pending, &cpu, &inter);
         }
 
         sio_set_button_state(&inter.sio, controller_update_from_keyboard(&gamepad));

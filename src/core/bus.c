@@ -10,6 +10,7 @@
 #include "mdec.h"
 #include "debugger.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 
 // --- Memory Region Masking ---
 const uint32_t REGION_MASK[8] = {
@@ -626,6 +627,7 @@ static void dma_ch2_signal_done(Interconnect* inter) {
     DmaChannel* ch = &inter->dma.channels[2];
     dma_channel_done(ch);
     inter->dma.stat_ch2_uploads++;   /* pipeline view: uploads/s (debug only) */
+    frame_events_record(FEV_DMA_GPU, ch->block_size);
     /* Fixed stall per slice (exact accounting happens across EVQ_DMA_GPU reschedules) */
     if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
 

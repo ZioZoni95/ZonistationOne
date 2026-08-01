@@ -56,3 +56,10 @@ guide.tex
 # Audio captures from ZS1_AUDIO_DUMP (diagnostic output)
 *.wav
 *.raw
+
+# Savestates — machine-specific binary snapshots, several MB each
+savestates/
+
+# Screenshots captured under a non-English locale ("Schermata del ...").
+# The rule above only covers the English "Screenshot*.png" name.
+Schermata*.png

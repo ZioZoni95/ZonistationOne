@@ -3,6 +3,7 @@
 #include "log.h"
 #include <string.h>
 #include <SDL2/SDL.h>
+#include "frame_events.h"
 
 /* =========================================================================
  * AudioFifo
@@ -253,6 +254,7 @@ void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_
     xa->prev1[1] = prev[1][0]; xa->prev2[1] = prev[1][1];
     if (muted) return;
     uint32_t total_frames = (uint32_t)(18 * frames_per_chunk);
+    frame_events_record(FEV_XA_SECTOR, total_frames);
     if (rate_18900) resample_xa_18900(xa, fifo, sample_buf, total_frames, stereo);
     else resample_xa_37800(xa, fifo, sample_buf, total_frames, stereo);
 }

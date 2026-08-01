@@ -14,7 +14,9 @@
 #include "log.h"
 #include "interconnect.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdlib.h>
 
 // ---------------------------------------------------------------------------
@@ -217,6 +219,43 @@ static void draw_rectangle(Gpu* gpu, int16_t x, int16_t y, uint16_t w, uint16_t 
 static inline uint16_t make_tpage(Gpu* gpu) {
     return (uint16_t)(gpu->page_base_x | (gpu->page_base_y << 4) |
                       ((uint16_t)gpu->texture_depth << 7));
+}
+
+// ---------------------------------------------------------------------------
+// Helper: apply a Texpage attribute to the draw-mode state
+//
+// PSX-SPX "Texpage Attribute (Parameter for Textured-Polygons commands)":
+//   bits 0-8  same as GP0(E1).0-8, bits 9-10 unused (dither and draw-to-display
+//   can only be changed via GP0(E1)), bit 11 same as GP0(E1).11.
+// A textured polygon therefore *is* a draw-mode write: the page base, the
+// semi-transparency mode and the texture depth it carries persist, and the
+// following rectangles and lines — which take their page from GP0(E1) state —
+// must see them. Without this the primitive drew correctly but every sprite
+// after it sampled a stale page.
+// ---------------------------------------------------------------------------
+// ZS1_GPU_NO_TEXPAGE_ATTR=1 restores the previous behaviour (the attribute is
+// used for the primitive only and does not persist) so a regression can be
+// bisected against this one change in a single run.
+static int texpage_attr_disabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = getenv("ZS1_GPU_NO_TEXPAGE_ATTR") ? 1 : 0;
+    return cached;
+}
+
+static void apply_texpage_attribute(Gpu* gpu, uint16_t texpage) {
+    if (texpage_attr_disabled()) return;
+    gpu->page_base_x       = (uint8_t)(texpage & 0xF);
+    gpu->page_base_y       = (uint8_t)((texpage >> 4) & 1);
+    gpu->semi_transparency = (uint8_t)((texpage >> 5) & 3);
+    switch ((texpage >> 7) & 3) {
+        case 0: gpu->texture_depth = T4Bit;  break;
+        case 1: gpu->texture_depth = T8Bit;  break;
+        default: gpu->texture_depth = T15Bit; break;  // 3 (reserved) behaves as 2
+    }
+    /* Bit 11 is deliberately not applied. On a retail v0 GPU it only means
+     * "texture disable" once GP1(09h).0 has enabled it, which this core treats
+     * as a no-op, and writing it here would flip GPUSTAT.15 on every textured
+     * polygon for no modelled effect. */
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +505,7 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
     t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
+    apply_texpage_attribute(gpu, texpage);
 
     p[2].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
     p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
@@ -570,6 +610,7 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture)
     t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[5] & 0xFF);
     t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[5] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
+    apply_texpage_attribute(gpu, texpage);
     // v2
     c[2].r = (GLubyte)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
     c[2].g = (GLubyte)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
@@ -677,6 +718,7 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
     t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
+    apply_texpage_attribute(gpu, texpage);
 
     p[2].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
     p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
@@ -792,6 +834,7 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture
         if (i == 0) clut    = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
         if (i == 1) texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
     }
+    apply_texpage_attribute(gpu, texpage);
 
     // raw/blend mode comes from the GP0 opcode (bit24), not from tpage bit15
     // which is reserved/always 0 on real hardware.
@@ -1141,6 +1184,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
                               dst_x, dst_y, w, h);
     gpu->vram_dirty = false;
+    frame_events_record(FEV_VRAM_COPY, (uint32_t)w * h);
     lua_debug_notify("gp0_vram_copy");
 }
 
@@ -1434,6 +1478,8 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
                                       gpu->vram_load_x, gpu->vram_load_y,
                                       gpu->vram_load_w, gpu->vram_load_h);
             gpu->vram_dirty = false;
+            frame_events_record(FEV_VRAM_UPLOAD,
+                                (uint32_t)gpu->vram_load_w * gpu->vram_load_h);
             lua_debug_notify("gp0_vram_upload");
             LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD COMPLETE (%u,%u) %ux%u",
                          gpu->vram_load_x, gpu->vram_load_y,

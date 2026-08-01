@@ -100,9 +100,15 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         // After firing, update now in case event handler advanced cycles
         now = sys->cpu_cycle_counter;
     }
-    // Recalculate the next event cycle as the nearest still-future pending
-    // target. Track the minimum signed delta from now (wrap-safe), not the
-    // absolute cycle value.
+    eventq_recompute_next(sys);
+}
+
+/* Derive the next-event anchor from the pending set rather than carrying it.
+ * Called after dispatch, and after a savestate load: evq_next_cycle is a cache
+ * over evq_pending and evq_target_cycle, and a cache restored from a file is
+ * only as trustworthy as the moment it was written. */
+void eventq_recompute_next(struct Interconnect* sys) {
+    const uint32_t now = sys->cpu_cycle_counter;
     uint32_t soonest = UINT32_MAX;
     int32_t  best_delta = INT32_MAX;
     for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
