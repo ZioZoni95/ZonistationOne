@@ -443,8 +443,11 @@ static inline float timer0_to_x_coord(uint16_t timer0, bool is_ntsc) {
     return base * (is_ntsc ? 0.198166f : 0.196358f);
 }
 
-// --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
-// Copyright (c) PCSX ReARMed authors. Used under open source license.
+// --- BEGIN: Timer Event Handlers ---
+// Structure inspired by PCSX ReARMed's timer handling (GPL-2.0-or-later,
+// Copyright (c) PCSX ReARMed authors). The counter model itself is derived
+// on read from DOCS/timers.md rather than ticked, so this is the scheduling
+// shape rather than the arithmetic.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
     /* The event fires at the timer's next boundary: catch it up (which crosses

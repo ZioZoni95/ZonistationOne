@@ -8,6 +8,8 @@ emulator_log.txt
 *.ppm
 logs/
 *.txt
+# ...but licence notices must ship: MIT requires them to be present.
+!**/LICENSE.txt
 
 # ROM files / BIOS images (copyrighted — do not distribute)
 roms/

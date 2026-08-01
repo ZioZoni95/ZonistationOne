@@ -4,7 +4,8 @@
 /*
  * MDEC — Macroblock Decoder
  * PSX-SPX: DOCS/macroblockdecodermdec.md
- * Algorithm ported from DuckStation (mdec.cpp, IDCT_Old / DecodeRLE_Old / YUVToRGB_Old).
+ * Decode stages written from DOCS/macroblockdecodermdec.md (rl_decode_block,
+ * real_idct_core, yuv_to_rgb, y_to_mono). See THIRD-PARTY.md.
  *
  * Registers:
  *   0x1F801820 (W): Command/Parameter   (R): Decoded Data

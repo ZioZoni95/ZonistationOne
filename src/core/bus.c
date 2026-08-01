@@ -111,9 +111,14 @@ void bus_hw_tables_init(void) {
 // =============================================================================
 
 // --- MemCtrl (0x1F801000-0x1F80103F) ---
-// Real per-region access-delay registers (nocash spec), ported from DuckStation's
-// Bus::CalculateMemoryTiming. Real BIOS/EXP1/CDROM/SPU ROM/bus accesses cost several
-// cycles each — not the flat 1 cycle/instruction this project used to assume everywhere.
+// Real per-region access-delay registers. BIOS/EXP1/CDROM/SPU accesses cost
+// several cycles each, not the flat 1 cycle/instruction assumed everywhere else.
+//
+// The 1ST/SEQ/MIN arithmetic below is the pseudocode published in
+// `DOCS/memorycontrol.md:136-145`, transcribed line for line; the register field
+// positions come from `:37-53` (delay registers) and `:126-132` (COM_DELAY).
+// The documentation's own hedge — "Works (somehow) like so" — applies to the
+// model, not to this transcription of it.
 static uint32_t calc_memory_timing_word_cycles(uint32_t mem_delay, uint32_t common_delay) {
     int32_t access_time    = (int32_t)((mem_delay >> 4) & 0xF);
     bool use_com0          = (mem_delay >> 8)  & 1;

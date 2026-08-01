@@ -300,11 +300,20 @@ Hardware behaviour is implemented from the documentation in `DOCS/` (PSX-SPX and
 from Lionel Flandrin's *PlayStation Emulation Guide*. Where hardware documentation was ambiguous, the
 DuckStation and PCSX-Redux sources were consulted as a second opinion on intended behaviour.
 
-The MDEC's transform stage (IDCT, RLE decode, YUV→RGB) is ported from DuckStation, with attribution in
-the file header. Everything else is this project's own implementation.
+Some code is derived from other emulators rather than merely informed by them; `THIRD-PARTY.md`
+lists every instance with its upstream licence. Everything not listed there is this project's own.
 
 ---
 
 ## License
 
-Educational purposes only. PlayStation is a trademark of Sony Interactive Entertainment.
+**GNU General Public License v3.0 or later** — see `LICENSE`.
+
+The GPL is not a "personal use only" licence: it grants anyone the right to use, study, modify and
+redistribute this code, on condition that derivative works carry the same licence and the same
+freedoms. That obligation is what makes it compatible with the GPL-2.0-or-later code this project
+incorporates from PCSX-Redux and PCSX ReARMed — see `THIRD-PARTY.md`.
+
+No BIOS image, game data, or other copyrighted Sony material is included in this repository, and none
+may be redistributed with it. You must supply your own. PlayStation is a trademark of Sony Interactive
+Entertainment, which is not affiliated with this project.

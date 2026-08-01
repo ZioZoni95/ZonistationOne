@@ -156,7 +156,7 @@ typedef struct Interconnect {
     Debugger debugger;
 
     // --- Memory Control 1 (0x1F801000-0x1F801020) — real register storage + derived timing ---
-    // Ported from DuckStation's Bus::CalculateMemoryTiming (nocash spec): real games/BIOS
+    // Timing model from DOCS/memorycontrol.md:136-145 (nocash spec): real games/BIOS
     // configure these delay registers, and un-cached/BIOS-ROM instruction fetches cost several
     // cycles each on real hardware, not the flat 1 cycle/instruction this project previously used.
     uint32_t memctrl_regs[9];    // exp1_base, exp2_base, exp1_delay, exp3_delay, bios_delay,

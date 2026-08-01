@@ -23,12 +23,22 @@ static int32_t clamp16(int32_t v) {
  * Noise Generator (Dr. Hell's algorithm)
  * ========================================================================= */
 
-static const uint8_t noise_wave_add[64] = {
-    1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0,
-    1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0,
-};
-
 static const uint8_t noise_freq_add[5] = { 0, 84, 140, 180, 210 };
+
+/* The bit shifted into the noise LFSR, straight from the documented generator
+ * (`DOCS/soundprocessingunitspu.md:534`):
+ *
+ *     ParityBit = NoiseLevel.Bit15 xor Bit12 xor Bit11 xor Bit10 xor 1
+ *
+ * This used to be a 64-entry lookup indexed by `(noise_level >> 10) & 63` —
+ * the same function, since index bit N is level bit 10+N, so the entry is
+ * `idx5 ^ idx2 ^ idx1 ^ idx0 ^ 1`. The table's second half was a copy of its
+ * first, which made the parity wrong for every state with bit 15 set: half the
+ * sequence. Computing it removes the whole class of transcription error, and
+ * the result matches DuckStation's and PCSX-Redux's tables entry for entry. */
+static inline uint32_t noise_parity(uint32_t level) {
+    return ((level >> 15) ^ (level >> 12) ^ (level >> 11) ^ (level >> 10) ^ 1u) & 1u;
+}
 
 static void noise_tick(Spu* spu) {
     uint32_t clock = (spu->control >> 8) & 0x3F;
@@ -41,8 +51,7 @@ static void noise_tick(Spu* spu) {
 
     if (spu->noise_count >= level) {
         spu->noise_count %= level;
-        spu->noise_level = (spu->noise_level << 1) |
-            noise_wave_add[(spu->noise_level >> 10) & 63];
+        spu->noise_level = (spu->noise_level << 1) | noise_parity(spu->noise_level);
     }
 }
 
