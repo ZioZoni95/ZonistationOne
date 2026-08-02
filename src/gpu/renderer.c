@@ -271,9 +271,20 @@ const char* fragment_shader_source =
     "        uint clut_x = (clut & 0x3Fu) * 16u;\n"
     "        uint clut_y = (clut >> 6) & 0x1FFu;\n"
     "\n"
-    "        // Apply Texture Window to UV coordinates (0-255)\n"
-    "        uint u_raw = uint(tex_coord.x) & 0xFFu;\n"
-    "        uint v_raw = uint(tex_coord.y) & 0xFFu;\n"
+    "        // Apply Texture Window to UV coordinates (0-255).\n"
+    "        //\n"
+    "        // Converting through int, not uint, then clamping. GLSL leaves\n"
+    "        // float->uint undefined for negative inputs (GLSL 3.30 section 5.4.1),\n"
+    "        // and tex_coord is interpolated: a vertex UV of 0 can arrive at a\n"
+    "        // fragment as a value a fraction below zero purely from interpolation\n"
+    "        // rounding. NVIDIA saturates that to 0; Mesa wraps it to 0xFFFFFFFF,\n"
+    "        // which the 0xFF mask turns into column 255 — the wrong end of the\n"
+    "        // texture page. On a primitive whose UVs are all 0 that mis-samples\n"
+    "        // the entire surface, which is why textures came out as flat blocks\n"
+    "        // of one colour on the Intel iGPU and looked correct on the dGPU.\n"
+    "        // float->int is defined for negatives, so clamp there instead.\n"
+    "        uint u_raw = uint(clamp(int(tex_coord.x), 0, 255));\n"
+    "        uint v_raw = uint(clamp(int(tex_coord.y), 0, 255));\n"
     "        uint u = (u_raw & uint(u_texWindow.x)) | uint(u_texWindow.z);\n"
     "        uint v = (v_raw & uint(u_texWindow.y)) | uint(u_texWindow.w);\n"
     "\n"
@@ -634,6 +645,14 @@ bool renderer_init(Renderer* renderer) {
                        renderer->display_fbo, renderer->vram_tex);
     // Note: We leave display_fbo bound so all PSX rendering goes here!
 
+    /* GL_DITHER is enabled by default, and it is not ours to want: the PSX's own
+     * 4x4 dither is applied in the fragment shader before the 15-bit quantize,
+     * so a second dither on the way to the render target is noise on top of a
+     * signal that is already correct. It also diverges by driver — NVIDIA
+     * generally ignores the state on 8-bit targets, Mesa honours it — which
+     * makes the same frame come out differently on the iGPU and the dGPU. */
+    glDisable(GL_DITHER);
+
     // --- VRAM viewer texture (RGBA8, updated on CPU each frame) ---
     glGenTextures(1, &renderer->vram_viewer_texture);
     glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
@@ -702,7 +721,19 @@ bool renderer_init(Renderer* renderer) {
 
         glGenTextures(1, &renderer->scanout_texture);
         glBindTexture(GL_TEXTURE_2D, renderer->scanout_texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        /* GL_RGBA8, not the unsized GL_RGB this used to ask for.
+         *
+         * An unsized internal format lets the driver pick whatever sized format
+         * it likes, and GL 3.3 core only guarantees the *sized* formats are
+         * colour-renderable — this texture is a framebuffer attachment. NVIDIA
+         * resolves GL_RGB to RGBA8 and the picture came out right; Mesa is free
+         * to choose something narrower, and a low-precision choice crushes every
+         * gradient to the nearest primary. That is what the flat blocks of pure
+         * blue, magenta, green and yellow on the Intel iGPU were: not mis-sampled
+         * textures, but the finished picture quantized on its way into this
+         * texture. Menus hid it because they are already saturated colour on
+         * black; the 3D scene showed it immediately. */
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glBindTexture(GL_TEXTURE_2D, 0);
