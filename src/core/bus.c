@@ -424,6 +424,80 @@ static inline void sp_store16(Interconnect* i, uint32_t off, uint16_t v) {
 }
 
 // =============================================================================
+// CPU DATA-ACCESS COST
+// =============================================================================
+//
+// The interpreter charged one cycle per instruction regardless of what that
+// instruction touched, which made every memory-bound loop run far faster in
+// emulated cycles than on hardware. The BIOS kernel's VSync wait is the case
+// that made it visible: 12 instructions per iteration, 32768 iterations, so
+// 393216 cycles against a PAL frame of 680823 (GPU_GAP_ANALYSIS §4). The loop
+// covered 0.58 of a field, its timeout expired before the VBlank it was waiting
+// for arrived, and the kernel printed "VSync: timeout" on essentially every
+// call — which in turn made every frame-counted animation run fast.
+//
+// What is documented, and what is not:
+//
+//   * BIOS ROM and the expansion/SPU/CDROM windows have published access times,
+//     computed by calc_memory_timing_word_cycles() from the MEMCTRL delay
+//     registers exactly as DOCS/memorycontrol.md:134-147 describes. That value
+//     is used here as-is.
+//
+//   * Main RAM does not. The only figure DOCS publishes for it is RAM_SIZE bit 7,
+//     "Delay on simultaneous CODE+DATA fetch from RAM (0=None, 1=One Cycle)"
+//     (DOCS/memorycontrol.md:161-163) — one cycle, and only for the contention
+//     case. Since the CPU is fetching instructions from RAM whenever it is also
+//     loading data from RAM, that bit applies to essentially every data access
+//     in RAM-resident code, but one cycle alone does not account for what the
+//     R3000A actually pays to reach RAM.
+//
+// So RAM_DATA_STALL_CALIBRATED below is exactly that: calibrated, not
+// transcribed. There is no line in DOCS/ behind it. It was chosen so the VSync
+// loop spans more than one field with margin rather than landing on the
+// boundary, and it is cross-checked by the cycles-per-instruction figure the
+// interconnect now tracks — a plausible CPI for mixed PSX code is the evidence
+// that this is a memory cost model and not a fudge sized to one loop.
+//
+// Scratchpad is the R3000A's data cache wired as fast local memory, so it is
+// deliberately free.
+
+#define RAM_DATA_STALL_DOCUMENTED  1u  /* DOCS/memorycontrol.md:161-163, RAM_SIZE bit 7 */
+#define RAM_DATA_STALL_CALIBRATED  2u  /* no citation — see the note above */
+
+/* Only main RAM is charged, and that is a scoping decision rather than a claim
+ * that nothing else costs anything.
+ *
+ * Scratchpad genuinely is free — it is the R3000A's data cache wired as local
+ * memory. BIOS ROM and the I/O window are not, but charging them is a separate
+ * change with a known hazard. cpu_icache.c records that applying the MEMCTRL word
+ * time (~24-32 cycles) to ROM-resident code hung the CD-ROM command sequence at
+ * LBA 23, never root-caused. Charging ROM *data* loads reintroduces exactly that:
+ * it was tried here and killed controller input outright, because the BIOS pad
+ * routines read their tables out of ROM and every one of those reads suddenly
+ * cost thirty cycles. Charging the I/O window has the same shape — the pad is
+ * polled in a tight loop over 1F801040h.
+ *
+ * The VSync measurement only ever justified the RAM figure: that loop is
+ * RAM-resident, and its three loads and one store are all RAM. So this models RAM
+ * and stops. Adding ROM or I/O is a later change that needs the LBA-23 isolation
+ * test run against it on its own.
+ *
+ * Keeping it to one comparison also keeps it off the profile. This sits on the
+ * hottest path in the emulator — interconnect_load32 alone was 4.3% of samples —
+ * and an earlier version with a chain of region tests cost about 10% of host
+ * frame time on its own. */
+#define RAM_DATA_STALL (RAM_DATA_STALL_DOCUMENTED + RAM_DATA_STALL_CALIBRATED)
+
+static inline void bus_charge_cpu_data_access(Interconnect* inter, uint32_t phys) {
+    /* RAM_SIZE bit 7 gates the documented contention cycle. hw_memctrl2_read
+     * returns a fixed 0x00000B88 and hw_memctrl2_write discards writes, so the
+     * bit is set for the whole run and the cycle always applies. Read the
+     * register here if it ever becomes writable. */
+    if (phys < 0x00800000)                   /* main RAM, mirrored */
+        inter->cpu_mem_stall_cycles += RAM_DATA_STALL;
+}
+
+// =============================================================================
 // LOAD OPERATIONS
 // =============================================================================
 
@@ -435,6 +509,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     // RAM (2 MB, mirrored in first 8 MB)
     if (phys < 0x00800000) {
@@ -474,6 +549,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load16(inter->ram, phys & (RAM_SIZE - 1));
@@ -495,6 +571,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load8(inter->ram, phys & (RAM_SIZE - 1));
@@ -525,6 +602,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -551,6 +629,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -571,6 +650,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_data_access(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);

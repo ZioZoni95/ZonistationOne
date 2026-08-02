@@ -76,7 +76,7 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
 typedef struct { SDL_Window* win; SDL_GLContext ctx; } SdlCtx;
 
 static bool init_sdl(SdlCtx* out) {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
         return false;
     }
@@ -396,6 +396,7 @@ int main(int argc, char* argv[]) {
 
     while (!quit) {
         while (SDL_PollEvent(&ev)) {
+            controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
             if (ev.type == SDL_QUIT) quit = true;
             else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) quit = true;
@@ -426,7 +427,17 @@ int main(int argc, char* argv[]) {
                 load_state_guarded(pending, &cpu, &inter);
         }
 
-        sio_set_button_state(&inter.sio, controller_update_from_keyboard(&gamepad));
+        sio_set_button_state(&inter.sio, controller_update(&gamepad));
+        // Touchpad-click edge → pad's Analog button: toggle SIO analog mode.
+        if (gamepad.analog_toggle)
+            sio_set_analog_mode(&inter.sio, !sio_get_analog_mode(&inter.sio));
+        // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
+        sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
+                             gamepad.right_x, gamepad.right_y);
+        // Rumble: M1/M2 levels captured from 42h reads → DS4 motors.
+        uint8_t rumble_m1, rumble_m2;
+        sio_get_rumble(&inter.sio, &rumble_m1, &rumble_m2);
+        controller_update_rumble(&gamepad, rumble_m1, rumble_m2);
         inject_tty_keys(&inter);
 
         /* Wait for GPU to finish the previous frame's rendering. */
@@ -501,9 +512,26 @@ int main(int argc, char* argv[]) {
             a_view += (double)(t3 - t2) * 1000.0 / (double)t_freq;
             a_sub  += (double)(t4 - t3) * 1000.0 / (double)t_freq;
             if (++frames == 60) {
-                LOG_SYSTEM_INFO("[PROF] per frame: emu=%.2fms (spu %.2fms) vram_upload=%.2fms viewer=%.2fms submit=%.2fms total=%.2fms",
+                /* Cycles per instruction, over the same 60 frames. This is the
+                 * independent check on the RAM data-access cost in bus.c: that
+                 * constant was calibrated so the BIOS VSync loop spans a field,
+                 * and a single loop can be made to say anything. CPI is a second,
+                 * unrelated observation over all executed code — real R3000A code
+                 * is mostly single-cycle ALU work punctuated by memory access, so
+                 * a believable figure sits a little above 1. A CPI near 1 means
+                 * the model is not being charged; a CPI far above it means the
+                 * constant is buying the VSync fix by slowing everything down. */
+                static uint32_t prev_cyc;
+                static uint64_t prev_ins;
+                uint32_t cyc = inter.cpu_cycle_counter;   /* 32-bit and wraps */
+                uint64_t ins = inter.instructions_retired;
+                uint32_t dcyc = cyc - prev_cyc;           /* unsigned: wrap-safe */
+                uint64_t dins = ins - prev_ins;
+                double cpi = dins ? (double)dcyc / (double)dins : 0.0;
+                prev_cyc = cyc; prev_ins = ins;
+                LOG_SYSTEM_INFO("[PROF] per frame: emu=%.2fms (spu %.2fms) vram_upload=%.2fms viewer=%.2fms submit=%.2fms total=%.2fms | CPI=%.3f",
                                 a_emu / 60, a_spu / 60, a_up / 60, a_view / 60, a_sub / 60,
-                                (a_emu + a_up + a_view + a_sub) / 60);
+                                (a_emu + a_up + a_view + a_sub) / 60, cpi);
                 frames = 0; a_emu = a_up = a_view = a_sub = a_spu = 0;
             }
         }

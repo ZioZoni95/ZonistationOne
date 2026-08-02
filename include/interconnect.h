@@ -170,6 +170,20 @@ typedef struct Interconnect {
                                  // spu_delay, cdrom_delay, exp2_delay, common_delay
     uint32_t bios_access_cycles; // extra cycles (beyond the base 1/instruction) per BIOS ROM word fetch
 
+    // Stall cycles owed by the data access(es) of the instruction currently
+    // executing. The bus adds to it; cpu_run_next_instruction drains it into the
+    // cycle counter and the downcount once the instruction retires, so an
+    // instruction's memory cost lands in one place instead of being charged
+    // half-way through its own execution. Always zero between instructions,
+    // which is why it does not travel in a savestate.
+    uint32_t cpu_mem_stall_cycles;
+
+    // Instructions retired, for measuring cycles-per-instruction against the
+    // cycle counter. The two were the same number until data accesses started
+    // costing more than one cycle; their ratio is now the check that the memory
+    // cost model produces a believable CPI rather than one tuned to a single loop.
+    uint64_t instructions_retired;
+
 } Interconnect;
 
 /* --- Function Declarations (Prototypes) --- */

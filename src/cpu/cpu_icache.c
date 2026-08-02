@@ -49,6 +49,18 @@ static inline void charge_bios_rom_cycles(Cpu* cpu, uint32_t paddr, uint32_t wor
 #endif
 }
 
+/* Instruction fetches go through interconnect_load32, which now charges the CPU
+ * data-access cost (bus.c). That cost models a *data* load: the instruction side
+ * has its own model — the cache above plus charge_bios_rom_cycles — and paying
+ * both would charge one fetch twice. So the accumulator is held across the fetch
+ * and put back, keeping the data-access cost strictly about data. */
+#define ICACHE_FETCH_NO_DATA_STALL(cpu, expr)                       \
+    do {                                                            \
+        uint32_t _saved = (cpu)->inter->cpu_mem_stall_cycles;       \
+        (expr);                                                     \
+        (cpu)->inter->cpu_mem_stall_cycles = _saved;                \
+    } while (0)
+
 uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
     // --- Cache Bypass Check ---
     // KSEG1 region (0xA0000000 - 0xBFFFFFFF) is un-cached.
@@ -56,7 +68,8 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
     if ((vaddr >> 29) == 0b101) {
         // KSEG1: Bypass cache, fetch directly from interconnect
         // printf("~ I-Cache Bypass (KSEG1 address: 0x%08x)\n", vaddr); // Optional debug
-        uint32_t instruction = interconnect_load32(cpu->inter, vaddr);
+        uint32_t instruction;
+        ICACHE_FETCH_NO_DATA_STALL(cpu, instruction = interconnect_load32(cpu->inter, vaddr));
         charge_bios_rom_cycles(cpu, vaddr & 0x1FFFFFFFu, 1, count_cycles);
         return instruction;
     }
@@ -115,7 +128,8 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
         // Calculate the physical address for this word
         uint32_t fetch_paddr = line_paddr_start + (j * 4);
         // Fetch from interconnect (bypassing cache itself - interconnect doesn't call back here)
-        uint32_t instruction_data = interconnect_load32(cpu->inter, fetch_paddr);
+        uint32_t instruction_data;
+        ICACHE_FETCH_NO_DATA_STALL(cpu, instruction_data = interconnect_load32(cpu->inter, fetch_paddr));
         // Store fetched data in the cache line
         line->data[j] = instruction_data;
         // Mark this word as valid
