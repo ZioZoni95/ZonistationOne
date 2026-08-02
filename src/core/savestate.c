@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 
 #define ZS1_STATE_MAGIC   0x5A533153u   /* "ZS1S" */
-#define ZS1_STATE_VERSION 2u
+#define ZS1_STATE_VERSION 3u   /* 3: added SIOI — the SIO0 protocol state */
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
@@ -35,8 +35,17 @@
 #define T_CDRT TAG('C','D','R','T')
 #define T_SPU  TAG('S','P','U',' ')
 #define T_SIO  TAG('S','I','O',' ')
+#define T_SIOI TAG('S','I','O','I')
 #define T_MDEC TAG('M','D','E','C')
 #define T_DISC TAG('D','I','S','C')
+
+/* The SIO0 protocol state (analog/config mode, the Analog-button lock, the
+ * rumble map, the controller and memory-card transfer steps) is a file-static
+ * inside sio.c, reached through sio_save/load_internal_state. Its size is a
+ * runtime value, so the section travels through a fixed staging buffer with a
+ * guard rather than a sized array. A few hundred bytes today; the guard is what
+ * turns a future overrun into a refused save instead of a smashed stack. */
+#define SIO_INTERNAL_MAX 2048
 
 /* The Renderer inside Gpu, and the disc handles and reader thread inside Cdrom,
  * are host objects: GL names, an open FILE per track, a pthread and its
@@ -147,6 +156,16 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
     DiscIdentity did;
     disc_identity_of(inter, &did);
 
+    size_t sio_sz = sio_internal_state_size();
+    uint8_t sio_blk[SIO_INTERNAL_MAX];
+    if (sio_sz > sizeof(sio_blk)) {
+        LOG_SYSTEM_ERROR("[STATE] SIO protocol state is %zu bytes, staging buffer is %zu — "
+                         "raise SIO_INTERNAL_MAX", sio_sz, sizeof(sio_blk));
+        fclose(f);
+        return false;
+    }
+    sio_save_internal_state(sio_blk);
+
     ok = ok && put_section(f, T_DISC, &did,              sizeof(did));
     ok = ok && put_section(f, T_CPU,  cpu,               sizeof(Cpu));
     ok = ok && put_section(f, T_RAM,  inter->ram->data,  RAM_SIZE);
@@ -160,6 +179,7 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
     ok = ok && put_section(f, T_CDRT, (const uint8_t*)&inter->cdrom + CDR_TAIL_OFF, CDR_TAIL_SIZE);
     ok = ok && put_section(f, T_SPU,  &inter->spu,  sizeof(Spu));
     ok = ok && put_section(f, T_SIO,  &inter->sio,  sizeof(Sio));
+    ok = ok && put_section(f, T_SIOI, sio_blk,      sio_sz);
     ok = ok && put_section(f, T_MDEC, &inter->mdec, sizeof(Mdec));
 
     long bytes = ftell(f);
@@ -261,6 +281,15 @@ bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inte
     Interconnect* tmr_inter   = inter->timers_state.inter;
     Interconnect* cdr_inter   = inter->cdrom.inter;
 
+    size_t sio_sz = sio_internal_state_size();
+    uint8_t sio_blk[SIO_INTERNAL_MAX];
+    if (sio_sz > sizeof(sio_blk)) {
+        LOG_SYSTEM_ERROR("[STATE] SIO protocol state is %zu bytes, staging buffer is %zu — "
+                         "raise SIO_INTERNAL_MAX", sio_sz, sizeof(sio_blk));
+        fclose(f);
+        return false;
+    }
+
     IntcBlock ib;
     bool ok = true;
     ok = ok && get_section(f, T_CPU,  cpu,               sizeof(Cpu));
@@ -275,8 +304,14 @@ bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inte
     ok = ok && get_section(f, T_CDRT, (uint8_t*)&inter->cdrom + CDR_TAIL_OFF, CDR_TAIL_SIZE);
     ok = ok && get_section(f, T_SPU,  &inter->spu,  sizeof(Spu));
     ok = ok && get_section(f, T_SIO,  &inter->sio,  sizeof(Sio));
+    bool sio_ok = ok && get_section(f, T_SIOI, sio_blk, sio_sz);
+    ok = ok && sio_ok;
     ok = ok && get_section(f, T_MDEC, &inter->mdec, sizeof(Mdec));
     fclose(f);
+
+    /* Only hand the block over once it actually read, otherwise a failed section
+     * would push an uninitialised staging buffer into the live protocol state. */
+    if (sio_ok) sio_load_internal_state(sio_blk);
 
     /* Put the host pointers back before anything can dereference them. A
      * partial load has already overwritten some of the structs, so this runs
