@@ -5,6 +5,11 @@
  * See LICENSE for the full licence text and THIRD-PARTY.md for the
  * components of this project that have other authors.
  */
+/* setenv() is POSIX, and -std=c99 hides it behind __STRICT_ANSI__. Requesting
+ * POSIX.1-2001 declares it without pulling in the wider GNU namespace. Must
+ * precede every include so the first libc header sees it. */
+#define _POSIX_C_SOURCE 200112L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -75,7 +80,49 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
 // --- SDL / OpenGL window init ---
 typedef struct { SDL_Window* win; SDL_GLContext ctx; } SdlCtx;
 
+/* ZS1_GPU picks which GPU the GL context lands on, on a hybrid-graphics machine.
+ *
+ * Neither value is ours: they are the GLVND/PRIME offload variables the driver
+ * stack reads when it resolves the GLX vendor, so this only saves typing them in
+ * front of the command. They have to be set before the GL context is created —
+ * hence before SDL_Init — because that is when the dispatch happens.
+ *
+ *   ZS1_GPU=nvidia   __NV_PRIME_RENDER_OFFLOAD=1, __GLX_VENDOR_LIBRARY_NAME=nvidia
+ *   ZS1_GPU=intel    DRI_PRIME=0, the Mesa side of the same switch
+ *
+ * Neither is set by default, so the machine's own default provider wins. The
+ * point of having it at all is being able to put the same build on both GPUs in
+ * one session: driver behaviour is a real source of rendering differences here,
+ * and the renderer's GL_RGB scanout format, its float-to-uint texture coordinate
+ * conversion and GL_DITHER all rendered differently on the two before they were
+ * fixed. An override that already exists is worth more than one you have to
+ * remember when a bug shows up.
+ *
+ * setenv() with overwrite=0, so an explicit variable on the command line still
+ * beats this. */
+static void apply_gpu_preference(void) {
+    const char* pref = getenv("ZS1_GPU");
+    if (!pref) return;
+
+    if (strcmp(pref, "nvidia") == 0) {
+        setenv("__NV_PRIME_RENDER_OFFLOAD", "1",      0);
+        setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
+        LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=nvidia — requesting the discrete GPU via PRIME offload");
+    } else if (strcmp(pref, "intel") == 0) {
+        setenv("DRI_PRIME", "0", 0);
+        LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=intel — requesting the integrated GPU");
+    } else {
+        LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=\"%s\" not recognised (want \"nvidia\" or \"intel\") — "
+                        "using the system default", pref);
+        return;
+    }
+    /* Whether the request was honoured is only knowable from the GL strings, which
+     * are logged once the context is up. Compare them, do not assume. */
+}
+
 static bool init_sdl(SdlCtx* out) {
+    apply_gpu_preference();
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
         return false;
@@ -112,8 +159,39 @@ static bool init_sdl(SdlCtx* out) {
     /* Which GPU actually got the context matters on hybrid machines — the same
      * binary lands on the iGPU or the discrete card depending on the PRIME
      * environment, and "is this a driver bug" is unanswerable without it. */
-    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s | %s | %s",
-                    glGetString(GL_VERSION), glGetString(GL_RENDERER), glGetString(GL_VENDOR));
+    const char* gl_version  = (const char*)glGetString(GL_VERSION);
+    const char* gl_renderer = (const char*)glGetString(GL_RENDERER);
+    const char* gl_vendor   = (const char*)glGetString(GL_VENDOR);
+    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s | %s | %s", gl_version, gl_renderer, gl_vendor);
+
+    /* Report which driver the context actually came from, and say plainly whether
+     * a ZS1_GPU request was honoured. Asking for the discrete card and silently
+     * getting the integrated one is a normal outcome — the offload can fail
+     * because the kernel module is not loaded, or the compositor holds the
+     * display — and it is exactly the case where an unexplained rendering
+     * difference gets blamed on the emulator. So it is checked here rather than
+     * left for a human to spot in the vendor string. */
+    {
+        bool on_nvidia = gl_vendor && strstr(gl_vendor, "NVIDIA") != NULL;
+        bool on_intel  = gl_vendor && strstr(gl_vendor, "Intel")  != NULL;
+        const char* driver = on_nvidia ? "NVIDIA proprietary"
+                           : on_intel  ? "Mesa (Intel integrated)"
+                           : "unknown";
+        LOG_SYSTEM_INFO("[SYSTEM] GL driver in use: %s", driver);
+
+        const char* want = getenv("ZS1_GPU");
+        if (want && strcmp(want, "nvidia") == 0 && !on_nvidia)
+            LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=nvidia was requested but the context is on \"%s\" — "
+                            "PRIME offload did not take. Check that the kernel module is loaded "
+                            "(/proc/driver/nvidia/version) and that libGLX_nvidia is installed",
+                            gl_vendor ? gl_vendor : "?");
+        else if (want && strcmp(want, "intel") == 0 && !on_intel)
+            LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=intel was requested but the context is on \"%s\"",
+                            gl_vendor ? gl_vendor : "?");
+        else if (want)
+            LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=%s honoured", want);
+    }
+
     check_gl_error("GLEW init");
     return true;
 }

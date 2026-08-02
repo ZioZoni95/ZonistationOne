@@ -90,7 +90,39 @@ Useful environment variables:
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_AUDIO_DUMP=path` | Record exactly what is handed to the sound device, as raw interleaved 16-bit stereo |
 | `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging where an artefact comes from |
-| `ZS1_FRAME_PROFILE=1` | Log where each frame's wall-clock time goes (emulation, VRAM upload, viewer, submit) |
+| `ZS1_FRAME_PROFILE=1` | Log where each frame's wall-clock time goes (emulation, VRAM upload, viewer, submit), plus cycles per emulated instruction |
+| `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU |
+
+### Choosing a GPU
+
+`ZS1_GPU` sets the PRIME offload variables the driver stack reads (`__NV_PRIME_RENDER_OFFLOAD`
+and `__GLX_VENDOR_LIBRARY_NAME` for NVIDIA, `DRI_PRIME` for Mesa) before the GL context is
+created. It saves typing them, nothing more — setting them by hand works identically, and an
+explicit variable on the command line still wins.
+
+```sh
+ZS1_GPU=nvidia ./myps1_emu roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"
+```
+
+The run always logs which driver it ended up on, and says whether the request was honoured:
+
+```
+[SYSTEM] OpenGL 3.3.0 NVIDIA 610.43.02 | NVIDIA GeForce RTX 4060 Laptop GPU/PCIe/SSE2 | NVIDIA Corporation
+[SYSTEM] GL driver in use: NVIDIA proprietary
+[SYSTEM] ZS1_GPU=nvidia honoured
+```
+
+Asking for the discrete card and quietly getting the integrated one is a normal failure — the
+kernel module may not be loaded, or the compositor may hold the display — so a request that does
+not take is reported as a warning rather than left for you to notice in the vendor string.
+
+This exists because driver behaviour is a real source of rendering differences here: the renderer
+had three places that relied on undefined GL, and each of them looked correct on the discrete card
+and wrong on the integrated one. Being able to put the same build on both GPUs in one session is
+how that gets diagnosed instead of guessed at.
+
+Reporting `OpenGL 3.3.0` on NVIDIA against `4.6` on Mesa is not a downgrade: the emulator asks for
+a 3.3 core context and NVIDIA returns exactly that, while Mesa reports the highest it supports.
 
 ---
 
