@@ -25,6 +25,10 @@ typedef struct {
     /* Health counters: pushed/popped tell whether the drive is feeding the SPU
      * at the rate the SPU consumes, dropped means the FIFO overflowed. */
     uint32_t total_pushed, total_popped, total_dropped;
+    /* Pops taken with the FIFO empty: a *missing* frame rather than a discarded
+     * one, so total_dropped never counts it. The CD input falls to zero for that
+     * sample and jumps back when the next sector lands, which is a click. */
+    uint32_t total_starved;
     uint32_t head, tail, count;
 } AudioFifo;
 

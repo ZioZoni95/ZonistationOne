@@ -467,10 +467,11 @@ static int l_emu_cd_audio(lua_State* L) {
     lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_pushed);
     lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_popped);
     lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_dropped);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_starved);
     lua_pushinteger(L, (lua_Integer)g_inter->spu.control);
     lua_pushinteger(L, (lua_Integer)cd->sectors_read_total);
     lua_pushinteger(L, (lua_Integer)cd->xa_sectors_total);
-    return 7;
+    return 8;
 }
 
 /* Host wall-clock milliseconds. Emulated cycles against this is the emulator's

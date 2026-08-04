@@ -38,6 +38,7 @@ local REPORT_EVERY = 50        -- vblanks; PAL field rate, so about one second
 
 local frames = 0
 local prev = nil
+local prev_starve = nil
 local loaded = false
 local win = {
   in_peak = 0, out_peak = 0,
@@ -86,7 +87,7 @@ emu.on_event(function(name)
 
   -- Delivery counters too: a pop from a dropped or missing sample is a different
   -- defect from a pop from saturation, and the two sound alike.
-  local cd_count, cd_push, cd_pop, cd_drop, spucnt = emu.cd_audio()
+  local cd_count, cd_push, cd_pop, cd_drop, cd_starve = emu.cd_audio()
   local _, _, _, _, _, ring_drop, under_ev = emu.audio_stats()
   local gen, _, _, _, keyons = emu.spu_stats()
 
@@ -99,10 +100,11 @@ emu.on_event(function(name)
   prev = { pop = cd_pop, keyons = keyons, gen = gen }
 
   emu.log(string.format(
-    "[clip] rvb %s eon=%04x | in=%6d out=%6d rail=%d/%d | xa: fifo=%4d +%6d/s drop=%d | keyon +%d | ring_drop=%d under=%d",
-    win.reverb_on_frames > 0 and "ON " or "off", eon,
-    win.in_peak, win.out_peak, win.out_rail, win.samples,
-    cd_count, d_pop, cd_drop, d_keys, ring_drop, under_ev))
+    "[clip] rvb %s | xa: fifo=%4d +%6d/s drop=%d STARVED=%d (+%d/s) | keyon +%d | ring_drop=%d under=%d",
+    win.reverb_on_frames > 0 and "ON " or "off",
+    cd_count, d_pop, cd_drop, cd_starve, cd_starve - (prev_starve or cd_starve),
+    d_keys, ring_drop, under_ev))
+  prev_starve = cd_starve
 
   reset()
 end)

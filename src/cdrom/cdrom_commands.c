@@ -663,6 +663,51 @@ void cdrom_execute_drive(Cdrom *cdrom) {
 
         if (cdrom->xa_adpcm_enable && is_xa_audio && is_realtime && file_match) {
             cdrom->xa_sectors_total++;
+            /* Which (file, channel) the decoder is actually being fed. An XA file
+             * interleaves several channels, and the decoder carries its ADPCM
+             * filter state across sectors — so accepting two channels splices
+             * unrelated audio into one stream and the state runs on from the wrong
+             * predecessor. Logged only when the pair changes, which is silent on a
+             * correctly filtered stream and noisy on the failure. */
+            /* Sector sequence. The ADPCM filter is an IIR whose state carries
+             * from one sector into the next, so a skipped or repeated sector does
+             * not merely lose a moment of audio — it restarts the filter from the
+             * wrong predecessor, and the error rings on until the signal decays.
+             * XA sectors of one channel arrive interleaved with other channels'
+             * sectors, so the LBA step is the interleave factor and what matters
+             * is that it stays *constant*, not that it is 1. */
+            {
+                static uint32_t s_prev_lba = 0;
+                static int32_t  s_step = 0;
+                static uint32_t s_breaks = 0;
+                if (s_prev_lba) {
+                    int32_t d = (int32_t)cdrom->current_lba - (int32_t)s_prev_lba;
+                    if (s_step == 0) {
+                        s_step = d;
+                        LOG_CDROM_INFO("[CDROM] XA interleave step = %d sectors", d);
+                    } else if (d != s_step) {
+                        s_breaks++;
+                        LOG_CDROM_WARN("[CDROM] XA sequence break #%u at LBA %u: step %d, expected %d",
+                                       s_breaks, cdrom->current_lba, d, s_step);
+                    }
+                }
+                s_prev_lba = cdrom->current_lba;
+            }
+            {
+                static int  s_last_file = -1, s_last_ch = -1;
+                static uint32_t s_switches = 0;
+                if (raw[16] != s_last_file || raw[17] != s_last_ch) {
+                    s_switches++;
+                    LOG_CDROM_INFO("[CDROM] XA stream now file=%u channel=%u "
+                                   "(filter %s, want file=%u channel=%u) — switch #%u at LBA %u",
+                                   raw[16], raw[17],
+                                   cdrom->xa_filter_enable ? "on" : "OFF",
+                                   cdrom->xa_filter_file, cdrom->xa_filter_channel,
+                                   s_switches, cdrom->current_lba);
+                    s_last_file = raw[16];
+                    s_last_ch   = raw[17];
+                }
+            }
             /* XA-ADPCM sector: decode to audio FIFO — NO INT1 */
             cdrom_audio_decode_xa(&cdrom->xa_adpcm_state, &cdrom->audio_fifo,
                                    raw + 24, xa_stereo, xa_8bit, xa_18900,

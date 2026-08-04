@@ -481,9 +481,39 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
          * The CDROM audio FIFO holds XA/CDDA at 44100 Hz stereo.
          * cd_vol_left/right are PSX-standard 15-bit signed scale factors. */
         {
-            int16_t cl = 0, cr = 0;
-            if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo))
+            /* Hold the last CD sample when the FIFO has nothing, rather than
+             * falling to zero.
+             *
+             * The rates match exactly on average — at double speed with the
+             * interleave of 8 this stream uses, XA delivers 44100 frames a second
+             * and the SPU consumes 44100 — but neither side is smooth. A sector
+             * lands 2352 frames at once every 53 ms while the SPU drains in bursts
+             * of 64, so the queue bottoms out and momentarily has nothing, about
+             * 230 times a second on the measured scene. total_dropped never saw
+             * this: nothing is discarded, a frame is simply missing.
+             *
+             * Zeroing turned each of those into a step to silence and back, which
+             * is a click; 230 a second is the buzz that was audible over speech.
+             * The CD input on hardware is a continuous signal that the SPU samples,
+             * so repeating the previous value is much closer to the truth than
+             * dropping to zero, and one held sample is inaudible where a zero is
+             * not. The counter stays, because a starving queue is still a fault
+             * worth seeing even once it stops being audible. */
+            /* File-static rather than a field on Spu: adding one would change
+             * sizeof(Spu), and the savestate stores the SPU as one sized span, so
+             * every existing state would stop loading. This is a single sample of
+             * hold state — losing it across a save and load costs one frame of a
+             * signal that is already continuous. */
+            static int16_t s_cd_last_l = 0, s_cd_last_r = 0;
+
+            int16_t cl = s_cd_last_l, cr = s_cd_last_r;
+            if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo)) {
                 cdrom_audio_fifo_pop(&inter->cdrom.audio_fifo, &cl, &cr);
+                s_cd_last_l = cl;
+                s_cd_last_r = cr;
+            } else {
+                inter->cdrom.audio_fifo.total_starved++;
+            }
             /* Apply CD input volume (cd_vol default 0x7FFF = full) */
             int32_t cv_l = (int32_t)(int16_t)spu->cd_vol_left;
             int32_t cv_r = (int32_t)(int16_t)spu->cd_vol_right;
