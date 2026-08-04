@@ -18,7 +18,17 @@ The game path must be passed as `--game=<cue>`; a bare positional path is reject
 with the PAL BIOS (`SCPH-7502`) — region mismatch is detected and rejected as on hardware.
 
 Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as well as the ImGui
-windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`.
+windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
+`ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
+`ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`.
+
+`ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
+before the context is created, and the run logs which driver it got and whether the request was
+honoured. Undefined GL behaved differently on the two, so *always* check that line before treating a
+rendering difference as an emulator bug.
+
+`ZS1_RAM_LOAD_STALL=<n>` overrides the per-load RAM cost (default 3). `0` restores the old flat
+one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
 
@@ -178,17 +188,36 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - DMA: all channels, linked-list + block, completion interrupts
 - Timers 0/1/2: derived counters, sync modes, video-mode-derived rates
 - CDROM: async command/response, disc region detection, XA audio decode
-- SIO: digital pad, both memory card slots
+- SIO: digital pad, DualShock analog protocol (ID 73h/F3h, adc0-3, config commands), rumble on both
+  the old one-motor and the new 4Dh-mapped method, both memory card slots
+- Controllers: DS4 over USB/Bluetooth via SDL_GameController, hot-plug, keyboard live alongside it
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
 - SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
+- **Savestates**: full machine, format **v3**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
+  from Lua. v2 states are refused — the SIOI section (SIO0 protocol state) arrived in v3.
+- CPU memory timing: RAM data **loads** cost 3 cycles (1 documented from RAM_SIZE bit 7, 2
+  calibrated); stores are free because the write buffer absorbs them. CPI lands ~1.6, tracked and
+  printed by `ZS1_FRAME_PROFILE=1`. This is what stopped the BIOS printing `VSync: timeout` on
+  every call.
 
 ## Known Broken / Absent
 
-- **Savestates**: not implemented.
+- **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
+  below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
+  `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the
+  XA and ring drop counters, which separates saturation from a dropped sample — the two sound alike.
+  `ZS1_SPU_NO_REVERB=1` is the one-run A/B. Not yet reproduced from a fixed point: no v3 savestate
+  inside a speech scene exists.
+- **iGPU rendering artifacts — fix committed, not verified.** Textures came out as flat blocks of
+  saturated colour on Mesa/Intel and clean on the NVIDIA dGPU. Three pieces of undefined GL were
+  corrected (unsized `GL_RGB` scanout target, float-to-uint on a possibly-negative interpolated UV,
+  `GL_DITHER` left enabled). The UV fix alone was tested and did not resolve it; the format fix is
+  the one that had not been tried when that was reported. Needs an iGPU run to confirm.
 - GPU: mask-bit *test* not applied to rasterized primitives; GP0(C0)/GP0(80) read the CPU-side VRAM;
   texture sampling reads a separate mirror; CRTC ticks once per frame.
-- No analog pad, no multitap.
+- No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
+  motors are mapped to config bytes cc..ff.
 
 See `GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
@@ -212,21 +241,47 @@ make clean && make
 Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
 `duckstation_ref/` and `pcsx-redux/` as submodules — they are consulted for behaviour, never linked.
 
-**State as of 2026-07-29** (branch `debug`):
+**State as of 2026-08-04** (branch `debug`, pushed to `origin/debug`):
 
-- Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly, and the
-  audio stream handed to the sound device is clean.
-- The last session fixed seven documented defects across CDROM and SPU (commit `0121813`) and rewrote
-  the SPU reverb from the hardware documentation (`73542de`).
-- Read `docs/study/README.md` first: it carries the combined work queue from a full documentation
-  study of the CDROM and SPU subsystems, ordered by impact per unit of effort, plus the list of things
-  already verified correct so they are not re-investigated.
+- Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly.
+- The machine is an i9-14900HX with an Intel iGPU **and** an RTX 4060. Which one gets the GL context
+  changes rendering behaviour, so always check the startup log before judging a visual defect.
+- Host cost is ~3.7ms against a 20ms PAL field with the panels closed. There is roughly 5x headroom;
+  when something *feels* slow, it is the emulated machine's cycle budget, not the host. Check the CPI
+  in `ZS1_FRAME_PROFILE=1` before looking anywhere else.
+- Read `docs/study/README.md` first: the combined CDROM/SPU work queue, ordered by impact per unit of
+  effort, plus what is already verified correct so it is not re-investigated. Item 9 (VSync) is done.
 - `GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `GPU_GAP_ANALYSIS_2026-07-15.md` hold per-subsystem state.
   `docs/ui/` holds the interface direction the debug UI is being rebuilt against.
+- The build emits **zero warnings from this project's own sources**. Keep it that way; the only one
+  left is `tmpnam` from vendored Lua at link time.
 
-**Next up, in order**: the VSync timeout mechanism (item 9 of the study queue — it explains the
-compressed boot sequence and points at the parked CPU memory-timing cost model), then savestates, then
-the three GPU items that are really one job (cross-thread GL readback).
+**Debugging convention**: use the in-tree Lua probes (`ZS1_LUA_SCRIPT=scripts/x.lua`, the `emu.*` API
+in `src/core/lua_debug.c`) rather than dumping state and analysing it outside. The Lua surface reads
+live internals a dump cannot show — `emu.reverb()` gives the reverb network's in/out, `emu.cd_audio()`
+the XA FIFO balance, `emu.audio_stats()` ring drops and underruns. Probes live in `scripts/` and are
+re-runnable next session.
+
+**DS4 support is implemented and confirmed working on hardware** (buttons, sticks, hot-plug, keyboard
+still live alongside it). Two things remain on it: **rumble is written but never verified with a real
+pad**, and there is **no UI for controller state or button mapping** — the mapping is hard-coded in
+`controller.c`. `docs/CONTROLLER_DS4_SUPPORT.md` and `docs/CONTROLLER_MAPPING_UI.md` are the design
+notes (untracked; commit them if they should travel).
+
+**Next up, in order**:
+1. **SPU pops during speech** — needs a v3 savestate taken inside a speech scene so runs start from
+   the defect instead of booting to it. Then `spu_clip_probe.lua` with and without
+   `ZS1_SPU_NO_REVERB=1`.
+2. **Confirm the iGPU artifact fix** — one run with `ZS1_GPU=intel` against one with `ZS1_GPU=nvidia`.
+3. **Controller UI** — a panel showing live pad state (mode 41h/73h/F3h, buttons, sticks, motors,
+   watchdog) and editable mapping, plus verifying rumble against the real DS4.
+4. The three GPU items that are really one job (cross-thread GL readback).
+
+**Repository question, still open**: `guide.tex` (Lionel Flandrin's guide, no upstream LICENSE) and
+the DuckStation-derived code that was rewritten are out of HEAD but remain in history. Recreating the
+repository from a clean tree was discussed and not decided. A `git bundle` preserves all 165+ commits
+in one file if the old repo is ever deleted — losing the history is separable from stopping
+distribution.
 
 **Traps that have each cost a session**:
 
@@ -238,5 +293,17 @@ the three GPU items that are really one job (cross-thread GL readback).
   time" that was later withdrawn.
 - The BIOS must match the disc's region. A PAL disc with the US BIOS is rejected exactly as on
   hardware, and the symptom — sitting at the BIOS menu — looks like a boot regression.
+- `--game=` needs the `.bin`, not the `.cue`, for these discs. A `.cue` is accepted and then reports
+  "Disc load failed — BIOS-only mode", which looks like a disc bug rather than a path mistake.
+- Never quote a frame figure from a single run. A "17.5ms per frame" measurement taken while a build
+  was running was reproduced at ~7ms minutes later on the identical binary, and nearly led to blaming
+  a 2.7x regression on gcc-14. Repeat, and take a median.
+- Do not charge the CPU memory cost to BIOS ROM or the I/O window without running the LBA-23
+  isolation test that `cpu_icache.c` describes. Charging ROM *data* loads with the MEMCTRL word time
+  killed controller input outright, because the BIOS pad routines read their tables out of ROM.
+- Anything on the load/store path is the hottest code in the emulator. A chain of region tests added
+  to `interconnect_load32` cost ~10% of host frame time by itself; it is now one comparison.
+- `include/timers.h` is CRLF, like `include/renderer.h`. Edit both by line, never by rewriting the
+  whole file, or a two-line change becomes a whole-file diff.
 - `include/renderer.h` is CRLF. Editing it with a script that rewrites the whole file converts it to
   LF and produces a 750-line diff.
