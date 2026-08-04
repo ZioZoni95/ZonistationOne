@@ -169,7 +169,5 @@ void timer2_event_handler(struct Interconnect* sys);
 // Forward declaration for Cpu
 struct Cpu;
 
-// Called by BIOS SetRCnt syscall to allow direct configuration of timers
-void timers_handle_setrcnt(Timers* timers, struct Cpu* cpu);
 
 #endif // TIMERS_H

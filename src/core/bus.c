@@ -461,8 +461,22 @@ static inline void sp_store16(Interconnect* i, uint32_t off, uint16_t v) {
 // Scratchpad is the R3000A's data cache wired as fast local memory, so it is
 // deliberately free.
 
-#define RAM_DATA_STALL_DOCUMENTED  1u  /* DOCS/memorycontrol.md:161-163, RAM_SIZE bit 7 */
-#define RAM_DATA_STALL_CALIBRATED  2u  /* no citation — see the note above */
+/* Loads stall, stores do not.
+ *
+ * The R3000A retires a store into a write buffer and carries on; the pipeline
+ * only stalls if the buffer is full. A load has nowhere to hide — the value is
+ * needed, so the CPU waits for it. Charging both the same made the emulated CPU
+ * markedly slower than the real one: cycles-per-instruction sat at 1.85, so the
+ * guest executed nearly half the instructions per field that it should have, and
+ * the games felt sluggish while the host sat at 18% of its frame budget. The
+ * emulator was keeping real time perfectly; the machine inside it was not.
+ *
+ * The VSync loop survives the change with room: its iteration is three loads and
+ * one store, so it goes to 12 + 3*3 = 21 cycles, and 32768 * 21 = 688128 still
+ * clears the 680823-cycle PAL field. */
+#define RAM_LOAD_STALL_DOCUMENTED  1u  /* DOCS/memorycontrol.md:161-163, RAM_SIZE bit 7 */
+#define RAM_LOAD_STALL_CALIBRATED  2u  /* no citation — see the note above */
+#define RAM_STORE_STALL            0u  /* write buffer absorbs it */
 
 /* Only main RAM is charged, and that is a scoping decision rather than a claim
  * that nothing else costs anything.
@@ -486,15 +500,48 @@ static inline void sp_store16(Interconnect* i, uint32_t off, uint16_t v) {
  * hottest path in the emulator — interconnect_load32 alone was 4.3% of samples —
  * and an earlier version with a chain of region tests cost about 10% of host
  * frame time on its own. */
-#define RAM_DATA_STALL (RAM_DATA_STALL_DOCUMENTED + RAM_DATA_STALL_CALIBRATED)
+#define RAM_LOAD_STALL (RAM_LOAD_STALL_DOCUMENTED + RAM_LOAD_STALL_CALIBRATED)
 
-static inline void bus_charge_cpu_data_access(Interconnect* inter, uint32_t phys) {
-    /* RAM_SIZE bit 7 gates the documented contention cycle. hw_memctrl2_read
-     * returns a fixed 0x00000B88 and hw_memctrl2_write discards writes, so the
-     * bit is set for the whole run and the cycle always applies. Read the
-     * register here if it ever becomes writable. */
+/* ZS1_RAM_LOAD_STALL overrides the per-load figure for a run.
+ *
+ * The calibrated part of it has no citation, and the one measurement that pins
+ * it — the VSync loop spanning a field — only sets a floor. Everything above
+ * that floor is a judgement about how fast the emulated machine should feel,
+ * which is not settled from inside the emulator: it needs comparison against
+ * hardware or a known-good reference, by someone watching the game.
+ *
+ * So the value is a run-time knob rather than a rebuild. 0 restores the flat
+ * one-cycle-per-instruction behaviour this replaced, which is the honest A/B —
+ * VSync then times out again, exactly as it used to. 2 is the documented floor
+ * plus nothing. The default stays 3.
+ *
+ * Read once and cached; the load path is the hottest in the emulator. */
+static uint32_t ram_load_stall(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* s = getenv("ZS1_RAM_LOAD_STALL");
+        long v = s ? strtol(s, NULL, 10) : (long)RAM_LOAD_STALL;
+        if (v < 0)  v = 0;
+        if (v > 64) v = 64;      /* absurd values are a typo, not an intent */
+        cached = (int)v;
+        if (s) LOG_INTERCONNECT_INFO("[BUS] ZS1_RAM_LOAD_STALL=%d extra cycles per RAM load "
+                                     "(default %u)", cached, (unsigned)RAM_LOAD_STALL);
+    }
+    return (uint32_t)cached;
+}
+
+/* RAM_SIZE bit 7 gates the documented contention cycle. hw_memctrl2_read returns
+ * a fixed 0x00000B88 and hw_memctrl2_write discards writes, so the bit is set for
+ * the whole run and the cycle always applies. Read the register here if it ever
+ * becomes writable. */
+static inline void bus_charge_cpu_load(Interconnect* inter, uint32_t phys) {
     if (phys < 0x00800000)                   /* main RAM, mirrored */
-        inter->cpu_mem_stall_cycles += RAM_DATA_STALL;
+        inter->cpu_mem_stall_cycles += ram_load_stall();
+}
+
+static inline void bus_charge_cpu_store(Interconnect* inter, uint32_t phys) {
+    if (phys < 0x00800000)
+        inter->cpu_mem_stall_cycles += RAM_STORE_STALL;
 }
 
 // =============================================================================
@@ -509,7 +556,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_load(inter, phys);
 
     // RAM (2 MB, mirrored in first 8 MB)
     if (phys < 0x00800000) {
@@ -549,7 +596,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_load(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load16(inter->ram, phys & (RAM_SIZE - 1));
@@ -571,7 +618,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_load(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load8(inter->ram, phys & (RAM_SIZE - 1));
@@ -602,7 +649,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -629,7 +676,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -650,7 +697,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
-    bus_charge_cpu_data_access(inter, phys);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);

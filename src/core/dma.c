@@ -67,13 +67,12 @@ void dma_channel_done(DmaChannel* ch) {
     ch->trigger = false;
 }
 
-// Helper: Estimate cycles for a DMA transfer (very rough, tune as needed)
-static uint32_t estimate_dma_cycles(DmaChannel* ch) {
-    // PS1 DMA is fast, but not instant. Use 2 cycles per word as a starting point.
-    uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
-    if (words == 0) words = 1;
-    return words * 2; // 2 cycles per word (tune as needed)
-}
+/* An estimate_dma_cycles() helper used to sit here — "2 cycles per word (tune as
+ * needed)" — called by nobody since it was written. Removed rather than silenced.
+ * DMA is paced by the event scheduler through EVQ slices, not by a per-transfer
+ * cycle estimate, so reviving this would mean deciding it is the right model
+ * first; an uncalled placeholder only makes it look like that decision was
+ * already taken. The real gap here is recorded in GAP_ANALYSIS §4. */
 
 /* Recompute DICR's master flag and drive the DMA interrupt LINE from it.
  *

@@ -1033,7 +1033,8 @@ static void gp0_rect_var_mono_impl(Gpu* gpu, bool semi_trans) {
     RendererColor col = { .r=(GLubyte)(cmd&0xFF), .g=(GLubyte)((cmd>>8)&0xFF), .b=(GLubyte)((cmd>>16)&0xFF) };
     int16_t x = (int16_t)(vtx & 0xFFFF); int16_t y = (int16_t)(vtx >> 16);
     uint16_t w = (uint16_t)(dim & 0xFFFF); uint16_t h = (uint16_t)(dim >> 16);
-    if (w == 0) w = 1; if (h == 0) h = 1;
+    if (w == 0) w = 1;
+    if (h == 0) h = 1;
     draw_rectangle(gpu, x, y, w, h, col, false, false, NULL, 0, 0, semi_trans);
 }
 
@@ -1053,7 +1054,8 @@ static void gp0_rect_var_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     uint16_t clut  = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = make_tpage(gpu);
     uint16_t w = (uint16_t)(dim & 0xFFFF); uint16_t h = (uint16_t)(dim >> 16);
-    if (w == 0) w = 1; if (h == 0) h = 1;
+    if (w == 0) w = 1;
+    if (h == 0) h = 1;
 
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;

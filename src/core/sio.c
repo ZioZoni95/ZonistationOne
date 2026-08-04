@@ -297,6 +297,7 @@ void sio_execute_event(Sio* sio) {
 // ============================================================================
 
 uint8_t sio_read8(Sio* sio, uint32_t offset) {
+    (void)sio;  /* sio_internal holds the register state — see SioInternal */
     switch (offset) {
         case 0x00: {  // JOY_DATA (1F801040h)
             // Return RX buffer
@@ -324,6 +325,7 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
 }
 
 uint16_t sio_read16(Sio* sio, uint32_t offset) {
+    (void)sio;  /* sio_internal holds the register state — see SioInternal */
     switch (offset) {
         case 0x04: {  // JOY_STAT (1F801044h)
             // STAT.7 mirrors the /ACK input, which the device holds low only for a
