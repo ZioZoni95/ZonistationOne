@@ -5,6 +5,7 @@
  * See LICENSE for the full licence text and THIRD-PARTY.md for the
  * components of this project that have other authors.
  */
+#include <stdlib.h>
 #include "cdrom_audio.h"
 #include "spu.h"
 #include "log.h"
@@ -84,8 +85,18 @@ static void decode_xa_chunk(const uint8_t *chunk, bool stereo, bool bits8,
     for (int block = 0; block < num_blocks; block++) {
         uint8_t hdr    = headers[block];
         int     shift  = hdr & 0x0F;
-        int     filter = (hdr >> 4) & 0x0F;
-        if (filter > 4) filter = 4;
+        /* Two bits, not four: "filter = (src[4+blk*2+nibble] AND 30h) SHR 4"
+         * (DOCS/cdromformat.md:843), and bits 6-7 of the header are documented as
+         * "Unused (should be 0)" (:781). XA has four filters, 0..3 — the fifth one
+         * belongs to SPU-ADPCM and the documentation says so twice (:780, :849).
+         *
+         * Masking four bits here meant a header with bit 6 or 7 set selected
+         * filter 4, whose coefficients (+122, -60) are the most aggressive of the
+         * set, and ran a whole 28-sample block through an IIR the data was never
+         * encoded for. One block is 0.74 ms of 37800 Hz audio, and that is the
+         * length of the bursts of near-Nyquist buzz that were audible as pops
+         * during speech. */
+        int     filter = (hdr >> 4) & 0x03;
         if (shift  > 12) shift = 9;
 
         int32_t fpos = s_filter_pos[filter];
@@ -171,11 +182,28 @@ static const int16_t s_zigzag18[7][25] = {
      0x3c07, -0x1249, 0x80e, -0x347, 0x15b, -0x44, -0x17, 0x46, -0x23, 0x11, -0x5, 0x0}
 };
 
+/* DOCS/cdromformat.md:891-894:
+ *
+ *   ZigZagInterpolate(p,TableX):
+ *     sum=0
+ *     for i=1 to 29, sum=sum+(ringbuf[(p-i) AND 1Fh]*TableX[i])/8000h
+ *     return MinMax(sum,-8000h,+7FFFh)
+ *
+ * The loop starts at i=1, so the first table entry weights ringbuf[p-1] — the
+ * sample written most recently. Our table holds those 29 entries at [0..28], so
+ * tbl[i] pairs with ringbuf[p-1-i].
+ *
+ * This read ringbuf[p-i], one position too early. p is the *next* write index, so
+ * ring[p] is not the newest sample but the oldest one still in the buffer, from 32
+ * inputs ago. Every tap was therefore shifted by one and the heaviest tap sat on a
+ * stale sample, which is a different filter from the documented one: it left a
+ * periodic residue at the rate the seven phases cycle, heard as short bursts of
+ * buzz on top of the audio rather than as a wrong pitch. */
 static int16_t zigzag_interp(const int16_t *ring, int table_idx, uint8_t p) {
     const int16_t *tbl = s_zigzag[table_idx];
     int32_t sum = 0;
     for (int i = 0; i < 29; i++)
-        sum += ((int32_t)ring[(p - i) & 0x1F] * (int32_t)tbl[i]) >> 15;
+        sum += ((int32_t)ring[(p + 31 - i) & 0x1F] * (int32_t)tbl[i]) >> 15;
     return clamp16_xa(sum);
 }
 
@@ -261,6 +289,31 @@ void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_
     xa->prev1[1] = prev[1][0]; xa->prev2[1] = prev[1][1];
     if (muted) return;
     uint32_t total_frames = (uint32_t)(18 * frames_per_chunk);
+
+    /* ZS1_XA_DUMP=<path>: the decoded stream at its own rate, before the zigzag
+     * resampler touches it. Comparing this against ZS1_AUDIO_DUMP splits the XA
+     * path in two — an artefact present here came out of the ADPCM decode, one
+     * that only appears in the final output was introduced by the resampling. */
+    {
+        static FILE* s_xa = NULL;
+        static int   s_tried = 0;
+        static unsigned s_frames = 0;
+        if (!s_tried) {
+            s_tried = 1;
+            const char* path = getenv("ZS1_XA_DUMP");
+            if (path) s_xa = fopen(path, "wb");
+        }
+        if (s_xa) {
+            for (uint32_t i = 0; i < total_frames; i++) {
+                int16_t f[2];
+                f[0] = sample_buf[stereo ? i * 2 : i];
+                f[1] = stereo ? sample_buf[i * 2 + 1] : f[0];
+                fwrite(f, sizeof(int16_t), 2, s_xa);
+            }
+            if ((s_frames += total_frames) > 4096) { fflush(s_xa); s_frames = 0; }
+        }
+    }
+
     frame_events_record(FEV_XA_SECTOR, total_frames);
     if (rate_18900) resample_xa_18900(xa, fifo, sample_buf, total_frames, stereo);
     else resample_xa_37800(xa, fifo, sample_buf, total_frames, stereo);
