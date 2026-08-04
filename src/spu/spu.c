@@ -71,7 +71,6 @@ void spu_process_key_on_off(Spu* spu) {
             spu->endx &= ~(1u << v);
             voice->SBPos        = 28;           /* trigger decode on first sample */
             voice->spos         = 0x30000;      /* prime gauss ring with 3 samples */
-            voice->sinc         = (int)voice->pitch << 4;
             voice->s_1          = 0;
             voice->s_2          = 0;
             memset(voice->gauss_ring, 0, sizeof(voice->gauss_ring));
@@ -92,8 +91,8 @@ void spu_process_key_on_off(Spu* spu) {
             voice->vol_left_count  = 0;
             voice->vol_right_count = 0;
             spu->total_key_on_events++;
-            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X sinc=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
-                         v, voice->start_address, voice->sinc,
+            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X pitch=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
+                         v, voice->start_address, voice->pitch,
                          voice->volume_left, voice->volume_right,
                          voice->adsr_low, voice->adsr_high);
         }
@@ -257,8 +256,17 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
                 v->vol_right = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x04:
-            v->pitch = value & 0x3FFF;
-            v->sinc  = (int)(value & 0x3FFF) << 4;
+            /* VxPitch holds all 16 bits: "0-15 Sample rate (0=stop, 4000h=fastest,
+             * 4001h..FFFFh=usually same as 4000h)" — DOCS/soundprocessingunitspu.md:166.
+             *
+             * This used to mask the register with 0x3FFF on the way in, which is the
+             * limit from the *pitch counter* (:197) applied at the wrong moment. The
+             * masked value is not a clamp, it wraps: a game writing 4000h, the
+             * documented fastest rate, stored 0 and the voice stopped dead, and 5000h
+             * stored 1000h and played at normal speed. The limit belongs where the
+             * documentation puts it, in spu_voice_get_sample, once per output sample
+             * and after pitch modulation. */
+            v->pitch = value;
             break;
         case 0x06:
             v->start_address = value;

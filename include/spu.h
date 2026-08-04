@@ -158,7 +158,7 @@ typedef struct SpuVoice {
     /* PSX MMIO register shadows */
     uint16_t volume_left;           /* reg 0x00 */
     uint16_t volume_right;          /* reg 0x02 */
-    uint16_t pitch;                 /* reg 0x04 (0-0x3FFF) */
+    uint16_t pitch;                 /* reg 0x04, all 16 bits (DOCS:166) */
     uint16_t start_address;         /* reg 0x06 (×8 = byte addr) */
     uint16_t adsr_low;              /* reg 0x08 */
     uint16_t adsr_high;             /* reg 0x0A */
@@ -171,8 +171,19 @@ typedef struct SpuVoice {
     int vol_left_count;   // sweep counter for left channel
     int vol_right_count;  // sweep counter for right channel
 
-    /* Pitch stepping (pcsx-redux spos/sinc model) */
-    int sinc;                       /* = pitch << 4 */
+    /* Pitch stepping */
+    int sinc_unused;                /* was the pre-multiplied step. The pitch
+                                     * counter is now derived per output sample in
+                                     * spu_voice_get_sample straight from `pitch`,
+                                     * because the 3FFFh limit belongs to the step
+                                     * and not to the register (DOCS:187-199).
+                                     *
+                                     * The field stays so sizeof(Spu) does not move:
+                                     * the savestate stores the SPU as one span and
+                                     * checks its size, so removing it invalidated
+                                     * every existing state — and the load failed
+                                     * half-way through, leaving a machine that was
+                                     * neither the old one nor the new one. */
     int spos;                       /* 16-bit fractional position (0-0xFFFF between steps) */
 
     /* ADPCM decode state */

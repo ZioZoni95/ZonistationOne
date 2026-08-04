@@ -348,8 +348,16 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     rev_in_l = clamp16(rev_in_l);
     rev_in_r = clamp16(rev_in_r);
 
-    /* CD audio mixing through SPU — separately routable to the reverb. */
-    if (spu->control & SPU_CTRL_CD_AUDIO_EN) {
+    /* CD audio mixing through SPU — separately routable to the reverb.
+     *
+     * ZS1_SPU_NO_CDAUDIO=1 drops the CD/XA contribution, the counterpart to
+     * ZS1_SPU_NO_REVERB. In a scene where XA streams at the full sample rate and
+     * the voices only fire effects, the two switches split the output into its
+     * two sources, and an artefact that survives both is in neither. */
+    static int s_no_cdaudio = -1;
+    if (s_no_cdaudio < 0) s_no_cdaudio = getenv("ZS1_SPU_NO_CDAUDIO") ? 1 : 0;
+
+    if (!s_no_cdaudio && (spu->control & SPU_CTRL_CD_AUDIO_EN)) {
         mix_l = clamp16(mix_l + (int32_t)spu->cd_audio_left);
         mix_r = clamp16(mix_r + (int32_t)spu->cd_audio_right);
         if (spu->control & SPU_CTRL_CD_REVERB) {
@@ -418,6 +426,7 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     {
         static FILE* s_dump = NULL;
         static int    s_dump_tried = 0;
+        static unsigned s_dump_frames = 0;
         if (!s_dump_tried) {
             s_dump_tried = 1;
             const char* path = getenv("ZS1_AUDIO_DUMP");
@@ -430,6 +439,11 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
         if (s_dump) {
             int16_t f[2] = { (int16_t)final_l, (int16_t)final_r };
             fwrite(f, sizeof(int16_t), 2, s_dump);
+            /* Flushed about ten times a second. Nothing closes this file, and a
+             * run that ends on a signal — a timeout, a kill, the crash being
+             * investigated — takes the whole stdio buffer with it, which is how
+             * a 30-second capture came back zero bytes. */
+            if ((++s_dump_frames & 4095u) == 0) fflush(s_dump);
         }
     }
 

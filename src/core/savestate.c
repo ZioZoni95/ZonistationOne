@@ -362,6 +362,18 @@ bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inte
      * counter rates and cycle anchors on load instead of restoring them. */
     eventq_recompute_next(inter);
 
+    /* What the machine looks like at the instant it resumes. A state that loads
+     * and then does nothing is the failure mode here, and it is invisible from
+     * outside: the window keeps redrawing, so it reads as a freeze rather than as
+     * a stopped event queue. These four numbers separate the cases — no pending
+     * VBlank, a VBlank target that never arrives, a zero frame length, or a CPU
+     * downcount that stops events being dispatched at all. */
+    LOG_SYSTEM_INFO("[STATE] Resume: cycle=%u evq_pending=0x%08x vblank_target=%u "
+                    "next=%u cycles_per_frame=%u downcount=%d",
+                    inter->cpu_cycle_counter, inter->evq_pending,
+                    inter->evq_target_cycle[EVQ_VBLANK], inter->evq_next_cycle,
+                    gpu_cycles_per_frame(&inter->gpu), cpu->downcount);
+
     /* The GL side holds the picture, and nothing in the file reached it: push
      * the restored VRAM through the path that stamps both the sampling mirror
      * and the unified texture, or the first frame after a load shows whatever

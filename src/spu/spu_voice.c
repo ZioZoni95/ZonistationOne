@@ -252,15 +252,41 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
         voice->stop = false;
     }
 
-    /* Compute sinc for this sample (with optional pitch modulation) */
-    int sinc = voice->sinc;
-    if (voice_idx > 0 && (spu->pitch_mod >> voice_idx) & 1) {
-        /* Frequency modulation from previous voice's sval */
-        int prev = spu->voices[voice_idx - 1].sval;
-        sinc = (int)(((int64_t)(32768 + prev) * sinc) >> 15);
-        if (sinc < 1)        sinc = 1;
-        if (sinc > 0x3FFF0)  sinc = 0x3FFF0;
+    /* Pitch counter step — DOCS/soundprocessingunitspu.md:187-199, transcribed in
+     * the documentation's own units (one sample = 1000h) and shifted at the end,
+     * because this file's spos counter runs at 16x that (one sample = 10000h).
+     *
+     *   Step = VxPitch                  ;range +0000h..+FFFFh
+     *   IF PMON.Bit(x)=1 AND (x>0)
+     *     Factor = VxOUTX(x-1)          ;range -8000h..+7FFFh
+     *     Factor = Factor+8000h         ;range +0000h..+FFFFh
+     *     Step = SignExpand16to32(Step) ;hardware glitch on VxPitch>7FFFh
+     *     Step = (Step * Factor) SAR 15
+     *     Step = Step AND 0000FFFFh     ;hardware glitch on VxPitch>7FFFh
+     *   IF Step>3FFFh then Step=4000h   ;range +0000h..+3FFFh (0..176.4 kHz)
+     *
+     * The last line is the one that matters here, and it sits *outside* the
+     * modulation branch: every voice is capped at 4000h, modulated or not. This
+     * code only capped modulated voices, so an unmodulated voice could step at up
+     * to FFFFh — 705.6 kHz against the 176.4 kHz the hardware allows, four times
+     * too fast. Playing sample data at four times its rate through a 4-point
+     * interpolator with no low-pass aliases straight to the top of the band, which
+     * is audible as short bursts of buzz rather than as a wrong note.
+     *
+     * Note the cap sets 4000h; it does not clamp to 3FFFh. The two differ by one
+     * step and the documentation is explicit about which it is. */
+    int32_t step = (int32_t)voice->pitch;                  /* 0000h..FFFFh */
+
+    if (voice_idx > 0 && ((spu->pitch_mod >> voice_idx) & 1)) {
+        int32_t factor = (int32_t)spu->voices[voice_idx - 1].sval + 0x8000;
+        step = (int32_t)(int16_t)step;                     /* SignExpand16to32 */
+        step = (int32_t)(((int64_t)step * factor) >> 15);
+        step &= 0xFFFF;
     }
+
+    if (step > 0x3FFF) step = 0x4000;
+
+    int sinc = step << 4;
 
     /* Advance spos: decode samples into gauss ring until spos < 0x10000 */
     while (voice->spos >= 0x10000) {
@@ -293,9 +319,13 @@ int32_t spu_voice_get_sample(Spu* spu, struct Interconnect* inter, int voice_idx
     int32_t adsr_vol = spu_adsr_mix(voice);
     int32_t mixed = ((int32_t)fa * adsr_vol) >> 15;
 
-    /* Clamp (pcsx-redux clamps to ±0xFFFF for capture/fmod) */
-    if (mixed >  0xFFFF) mixed =  0xFFFF;
-    if (mixed < -0xFFFF) mixed = -0xFFFF;
+    /* VxOUTX is a 16-bit signed value: "Factor = VxOUTX(x-1) ;range -8000h..+7FFFh
+     * (prev voice amplitude)" — DOCS/soundprocessingunitspu.md:192. This clamped to
+     * ±FFFFh, twice the range the register can hold, which let a voice put double
+     * its legal excursion into the dry mix and doubled the swing of the pitch
+     * modulation factor a following voice reads out of it. */
+    if (mixed >  32767) mixed =  32767;
+    if (mixed < -32768) mixed = -32768;
 
     voice->sval = mixed;
 
