@@ -2,6 +2,7 @@
 myps1_emu
 cpu_test
 *.o
+*.d
 
 # Debug / capture output
 emulator_log.txt
@@ -36,8 +37,10 @@ duckstation/
 backup/
 *.bak
 
-# Screenshots (except the ones actually referenced by README.md)
-screenshots/
+# Screenshots (except the ones actually referenced by README.md).
+# 'screenshots/*' not 'screenshots/': a re-include below cannot reach inside a
+# directory that is itself excluded.
+screenshots/*
 Screenshot*.png
 !screenshots/Screenshot 2026-02-22 153306.png
 !screenshots/Screenshot 2026-05-02 212421.png
@@ -50,6 +53,7 @@ Screenshot*.png
 !Screenshot 2026-07-26 230210.png
 !Screenshot 2026-07-27 215006.png
 !Screenshot 2026-07-30 192724.png
+!screenshots/2026-08-06-*.png
 
 # Misc
 Hack.zip

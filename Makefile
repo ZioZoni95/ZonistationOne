@@ -20,8 +20,24 @@ else
   OPT = -O3 -g -march=native -DNDEBUG
 endif
 
-CFLAGS = -std=c99 $(OPT) -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
-CXXFLAGS = -std=c++11 $(OPT) -Wall -Wextra $(INCLUDES) $(SDL_CFLAGS)
+# Header dependency tracking. Without it, `make` after editing anything in
+# include/ relinked stale objects: a struct whose layout changed in one
+# translation unit and not another produces a binary that segfaults or
+# misbehaves silently, and the only reliable answer was `make clean && make`
+# every time. -MMD writes a .d file listing the headers each object really
+# includes (project headers only — system ones do not change under us), and
+# -MP emits a phony target for each so deleting a header does not wedge the
+# build with "no rule to make target".
+DEPFLAGS = -MMD -MP
+
+CFLAGS = -std=c99 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(SDL_CFLAGS)
+CXXFLAGS = -std=c++11 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(SDL_CFLAGS)
+
+# Build every translation unit at once by default. The tree is ~90 objects and
+# they are independent; an explicit -j on the command line still wins, because
+# make appends command-line flags after MAKEFLAGS.
+NPROC := $(shell nproc 2>/dev/null || echo 4)
+MAKEFLAGS += -j$(NPROC)
 
 # --- Core / CPU ---
 EMU_CPU_SRCS = \
@@ -97,6 +113,15 @@ TEST_SRCS = tests/cpu_minimal_test.c \
     src/spu/spu.c src/utils/rxi_log.c src/core/event_scheduler.c
 TEST_BIN = cpu_test
 
+TEST_OBJS = $(TEST_SRCS:.c=.o)
+
+# Every object either target can build, so the .d files are picked up whichever
+# one was made last.
+ALL_OBJS = $(sort $(EMU_OBJS) $(TEST_OBJS))
+DEPS = $(ALL_OBJS:.o=.d)
+
+.PHONY: all test clean
+
 all: $(EMU_BIN)
 
 $(EMU_BIN): $(EMU_OBJS)
@@ -111,7 +136,7 @@ $(EMU_BIN): $(EMU_OBJS)
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-$(TEST_BIN): $(TEST_SRCS:.c=.o)
+$(TEST_BIN): $(TEST_OBJS)
 	$(CC) -o $@ $^ $(CFLAGS) $(LIBS)
 
 split_log: split_log.c
@@ -119,7 +144,11 @@ split_log: split_log.c
 
 clean:
 	rm -f $(EMU_BIN) $(TEST_BIN) split_log \
-	    src/*.o src/cpu/*.o src/core/*.o src/gpu/*.o src/gte/*.o \
-	    src/cdrom/*.o src/spu/*.o src/utils/*.o \
-	    third_party/imgui/*.o third_party/imgui/backends/*.o third_party/lua/*.o \
+	    src/*.[od] src/cpu/*.[od] src/core/*.[od] src/gpu/*.[od] src/gte/*.[od] \
+	    src/cdrom/*.[od] src/spu/*.[od] src/utils/*.[od] tests/*.[od] \
+	    third_party/imgui/*.[od] third_party/imgui/backends/*.[od] third_party/lua/*.[od] \
 	    *.txt logs/*.txt logs/*_old.txt
+
+# Last: the .d files are generated, so a build that has never run simply has
+# none and make carries on.
+-include $(DEPS)
