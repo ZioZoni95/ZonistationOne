@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /*
  * system.c — core per-frame execution driver.
  *
@@ -16,8 +23,10 @@
 #include "event_scheduler.h"
 #include "timers.h"
 #include "gpu.h"
+#include "spu.h"
 #include "debugger.h"
 #include "debug_ui.h"
+#include "frame_events.h"
 
 void system_init(Interconnect* inter, Cpu* cpu) {
     (void)cpu;
@@ -25,6 +34,9 @@ void system_init(Interconnect* inter, Cpu* cpu) {
     /* VBlank is the frame boundary and self-reschedules. Timers arm their own
      * EVQ_TIMER{0,1,2} events at their first target/overflow. */
     eventq_schedule(inter, EVQ_VBLANK, gpu_cycles_per_frame(&inter->gpu));
+    /* SPU samples are produced from the emulated clock, on this thread. */
+    inter->spu.last_update_cycle = inter->cpu_cycle_counter;
+    eventq_schedule(inter, EVQ_SPU, SPU_EVENT_PERIOD_CYCLES);
     timers_start(&inter->timers_state);
 }
 
@@ -57,4 +69,7 @@ void system_run_frame(Interconnect* inter, Cpu* cpu) {
         if (dbg->paused) return;                       /* breakpoint hit mid-frame */
         if (inter->cpu_cycle_counter - start >= cap) break;  /* safety */
     }
+
+    /* Frame boundary: publish the event ring the Frame view reads. */
+    frame_events_end_frame();
 }

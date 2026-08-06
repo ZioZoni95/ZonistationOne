@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "event_scheduler.h"
 #include "interconnect.h"
 #include "cpu.h"
@@ -8,7 +15,8 @@
 #include "log.h"
 #include "dma.h"           // For DMA structures and helpers
 #include "gpu.h"           // For GPU DMA transfer
-#include "timers.h"        // For timer event handler prototypes
+#include "timers.h"
+#include "spu.h"        // For timer event handler prototypes
 #include "sio.h"           // For sio_execute_event
 #include "lua_debug.h"     // For the Lua "vblank" probe hook
 
@@ -31,6 +39,7 @@ static void evq_handle_cdrom_command(struct Interconnect* sys);         // CDROM
 static void evq_handle_cdrom_drive(struct Interconnect* sys);           // CDROM drive event
 static void evq_handle_cdrom_second_response(struct Interconnect* sys); // CDROM second-response event
 static void evq_handle_sio(struct Interconnect* sys);   // SIO deferred transfer
+static void evq_handle_spu(struct Interconnect* sys);   // SPU sample generation
 
 // Table of event handlers, indexed by EventQueueType
 typedef EventQueueHandler EventHandlerTable[EVQ_EVENT_COUNT];
@@ -46,7 +55,7 @@ static EventHandlerTable evq_handlers = {
     evq_handle_cdrom_drive,           // EVQ_CDROM_DRIVE
     evq_handle_cdrom_second_response, // EVQ_CDROM_SECOND_RESPONSE
     dma_mdec_resume,                  // EVQ_MDEC — sliced ch0/ch1 MDEC DMA (see dma_mdec_resume, bus.c)
-    NULL                                // EVQ_SPU — handled by dedicated SPU thread
+    evq_handle_spu                    // EVQ_SPU — samples owed since the last tick
 };
 
 // --- Event Scheduling ---
@@ -98,9 +107,15 @@ void eventq_dispatch_due(struct Interconnect* sys) {
         // After firing, update now in case event handler advanced cycles
         now = sys->cpu_cycle_counter;
     }
-    // Recalculate the next event cycle as the nearest still-future pending
-    // target. Track the minimum signed delta from now (wrap-safe), not the
-    // absolute cycle value.
+    eventq_recompute_next(sys);
+}
+
+/* Derive the next-event anchor from the pending set rather than carrying it.
+ * Called after dispatch, and after a savestate load: evq_next_cycle is a cache
+ * over evq_pending and evq_target_cycle, and a cache restored from a file is
+ * only as trustworthy as the moment it was written. */
+void eventq_recompute_next(struct Interconnect* sys) {
+    const uint32_t now = sys->cpu_cycle_counter;
     uint32_t soonest = UINT32_MAX;
     int32_t  best_delta = INT32_MAX;
     for (EventQueueType event = 0; event < EVQ_EVENT_COUNT; ++event) {
@@ -230,4 +245,16 @@ static void evq_handle_cdrom_second_response(struct Interconnect* sys) {
 static void evq_handle_sio(struct Interconnect* sys) {
     LOG_EVENT_DEBUG("[EVQ] Firing SIO deferred byte transfer");
     sio_execute_event(&sys->sio);
+}
+
+/* SPU: generate every sample the emulated clock owes, then re-arm.
+ *
+ * The period covers a batch of samples rather than one, because the per-sample
+ * work is small and an event dispatch at 44100 Hz would be pure overhead.
+ * Register accesses catch the SPU up on demand (spu_catch_up), so the batch size
+ * bounds only how far the output ring can run dry — never how accurately a
+ * register write lands relative to the audio it affects. */
+static void evq_handle_spu(struct Interconnect* sys) {
+    spu_catch_up(sys);
+    eventq_schedule(sys, EVQ_SPU, SPU_EVENT_PERIOD_CYCLES);
 }

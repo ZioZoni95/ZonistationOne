@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "bios.h"       // Include the corresponding header file
 #include <stdio.h>      // For file operations (fopen, fread, fclose, perror, fprintf)
 #include <string.h>     // For memcmp, strlen
@@ -49,7 +56,7 @@ bool bios_load(Bios* bios, const char* path) {
 
 void bios_apply_fastboot_patch(Bios* bios) {
     // Replace BIOS shell entry point with: enable display + jr $ra
-    // This skips region check and shell entirely (DuckStation PatchBIOSFastBoot Type1).
+    // This skips region check and shell entirely (fast-boot patch, Type 1).
     static const uint32_t patch[] = {
         0x3C011F80,  // lui  $at, 0x1F80
         0x3C0A0300,  // lui  $t2, 0x0300

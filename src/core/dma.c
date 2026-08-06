@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "dma.h"
 #include <stdio.h> // For fprintf, stderr
 #include "log.h"
@@ -60,19 +67,17 @@ void dma_channel_done(DmaChannel* ch) {
     ch->trigger = false;
 }
 
-// Helper: Estimate cycles for a DMA transfer (very rough, tune as needed)
-static uint32_t estimate_dma_cycles(DmaChannel* ch) {
-    // PS1 DMA is fast, but not instant. Use 2 cycles per word as a starting point.
-    uint32_t words = (ch->block_count == 0 ? 1 : ch->block_count) * (ch->block_size == 0 ? 1 : ch->block_size);
-    if (words == 0) words = 1;
-    return words * 2; // 2 cycles per word (tune as needed)
-}
+/* An estimate_dma_cycles() helper used to sit here — "2 cycles per word (tune as
+ * needed)" — called by nobody since it was written. Removed rather than silenced.
+ * DMA is paced by the event scheduler through EVQ slices, not by a per-transfer
+ * cycle estimate, so reviving this would mean deciding it is the right model
+ * first; an uncalled placeholder only makes it look like that decision was
+ * already taken. The real gap here is recorded in GAP_ANALYSIS §4. */
 
 /* Recompute DICR's master flag and drive the DMA interrupt LINE from it.
  *
- * This is the single place allowed to touch the IRQ3 line, mirroring
- * DuckStation's DMA::UpdateIRQ (dma.cpp:500-507: UpdateMasterFlag() then
- * InterruptController::SetLineState(IRQ::DMA, master_flag)).
+ * This is the single place allowed to touch the IRQ3 line: recompute the
+ * DICR master flag, then set the line from it.
  *
  * Why the line, and not just I_STAT: interconnect_set_irq_line only latches
  * I_STAT on a low->high edge. Completion sites used to poke the line high
@@ -244,9 +249,8 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
                 }
                 /* Always re-evaluate: besides acknowledging, this write may have
                  * just ENABLED a channel whose transfer already finished — games
-                 * legitimately program DICR after CHCR (DuckStation calls
-                 * UpdateIRQ() on every DICR write for exactly that reason,
-                 * dma.cpp:457, see its Lagnacure Legend note at dma.cpp:401). */
+                 * legitimately program DICR after CHCR, so every DICR write
+                 * re-evaluates the master flag. */
                 dma_update_irq(dma);
                 break;
             default:

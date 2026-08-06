@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef CPU_H
 #define CPU_H
 
@@ -134,7 +141,7 @@ typedef struct Cpu {
     // --- Boot Stage Tracking ---
     BootStage boot_stage;   // Current BIOS/boot stage for debugging visibility
 
-    // --- Cycle Accounting (DuckStation-style) ---
+    // --- Cycle Accounting (event-scheduler downcount) ---
     int32_t  downcount;              // countdown to next event (decrements per instruction)
     uint32_t muldiv_completion_tick; // cycle when pending MULT/DIV finishes (for MFHI/MFLO stall)
     uint32_t gte_completion_tick;    // cycle when pending GTE op finishes (for MFC2/CFC2/next-op stall)
@@ -203,7 +210,7 @@ void decode_and_execute(Cpu* cpu, uint32_t instruction);
  */
 void cpu_exception(Cpu* cpu, ExceptionCause cause);
 
-// --- BIOS SYSCALL interceptors (DuckStation-style) ---
+// --- BIOS SYSCALL interceptors (side-channel capture) ---
 bool handle_a0_syscall(Cpu* cpu);  /* returns true if HLE'd (caller must skip native jump) */
 void handle_b0_syscall(Cpu* cpu);
 void handle_c0_syscall(Cpu* cpu);

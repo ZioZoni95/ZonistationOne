@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "pcdrv.h"
 #include <stdio.h>
 #include <string.h>
@@ -56,7 +63,6 @@ bool PCDrv_HandleSyscall(Cpu* cpu, uint32_t instruction) {
     // instruction contains the break code in bits 25-6 (20 bits)
     // op=000000 (6 bits) | code (20 bits) | funct=001101 (6 bits)
     // Actually MIPS break is: 000000 | code (20 bits) | 001101
-    // The `code` variable in DuckStation is extracted as (instruction >> 6) & 0xfffff
     uint32_t code = (instruction >> 6) & 0xfffff;
     
     // Check if it's a PCDrv syscall (0x101 - 0x107)

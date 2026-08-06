@@ -2,12 +2,15 @@
 myps1_emu
 cpu_test
 *.o
+*.d
 
 # Debug / capture output
 emulator_log.txt
 *.ppm
 logs/
 *.txt
+# ...but licence notices must ship: MIT requires them to be present.
+!**/LICENSE.txt
 
 # ROM files / BIOS images (copyrighted — do not distribute)
 roms/
@@ -34,8 +37,10 @@ duckstation/
 backup/
 *.bak
 
-# Screenshots (except the ones actually referenced by README.md)
-screenshots/
+# Screenshots (except the ones actually referenced by README.md).
+# 'screenshots/*' not 'screenshots/': a re-include below cannot reach inside a
+# directory that is itself excluded.
+screenshots/*
 Screenshot*.png
 !screenshots/Screenshot 2026-02-22 153306.png
 !screenshots/Screenshot 2026-05-02 212421.png
@@ -47,7 +52,31 @@ Screenshot*.png
 !Screenshot 2026-07-23 214744.png
 !Screenshot 2026-07-26 230210.png
 !Screenshot 2026-07-27 215006.png
+!Screenshot 2026-07-30 192724.png
+!screenshots/2026-08-06-*.png
 
 # Misc
 Hack.zip
+
+# Lionel Flandrin's PlayStation emulation guide. Consulted, never redistributed:
+# simias/psx-guide ships no LICENSE, so every right is reserved to its author.
 guide.tex
+
+# Per-machine runtime state, not source. These were tracked for a long time, so
+# a .gitignore entry alone did nothing — they had to be removed from the index.
+imgui.ini
+*.mcd
+
+# Audio captures from ZS1_AUDIO_DUMP (diagnostic output)
+*.wav
+*.raw
+
+# Savestates — machine-specific binary snapshots, several MB each
+savestates/
+
+# Screenshots captured under a non-English locale ("Schermata del ...").
+# The rule above only covers the English "Screenshot*.png" name.
+Schermata*.png
+
+# Stray third-party image, removed 2026-08-01
+maxresdefault.jpg

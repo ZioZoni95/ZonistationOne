@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "log.h"
 #include "rxi_log.h"
 #include <string.h>
@@ -104,9 +111,48 @@ void log_set_stderr_quiet(bool quiet) {
     rxi_log_set_quiet(quiet);
 }
 
+/* Lines logged before any sink exists, replayed to the first one that registers.
+ *
+ * The ImGui log windows are a sink, and debug_ui_init() registers it after
+ * init_sdl() has already run — so everything the startup path says, including
+ * which GL driver the context came from and whether a ZS1_GPU request was
+ * honoured, was dispatched to nobody and only ever visible with ZS1_LOG_STDERR.
+ * Precisely the lines you want when the question is "why does this machine
+ * render differently", and precisely the ones that were missing from the app.
+ *
+ * Bounded and never refilled: once a sink has registered, lines go straight
+ * through and the backlog is spent. */
+#define LOG_EARLY_MAX 256
+typedef struct { int category; int level; char msg[480]; } EarlyLine;
+static EarlyLine early_lines[LOG_EARLY_MAX];
+static int  early_count   = 0;
+static bool early_dropped = false;
+static bool early_replayed = false;
+
+static void early_record(int category, int level, const char* msg) {
+    if (early_replayed) return;
+    if (early_count >= LOG_EARLY_MAX) { early_dropped = true; return; }
+    EarlyLine* e = &early_lines[early_count++];
+    e->category = category;
+    e->level    = level;
+    snprintf(e->msg, sizeof(e->msg), "%s", msg);
+}
+
 void log_add_sink(LogSinkFn fn, void* udata) {
-    if (sink_count < MAX_LOG_SINKS)
-        sinks[sink_count++] = (SinkEntry){ fn, udata };
+    if (sink_count >= MAX_LOG_SINKS) return;
+    sinks[sink_count++] = (SinkEntry){ fn, udata };
+
+    /* Hand the backlog to the first sink only. A second sink registering later
+     * would otherwise see startup lines the first one has already shown. */
+    if (early_replayed) return;
+    early_replayed = true;
+    for (int i = 0; i < early_count; i++)
+        fn(early_lines[i].category, early_lines[i].level, early_lines[i].msg, udata);
+    if (early_dropped)
+        fn((int)LOG_CAT_SYSTEM, (int)LOG_LEVEL_WARN,
+           "[SYSTEM] Startup log backlog overflowed; earlier lines were dropped "
+           "(raise LOG_EARLY_MAX in log.c, or use ZS1_LOG_STDERR=1)", udata);
+    early_count = 0;
 }
 
 // --- Filter (lightweight, no side effects) ---
@@ -134,6 +180,7 @@ static char        dup_last_msg[480] = {0};
 static uint32_t    dup_repeat_count  = 0;
 
 static void dispatch_line(LogCategory category, LogLevel level, const char* msg) {
+    if (sink_count == 0) early_record((int)category, (int)level, msg);
     for (int i = 0; i < sink_count; i++)
         sinks[i].fn((int)category, (int)level, msg, sinks[i].udata);
     char full[560];

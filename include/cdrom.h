@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef CDROM_H
 #define CDROM_H
 
@@ -32,16 +39,20 @@ struct Interconnect;
 #define CDROM_RESET_DELAY      4100000
 
 /* Seek delays */
-/* Matches DuckStation's MIN_SEEK_TICKS (cdrom.cpp) — even a same-location "instant"
- * seek completion is never scheduled sooner than this on real hardware; BIOS's own
- * ISR for the first (INT3 command-ack) response needs enough real cycles to fully
- * run and re-enable interrupts before the second response's IRQ fires, or the second
- * IRQ can land while interrupts are still disabled and get silently dropped. The old
- * 0x800 (2048-cycle) value only worked because instructions were costed at a flat
- * 1 cycle/instruction; now that BIOS ROM fetches cost real wait-states (cpu_icache.c),
- * 2048 cycles is no longer enough headroom. */
+/* A same-location "instant" seek is never scheduled sooner than this on real
+ * hardware; BIOS's own ISR for the first (INT3 command-ack) response needs
+ * enough real cycles to fully run and re-enable interrupts before the second
+ * response's IRQ fires, or the second IRQ can land while interrupts are still
+ * disabled and get silently dropped. The old 0x800 (2048-cycle) value only
+ * worked because instructions were costed at a flat 1 cycle/instruction; now
+ * that BIOS ROM fetches cost real wait-states (cpu_icache.c), 2048 cycles is
+ * no longer enough headroom. */
 #define CDROM_SEEK_FAST_DELAY    30000  /* setloc_pending, no head movement */
 #define CDROM_SEEK_DELAY         (CDROM_SECTOR_TIME * 4u)      /* real seek base */
+/* Per-sector cost of a short head move, ~6.93 ms at 33.8688 MHz. Calibrated
+ * against observed drive behaviour, not documented — see
+ * cdrom_disc_get_seek_ticks(). */
+#define CDROM_SEEK_FINE_PER_LBA  234700u
 #define CDROM_SEEK_CHANGE_DELAY  (CDROM_SECTOR_TIME * 30u)     /* post-location-change first read */
 
 /* Spinup */
@@ -51,10 +62,17 @@ struct Interconnect;
 #define CDROM_STOP_IDLE_DELAY    0x800                          /* motor already stopped */
 #define CDROM_STOP_SPIN_DELAY    (CDROM_SECTOR_TIME * 30u / 2u) /* spinning → stop */
 
-/* Pause — speed-dependent (pcsx-redux hardware-tested values) */
-#define CDROM_PAUSE_IDLE_DELAY    7000    /* already idle/standby */
-#define CDROM_PAUSE_1X_DELAY    1000000
-#define CDROM_PAUSE_2X_DELAY    2000000
+/* Pause — speed-dependent. Measured on hardware (DOCS/cdromdrive.md:1888-1889):
+ * 2 168 860 cycles at 1x and 1 097 107 at 2x, i.e. a faster drive pauses
+ * sooner. These two used to be the other way round. */
+#define CDROM_PAUSE_IDLE_DELAY    7000      /* already idle/standby */
+#define CDROM_PAUSE_1X_DELAY      2168860
+#define CDROM_PAUSE_2X_DELAY      1097107
+
+/* Read-speed change: the drive has to spin up or down before the next seek
+ * completes (DOCS/cdromdrive.md:1896-1908). */
+#define CDROM_SPEED_UP_DELAY      20321280  /* 1x -> 2x, 0.6 s */
+#define CDROM_SPEED_DOWN_DELAY    23708160  /* 2x -> 1x, 0.7 s */
 
 /* Aliases for readability */
 #define CDROM_READ_DELAY_1X      CDROM_SECTOR_TIME
@@ -219,6 +237,13 @@ typedef struct Cdrom {
 
     /* --- Position --- */
     uint32_t current_lba;
+    /* Where the pickup physically sits: the last sector actually transferred.
+     * current_lba runs ahead of it — it is advanced to the next sector to fetch
+     * as soon as one is delivered, and jumped to the Setloc target before the
+     * head has moved. Measuring seek distance from it made almost every seek
+     * come out as zero distance and cost 0.9ms instead of ~20ms, which is most
+     * of why the boot ran seconds ahead of the drive. */
+    uint32_t head_lba;
     uint32_t target_lba;
     uint32_t setloc_lba;
     bool     setloc_pending;
@@ -257,6 +282,11 @@ typedef struct Cdrom {
 
     /* --- Audio --- */
     AudioFifo    audio_fifo;
+    /* Sector pacing counters: the XA stream only stays in sync with the SPU if
+     * audio sectors arrive at the rate their sample count implies. */
+    uint32_t     pending_speed_change;  /* cycles owed for a Setmode speed change */
+    uint32_t     sectors_read_total;
+    uint32_t     xa_sectors_total;
     XaAdpcmState xa_adpcm_state;
 
     /* Volume matrix (L←CDL, L←CDR, R←CDL, R←CDR) — default 0x80 each.

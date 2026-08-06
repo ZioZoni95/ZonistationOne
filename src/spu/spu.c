@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: 2002 Pete Bernert and the PCSX-Redux authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "spu.h"
 #include "interconnect.h"
 #include "log.h"
@@ -63,7 +71,6 @@ void spu_process_key_on_off(Spu* spu) {
             spu->endx &= ~(1u << v);
             voice->SBPos        = 28;           /* trigger decode on first sample */
             voice->spos         = 0x30000;      /* prime gauss ring with 3 samples */
-            voice->sinc         = (int)voice->pitch << 4;
             voice->s_1          = 0;
             voice->s_2          = 0;
             memset(voice->gauss_ring, 0, sizeof(voice->gauss_ring));
@@ -84,8 +91,8 @@ void spu_process_key_on_off(Spu* spu) {
             voice->vol_left_count  = 0;
             voice->vol_right_count = 0;
             spu->total_key_on_events++;
-            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X sinc=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
-                         v, voice->start_address, voice->sinc,
+            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X pitch=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
+                         v, voice->start_address, voice->pitch,
                          voice->volume_left, voice->volume_right,
                          voice->adsr_low, voice->adsr_high);
         }
@@ -120,8 +127,17 @@ void spu_set_control(Spu* spu, uint16_t value) {
         }
     }
 
-    /* Update status mode bits */
-    spu->status = (spu->status & ~SPU_STATUS_MODE) | (value & SPU_CTRL_TRANSFER_MODE);
+    /* SPUSTAT.5-0 mirrors SPUCNT.5-0 in full — not just the transfer mode in
+     * bits 5-4 (DOCS/soundprocessingunitspu.md:579). Every documented SPUCNT
+     * sequence ends with "wait until it is applied in SPUSTAT" (:566-568,
+     * :635-651), so a driver that writes SPUCNT and polls SPUSTAT for the same
+     * low bits never sees its write land if bits 3-0 are dropped. Ace Combat 2
+     * writes 0xC085 (low bits 05h: CD audio + CD reverb) at the handover to the
+     * game engine, and stayed there with main volume at zero.
+     * Bit 7 repeats SPUCNT.5 (:577). */
+    spu->status = (uint16_t)((spu->status & ~(SPU_STATUS_MODE | SPU_STATUS_DMA_REQUEST))
+                             | (value & SPU_STATUS_MODE)
+                             | ((value & (1u << 5)) ? SPU_STATUS_DMA_REQUEST : 0u));
 
     if (value != old) {
         LOG_SPU_INFO("[SPU] Control=0x%04X (enable=%d, muted=%d, irq=%d, mode=%d)",
@@ -142,6 +158,9 @@ void spu_set_control(Spu* spu, uint16_t value) {
 
 uint16_t spu_read16(struct Interconnect* inter, uint32_t addr) {
     Spu* spu = &inter->spu;
+    /* Bring the DSP up to now before reporting anything derived from it:
+     * envelope volumes, the transfer address, the status bits. */
+    spu_catch_up(inter);
     int off = spu_offset_for_addr(addr);
     if (off < 0) return 0;
 
@@ -230,23 +249,33 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
     SpuVoice* v = &spu->voices[voice];
 
     switch (sub) {
+        /* Fixed mode (bit15=0) sets the level directly. Sweep mode (bit15=1)
+         * describes how to *move* from wherever the level already is — writing
+         * the configuration bits into the level, as this used to, starts every
+         * sweep from a meaningless volume
+         * (DOCS/soundprocessingunitspu.md:379-383). */
         case 0x00:
             v->volume_left = value;
-            if (value & 0x8000)
-                v->vol_left = (int)(int16_t)(value & 0x7FFF);  // sweep: placeholder
-            else
-                v->vol_left = (int)(int16_t)((value & 0x7FFF) << 1);  // fixed: Volume/2 × 2
+            if (!(value & 0x8000))
+                v->vol_left = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x02:
             v->volume_right = value;
-            if (value & 0x8000)
-                v->vol_right = (int)(int16_t)(value & 0x7FFF);
-            else
+            if (!(value & 0x8000))
                 v->vol_right = (int)(int16_t)((value & 0x7FFF) << 1);
             break;
         case 0x04:
-            v->pitch = value & 0x3FFF;
-            v->sinc  = (int)(value & 0x3FFF) << 4;
+            /* VxPitch holds all 16 bits: "0-15 Sample rate (0=stop, 4000h=fastest,
+             * 4001h..FFFFh=usually same as 4000h)" — DOCS/soundprocessingunitspu.md:166.
+             *
+             * This used to mask the register with 0x3FFF on the way in, which is the
+             * limit from the *pitch counter* (:197) applied at the wrong moment. The
+             * masked value is not a clamp, it wraps: a game writing 4000h, the
+             * documented fastest rate, stored 0 and the voice stopped dead, and 5000h
+             * stored 1000h and played at normal speed. The limit belongs where the
+             * documentation puts it, in spu_voice_get_sample, once per output sample
+             * and after pitch modulation. */
+            v->pitch = value;
             break;
         case 0x06:
             v->start_address = value;
@@ -280,6 +309,10 @@ static void voice_write_reg(Spu* spu, int voice, int sub, uint16_t value) {
 
 void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
     Spu* spu = &inter->spu;
+    /* Flush before mutate: everything owed up to this cycle is generated with
+     * the old register values, so a write cannot retroactively change audio the
+     * guest already asked for. */
+    spu_catch_up(inter);
     int off = spu_offset_for_addr(addr);
     if (off < 0) return;
 
@@ -297,18 +330,14 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
     switch (reg) {
         case SPU_REG_MVOL_L:
             spu->main_vol_left = value;
-            /* Same fixed/sweep treatment as voice volumes: fixed = (bits14-0)<<1 */
-            if (value & 0x8000)
-                spu->main_vol_left_cur = (int32_t)(int16_t)(value & 0x7FFF);
-            else
+            /* Same rule as the voice volumes: only fixed mode sets the level. */
+            if (!(value & 0x8000))
                 spu->main_vol_left_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
             LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (working=%d)", value, spu->main_vol_left_cur);
             break;
         case SPU_REG_MVOL_R:
             spu->main_vol_right = value;
-            if (value & 0x8000)
-                spu->main_vol_right_cur = (int32_t)(int16_t)(value & 0x7FFF);
-            else
+            if (!(value & 0x8000))
                 spu->main_vol_right_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
             LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (working=%d)", value, spu->main_vol_right_cur);
             break;
@@ -324,7 +353,14 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
         case SPU_REG_NOISE_H: spu->noise_mode = (spu->noise_mode & ~0xFFFF0000) | ((uint32_t)value << 16); break;
         case SPU_REG_REVERB_L: spu->reverb_on = (spu->reverb_on & ~0xFFFF) | value; break;
         case SPU_REG_REVERB_H: spu->reverb_on = (spu->reverb_on & ~0xFFFF0000) | ((uint32_t)value << 16); break;
-        case SPU_REG_REVERB_BASE: spu->reverb_base = value & 0x3FFF; break;
+        case SPU_REG_REVERB_BASE:
+            /* mBASE is a full 16-bit address divided by 8, covering all 512 KB
+             * of SPU RAM; masking it to 14 bits put the work area ~384 KB too
+             * low, on top of the voices' own ADPCM data. Writing it also sets
+             * the current buffer address (DOCS/soundprocessingunitspu.md:810-814). */
+            spu->reverb_base = value;
+            spu->reverb_current_addr = (uint32_t)spu->reverb_base * 4u;
+            break;
         case SPU_REG_IRQ_ADDR:
             spu->irq_addr = value;
             spu_update_irq_addr(spu, inter);

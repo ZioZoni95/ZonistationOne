@@ -1,8 +1,17 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
+#include <stdlib.h>
 #include "cdrom_audio.h"
 #include "spu.h"
 #include "log.h"
 #include <string.h>
 #include <SDL2/SDL.h>
+#include "frame_events.h"
 
 /* =========================================================================
  * AudioFifo
@@ -16,7 +25,16 @@ void cdrom_audio_init(AudioFifo *fifo, XaAdpcmState *xa) {
 }
 
 void cdrom_audio_fifo_push(AudioFifo *fifo, int16_t left, int16_t right) {
-    if (fifo->count >= AUDIO_FIFO_CAPACITY) return;
+    if (fifo->count >= AUDIO_FIFO_CAPACITY) { fifo->total_dropped++; return; }
+    /* Keep the queue's standing latency bounded: past the limit, drop the
+     * oldest frame rather than the newest, so the delay stops growing while the
+     * stream stays continuous. */
+    if (fifo->count >= AUDIO_FIFO_MAX_LATENCY) {
+        fifo->head = (fifo->head + 1) % AUDIO_FIFO_CAPACITY;
+        fifo->count--;
+        fifo->total_dropped++;
+    }
+    fifo->total_pushed++;
     uint32_t packed = (uint32_t)(uint16_t)left | ((uint32_t)(uint16_t)right << 16);
     fifo->data[fifo->tail] = packed;
     fifo->tail = (fifo->tail + 1) % AUDIO_FIFO_CAPACITY;
@@ -25,6 +43,7 @@ void cdrom_audio_fifo_push(AudioFifo *fifo, int16_t left, int16_t right) {
 
 bool cdrom_audio_fifo_pop(AudioFifo *fifo, int16_t *left, int16_t *right) {
     if (fifo->count == 0) return false;
+    fifo->total_popped++;
     uint32_t packed = fifo->data[fifo->head];
     fifo->head = (fifo->head + 1) % AUDIO_FIFO_CAPACITY;
     fifo->count--;
@@ -66,8 +85,18 @@ static void decode_xa_chunk(const uint8_t *chunk, bool stereo, bool bits8,
     for (int block = 0; block < num_blocks; block++) {
         uint8_t hdr    = headers[block];
         int     shift  = hdr & 0x0F;
-        int     filter = (hdr >> 4) & 0x0F;
-        if (filter > 4) filter = 4;
+        /* Two bits, not four: "filter = (src[4+blk*2+nibble] AND 30h) SHR 4"
+         * (DOCS/cdromformat.md:843), and bits 6-7 of the header are documented as
+         * "Unused (should be 0)" (:781). XA has four filters, 0..3 — the fifth one
+         * belongs to SPU-ADPCM and the documentation says so twice (:780, :849).
+         *
+         * Masking four bits here meant a header with bit 6 or 7 set selected
+         * filter 4, whose coefficients (+122, -60) are the most aggressive of the
+         * set, and ran a whole 28-sample block through an IIR the data was never
+         * encoded for. One block is 0.74 ms of 37800 Hz audio, and that is the
+         * length of the bursts of near-Nyquist buzz that were audible as pops
+         * during speech. */
+        int     filter = (hdr >> 4) & 0x03;
         if (shift  > 12) shift = 9;
 
         int32_t fpos = s_filter_pos[filter];
@@ -101,6 +130,9 @@ static void decode_xa_chunk(const uint8_t *chunk, bool stereo, bool bits8,
 
             int32_t s = nibble
                         + ((xa_prev[ch][0] * fpos + xa_prev[ch][1] * fneg + 32) >> 6);
+            /* The filter feeds back the *clamped* sample (DOCS/cdromformat.md:836-837);
+             * storing the raw value lets the IIR state run away on loud material. */
+            s = clamp16_xa(s);
             xa_prev[ch][1] = xa_prev[ch][0];
             xa_prev[ch][0] = s;
 
@@ -150,11 +182,28 @@ static const int16_t s_zigzag18[7][25] = {
      0x3c07, -0x1249, 0x80e, -0x347, 0x15b, -0x44, -0x17, 0x46, -0x23, 0x11, -0x5, 0x0}
 };
 
+/* DOCS/cdromformat.md:891-894:
+ *
+ *   ZigZagInterpolate(p,TableX):
+ *     sum=0
+ *     for i=1 to 29, sum=sum+(ringbuf[(p-i) AND 1Fh]*TableX[i])/8000h
+ *     return MinMax(sum,-8000h,+7FFFh)
+ *
+ * The loop starts at i=1, so the first table entry weights ringbuf[p-1] — the
+ * sample written most recently. Our table holds those 29 entries at [0..28], so
+ * tbl[i] pairs with ringbuf[p-1-i].
+ *
+ * This read ringbuf[p-i], one position too early. p is the *next* write index, so
+ * ring[p] is not the newest sample but the oldest one still in the buffer, from 32
+ * inputs ago. Every tap was therefore shifted by one and the heaviest tap sat on a
+ * stale sample, which is a different filter from the documented one: it left a
+ * periodic residue at the rate the seven phases cycle, heard as short bursts of
+ * buzz on top of the audio rather than as a wrong pitch. */
 static int16_t zigzag_interp(const int16_t *ring, int table_idx, uint8_t p) {
     const int16_t *tbl = s_zigzag[table_idx];
     int32_t sum = 0;
     for (int i = 0; i < 29; i++)
-        sum += ((int32_t)ring[(p - i) & 0x1F] * (int32_t)tbl[i]) >> 15;
+        sum += ((int32_t)ring[(p + 31 - i) & 0x1F] * (int32_t)tbl[i]) >> 15;
     return clamp16_xa(sum);
 }
 
@@ -186,32 +235,46 @@ static void resample_xa_37800(XaAdpcmState *xa, AudioFifo *fifo,
     xa->ring_p = p; xa->sixstep = sixstep;
 }
 
+/* 18900 Hz -> 44100 Hz is 7 output samples per 3 input samples, where 37800 Hz
+ * is 7 per 6. Reusing the 37800 loop here (one input per step, seven outputs
+ * every six inputs) played 18900 Hz material an octave low at half speed. The
+ * credit counter below emits while it can afford to, so the 7:3 ratio holds
+ * across sector boundaries instead of resetting. */
 static void resample_xa_18900(XaAdpcmState *xa, AudioFifo *fifo,
                                const int16_t *frames, uint32_t num_frames, bool stereo) {
     uint8_t p = xa->ring18_p;
-    uint8_t sixstep = xa->sixstep18;
+    uint32_t credit = xa->sixstep18;
+    uint8_t phase = xa->phase18;
     for (uint32_t i = 0; i < num_frames; i++) {
         xa->ring18[0][p] = frames[stereo ? i*2 : i];
         xa->ring18[1][p] = frames[stereo ? i*2+1 : i];
         p = (p + 1) % 32;
-        if (--sixstep == 0) {
-            sixstep = 6;
-            for (int j = 0; j < 7; j++) {
-                int16_t l = zigzag_interp18(xa->ring18[0], j, p);
-                int16_t r = stereo ? zigzag_interp18(xa->ring18[1], j, p) : l;
-                cdrom_audio_fifo_push(fifo, l, r);
-            }
+        credit += 7;                       /* 7 outputs owed per 3 inputs */
+        while (credit >= 3) {
+            credit -= 3;
+            int16_t l = zigzag_interp18(xa->ring18[0], phase, p);
+            int16_t r = stereo ? zigzag_interp18(xa->ring18[1], phase, p) : l;
+            cdrom_audio_fifo_push(fifo, l, r);
+            phase = (uint8_t)((phase + 1) % 7);
         }
     }
-    xa->ring18_p = p; xa->sixstep18 = sixstep;
+    xa->ring18_p = p;
+    xa->sixstep18 = (uint8_t)credit;
+    xa->phase18 = phase;
 }
 
 void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_data,
                             bool stereo, bool bits8, bool rate_18900, bool muted) {
-    if (fifo->count > 2048) return;
+    /* One 128-byte sound group holds num_blocks blocks of 28 samples: 224 for
+     * 4-bit XA, 112 for 8-bit. There is no further multiplier — an extra factor
+     * of 8 here made every sector claim 18816 output frames instead of 2352, so
+     * seven eighths of what reached the audio FIFO was whatever happened to be
+     * left in the decode buffer, i.e. noise, and the surplus also swamped the
+     * queue. A whole XA sector is 18 groups: 4032 mono samples, 2016 stereo
+     * frames, which at 37800 Hz is exactly one sector's worth of playback. */
     const int num_blocks = bits8 ? 4 : 8;
     const int words_per_block = 28;
-    const int samples_per_chunk = num_blocks * words_per_block * (bits8 ? 4 : 8);
+    const int samples_per_chunk = num_blocks * words_per_block;
     const int frames_per_chunk = stereo ? samples_per_chunk / 2 : samples_per_chunk;
     static int16_t sample_buf[18 * 8 * 28 * 8];
     int32_t prev[2][2];
@@ -226,6 +289,32 @@ void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_
     xa->prev1[1] = prev[1][0]; xa->prev2[1] = prev[1][1];
     if (muted) return;
     uint32_t total_frames = (uint32_t)(18 * frames_per_chunk);
+
+    /* ZS1_XA_DUMP=<path>: the decoded stream at its own rate, before the zigzag
+     * resampler touches it. Comparing this against ZS1_AUDIO_DUMP splits the XA
+     * path in two — an artefact present here came out of the ADPCM decode, one
+     * that only appears in the final output was introduced by the resampling. */
+    {
+        static FILE* s_xa = NULL;
+        static int   s_tried = 0;
+        static unsigned s_frames = 0;
+        if (!s_tried) {
+            s_tried = 1;
+            const char* path = getenv("ZS1_XA_DUMP");
+            if (path) s_xa = fopen(path, "wb");
+        }
+        if (s_xa) {
+            for (uint32_t i = 0; i < total_frames; i++) {
+                int16_t f[2];
+                f[0] = sample_buf[stereo ? i * 2 : i];
+                f[1] = stereo ? sample_buf[i * 2 + 1] : f[0];
+                fwrite(f, sizeof(int16_t), 2, s_xa);
+            }
+            if ((s_frames += total_frames) > 4096) { fflush(s_xa); s_frames = 0; }
+        }
+    }
+
+    frame_events_record(FEV_XA_SECTOR, total_frames);
     if (rate_18900) resample_xa_18900(xa, fifo, sample_buf, total_frames, stereo);
     else resample_xa_37800(xa, fifo, sample_buf, total_frames, stereo);
 }

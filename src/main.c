@@ -1,3 +1,15 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
+/* setenv() is POSIX, and -std=c99 hides it behind __STRICT_ANSI__. Requesting
+ * POSIX.1-2001 declares it without pulling in the wider GNU namespace. Must
+ * precede every include so the first libc header sees it. */
+#define _POSIX_C_SOURCE 200112L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -25,6 +37,8 @@
 #include "spu.h"
 #include "lua_debug.h"
 #include "system.h"
+#include "frame_events.h"
+#include "savestate.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -66,17 +80,61 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
 // --- SDL / OpenGL window init ---
 typedef struct { SDL_Window* win; SDL_GLContext ctx; } SdlCtx;
 
+/* ZS1_GPU picks which GPU the GL context lands on, on a hybrid-graphics machine.
+ *
+ * Neither value is ours: they are the GLVND/PRIME offload variables the driver
+ * stack reads when it resolves the GLX vendor, so this only saves typing them in
+ * front of the command. They have to be set before the GL context is created —
+ * hence before SDL_Init — because that is when the dispatch happens.
+ *
+ *   ZS1_GPU=nvidia   __NV_PRIME_RENDER_OFFLOAD=1, __GLX_VENDOR_LIBRARY_NAME=nvidia
+ *   ZS1_GPU=intel    DRI_PRIME=0, the Mesa side of the same switch
+ *
+ * Neither is set by default, so the machine's own default provider wins. The
+ * point of having it at all is being able to put the same build on both GPUs in
+ * one session: driver behaviour is a real source of rendering differences here,
+ * and the renderer's GL_RGB scanout format, its float-to-uint texture coordinate
+ * conversion and GL_DITHER all rendered differently on the two before they were
+ * fixed. An override that already exists is worth more than one you have to
+ * remember when a bug shows up.
+ *
+ * setenv() with overwrite=0, so an explicit variable on the command line still
+ * beats this. */
+static void apply_gpu_preference(void) {
+    const char* pref = getenv("ZS1_GPU");
+    if (!pref) return;
+
+    if (strcmp(pref, "nvidia") == 0) {
+        setenv("__NV_PRIME_RENDER_OFFLOAD", "1",      0);
+        setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
+        LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=nvidia — requesting the discrete GPU via PRIME offload");
+    } else if (strcmp(pref, "intel") == 0) {
+        setenv("DRI_PRIME", "0", 0);
+        LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=intel — requesting the integrated GPU");
+    } else {
+        LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=\"%s\" not recognised (want \"nvidia\" or \"intel\") — "
+                        "using the system default", pref);
+        return;
+    }
+    /* Whether the request was honoured is only knowable from the GL strings, which
+     * are logged once the context is up. Compare them, do not assume. */
+}
+
 static bool init_sdl(SdlCtx* out) {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+    apply_gpu_preference();
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
         return false;
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    /* Resizable so the window manager offers a maximise button; maximised
+     * after the GL context is up (see below). Alt+Enter toggles fullscreen. */
     out->win = SDL_CreateWindow("ZoniStation One",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1280, 720, SDL_WINDOW_OPENGL);
+        1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!out->win) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_CreateWindow: %s", SDL_GetError());
         SDL_Quit();
@@ -98,7 +156,42 @@ static bool init_sdl(SdlCtx* out) {
         SDL_Quit();
         return false;
     }
-    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s", glGetString(GL_VERSION));
+    /* Which GPU actually got the context matters on hybrid machines — the same
+     * binary lands on the iGPU or the discrete card depending on the PRIME
+     * environment, and "is this a driver bug" is unanswerable without it. */
+    const char* gl_version  = (const char*)glGetString(GL_VERSION);
+    const char* gl_renderer = (const char*)glGetString(GL_RENDERER);
+    const char* gl_vendor   = (const char*)glGetString(GL_VENDOR);
+    LOG_SYSTEM_INFO("[SYSTEM] OpenGL %s | %s | %s", gl_version, gl_renderer, gl_vendor);
+
+    /* Report which driver the context actually came from, and say plainly whether
+     * a ZS1_GPU request was honoured. Asking for the discrete card and silently
+     * getting the integrated one is a normal outcome — the offload can fail
+     * because the kernel module is not loaded, or the compositor holds the
+     * display — and it is exactly the case where an unexplained rendering
+     * difference gets blamed on the emulator. So it is checked here rather than
+     * left for a human to spot in the vendor string. */
+    {
+        bool on_nvidia = gl_vendor && strstr(gl_vendor, "NVIDIA") != NULL;
+        bool on_intel  = gl_vendor && strstr(gl_vendor, "Intel")  != NULL;
+        const char* driver = on_nvidia ? "NVIDIA proprietary"
+                           : on_intel  ? "Mesa (Intel integrated)"
+                           : "unknown";
+        LOG_SYSTEM_INFO("[SYSTEM] GL driver in use: %s", driver);
+
+        const char* want = getenv("ZS1_GPU");
+        if (want && strcmp(want, "nvidia") == 0 && !on_nvidia)
+            LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=nvidia was requested but the context is on \"%s\" — "
+                            "PRIME offload did not take. Check that the kernel module is loaded "
+                            "(/proc/driver/nvidia/version) and that libGLX_nvidia is installed",
+                            gl_vendor ? gl_vendor : "?");
+        else if (want && strcmp(want, "intel") == 0 && !on_intel)
+            LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=intel was requested but the context is on \"%s\"",
+                            gl_vendor ? gl_vendor : "?");
+        else if (want)
+            LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=%s honoured", want);
+    }
+
     check_gl_error("GLEW init");
     return true;
 }
@@ -154,6 +247,19 @@ static void audio_shutdown(void) {
         SDL_CloseAudioDevice(g_audio_dev);
         g_audio_dev = 0;
     }
+}
+
+/* A savestate load rewrites structs that two other threads are reading: the GPU
+ * thread replays the previous frame out of VRAM, and the SDL audio callback
+ * reads the SPU's sample ring. Both are quiesced around the restore — the ring
+ * indices in particular are restored as a pair, and a callback landing between
+ * them would read a window that never existed. */
+static bool load_state_guarded(const char* path, Cpu* cpu, Interconnect* inter) {
+    renderer_wait_frame_done(&inter->gpu.renderer);
+    if (g_audio_dev) SDL_LockAudioDevice(g_audio_dev);
+    bool ok = savestate_load(path, cpu, inter);
+    if (g_audio_dev) SDL_UnlockAudioDevice(g_audio_dev);
+    return ok;
 }
 
 // --- PS-X EXE loader ---
@@ -296,6 +402,10 @@ int main(int argc, char* argv[]) {
     SDL_GL_MakeCurrent(sdl.win, NULL);
     renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
 
+    /* Fill the screen while keeping the titlebar's minimise/maximise/close
+     * buttons. Window-manager call only — no GL. */
+    SDL_MaximizeWindow(sdl.win);
+
     if (args.game_path) {
         if (!cdrom_load_disc(&inter.cdrom, args.game_path))
             LOG_SYSTEM_WARN("[SYSTEM] Disc load failed: %s — BIOS-only mode", args.game_path);
@@ -309,6 +419,7 @@ int main(int argc, char* argv[]) {
 
     cpu_init(&cpu, &inter);
     interconnect_set_cpu(&inter, &cpu);
+    frame_events_bind_clock(&inter.cpu_cycle_counter);
     lua_debug_init(&inter, &cpu);
     if (getenv("ZS1_LUA_SCRIPT")) lua_debug_run_file(getenv("ZS1_LUA_SCRIPT"));
 
@@ -321,7 +432,6 @@ int main(int argc, char* argv[]) {
     sio_set_controller_connected(&inter.sio, true);
 
     audio_init(&inter.spu);
-    spu_thread_start(&inter.spu, &inter);
 
     system_init(&inter, &cpu);
 
@@ -332,9 +442,28 @@ int main(int argc, char* argv[]) {
 
     LOG_SYSTEM_INFO("[SYSTEM] All components initialised — starting loop");
 
+    /* Machine-bar identity for the debug UI: the two paths' basenames. */
+    {
+        const char* bn = args.bios_path;
+        const char* dn = args.game_path ? args.game_path : "n/a";
+        for (const char* p = args.bios_path; *p; p++)
+            if (*p == '/' || *p == '\\') bn = p + 1;
+        if (args.game_path)
+            for (const char* p = args.game_path; *p; p++)
+                if (*p == '/' || *p == '\\') dn = p + 1;
+        debug_ui_set_machine_info(bn, dn);
+    }
+
     // --- Main loop ---
     bool quit = false;
     SDL_Event ev;
+
+    /* Live vitals for the machine bar. Cheap: two perf-counter reads and one
+     * SPU sample delta per frame, no logging — the instrumentation that once
+     * produced a bogus speed figure was the logging, not the counters. */
+    uint64_t vit_prev         = SDL_GetPerformanceCounter();
+    uint32_t vit_prev_samples = inter.spu.total_samples_generated;
+    double   vit_drift_ema    = 0.0;
 
     /* Re-derived each frame: a game may switch video mode via GP1(08) at any
      * point (and the BIOS boots NTSC before a PAL disc's shell switches it). */
@@ -345,12 +474,48 @@ int main(int argc, char* argv[]) {
 
     while (!quit) {
         while (SDL_PollEvent(&ev)) {
+            controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
             if (ev.type == SDL_QUIT) quit = true;
             else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) quit = true;
+            /* Alt+Enter toggles borderless desktop fullscreen. */
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_RETURN &&
+                     (ev.key.keysym.mod & KMOD_ALT)) {
+                Uint32 fs = SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+                SDL_SetWindowFullscreen(sdl.win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            }
+            /* F5 saves, F8 loads. Handled here rather than in the debug UI so
+             * they work with every panel closed, which is when the emulator is
+             * actually fast enough to reach the state worth capturing. */
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F5 && !ev.key.repeat) {
+                savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+            }
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F8 && !ev.key.repeat) {
+                load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+            }
         }
 
-        sio_set_button_state(&inter.sio, controller_update_from_keyboard(&gamepad));
+        /* A script's emu.load_state() parks its request rather than restoring
+         * from inside the event dispatch; this is where it lands. */
+        {
+            char pending[512];
+            if (lua_debug_take_pending_state_save(pending, sizeof(pending)))
+                savestate_save(pending, &cpu, &inter);
+            if (lua_debug_take_pending_state_load(pending, sizeof(pending)))
+                load_state_guarded(pending, &cpu, &inter);
+        }
+
+        sio_set_button_state(&inter.sio, controller_update(&gamepad));
+        // Touchpad-click edge → pad's Analog button: toggle SIO analog mode.
+        if (gamepad.analog_toggle)
+            sio_set_analog_mode(&inter.sio, !sio_get_analog_mode(&inter.sio));
+        // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
+        sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
+                             gamepad.right_x, gamepad.right_y);
+        // Rumble: M1/M2 levels captured from 42h reads → DS4 motors.
+        uint8_t rumble_m1, rumble_m2;
+        sio_get_rumble(&inter.sio, &rumble_m1, &rumble_m2);
+        controller_update_rumble(&gamepad, rumble_m1, rumble_m2);
         inject_tty_keys(&inter);
 
         /* Wait for GPU to finish the previous frame's rendering. */
@@ -361,8 +526,41 @@ int main(int argc, char* argv[]) {
         frame_ticks = (uint64_t)((double)SDL_GetPerformanceFrequency() *
                                  (double)cycles_per_frame / (double)PSX_SYSCLK_HZ);
 
+        /* ZS1_FRAME_PROFILE=1: where the frame's wall-clock time actually goes.
+         * The emulator has to deliver 44100 audio samples per real second, so
+         * any millisecond spent outside emulation is a millisecond of audio the
+         * device will not get. */
+        static int s_prof = -1;
+        if (s_prof < 0) s_prof = getenv("ZS1_FRAME_PROFILE") ? 1 : 0;
+        uint64_t t_freq = SDL_GetPerformanceFrequency(), t0 = 0, t1 = 0, t2 = 0, t3 = 0, t4 = 0;
+        if (s_prof) t0 = SDL_GetPerformanceCounter();
+
         /* Run the machine for one video frame (or one debugger step). */
         system_run_frame(&inter, &cpu);
+        if (s_prof) t1 = SDL_GetPerformanceCounter();
+
+        /* Update machine-bar vitals from the counters we already hold. Wall
+         * time is the full loop iteration (work + pacing), so Speed reads 100%
+         * when the emulator keeps real time and drops below it when it cannot. */
+        {
+            uint64_t vit_now  = SDL_GetPerformanceCounter();
+            double   vit_freq = (double)SDL_GetPerformanceFrequency();
+            double   frame_ms = (double)(vit_now - vit_prev) * 1000.0 / vit_freq;
+            double   budget_ms = (double)cycles_per_frame * 1000.0 / (double)PSX_SYSCLK_HZ;
+            uint32_t cur_samples = inter.spu.total_samples_generated;
+            uint32_t produced = cur_samples - vit_prev_samples;
+            double   drift = 0.0;
+            double   wall_s = frame_ms / 1000.0;
+            if (wall_s > 0.0005) {
+                double expected = 44100.0 * wall_s;   /* device consumption rate */
+                if (expected > 1.0) drift = ((double)produced / expected - 1.0) * 100.0;
+            }
+            vit_drift_ema = vit_drift_ema * 0.9 + drift * 0.1;
+            debug_ui_set_vitals(frame_ms, budget_ms, spu_ring_used(&inter.spu),
+                                SPU_RING_TARGET_SAMPLES, vit_drift_ema);
+            vit_prev = vit_now;
+            vit_prev_samples = cur_samples;
+        }
 
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
@@ -371,31 +569,81 @@ int main(int argc, char* argv[]) {
          * GP0(A0) sprite loads cleared vram_dirty (preventing upload_vram_if_dirty in draw cmds).
          * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
         renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
+        if (s_prof) t2 = SDL_GetPerformanceCounter();
 
         /* Snapshot VRAM into viewer texture before submitting. Converting the
          * whole 1024x512 buffer to RGBA8 costs 2 MB of staging pool per frame,
          * so only pay it while the viewer window is actually open. */
         if (debug_ui_vram_viewer_open())
             renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+        if (s_prof) t3 = SDL_GetPerformanceCounter();
 
         /* Submit frame to GPU thread: swap buffers, wake renderer */
         renderer_submit_frame(&inter.gpu.renderer, debug_ui_get_draw_data());
+        if (s_prof) {
+            t4 = SDL_GetPerformanceCounter();
+            extern uint64_t g_spu_gen_ticks;
+            static int frames = 0; static double a_emu, a_up, a_view, a_sub, a_spu;
+            a_spu += (double)g_spu_gen_ticks * 1000.0 / (double)t_freq; g_spu_gen_ticks = 0;
+            a_emu  += (double)(t1 - t0) * 1000.0 / (double)t_freq;
+            a_up   += (double)(t2 - t1) * 1000.0 / (double)t_freq;
+            a_view += (double)(t3 - t2) * 1000.0 / (double)t_freq;
+            a_sub  += (double)(t4 - t3) * 1000.0 / (double)t_freq;
+            if (++frames == 60) {
+                /* Cycles per instruction, over the same 60 frames. This is the
+                 * independent check on the RAM data-access cost in bus.c: that
+                 * constant was calibrated so the BIOS VSync loop spans a field,
+                 * and a single loop can be made to say anything. CPI is a second,
+                 * unrelated observation over all executed code — real R3000A code
+                 * is mostly single-cycle ALU work punctuated by memory access, so
+                 * a believable figure sits a little above 1. A CPI near 1 means
+                 * the model is not being charged; a CPI far above it means the
+                 * constant is buying the VSync fix by slowing everything down. */
+                static uint32_t prev_cyc;
+                static uint64_t prev_ins;
+                uint32_t cyc = inter.cpu_cycle_counter;   /* 32-bit and wraps */
+                uint64_t ins = inter.instructions_retired;
+                uint32_t dcyc = cyc - prev_cyc;           /* unsigned: wrap-safe */
+                uint64_t dins = ins - prev_ins;
+                double cpi = dins ? (double)dcyc / (double)dins : 0.0;
+                prev_cyc = cyc; prev_ins = ins;
+                LOG_SYSTEM_INFO("[PROF] per frame: emu=%.2fms (spu %.2fms) vram_upload=%.2fms viewer=%.2fms submit=%.2fms total=%.2fms | CPI=%.3f",
+                                a_emu / 60, a_spu / 60, a_up / 60, a_view / 60, a_sub / 60,
+                                (a_emu + a_up + a_view + a_sub) / 60, cpi);
+                frames = 0; a_emu = a_up = a_view = a_sub = a_spu = 0;
+            }
+        }
 
-        // Frame-rate cap at the emulated refresh rate (59.82 NTSC / 49.75 PAL)
-        uint64_t now = SDL_GetPerformanceCounter();
-        if (now < next_frame) {
-            uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();
-            if (ms > 1) SDL_Delay((uint32_t)(ms - 1));
-            while (SDL_GetPerformanceCounter() < next_frame) {}
-            next_frame += frame_ticks;
+        /* Pacing.
+         *
+         * With an audio device open the sound queue is the clock: the emulator
+         * runs ahead only until the SPU ring holds SPU_RING_TARGET_SAMPLES, then
+         * waits for the device to drain some. Production and consumption are
+         * then matched by construction — the emulator cannot outrun the device
+         * (dropped samples) or fall behind it (silence in the callback), and
+         * frame-pacing jitter never reaches the audio.
+         *
+         * Without a device there is nothing to synchronise to, so fall back to
+         * pacing frames against the emulated refresh rate. */
+        if (g_audio_dev) {
+            while (!quit && spu_ring_used(&inter.spu) > SPU_RING_TARGET_SAMPLES)
+                SDL_Delay(1);
+            next_frame = SDL_GetPerformanceCounter() + frame_ticks;
         } else {
-            next_frame = now + frame_ticks;
+            uint64_t now = SDL_GetPerformanceCounter();
+            if (now < next_frame) {
+                uint64_t ms = ((next_frame - now) * 1000ULL) / SDL_GetPerformanceFrequency();
+                if (ms > 1) SDL_Delay((uint32_t)(ms - 1));
+                while (SDL_GetPerformanceCounter() < next_frame) {}
+                next_frame += frame_ticks;
+            } else {
+                next_frame = now + frame_ticks;
+            }
         }
     }
 
     // --- Cleanup ---
     cpu_dump_exec_trace(&cpu, "logs/exec_trace.log");
-    spu_thread_stop(&inter.spu);
     audio_shutdown();
     renderer_stop_gpu_thread(&inter.gpu.renderer);
     /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */

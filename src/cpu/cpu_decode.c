@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: The PCSX-Redux authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "cpu.h"
 
 /* Forward-declare op_special before s_op_table references it */

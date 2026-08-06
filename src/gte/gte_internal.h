@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /**
  * gte_internal.h
  * Private GTE helper functions and register macros.
@@ -182,8 +189,7 @@ static inline void push_rgb_from_mac(Gte* gte) {
      * software renderers that read the pushed colour word back as a GP0
      * primitive: the GP0 command byte lives in bits 24-31, so a zero CODE
      * makes the packet decode as opcode 0x00 and get discarded. This is what
-     * hid the PS boot logo (its Gouraud prims went out with opcode 0).
-     * Matches DuckStation PushRGBFromMAC: dr32[22] = r|g<<8|b<<16|c<<24. */
+     * hid the PS boot logo (its Gouraud prims went out with opcode 0). */
     uint32_t code = ((uint32_t)gte->data[GTE_REG_RGBC] >> 24) & 0xFFu;
     gte->data[GTE_REG_RGB0] = gte->data[GTE_REG_RGB1];
     gte->data[GTE_REG_RGB1] = gte->data[GTE_REG_RGB2];

@@ -1,8 +1,16 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef SIO_H
 #define SIO_H
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 // SIO (Serial I/O) - Controller and Memory Card Interface
 // PSX-SPEX: I/O Ports 1F801040h-1F80104Fh and 1F801050h-1F80105Fh
@@ -86,8 +94,31 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value);
 void sio_write16(Sio* sio, uint32_t offset, uint16_t value);
 void sio_write32(Sio* sio, uint32_t offset, uint32_t value);
 
-// Controller input (for future implementation)
+// Controller input
 void sio_set_button_state(Sio* sio, uint16_t buttons);
 void sio_set_controller_connected(Sio* sio, bool connected);
+
+// DualShock analog support
+void sio_set_analog_state(Sio* sio, int16_t lx, int16_t ly, int16_t rx, int16_t ry);
+void sio_set_analog_mode(Sio* sio, bool analog);
+bool sio_get_analog_mode(Sio* sio);
+
+// Rumble: current motor levels (m1 = large 00h..FFh, m2 = small 00h/FFh)
+void sio_get_rumble(Sio* sio, uint8_t* m1, uint8_t* m2);
+
+// --- Savestate access to the protocol state -------------------------------
+//
+// Everything the SIO0 protocol runs on — analog/config mode, the Analog-button
+// lock, the rumble map, the controller and memory-card transfer steps — lives in
+// a file-static inside sio.c, not in the public Sio struct. None of it therefore
+// travelled with a savestate, so a load dropped the pad back to digital with the
+// motors locked, throwing away what the game had configured at boot.
+//
+// These two move that block in and out. The size is opaque to the caller; the
+// host pointers inside (the Interconnect and the memory-card slots) are
+// preserved by the restore, since they name live objects in this process.
+size_t sio_internal_state_size(void);
+void   sio_save_internal_state(void* dst);
+void   sio_load_internal_state(const void* src);
 
 #endif // SIO_H

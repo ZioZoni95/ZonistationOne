@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "interconnect.h"
 #include <stdio.h>
 #include <stdbool.h>
@@ -10,6 +17,7 @@
 #include "mdec.h"
 #include "debugger.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 
 // --- Memory Region Masking ---
 const uint32_t REGION_MASK[8] = {
@@ -28,7 +36,7 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch);
 
 // =============================================================================
-// HW DISPATCH TABLE  (DuckStation-style, ref: bus.cpp:2046-2118)
+// HW DISPATCH TABLE  (indexed by 16-byte block)
 //
 // Hardware registers occupy 0x1F801000-0x1F801FFF (4 KB).
 // We index by (phys >> 4) & 0xFF — one entry per 16-byte block (256 entries).
@@ -110,9 +118,14 @@ void bus_hw_tables_init(void) {
 // =============================================================================
 
 // --- MemCtrl (0x1F801000-0x1F80103F) ---
-// Real per-region access-delay registers (nocash spec), ported from DuckStation's
-// Bus::CalculateMemoryTiming. Real BIOS/EXP1/CDROM/SPU ROM/bus accesses cost several
-// cycles each — not the flat 1 cycle/instruction this project used to assume everywhere.
+// Real per-region access-delay registers. BIOS/EXP1/CDROM/SPU accesses cost
+// several cycles each, not the flat 1 cycle/instruction assumed everywhere else.
+//
+// The 1ST/SEQ/MIN arithmetic below is the pseudocode published in
+// `DOCS/memorycontrol.md:136-145`, transcribed line for line; the register field
+// positions come from `:37-53` (delay registers) and `:126-132` (COM_DELAY).
+// The documentation's own hedge — "Works (somehow) like so" — applies to the
+// model, not to this transcription of it.
 static uint32_t calc_memory_timing_word_cycles(uint32_t mem_delay, uint32_t common_delay) {
     int32_t access_time    = (int32_t)((mem_delay >> 4) & 0xF);
     bool use_com0          = (mem_delay >> 8)  & 1;
@@ -245,11 +258,11 @@ static void hw_irq_write(Interconnect* inter, uint32_t addr, uint32_t val, BusSi
 // --- DMA (0x1F801080-0x1F8010FF) ---
 /* DMA registers are 32-bit, but sub-word access to them is legal and real
  * software uses it — the BIOS shell enables the DMA completion IRQs with a
- * byte write to DICR+2 (0x1F8010F6). Both reference emulators service such
- * accesses through the containing word (DuckStation's FIXUP_WORD_OFFSET;
- * PCSX-Redux lists 0x1F8010F0-0x1F8010F7 as byte-addressable register space),
- * so the offset must be word-aligned before it reaches dma_read/dma_write —
- * passing 0x76 straight through fell into their default cases instead. */
+ * byte write to DICR+2 (0x1F8010F6). Sub-word accesses are serviced through
+ * the containing word (PCSX-Redux lists 0x1F8010F0-0x1F8010F7 as
+ * byte-addressable register space), so the offset must be word-aligned before
+ * it reaches dma_read/dma_write — passing 0x76 straight through fell into
+ * their default cases instead. */
 static uint32_t hw_dma_read(Interconnect* inter, uint32_t addr, BusSize sz) {
     uint32_t off = addr - DMA_START;
     uint32_t v32 = dma_read(&inter->dma, off & ~3u);
@@ -411,6 +424,127 @@ static inline void sp_store16(Interconnect* i, uint32_t off, uint16_t v) {
 }
 
 // =============================================================================
+// CPU DATA-ACCESS COST
+// =============================================================================
+//
+// The interpreter charged one cycle per instruction regardless of what that
+// instruction touched, which made every memory-bound loop run far faster in
+// emulated cycles than on hardware. The BIOS kernel's VSync wait is the case
+// that made it visible: 12 instructions per iteration, 32768 iterations, so
+// 393216 cycles against a PAL frame of 680823 (GPU_GAP_ANALYSIS §4). The loop
+// covered 0.58 of a field, its timeout expired before the VBlank it was waiting
+// for arrived, and the kernel printed "VSync: timeout" on essentially every
+// call — which in turn made every frame-counted animation run fast.
+//
+// What is documented, and what is not:
+//
+//   * BIOS ROM and the expansion/SPU/CDROM windows have published access times,
+//     computed by calc_memory_timing_word_cycles() from the MEMCTRL delay
+//     registers exactly as DOCS/memorycontrol.md:134-147 describes. That value
+//     is used here as-is.
+//
+//   * Main RAM does not. The only figure DOCS publishes for it is RAM_SIZE bit 7,
+//     "Delay on simultaneous CODE+DATA fetch from RAM (0=None, 1=One Cycle)"
+//     (DOCS/memorycontrol.md:161-163) — one cycle, and only for the contention
+//     case. Since the CPU is fetching instructions from RAM whenever it is also
+//     loading data from RAM, that bit applies to essentially every data access
+//     in RAM-resident code, but one cycle alone does not account for what the
+//     R3000A actually pays to reach RAM.
+//
+// So RAM_DATA_STALL_CALIBRATED below is exactly that: calibrated, not
+// transcribed. There is no line in DOCS/ behind it. It was chosen so the VSync
+// loop spans more than one field with margin rather than landing on the
+// boundary, and it is cross-checked by the cycles-per-instruction figure the
+// interconnect now tracks — a plausible CPI for mixed PSX code is the evidence
+// that this is a memory cost model and not a fudge sized to one loop.
+//
+// Scratchpad is the R3000A's data cache wired as fast local memory, so it is
+// deliberately free.
+
+/* Loads stall, stores do not.
+ *
+ * The R3000A retires a store into a write buffer and carries on; the pipeline
+ * only stalls if the buffer is full. A load has nowhere to hide — the value is
+ * needed, so the CPU waits for it. Charging both the same made the emulated CPU
+ * markedly slower than the real one: cycles-per-instruction sat at 1.85, so the
+ * guest executed nearly half the instructions per field that it should have, and
+ * the games felt sluggish while the host sat at 18% of its frame budget. The
+ * emulator was keeping real time perfectly; the machine inside it was not.
+ *
+ * The VSync loop survives the change with room: its iteration is three loads and
+ * one store, so it goes to 12 + 3*3 = 21 cycles, and 32768 * 21 = 688128 still
+ * clears the 680823-cycle PAL field. */
+#define RAM_LOAD_STALL_DOCUMENTED  1u  /* DOCS/memorycontrol.md:161-163, RAM_SIZE bit 7 */
+#define RAM_LOAD_STALL_CALIBRATED  2u  /* no citation — see the note above */
+#define RAM_STORE_STALL            0u  /* write buffer absorbs it */
+
+/* Only main RAM is charged, and that is a scoping decision rather than a claim
+ * that nothing else costs anything.
+ *
+ * Scratchpad genuinely is free — it is the R3000A's data cache wired as local
+ * memory. BIOS ROM and the I/O window are not, but charging them is a separate
+ * change with a known hazard. cpu_icache.c records that applying the MEMCTRL word
+ * time (~24-32 cycles) to ROM-resident code hung the CD-ROM command sequence at
+ * LBA 23, never root-caused. Charging ROM *data* loads reintroduces exactly that:
+ * it was tried here and killed controller input outright, because the BIOS pad
+ * routines read their tables out of ROM and every one of those reads suddenly
+ * cost thirty cycles. Charging the I/O window has the same shape — the pad is
+ * polled in a tight loop over 1F801040h.
+ *
+ * The VSync measurement only ever justified the RAM figure: that loop is
+ * RAM-resident, and its three loads and one store are all RAM. So this models RAM
+ * and stops. Adding ROM or I/O is a later change that needs the LBA-23 isolation
+ * test run against it on its own.
+ *
+ * Keeping it to one comparison also keeps it off the profile. This sits on the
+ * hottest path in the emulator — interconnect_load32 alone was 4.3% of samples —
+ * and an earlier version with a chain of region tests cost about 10% of host
+ * frame time on its own. */
+#define RAM_LOAD_STALL (RAM_LOAD_STALL_DOCUMENTED + RAM_LOAD_STALL_CALIBRATED)
+
+/* ZS1_RAM_LOAD_STALL overrides the per-load figure for a run.
+ *
+ * The calibrated part of it has no citation, and the one measurement that pins
+ * it — the VSync loop spanning a field — only sets a floor. Everything above
+ * that floor is a judgement about how fast the emulated machine should feel,
+ * which is not settled from inside the emulator: it needs comparison against
+ * hardware or a known-good reference, by someone watching the game.
+ *
+ * So the value is a run-time knob rather than a rebuild. 0 restores the flat
+ * one-cycle-per-instruction behaviour this replaced, which is the honest A/B —
+ * VSync then times out again, exactly as it used to. 2 is the documented floor
+ * plus nothing. The default stays 3.
+ *
+ * Read once and cached; the load path is the hottest in the emulator. */
+static uint32_t ram_load_stall(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* s = getenv("ZS1_RAM_LOAD_STALL");
+        long v = s ? strtol(s, NULL, 10) : (long)RAM_LOAD_STALL;
+        if (v < 0)  v = 0;
+        if (v > 64) v = 64;      /* absurd values are a typo, not an intent */
+        cached = (int)v;
+        if (s) LOG_INTERCONNECT_INFO("[BUS] ZS1_RAM_LOAD_STALL=%d extra cycles per RAM load "
+                                     "(default %u)", cached, (unsigned)RAM_LOAD_STALL);
+    }
+    return (uint32_t)cached;
+}
+
+/* RAM_SIZE bit 7 gates the documented contention cycle. hw_memctrl2_read returns
+ * a fixed 0x00000B88 and hw_memctrl2_write discards writes, so the bit is set for
+ * the whole run and the cycle always applies. Read the register here if it ever
+ * becomes writable. */
+static inline void bus_charge_cpu_load(Interconnect* inter, uint32_t phys) {
+    if (phys < 0x00800000)                   /* main RAM, mirrored */
+        inter->cpu_mem_stall_cycles += ram_load_stall();
+}
+
+static inline void bus_charge_cpu_store(Interconnect* inter, uint32_t phys) {
+    if (phys < 0x00800000)
+        inter->cpu_mem_stall_cycles += RAM_STORE_STALL;
+}
+
+// =============================================================================
 // LOAD OPERATIONS
 // =============================================================================
 
@@ -422,6 +556,7 @@ uint32_t interconnect_load32(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_load(inter, phys);
 
     // RAM (2 MB, mirrored in first 8 MB)
     if (phys < 0x00800000) {
@@ -461,6 +596,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
     }
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_load(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load16(inter->ram, phys & (RAM_SIZE - 1));
@@ -482,6 +618,7 @@ uint16_t interconnect_load16(Interconnect* inter, uint32_t address) {
 uint8_t interconnect_load8(Interconnect* inter, uint32_t address) {
     debugger_check_read_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_load(inter, phys);
 
     if (phys < 0x00800000)
         return ram_load8(inter->ram, phys & (RAM_SIZE - 1));
@@ -512,6 +649,7 @@ void interconnect_store32(Interconnect* inter, uint32_t address, uint32_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 4);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -538,6 +676,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
     }
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 2);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -558,6 +697,7 @@ void interconnect_store16(Interconnect* inter, uint32_t address, uint16_t value)
 void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     debugger_check_write_watchpoint(&inter->debugger, inter->cpu, address, 1);
     const uint32_t phys = mask_region(address);
+    bus_charge_cpu_store(inter, phys);
 
     if (phys < 0x00800000) {
         uint32_t ram_off = phys & (RAM_SIZE - 1);
@@ -568,9 +708,9 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     if (phys >= 0x1F000000 && phys < 0x1F800000) return; // EXP1
     if (phys >= 0x1F801000 && phys < 0x1F802000) { g_hw_write[(phys>>4)&0xFF](inter, phys, value, BUS_BYTE); return; }
     // EXP2 (0x1F802000-0x1F803FFF) — only offset 0x23/0x80 is the TTY char
-    // port (matches DuckStation's EXP2WriteHandler). The rest of the range is
-    // POST status codes and other diagnostic registers — capturing writes to
-    // those as if they were TTY text corrupts the log with garbage characters.
+    // port. The rest of the range is POST status codes and other diagnostic
+    // registers — capturing writes to those as if they were TTY text corrupts
+    // the log with garbage characters.
     if (phys >= 0x1F802000 && phys < 0x1F804000) {
         uint32_t offset = phys - 0x1F802000;
         if (offset == 0x23 || offset == 0x80) {
@@ -607,17 +747,16 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
 #define DMA_SLICE_CYCLES 1000  /* EVQ cycles between slices (~30µs) */
 
 /* MDEC DMA pacing. Real DMA reaches RAM in DRAM hyper-page mode: ~1 cycle per
- * word plus a row-load per 16 (DuckStation Bus::GetDMARAMTickCount). Pacing
- * MDEC's ch0/ch1 slices with the GPU path's flat 64-words-per-1000-cycles
- * instead works out to ~15.6 cycles/word — slow enough that libmdec's
- * DecDCTinSync/DecDCToutSync spin loops give up mid-FMV, which the game
- * reports on the TTY as "MDEC_in_sync timeout:" / "time out in decoding !".
- * Slice size mirrors DuckStation's SLICE_SIZE_WHEN_DECODING_MDEC (it caps MDEC
- * slices low on purpose so an oversized FIFO can't swallow kilobytes at once
- * and starve other interrupts), and the stall between slices is the real cost
- * of the words actually moved, not a fixed quantum. */
-#define MDEC_SLICE_WORDS   100  /* DuckStation SLICE_SIZE_WHEN_DECODING_MDEC */
-#define MDEC_IDLE_BACKOFF  100  /* DuckStation DEFAULT_DMA_HALT_TICKS */
+ * word plus a row-load per 16 (DOCS/dmachannels.md). Pacing MDEC's ch0/ch1
+ * slices with the GPU path's flat 64-words-per-1000-cycles instead works out
+ * to ~15.6 cycles/word — slow enough that libmdec's DecDCTinSync/
+ * DecDCToutSync spin loops give up mid-FMV, which the game reports on the TTY
+ * as "MDEC_in_sync timeout:" / "time out in decoding !". The slice size caps
+ * MDEC slices low on purpose so an oversized FIFO can't swallow kilobytes at
+ * once and starve other interrupts, and the stall between slices is the real
+ * cost of the words actually moved, not a fixed quantum. */
+#define MDEC_SLICE_WORDS   100  /* slice size while decoding MDEC */
+#define MDEC_IDLE_BACKOFF  100  /* DMA halt ticks when the FIFO is full */
 
 static uint32_t dma_ram_ticks(uint32_t words) { return words + (words + 15u) / 16u; }
 
@@ -625,6 +764,8 @@ static uint32_t dma_ram_ticks(uint32_t words) { return words + (words + 15u) / 1
 static void dma_ch2_signal_done(Interconnect* inter) {
     DmaChannel* ch = &inter->dma.channels[2];
     dma_channel_done(ch);
+    inter->dma.stat_ch2_uploads++;   /* pipeline view: uploads/s (debug only) */
+    frame_events_record(FEV_DMA_GPU, ch->block_size);
     /* Fixed stall per slice (exact accounting happens across EVQ_DMA_GPU reschedules) */
     if (inter->cpu) inter->cpu->downcount -= (int32_t)DMA_SLICE_CYCLES;
 
@@ -848,12 +989,11 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
      * later kick that inspects "is this channel active?" — a DPCR write
      * unblocking channels, or software re-poking CHCR — would otherwise
      * restart the transfer from base_addr and re-send the entire payload.
-     * DuckStation's TransferChannel() is resumable for exactly this reason
-     * (it advances base_address/block_control as it goes and re-entry
-     * continues rather than rewinds). Ours resumes off the event scheduler,
-     * so a re-kick has to be a no-op. This was corrupting FMV playback: the
-     * duplicate GPU ch2 payload arrived with no GP0(0xA0) in front of it, so
-     * MDEC pixel words were decoded as GP0 commands. */
+     * A resumable transfer advances base_address/block_control as it goes and
+     * re-entry continues rather than rewinds; ours resumes off the event
+     * scheduler, so a re-kick has to be a no-op. This was corrupting FMV
+     * playback: the duplicate GPU ch2 payload arrived with no GP0(0xA0) in
+     * front of it, so MDEC pixel words were decoded as GP0 commands. */
     /* A kick that arrives while this channel still has a sliced transfer in
      * flight used to be dropped outright, which silently lost a whole transfer:
      * during FMV playback the movie player kicks the next column upload while a
@@ -916,11 +1056,10 @@ static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index
              * kicked, so a deferred read picked up the NEXT column's pixels and
              * VRAM ended up holding two payloads repeated across all twenty
              * 16-pixel columns — the striping visible on screen. A block
-             * transfer must consume the buffer at kick time; both references do
-             * it that way (DuckStation delays only the completion, never the
-             * data read; PCSX-Redux copies immediately and schedules just the
-             * IRQ). The linked list below stays sliced: its node chain is built
-             * before the kick and is not rewritten under us. */
+             * transfer must consume the buffer at kick time: the data is
+             * read then, only the completion is scheduled later. The linked
+             * list below stays sliced: its node chain is built before the
+             * kick and is not rewritten under us. */
             if (channel_index == 2 && ch->direction == FROM_RAM) {
                 LOG_DMA_DEBUG("[DMA] GPU REQUEST/MANUAL FROM_RAM: %u words", words_to_transfer);
                 inter->dma.gpu_ll_active  = false;

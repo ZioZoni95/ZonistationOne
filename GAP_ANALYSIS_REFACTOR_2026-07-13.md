@@ -1,748 +1,440 @@
-# ZonistationOne — Structural Gap Analysis & Refactor Roadmap
+# ZoniStation One — Structural Gap Analysis & Roadmap
 
-**Date**: 2026-07-13
-**Compared against**: `duckstation_ref/` (DuckStation, C++) and `pcsx-redux/` (PCSX-Redux, C-style) — both local clones in this repo.
-**Scope**: structural/architectural comparison, component by component. Not a line-by-line code review. Focus is on gaps that matter for a planned 1:1 structural refactor: dead/duplicate code, missing abstractions, incomplete features, and organizational issues — including minor ones.
-**Status**: Phase 0 (cleanup) and Phase 1 (unify event scheduling) complete as of 2026-07-13, **live-tested and confirmed working**; Phase 2.5's CDROM/DMA boot bug fixed and live-confirmed 2026-07-14 — see Changelog at bottom. §5/§8/§9 substantially revised 2026-07-15 after a dedicated GTE/Timer/GPU pass (doc-only, no source changes) — see Phase 2.6/3.6 and the new `GPU_GAP_ANALYSIS_2026-07-15.md`. Findings below are left as originally written (historical record); items resolved are marked inline with ✅; superseded findings are marked with an inline **Correction**.
+**Opened 2026-07-13. Fully rewritten 2026-07-28** against the code as it stands today, because the
+per-section state had drifted badly out of date (SPU was listed as gap-free; MDEC, the boot logo and
+the FMV display path were listed as open blockers after they had been fixed).
 
----
+**How to read this file**: every section states what the subsystem *does today*, then what is
+genuinely missing. Sections keep their original numbers so older notes and commit messages that cite
+"§8" or "§11" still resolve. Resolved investigations are compressed to a sentence and a commit hash —
+the full narrative for any of them is in `CHANGELOG.md` and in `git log`.
 
-## Methodology
-
-Three research passes fed this document:
-1. Full inventory of this project's own `src/`+`include/` — every component, LOC, every `TODO`/`FIXME`/stub marker found via grep, dead-code detection via Makefile cross-reference.
-2. DuckStation `src/core/` architecture per component — how state is structured, module boundaries, key design choices (notably its `timing_event.cpp` event scheduler and `Controller` abstraction).
-3. PCSX-Redux `src/core/` architecture per component — same set, with attention to patterns most portable to plain C99 (PCSX-Redux's own style is closer to C than DuckStation's).
-
-Where the two references disagree, this doc recommends the pattern most portable to C99 — usually PCSX-Redux's, adapted (e.g. function-pointer struct instead of virtual class) — or a synthesized minimal version.
-
-## Priority Framework
-
-- **Critical** — dead/duplicate code causing confusion or real bugs, or missing functionality actively blocking correctness (e.g. two competing IRQ controllers, two competing event schedulers).
-- **High** — structural gap likely to cause real bugs or block compatibility (e.g. no PAL support, a BIOS syscall handler that's a no-op stub).
-- **Medium** — incomplete-but-low-impact features (e.g. one DMA channel stubbed, an unreachable-but-otherwise-complete feature).
-- **Low** — cosmetic/organizational (misplaced file, stale comment, duplicated `#define` block).
+**Scope note**: this is a correctness/architecture document. It does not track performance work, and
+it does not list "features other emulators have" as gaps unless they affect this emulator's own
+correctness or its ability to run software.
 
 ---
 
-## 1. CPU / Interpreter Core
+## Status at a glance (2026-07-28)
 
-*Expanded 2026-07-13 into a full CPU-only deep audit (interpreter, recompiler/JIT, LLE/HLE BIOS handling, PGXP — nothing skipped), triggered by a live register/stack-corruption bug found this session (see Phase 2.5/§10 addendum). Original shallow pass folded in below; this replaces it entirely, same section number.*
+| Subsystem | State | Open work |
+|---|---|---|
+| CPU / interpreter | Working | Memory-timing cost model parked; single-slot load delay |
+| Bus / interconnect | Working | — |
+| Interrupt controller | Working | — |
+| DMA | Working | MDEC ch0/ch1 drop a kick that arrives mid-slice |
+| Timers | Working | Timer0's hblank gate needs a per-scanline CRTC |
+| Event scheduler | Working | — |
+| SIO / pads / memory cards | Working (digital pad, 2 cards) | No analog pad, no multitap |
+| GPU / renderer | Working | Mask-bit *test*, GP0(C0)/(80) readback, coarse CRTC, no FIFO timing, GPUSTAT h-res bit order |
+| GTE | Working | — |
+| CDROM | Working | Async pacing is coarse |
+| SPU / audio | Working | Emulated-clock generation landed 2026-07-28; output quality not yet surveyed |
+| MDEC | Working | — |
+| PCDRV | Working | — |
+| Savestates | **Absent** | Whole feature |
 
-**Files**: `src/cpu/cpu_instructions.c` (999L), `cpu_bios.c` (381L), `cpu_execution.c` (260L), `cpu_disasm.c` (177L), `cpu_decode.c` (95L), `cpu_exceptions.c` (88L), `cpu_icache.c` (84L), `cpu_init.c` (72L), `cpu_registers.c` (44L), `include/cpu.h` (336L). No `tests/` directory exists in this checkout (pre-existing, unrelated — see Changelog).
+Live status: the BIOS boots to its menu; `Ace Combat 2 (Europe)` boots, plays its FMV intro
+correctly, and reaches its textured main menu and in-engine 3D view. Audio generation is paced by the
+emulated clock, and the output stream is clean after the 2026-07-29 fixes; how it sounds across a
+range of games has not been surveyed.
 
-### 1.1 Interpreter core &amp; dispatch
-
-**Current state**: Function-pointer dispatch tables, `s_op_table[64]` (primary opcode) + `s_special_table[64]` (SPECIAL funct) in `cpu_decode.c`; no separate REGIMM sub-table exists — `op_bxx` handles all 32 rt values inline via two bit tests, matching real R3000A behavior where the "reserved" REGIMM encodings aren't actually trapped in hardware. COP0 sub-dispatch is a local 32-entry table declared inside `op_cop0` itself, not in `cpu_decode.c`. Dual-buffer register file (`regs`/`out_regs`) — the previous instruction's writes become visible via an explicit `memcpy(regs, out_regs, ...)` each step, rather than a two-PC pipeline or a single live array. Downcount/cycle model: exactly 1 cycle per instruction always, with `downcount` counted down and `eventq_dispatch_due()` firing at zero — DuckStation-style. MULT/DIV/MFHI/MFLO/MTHI/MTLO implement genuine completion-tick stalling (`muldiv_completion_tick`, 7/37-cycle latencies) — these are the *only* instructions with non-1 cycle cost. Overflow-checked ADD/ADDI/SUB use `__builtin_add/sub_overflow`, discard the destination on trap (spec-correct). LWL/LWR/SWL/SWR implement the classic 4-way masked merge, correctly reading the in-flight load-delay value (not the stale committed one) when the same register is targeted twice in a row.
-
-**Reference pattern**:
-- *DuckStation*: flat `State` struct, genuine two-PC pipeline (`pc`/`npc`, current/next instruction promoted each step) instead of a dual-register-buffer commit. Same downcount/completion-tick philosophy as this project (1 cycle/instruction + explicit MULT/DIV/GTE stall accounting) — closely aligned design, not a gap. One real difference: DuckStation models **variable uncached-fetch timing** for BIOS ROM/EXP1 accesses (`dynamic_fetch_ticks`, looked up per memory region) — this project's downcount always ticks flat 1 regardless of whether the fetch was cached RAM or uncached KSEG1 ROM.
-- *PCSX-Redux*: flat `psxRegisters`, real 34-slot GPR array (not dual-buffered — writes are immediate, delay is modeled separately, see 1.2), flat `BIAS=2` cycle cost for *every* instruction with **no completion-tick stalling at all** — its interpreter doesn't stall MFHI/MFLO/GTE-register-access the way this project and DuckStation both do. **This project's MULT/DIV/GTE stall modeling is more hardware-accurate than PCSX-Redux's interpreter**, and matches DuckStation's approach closely — a genuine strength, not a gap.
-
-**Gaps**:
-1. No variable uncached-fetch timing (BIOS ROM/EXP1 execute at the same flat per-instruction cost as cached RAM) — DuckStation models this, this project and (per its flat-BIAS design) PCSX-Redux's interpreter both don't. Timing-accuracy-only, no correctness impact. — **Low**
-2. COP0 breakpoint registers (BPC/BDA/BDAM/BPCM) unimplemented (reads 0, writes ignored) — matches real hardware rarely being exercised this way; the software debugger covers this need instead. — **Low**
-
-**Recommended action**: No structural rework needed for the core dispatch/cycle model — it already sits closer to DuckStation's more-accurate stall philosophy than PCSX-Redux's flatter one. Uncached-fetch timing is a nice-to-have, not correctness-relevant; skip unless a specific timing-sensitive game surfaces needing it.
-
-### 1.2 Delay slots &amp; load-delay modeling
-
-**Current state**: Branch-delay sequencing via `branch_taken`/`next_pc`, set explicitly by every branch/jump handler (delay slot always executes, per spec; BGEZAL/BLTZAL correctly write `$ra` unconditionally even when not taken). **GPR load delay is single-slot**: `load_reg_idx`/`load_value`, committed once per instruction at the *start* of `cpu_run_next_instruction` (before the next instruction executes), then cleared. **GTE load delay is separately double-buffered**: `gte_load_delay_reg/value` (current) + `gte_next_load_delay_reg/value` (pending), advanced every instruction. LWL/LWR correctly check whether there's an in-flight load-delay write to the same register before merging (matches DuckStation's approach exactly).
-
-**Reference pattern**:
-- *DuckStation*: **all** loads (GPR and COP0/COP2) go through a genuine double-buffered pair (`load_delay_reg/value` + `next_load_delay_reg/value`, realized via a dummy 35th slot in a `r[]` array so "no pending load" needs no branch). `WriteRegDelayed` explicitly drops the *first* value if a second load targets the same register before the first resolves — "double loads ignore the first value," a documented real-hardware behavior.
-- *PCSX-Redux*: **all** loads go through a double-buffered `m_delayedLoadInfo[2]` ping-ponged every instruction (`m_currentDelayedLoad ^= 1`), functionally the same dual-buffer guarantee as DuckStation's, for every register class uniformly (not split GPR-vs-GTE like this project).
-
-**Gap — real structural asymmetry**: this project's GTE load delay is dual-buffered (matching both references), but its **GPR** load delay is single-slot. Traced through the actual commit timing: for an isolated load, single-slot and dual-buffer produce identical results (commit happens exactly one instruction later either way). The difference only surfaces for **two back-to-back loads targeting the same register with nothing in between** — a rare but real pattern (compilers occasionally emit it). With this project's single-slot design, the *first* load's value is briefly, incorrectly written into the committed register file for one instruction (between the first load's scheduled commit and the second load's own scheduling) before being overwritten — real hardware (and both references) never let that first value become observable at all. Whether this specific pattern occurs anywhere in the BIOS or in `Ace Combat 2`'s boot path is unconfirmed — flagged here as the clearest concrete correctness-gap candidate found in this audit, and the top thing to check first in the Phase 3.5 CPU Correctness Pass (§ roadmap) against the still-unexplained register/stack-corruption bug from today's live debugging (`dev_card_format → longjmp(garbage) → read(garbage)`, see Phase 2.5).
-
-**Priority**: High — plausible root-cause candidate for an open, reproducible bug, not just a theoretical spec deviation.
-
-**Recommended action**: Convert the GPR load-delay slot (`load_reg_idx`/`load_value` in `cpu.h`) to a genuine double-buffer pattern. Low-risk, mechanical change; write a small targeted test (or reuse the debug UI's Exec Trace) exercising back-to-back same-register loads before/after to confirm the fix actually changes behavior on real BIOS code, not just in theory.
-
-**Correction (2026-07-15, from §9 GTE pass)**: this recommendation originally pointed at `gte_load_delay_*`/`gte_next_load_delay_*` as "a working, in-house reference implementation... one struct field away." That's wrong — a dedicated GTE pass this session found `gte_next_load_delay_reg`/`value` are only ever set to their disabled sentinel and never populated with a real pending value anywhere in the codebase (full detail in §9, Gap 3). It's inert scaffolding, not a working double-buffer, so there is no in-house reference to copy from. Use DuckStation's pattern directly instead: a dummy 35th register slot in the GPR array so "no pending load" needs no branch (`load_delay_reg/value` + `next_load_delay_reg/value`, `WriteRegDelayed` drops the *first* value if a second load targets the same register before the first resolves). This also means the GTE fix in §9 (populate or replace the load-delay pair) and this GPR fix are now two independent implementations of the same pattern, not one feeding the other — worth doing together for consistency, but neither blocks the other.
-
-### 1.3 Exception &amp; interrupt handling
-
-**Current state**: `cpu_exception()` — single entry point, 6-step sequence (pending flag, diagnostic dump-on-first-fault, SR mode-stack push, Cause/EPC write with delay-slot `-4` adjustment, BEV-gated vector select, immediate PC redirect). No explicit priority arbitration exists, and none is needed — every instruction handler raises at most one exception per instruction, checked structurally (address-error checks always `return` immediately after raising). **Interrupt check runs every single instruction** (`CheckPendingInterrupt`, unconditional call in `cpu_run_next_instruction`), live-recomputing Cause bit 10 from `i_stat &amp; i_mask` each time rather than only at explicit trigger points. **GTE-in-delay-slot-of-interrupt edge case is handled**: a peek-ahead re-fetch checks whether the next instruction is a GTE compute op (opcode mask `0xFE000000==0x4A000000`, correctly excluding MFC2/MTC2/CFC2/CTC2 register moves) and defers the interrupt by one instruction if so.
-
-**Reference pattern**:
-- *DuckStation*: interrupts checked only at downcount-boundary polls plus explicit re-checks after `SR`/`CAUSE`/`RFE` writes (`CheckForPendingInterrupt`, which just zeroes `downcount` to force an early poll) — **not** every instruction. Handles the GTE-in-delay-slot case differently: it actually **executes the GTE instruction's real side effects** even while dispatching the interrupt against the *following* instruction, rather than deferring — its own source comment explains this matches real hardware's actual (unusual) behavior: a GTE op, once dispatched, can't be aborted by an incoming interrupt the way a normal instruction can.
-- *PCSX-Redux*: interrupts checked lazily, once per resolved branch (`branchTest()`), not per instruction. Handles the GTE-in-delay-slot case the **same way this project does** — defers the whole IRQ by one instruction rather than executing the GTE op through it, citing the identical documented real-hardware quirk.
-
-**Gap / notable design split**: this project's interrupt-check frequency (every instruction) is the most eager/frequent of the three — arguably closer to real hardware (Cause.IP2 is a genuinely live wire, not a latch) at negligible interpreter cost, not a gap. The GTE-in-delay-slot handling is a genuine **3-way split**: this project and PCSX-Redux both defer the interrupt outright; DuckStation instead lets the GTE op execute and interrupts the instruction after. Both approaches are independently justified by their respective authors as matching real hardware — worth flagging as an unresolved nuance rather than picking a side without a documented, reproducible test case to arbitrate it. No exception-priority table exists in any of the three (none of them need one, given how exceptions are raised).
-
-**Priority**: Low — both documented approaches (defer vs. execute-through) claim hardware fidelity; this project already matches one of the two references exactly (PCSX-Redux), and there's no known failing test distinguishing them.
-
-**Recommended action**: No change recommended without a concrete failing test case that would distinguish "defer" from "execute-through" behavior. Worth a one-line code comment noting the DuckStation-vs-PCSX-Redux split exists, so a future debugging session doesn't have to rediscover it from scratch.
-
-### 1.4 Instruction cache
-
-**Current state**: Direct-mapped, 256 lines × 4 words (4KB total), tag = `paddr&gt;&gt;12`, per-word valid bits. KSEG1 fully bypasses the cache (direct bus read). Implements the documented real-hardware **partial-line-fill quirk**: a miss on word N fills words N..3 of the line, explicitly leaving words 0..N-1 marked invalid (not a full-line refill from word 0). `SR.IsC` (cache isolation) is handled only on the **store** side (writes redirect to icache-line invalidation instead of RAM) — the fetch path has an explicit `TODO` acknowledging isolation isn't honored there. `SR.SwC` (cache-swap) is not implemented anywhere.
-
-**Reference pattern**:
-- *DuckStation*: same 256-line × 4-word (16-byte) direct-mapped model, **same partial-fill-from-triggering-word quirk** (`GetICacheFillTagForAddress`'s offset-dependent `invalid_bits[]` table matches this project's design almost exactly) — strong structural alignment, not a gap. Additionally has a **stale-icache self-check safety net**: on hitting what looks like a reserved/illegal instruction encoding, it re-reads the same address directly from RAM and compares against the cached value; if they differ (the cache went stale, e.g. from a missed invalidation on a self-modifying-code write) it patches the cached instruction and re-executes rather than incorrectly raising `ReservedInstruction`. This project has no equivalent self-healing check.
-- *PCSX-Redux*: a coarser model — only active for KUSEG/KSEG0 (not KSEG1, similar bypass), and **fills the entire 4-word line on any miss** (no partial-fill-from-offset quirk) — simpler than both this project's and DuckStation's more hardware-accurate partial-fill behavior.
-
-**Gaps**:
-1. `SR.SwC` unimplemented — appears to also be absent/unmentioned in both references' interpreters (real hardware SwC is obscure, essentially unused by retail software) — not a differential gap versus either reference, a shared omission. — **Low**
-2. `SR.IsC` not honored on the fetch path (only stores) — TODO already flagged pre-existing. — **Medium**
-3. No stale-icache self-healing check (DuckStation has one, this project and — per the research — PCSX-Redux do not) — a resilience/diagnostic gap: if this project's icache ever goes stale due to a missed store-side invalidation, it has no fallback and would either execute wrong cached instructions or raise a spurious `ReservedInstruction` exception instead of self-correcting.
-
-**Priority**: Medium — item 2 was already tracked; item 3 is a new, cheap, purely-defensive addition worth doing given today's unexplained-corruption context (it would make certain classes of stale-cache bugs *fail loudly and self-correct* instead of silently misbehaving).
-
-**Recommended action**: Add IsC handling to the fetch path (`cpu_icache_fetch`) matching the existing store-side behavior. Add a DuckStation-style reserved-instruction re-verify-against-RAM safety net in `cpu_icache.c` — cheap, mechanical, and directly relevant to ruling out icache staleness as a contributor to the open corruption bug.
-
-### 1.5 LLE vs HLE BIOS execution — exhaustive
-
-**Current state — confirmed, exhaustively, across all three tables (A0/B0/C0)**: every syscall hook in `cpu_bios.c` is a pure side-channel snoop. `handle_a0_syscall` has a `bool` return type but **no code path in it ever returns `true`** — meaning `op_jr`'s `if (hle) { ...; return; }` short-circuit is structurally dead for the A-table; A0 calls always fall through to executing the real BIOS code at address `0xA0` itself. `handle_b0_syscall`/`handle_c0_syscall` are `void`-returning and *structurally cannot* HLE even in principle. Explicit source comments confirm this is deliberate: *"Do NOT set `cpu->regs[2]` — BIOS executes its real function after this hook"* and *"LLE: Do NOT fake return values."* The only side effects these hooks have: TTY-line-buffer accumulation (shared with the separate EXP2+0x23 DUART capture path) and debug-log rate-limiting statics — never CPU-visible state. Named-function coverage is good for the standard C-library range (0x00-0x3F) and known BIOS internals (0x40-0x72, 0x78-0x80), with real gaps in the "undocumented internals" ranges (0x73-0x77, 0x79-0x7B, 0x81-0xA7, 0xA9-0xBB, 0xBD-0xBF fall through to `"unknown"`) — cosmetic/logging-only, since LLE means the real code executes regardless of whether a friendly name exists for it. Separately, `pcdrv.c` (host filesystem passthrough via `BREAK` codes 0x101-0x107) is fully implemented but — per the original gap-analysis §13 — never wired into `op_break`, so it's dead code from a reachability standpoint.
-
-**Reference pattern**:
-- *DuckStation*: LLE-only, confirmed no HLE-BIOS mode exists at all (no `HLEBios`/`hle_bios` anywhere in source) — cannot boot without a real dumped BIOS image. Same TTY-tap-only philosophy for A0/B0 (`HandleA0Syscall`/`HandleB0Syscall`), same "real function still executes after the hook" model. Has a **FastBootPatch** mechanism this project entirely lacks: after loading the real BIOS ROM into memory but *before* execution starts, it patches ~20 bytes at the shell-entry (or shell-decompressor, for the "Type 1B" optimization) routine with a hand-assembled 5-instruction stub that flips the display-enable MMIO bit and returns immediately — skipping the logo animation/shell menu while leaving the low-level kernel bootstrap that calls into it completely intact. The patch offset is found via a byte-pattern search (tolerant of BIOS-revision code-layout shifts) with a fixed-offset fallback per two known "Type1"/"Type2" BIOS structural variants. This is a pure boot-speed optimization — zero functional/correctness effect, reloads the pristine BIOS from disk to "un-patch" when fast-boot is toggled off. Also has PCDrv, functionally identical in scope/design to this project's own unwired `pcdrv.c` (same `BREAK`-code-range interception concept), gated behind `pcdrv_enable`, hooked directly into `RaiseBreakException` — i.e. **actually wired**, unlike this project's equivalent.
-- *PCSX-Redux*: dual-path — a real Sony BIOS dump is the default/primary LLE path (auto-detected/named via a CRC32 lookup table of known retail dumps), with **OpenBIOS** as an automatic fallback when no BIOS file is configured or found. OpenBIOS is confirmed to be a **genuine clean-room LLE reimplementation** — real cross-assembled MIPS-I machine code, real A0/B0/C0 vector installation at the canonical fixed addresses, real exception-vector setup, a real `SYSTEM.CNF`-driven CD-boot protocol — not a C-level HLE shim; it's indistinguishable from a real BIOS dump at the instruction-execution level, and is itself the target of the same interpreter/JIT CPU core covered in 1.1/1.6. Has the same PCDrv-equivalent concept as DuckStation (BREAK 0x101-0x107, host filesystem passthrough, actually wired) and the same TTY-tap-only A0/B0/C0 interception philosophy as both DuckStation and this project.
-
-**Gaps**:
-1. No FastBootPatch / boot-speed-skip mechanism at all — every boot runs the full logo+shell animation at real instruction-count cost. Pure dev-iteration-speed QoL gap, zero correctness impact. — **Low**
-2. `pcdrv.c` fully implemented but never wired into `op_break` — both references have the equivalent feature *actually reachable*. Already tracked in the original doc, §13 and roadmap Phase 4 — cross-referenced here, not duplicated. — **Medium** (per §13)
-3. No alternative-BIOS (OpenBIOS-equivalent) path — not really a gap so much as a deliberate scope difference: this project is designed to always require a real BIOS dump, matching DuckStation's model rather than PCSX-Redux's dual-path one. Stated neutrally, not a deficiency.
-4. A0-table naming coverage gaps in undocumented ranges — cosmetic/logging-only, zero functional effect under LLE. — **Low**
-
-**Recommended action**: No urgent action. If boot-iteration speed becomes a real friction point during future debugging sessions, DuckStation's byte-pattern-search-with-fallback-offset technique is directly portable (same "patch loaded ROM before execution, reload pristine copy to undo" pattern). The `pcdrv.c` wiring gap is already scheduled (Phase 4).
-
-### 1.6 Recompiler / JIT — the largest structural gap, confirmed absent, documented in full
-
-**Current state**: Confirmed via exhaustive grep (`recompiler|dynarec|jit|codegen|dynamic.?recompil`, zero hits in `src/`/`include/`) — **this project is interpreter-only**, with no recompiler, JIT, or dynamic-recompilation code anywhere. This is a deliberate, correct, and appropriate scope boundary for a project at this stage — a JIT is a large, separate undertaking, not an incremental fix. Documented here in full per the explicit instruction not to skip it, not as a near-term action item.
-
-**Reference pattern** (both references have full JITs; summarized, not exhaustively — see the underlying research for complete detail if this is ever picked up):
-- *DuckStation* (x64/ARM32/ARM64/RISC-V64/LoongArch64 backends): no separate IR data structure — single-pass MIPS-to-host-assembly compilation with aggressive compile-time constant propagation (folds entire instruction sequences when operands are compile-time-known, including resolving branch targets with zero emitted comparison code). Two-level block-lookup LUT (code-pointer + block-metadata), linear-scan-ish register allocator using the block's precomputed backward-liveness data as an eviction heuristic, an optional delay-slot-instruction-reordering scheduling optimization (semantically inert, since delay-slot order is ISA-defined either way). **Two independent self-modifying-code detection mechanisms**: host-page mprotect-based fault-trapping as the fast path, auto-promoting a repeatedly-thrashing page to an explicit per-execution memcmp guard, plus a separate per-block compile-thrash counter that permanently demotes pathological blocks back to pure interpretation. Block linking with self-healing guards (a linked jump validates the target is still the expected compiled code before committing, falling back to the dispatcher if a stale link is detected). Two fastmem strategies (direct address-space memory-mapping vs. LUT-indirection) with a **self-patching backpatch-on-first-fault mechanism** and per-faulting-PC negative caching, so only genuinely MMIO-touching instructions ever pay a checked-call cost. Exceptions/branches from JIT'd code call the **same shared C++ exception-raising function** the interpreter uses — no duplicated exception logic between backends.
-- *PCSX-Redux* (x64 primary, AArch64 secondary): similar direct-codegen-no-IR approach and constant folding. Simpler memory-access codegen — compile-time-constant addresses resolve to a direct host pointer once, otherwise a real function call through the same shared `Memory` class the interpreter uses (no fastmem/backpatch system, no page-fault-trap SMC detection — invalidation is externally triggered by the memory-write path at block-pointer granularity instead). **Sophisticated two-tier cross-block load-delay handling on the x64 backend specifically**: blocks compile fast-but-unsafe by default, and only speculatively-recompile themselves into a slower-but-correct "full load delay emulation" mode when a cross-block load-delay hazard is actually detected at runtime — and this entire mechanism is **confirmed absent on PCSX-Redux's own AArch64 backend**, a real, cited asymmetry between that project's two JIT backends, itself evidence that cross-block load-delay correctness is a genuinely easy corner to cut. GTE handling in the JIT is also selectively scoped: only `AVSZ3`/`AVSZ4` are actually JIT-compiled; every other GTE math opcode falls back to a real function call into the same shared interpreter GTE implementation used everywhere else.
-- **PGXP** (Parallel/Precision GXP — shadow float-precision tracking to reduce vertex "wobble" from PS1's native 16-bit fixed-point GTE math): both references implement a full shadow system (float-shadowed GPR/CP0/GTE registers, shadow memory, vertex cache), wired into the interpreter via compile-time template dispatch (DuckStation) or dispatch-table-swap (PCSX-Redux), and into their respective JITs via inline runtime-call injection — DuckStation's JIT toggles PGXP by discarding and recompiling the entire code cache; PCSX-Redux's JIT **explicitly refuses CPU-level PGXP** (`throw` if enabled) since only its GTE-level shadow tracking (baked into the always-shared GTE math implementation) works under its JIT. This project has zero PGXP at any level.
-
-**Gap**: total absence of JIT/recompiler infrastructure, and total absence of PGXP. Both are large, self-contained, independently-addable subsystems — neither blocks correctness of the current interpreter-only design.
-
-**Priority**: Low near-term (JIT: large undertaking, no correctness need; PGXP: cosmetic upscaling-quality feature, and this project's renderer doesn't do internal-resolution upscaling per the original §8, so there's nothing for it to improve yet) — but explicitly named, not silently omitted, per this audit's scope.
-
-**Recommended action**: Not scoped for near-term work. If ever pursued: a JIT would be a multi-session undertaking on its own, best modeled after PCSX-Redux's simpler no-fastmem, shared-Memory-class-call design (more portable to this project's existing bus architecture than DuckStation's fastmem/backpatch machinery) rather than attempted from DuckStation's more elaborate approach. PGXP has no prerequisite value until/unless a higher-internal-resolution rendering mode is ever added to `src/gpu/renderer.c`.
+**Speed**: real time is kept with the debug interface closed. With the log windows and inspector
+panels open under WSL it is not, and audio then underruns. A "85-95% of real time" figure recorded
+earlier was measured with stderr logging and per-vblank Lua probes running and has been withdrawn —
+it described the instrumentation, not the emulator.
 
 ---
 
-## 2. Bus / Interconnect / Memory Dispatch
+## 1. CPU / interpreter core
 
-**Files**: `src/core/bus.c` (811L), `src/core/interconnect.c` (162L), `include/interconnect.h` (320L).
+**Files**: `cpu_instructions.c` (978L), `cpu_bios.c` (501L), `cpu_execution.c` (270L),
+`cpu_disasm.c` (224L), `cpu_icache.c` (120L), `cpu_decode.c` (94L), `cpu_exceptions.c` (87L),
+`cpu_init.c` (66L), `cpu_registers.c` (44L).
 
-**Current state**: `bus.c` uses a 256-entry function-pointer dispatch table (`g_hw_read[256]`/`g_hw_write[256]`, indexed by `(phys>>4)&0xFF`) for the `0x1F801000-0x1F801FFF` hardware register window, built once at init.
+**State**: interpreter with function-pointer dispatch (`s_op_table[64]` + `s_special_table[64]`).
+Register file is double-buffered per instruction (`regs` in, `out_regs` out) and committed at the end
+of the step, which is what makes the load-delay slot and the branch-delay slot fall out naturally
+rather than needing special cases. Branch delay is explicit (`branch_taken`/`next_pc`), and the
+delay-slot flag feeds Cause/EPC on exceptions. Exceptions go through one entry point that pushes the
+SR mode stack and picks the vector from BEV. Interrupts are checked every instruction.
 
-**Reference pattern**:
-- *DuckStation*: page-granularity (4KB) function-pointer LUT indexed by `[access size][read/write][page]`, not a switch — plus a **separate parallel LUT for cache-isolated mode**, swapped wholesale rather than branched per-handler. HW region dispatches a second level to per-peripheral handler classes.
-- *PCSX-Redux*: **512-entry LUT indexed by `address >> 16`** (64KB granularity) gives O(1) direct pointer access for RAM/BIOS/EXP1 mirrors across KUSEG/KSEG0/KSEG1 with zero branching — flagged by that research pass as the single highest-value portable pattern in their whole codebase for a C99 bus. HW register *storage* is centralized in `Memory`; HW register *behavior* is a thin switch-based trampoline in a separate module — a clean storage/behavior split.
+`downcount` drives the event scheduler; MULT/DIV set a completion tick that MFHI/MFLO stall against,
+and GTE ops do the same through `gte_completion_tick`. I-cache is direct-mapped, 256 lines × 4 words,
+per-word valid bits, KSEG1 bypassing, invalidation on isolated-cache stores.
 
-**Gaps**:
-1. `interconnect.c` contains a **private, parallel event system** — an 8-slot `CdromEvent` array — entirely separate from the real `event_scheduler.c`. Two independent scheduling mechanisms coexist. (Full detail under §6 Event Scheduler — this is the same root issue, cross-referenced here because the array physically lives in this file.) — **Critical**
-2. Hard-coded RAM address "WATCHPOINT" ranges baked directly into `interconnect_load32/16/8` and the matching stores — game-specific debug instrumentation in the hot memory-access path, while a real `Debugger` watchpoint mechanism (`debugger_check_read/write_watchpoint`) already exists and goes unused by `bus.c`. — **Medium**
-3. ✅ **RESOLVED (Phase 0)** — `interconnect_check_bios_boot()` — dead one-line no-op stub (`(void)inter;`). — was **Low**
-4. ✅ **RESOLVED (Phase 0)** — `interconnect.h` defines `TIMERS_START`/`TIMERS_SIZE`/`TIMERS_END` **twice** (copy-paste duplication within the same header, ~lines 28-30 and 67-69). — was **Low**
-5. Top-level KUSEG/KSEG0/KSEG1 address routing structure not confirmed as LUT vs switch/if-chain during this pass — worth a direct read during the actual refactor to compare against PCSX-Redux's 64KB-granularity LUT pattern. — **flag for verification, not a confirmed gap**
+BIOS execution is LLE end to end: the A0/B0/C0 hooks in `cpu_bios.c` only observe (TTY capture,
+call tracing) and never fake a return value.
 
-**Recommended action**: Remove hard-coded WATCHPOINT ranges from the hot path, route through the existing `Debugger` watchpoint mechanism instead (still open, Phase 3). ~~Fix the duplicated `TIMERS_*` defines.~~ ~~Delete the dead `interconnect_check_bios_boot()`.~~ Both done. Defer top-level LUT restructuring to the DMA/Bus refactor phase (Phase 3) pending direct-read verification.
+**Open**:
+1. **Memory-timing cost model is shipped disabled** — per-instruction BIOS-ROM/RAM access costs were
+   implemented and then parked after they caused a CD-command hang that was never root-caused. Until
+   it is re-enabled, instruction timing is uniform and slightly optimistic.
+2. **Single-slot GPR load delay** — one pending load is tracked. Back-to-back loads targeting the
+   same register in consecutive instructions is the case that can differ from hardware. No live bug
+   is currently attributed to it.
+3. No JIT and no PGXP. Both are deliberate: the interpreter is the reference implementation for this
+   project, and the renderer does not upscale internal resolution, so PGXP would have nothing to
+   improve.
+
+**Priority**: Low. Nothing here blocks software.
 
 ---
 
-## 3. Interrupt Controller
+## 2. Bus / interconnect / memory dispatch
 
-✅ **RESOLVED (Phase 0)** — `src/interrupt_controller.c` + `include/interrupt_controller.h` deleted; `interconnect_debug_check_irq_status()` deleted. Section kept below as historical record of the finding.
+**Files**: `bus.c` (1040L), `interconnect.c` (108L), `system.c` (60L).
 
-**Files (live)**: `src/core/bus_irq.c` (51L) + IRQ fields embedded directly in the `Interconnect` struct.
-**Files (dead, now deleted)**: ~~`src/interrupt_controller.c` (49L) + `include/interrupt_controller.h` (37L)~~.
+**State**: hardware register space `0x1F801000-0x1F801FFF` is routed through a 256-entry
+read/write dispatch table indexed by `(phys >> 4) & 0xFF`, so adding a device is a table entry and a
+handler, not another `if` in a chain. RAM, scratchpad, BIOS ROM, EXP1/2, MEMCTRL and the cache-control
+register all have real backing storage. Sub-word (byte/halfword) accesses to the DMA register block
+merge into the containing word instead of being dropped, with DICR's write-1-to-clear lane excluded
+from the merge — that one mattered in practice, since the BIOS shell enables DMA-completion
+interrupts with a byte write to `DICR+2` (`7172960`).
 
-**Original finding — confirmed dead code**: `src/interrupt_controller.c`/`.h` implement a self-contained `InterruptController` struct with a full `init/read_status/read_mask/write_status/write_mask/set_line/has_pending` API. It is **not referenced in the Makefile** (absent from every source list, including the test build) and **not included anywhere** except by itself. The actually-used implementation is entirely different: `Interconnect` holds `irq_status`/`irq_mask`/`irq_line_state` as plain fields, operated on by free functions in `bus_irq.c` (`interconnect_set_irq_line`, `interconnect_request_irq`, `interconnect_clear_irq`, `interconnect_trigger_cdrom_irq`). I_STAT/I_MASK register I/O is handled directly in `bus.c`. The two implementations even carried **duplicate, independently-maintained IRQ-number enumerations** (`IRQNumber` enum in the dead header vs `#define IRQ_VBLANK 0..IRQ_PIO 10` macros in the live one) that could have drifted if either was edited in isolation.
+`system.c` owns "run one frame": it runs the machine until the VBlank event marks the frame boundary.
+`main.c` is a host shell (SDL, GL context, audio device, threads, frame cap).
 
-Also dead (now deleted): `bus_irq.c:50` — `interconnect_debug_check_irq_status()` was an always-empty function, declared but never called.
+**Open**: none tracked.
 
-**Reference pattern** (DuckStation `interrupt_controller.cpp`, 119L — deliberately minimal): I_STAT/I_MASK plus one extra hidden register, `s_interrupt_line_state`, tracked separately from the latched status register — this is what implements true edge-triggering: the STAT bit is set only on a 0→1 transition of the line (not on line-drop), matching real hardware where a device asserting-then-deasserting between polls still latches. `UpdateCPUInterruptRequest()` is a single push notification computed after every STAT/MASK read-modify-write, not polled per cycle. **Takeaway**: DuckStation's reference is *not* structurally richer than a well-implemented edge-triggered I_STAT/I_MASK — the live implementation (`bus_irq.c` + `Interconnect` fields tracking `irq_line_state` separately) already matches this shape. The gap here was pure dead code, not missing structure.
+---
 
-**Priority**: was **Critical** — not because the live implementation was wrong, but because the dead duplicate was a navigation hazard during a refactor (easy to edit the wrong file, or assume both are live).
+## 3. Interrupt controller
 
-**Recommended action**: ~~Delete `src/interrupt_controller.c` and `include/interrupt_controller.h` entirely. Delete the dead `interconnect_debug_check_irq_status()`.~~ Done. Still open: explicitly verify `interconnect_set_irq_line`'s edge-detect semantics against DuckStation's "latch only on 0→1 transition, ignore line-drop" rule as a correctness check (read of `bus_irq.c` during Phase 0 shows this already matches — treat as confirmed-by-inspection, not yet regression-tested).
+**Files**: `bus_irq.c` (55L) plus the I_STAT/I_MASK fields on `Interconnect`.
+
+**State**: edge-triggered. `interconnect_set_irq_line(inter, IRQ_x, state)` latches I_STAT on a
+low→high transition and keeps a per-source line state so a level that is already high cannot latch
+twice. Every documented source is wired: VBlank, GPU, CDROM, DMA, the three timers, SPU, and
+PAD/memory-card.
+
+Two bugs found here are worth remembering because both produced "the machine is alive but one
+subsystem is deaf" symptoms: the GPU line had no raise site at all until `18e0732`, and the DMA line
+could be left logically high forever by a DICR-only acknowledge, swallowing every later completion
+(`7923c52`).
+
+**Open**: none tracked.
 
 ---
 
 ## 4. DMA
 
-**Files**: `src/core/dma.c` (217L), `include/dma.h`.
+**Files**: `dma.c` (258L), plus the transfer implementations reached from `bus.c`.
 
-**Current state**: 7-channel `DmaChannel channels[7]` array, complete register I/O (MADR/BCR/CHCR, DPCR, DICR) for all channels. Actual transfer wiring (in `interconnect_perform_dma`, `bus.c`):
+**State**: all 7 channels with full register I/O. Linked-list transfers (GPU ch2) are sliced across
+scheduled events, since the node chain is built before the kick and is not rewritten underneath us.
+Block/`REQUEST` transfers read their source at kick time — deferring the read is wrong whenever the
+guest refills its staging buffer immediately after kicking, which is exactly what the FMV player does
+(`7bf783e`). Completion interrupts flow through one function, `dma_update_irq()`, which recomputes
+DICR's master flag and acts only on the transition; DICR writes call it too, so a game that enables
+interrupts after writing CHCR still gets its completion.
 
-| Ch | Device | Status |
-|---|---|---|
-| 0 | MDEC in | ✅ wired |
-| 1 | MDEC out | ✅ wired |
-| 2 | GPU | ✅ wired (sliced LL + REQUEST/MANUAL) |
-| 3 | CDROM | ✅ wired (to-RAM only — correct, matches real HW) |
-| 4 | SPU | ✅ wired both directions |
-| **5** | **PIO** | ❌ falls to `default:` — silently no-ops |
-| 6 | OTC | ✅ wired (special-cased in `bus.c`) |
+A kick that arrives while a slice is in flight is drained first on the GPU channel rather than being
+dropped.
 
-`chcr_unknown_rw` bits 29-30 explicitly not implemented (commented out, undocumented/unused on real hardware). GPU DMA slicing logic lives in `bus.c` rather than `dma.c` — mild separation-of-concerns issue, not a functional gap.
+**Open**:
+1. **MDEC ch0/ch1 still drop a kick that arrives mid-slice.** They gate on each other's FIFO
+   readiness, so draining one synchronously deadlocks (tried, reverted — it hangs at the first FMV
+   frame). The fix belongs in the MDEC path itself: queue the kick and run it when the FIFO frees up.
 
-**Reference pattern**:
-- *DuckStation*: channels as `std::array<ChannelState>` (shared POD struct); behavior is compile-time specialized per channel via templates, with a static array of pre-instantiated function pointers giving O(1) dispatch (not a per-instance callback member). Full bitfield unions for DPCR/DICR with `UpdateMasterFlag()`/`ShouldSetIRQFlag()` helpers implementing the correct OR-reduction logic. Linked-list/request/manual modes handled inside one templated `TransferChannel<channel>()` via a `SyncMode` branch.
-- *PCSX-Redux*: no unified per-channel struct — channel state lives as raw bytes in the shared HW register block, accessed via templated getters. Behavior is scattered by ownership: channels 0-3 are one-line forwards to the owning module's `dma()` method; channels 4 (SPU) and 6 (OTC) are standalone free functions because they lack a natural owning object. **Notable pattern**: a *generic* linked-list chain-walker (used by GPU/OTC modes) includes a loop-guard counter and a small address history (`usedAddr[3]`) to detect and break infinite loops in malformed linked lists — shared by all channels rather than duplicated.
-
-**Gaps**:
-1. DMA channel 5 (PIO/Expansion) has zero data path — register access works, no transfer logic. Real hardware rarely uses this, but it currently fails silently rather than being documented as an intentional gap. — **Medium**
-2. Not confirmed whether the GPU/OTC linked-list walker has an infinite-loop guard matching PCSX-Redux's defensive pattern — worth a direct check; a malformed linked list could hang the emulator without one. — **flag for verification**
-3. `chcr_unknown_rw` bits 29-30 unimplemented. — **Low** (undocumented on real hardware)
-
-**Recommended action**: Either implement a minimal PIO DMA passthrough or explicitly log+document channel 5 as "not implemented, no known title requires it" instead of silent fallthrough. Verify (and if missing, add) a loop-guard on the GPU/OTC linked-list walker.
+**Priority**: Medium — no current symptom, but it is a known-lossy path.
 
 ---
 
 ## 5. Timers
 
-**Files**: `src/core/timers.c` (466L), `include/timers.h`.
+**Files**: `timers.c` (462L).
 
-**Current state**: Per-timer clock source selection (sysclock/dotclock/hblank/div8) is correctly wired, including the div8/dotclock fix already documented in this repo's history. IRQ generation (target/overflow, one-shot vs. repeat, pulse vs. toggle mode) is implemented per-tick in `timers_step`. Two parallel timing mechanisms coexist: a cycle-downcount polling path (`timers_step`, called each main-loop chunk, does correct per-tick clock-ratio math) and a separately-scheduled event path (`timers_schedule_next_event`/`timer_event_handler`) that re-derives its own deadline independently. Includes a PCSX-ReARMed-attributed BIOS-boot compatibility hack (`timer_force_bios_boot_config`) — see dead-code note below, it's actually unreferenced.
+**State**: timers are scheduled events with a **derived counter** — the value is computed on read as
+`(cpu_cycle_counter - cycle_start) / rate`, so there is no per-tick loop and no fractional
+accumulator, and a game polling a counter always sees it advance. IRQ and reset fire from the
+scheduled event through one shared path; register writes, reads and gate changes catch the timer up
+on demand. All four sync modes genuinely gate, reset or pause. Clock sources (sysclk, dotclock,
+hblank, div8) derive their rates from the GPU's active video mode rather than fixed NTSC constants.
 
-**Correction to previous version of this section**: previously described as "Full 3-timer model with sync modes." A dedicated pass this session (2026-07-15) found sync modes are *decoded*, not *implemented* — see Gap below. This is a materially different, more serious finding than the prior text implied.
+**Open**:
+1. **Timer0's gate (hblank) is not wired** — the gating logic is generic and ready, but the CRTC
+   model only ticks once per VBlank, so there is no per-scanline hblank signal to feed it. Blocked on
+   §8's CRTC item.
 
-**Gap — sync modes decoded but never applied (2026-07-15, new)**: `timer_update_internal_state` (`timers.c:44-45`) parses `sync_enable`/`sync_mode` out of the mode register into the `Timer` struct, but a repo-wide grep confirms **neither field is read anywhere else in the codebase**. None of the 4 documented PS1 sync modes (PauseWhileGateActive / ResetOnGateEnd / ResetAndRunOnGateStart / FreeRunOnGateEnd) gate, reset, or pause any counter — they free-run unconditionally regardless of the Sync Enable bit. — **Critical** (games commonly use Timer1/HBlank-gated or Timer0/dotclock-gated sync modes for frame pacing and raster effects; both references fully implement all 4 modes, see Reference pattern)
-
-**Gap — dual timing paths can disagree (2026-07-15, new)**: `timers_schedule_next_event` (`timers.c:338-352`) computes its wakeup deadline from `t->rate`, a field set once at init (Timer2=8, others=1, `timers.c:89`) and **never updated when the mode register's clock source changes at runtime** — unlike `timers_step`'s own per-tick math, which reacts to clock-source changes immediately. The event path also only models ×1/÷8 sysclock ratios, ignoring dotclock/hblank ratios entirely. In practice `timers_step`'s own IRQ-firing tends to win the race via the `already_pending` dedup (`timers.c:304-305,410-411`), but timer IRQ latency is consequently not deterministic and depends on which path happens to reach the threshold first. — **High**
-
-**Gaps (carried forward)**:
-1. `timers_handle_setrcnt()` (BIOS `SetRCnt` syscall handler) is a **pure stub** — body is just a TODO comment, does nothing. `SetRCnt` is a real, occasionally-used BIOS syscall; silently no-op-ing it can desync games that call it expecting side effects. — **High**
-2. `timers_calculate_frame_cycles()` is hard-coded to NTSC 60Hz — no PAL support threaded through, despite `VMode`/`Pal` already existing in GPU state (TODO comment present at the call site). Blocks correct frame timing for any PAL-region BIOS/game. — **High**
-3. **Dead/unreferenced functions (2026-07-15, new)**: `timer_force_bios_boot_config()` (`timers.c:376-395`, fully defined "BIOS boot helper," zero call sites — the "current state" paragraph above previously implied this was active), `timers_update()`/`timers_schedule_next()` (declared `timers.h:141-142`, **no definitions anywhere in the codebase**), `timers_calculate_frame_cycles()`/`timers_calculate_line_cycles()` (defined, never called), `timer0_to_x_coord()` (static, never called). — **Low**
-4. ✅ **RESOLVED (Phase 0)** — Six `bios_init_timer`/`bios_get_timer`/`bios_enable_timer_irq`/`bios_disable_timer_irq`/`bios_restart_timer`/`bios_ChangeClearRCnt` functions were explicit dead placeholder stubs, vestigial from an earlier HLE-era API, explicitly commented as "not used by BIOS itself." — was **Low**
-
-**Reference pattern**:
-- *DuckStation*: counters as `std::array<CounterState>`; a **single shared TimingEvent** drives all 3 for sysclk-sourced ticking, with timer 2 accumulating a `/8` carry. `CounterState.gate`/`counting_enabled` are explicit fields; `SetGate()` implements all 4 sync-mode edge behaviors precisely (reset-on-gate-end zeroes the counter *while* the gate is active; reset-and-run-on-gate-start zeroes it *at* the gate-active edge and only counts while gated; free-run-on-gate-end permanently clears `sync_enable` once the gate first goes inactive), and `UpdateCountingEnabled()` recomputes `counting_enabled` from `sync_mode`+`gate` on every relevant state change — this is the piece with no equivalent anywhere in this project. Reschedule distance recomputed via `GetTicksUntilNextInterrupt()` (min over all counters) after any state change — push-model. External clock sources (dotclock, hblank) are **not owned by the timer module** — GPU pushes ticks/gate state directly into Timers (cross-module push, not polling), cross-synchronized via `InvokeEarly()`.
-- *PCSX-Redux*: single `Rcnt[4]` array (index 3 = internal hsync pseudo-counter for CRTC timing, not exposed to the guest). Gating is derived live from the mode-register bits rather than cached state (`isGateEnabled()`/`gateSyncMode()`), with `update()`'s per-index switch implementing all 4 PS1 gate modes explicitly, including the special Timer-2-has-no-gate-input case (its sync bit instead selects a "disable counting in sync modes 0/3" behavior — a real hardware quirk, verified against SCPH-5501 per the source comment). **Lazy virtual-clock model**: counters are not incremented per cycle, they're computed on-demand as `(cycle - cycleStart) / rate` — this structurally avoids this project's dual-path-disagreement problem since there is only one authoritative rate computation. `recalculateRate()` handles GPU-resolution-dependent dot-clock rate. SPU audio-frame pacing and SIO1 polling are piggybacked into the same per-scanline update — Counters ends up as a general event pump, not just a timer peripheral.
-
-**Recommended action**: Implement sync-mode gating first (highest-impact, currently silently absent) — port DuckStation's `SetGate`/`UpdateCountingEnabled` pattern (cleanest to adapt to C: a `counting_enabled` bool recomputed on mode-write and on every gate-transition event, keyed by the `sync_mode` field already being parsed but unused). Then either delete the redundant `timers_schedule_next_event` path in favor of the single polling path, or make it derive its rate live from current mode state instead of a stale cached `t->rate` — the two-path disagreement is itself evidence one of them is unnecessary. Implement `SetRCnt` per PSX-SPX spec — still open, Phase 3. Thread the GPU's `VMode`/`Pal` flag into `timers_calculate_frame_cycles()` — still open, Phase 3. Delete the four confirmed-dead functions. ~~Delete the dead `bios_*` stub functions.~~ Done.
+**Priority**: Medium, and it is really a GPU/CRTC task.
 
 ---
 
-## 6. Event Scheduler
+## 6. Event scheduler
 
-**Files**: `src/core/event_scheduler.c` (193L), `include/event_scheduler.h`.
+**Files**: `event_scheduler.c` (232L).
 
-**Current state**: ✅ **RESOLVED (Phase 1)** — see below. Originally 13 event types (`EVQ_VBLANK`, `TIMER0-2`, `DMA_GPU`, `DMA_CDROM`, `DMA_SPU`, `DMA_OTC`, `SIO`, `CDROM`, `GPU`, `MDEC`, `SPU`), bitmask-pending + target-cycle-array design, dispatched from the CPU's `downcount` mechanism. Now 12 types after Phase 1 (3 dead removed, `EVQ_CDROM` split into 3 real ones — net -3+2).
+**State**: single scheduling authority. Event types: VBlank, the three timers, GPU DMA, CDROM DMA,
+SIO, three CDROM events (command/first response, drive tick, second response), MDEC and SPU.
+Scheduling comparisons use signed deltas so they stay correct across the 32-bit cycle-counter wrap
+(~127 s).
 
-**Original finding — the single most important cross-cutting gap in the codebase.** `interconnect.c` maintained a **second, entirely private event system** — a hand-rolled 8-slot `CdromEvent` array (`interconnect_schedule_event`/`interconnect_check_cdrom_events`) — completely separate from this "real" scheduler. `evq_handle_dma_cdrom` and `evq_handle_cdrom` in `event_scheduler.c` were both explicit no-op passthroughs, with comments noting the real logic lived in the CDROM subsystem's own private array. Meanwhile `EVQ_DMA_SPU`, `EVQ_DMA_OTC`, and `EVQ_GPU` (non-DMA) mapped to `NULL` handlers — declared/schedulable but silent no-ops if ever fired (SPU is intentionally handled by its own dedicated thread instead — fine — but the DMA_SPU/DMA_OTC/GPU slots were just dead enum values). ~~Stale comments ("Event handler stubs for all timer events" / "Example Event Handlers (Stubs)") are misleading now that most of the table is production code.~~ ✅ **RESOLVED (Phase 0)** — comments updated to reflect production status.
+`EVQ_SPU` drives SPU sample generation in 64-sample batches (§11). `EVQ_DMA_CDROM` is intentionally
+inert and should stay documented rather than "fixed": the CDROM transfer itself is synchronous, and the
+event exists only as a completion marker. `EVQ_MDEC` resumes sliced MDEC DMA.
 
-**✅ Phase 1 migration — what actually happened**: `interconnect_schedule_event`/`interconnect_check_cdrom_events`/`CdromEvent[8]` deleted entirely from `interconnect.c`/`.h`. The per-instruction poll call (`interconnect_check_cdrom_events(cpu->inter)`, step 10 of every single `cpu_step()`, `cpu_execution.c`) is gone — CDROM timing now rides the same downcount-gated dispatch as everything else. `EventQueueType` enum: `EVQ_CDROM` (non-DMA, previously a single dead-end no-op slot) replaced with three real types — `EVQ_CDROM_COMMAND`, `EVQ_CDROM_DRIVE`, `EVQ_CDROM_SECOND_RESPONSE` — matching CDROM's own 3-timer internal shape (`cdrom_schedule_command_event`/`_drive_event`/`_second_response_event` in `cdrom.c`, unchanged public signatures). The 3 truly-dead slots (`EVQ_DMA_SPU`, `EVQ_DMA_OTC`, `EVQ_GPU` non-DMA — confirmed via grep: never scheduled anywhere in the codebase, not just NULL-handled) were deleted rather than documented, since nothing referenced them. `cdrom.c`'s 3 static callbacks (`command_event_callback`/`drive_event_callback`/`second_response_callback`, signature `(void*, uint32_t)`) became 3 public tick functions (`cdrom_command_event_tick`/`cdrom_drive_event_tick`/`cdrom_second_response_event_tick`, signature `(struct Interconnect*)` — matching `EventQueueHandler` exactly, declared in `cdrom.h`) operating on `&inter->cdrom` directly; the `cycles_late` parameter was dropped since all 3 original callbacks discarded it (`(void)cycles_late;`) — confirmed by direct read before deleting. `event_scheduler.c`'s handler table wires these in directly, no wrapper indirection needed. `evq_handle_dma_cdrom` (a different, still-legitimate no-op — DMA channel 3 completion is handled synchronously elsewhere) was left untouched, out of scope for this migration.
-
-**Correction to original doc**: §12 (MDEC) previously stated `EVQ_MDEC` "already has a real, non-NULL handler" — this was wrong; direct read during Phase 1 confirms `EVQ_MDEC`'s handler is `NULL` and it is never scheduled anywhere either, same as the 3 slots removed above. Left in the enum (not in Phase 1's stated scope) but the MDEC section's claim should be read as corrected here.
-
-**Reference pattern** (DuckStation `timing_event.cpp` — the key architectural pattern DuckStation is built around):
-- **Sorted intrusive doubly-linked list**, not a min-heap and not a linear scan-and-pick-min. Reschedule uses a local bubble from the event's current position — O(1) amortized for periodic events (VBlank, timers) that stay near their old position.
-- Two time domains reconciled explicitly: `GlobalTicks` (absolute) for the queue vs `TickCount` (relative) for the CPU's `pending_ticks`/`downcount`. The "true now" used for scheduling includes ticks the CPU has executed but not yet committed — lets the interpreter batch instructions before paying the cost of walking the event list.
-- Downcount recalculation is **push-driven**: recomputed whenever the head of the list changes, from every call site that could change it (add/remove/sort/delay/schedule/invoke-early) — not recomputed every CPU cycle.
-- **Catch-up/"late" execution is built into normal dispatch**: a loop over the head event runs (and re-sorts it back in) as long as global time has passed its scheduled time, computing elapsed ticks correctly for a late-firing event. Critically, the **next scheduled time is computed from `old_next_run_time + interval`, not `now + interval`** — this is what avoids long-term drift if an event ever fires late (e.g. under a slow catch-up frame). `InvokeEarly(force)` lets other subsystems force an event to run early without waiting for its natural downcount — the same idiom noted under Timers/DMA/SPU.
-
-**Gaps**:
-1. ✅ **RESOLVED (Phase 1)** — Dual event schedulers (CDROM private array vs real EVQ mechanism) — was **Critical**
-2. ⚠️ **AUDITED (Phase 1), not changed** — This project's rearm-on-late-fire logic uses `now + interval` (e.g. `eventq_schedule(sys, EVQ_VBLANK, VBLANK_CYCLES)` inside `evq_handle_vblank`, using `sys->cpu_cycle_counter` at fire time as the base), not DuckStation's `old_next_run_time + interval`. However this project's downcount is truncated to land **exactly** on the next event's target cycle (`eventq_schedule`'s push-model: `downcount = cycles_until` when a sooner event is scheduled) and `cpu_cycle_counter` does not advance during `eventq_dispatch_due()`'s handler-firing loop — so in practice "late" firing only happens in the rare case a handler forces downcount to a minimum of 1 cycle after finding the next event already due. This is a structurally lower drift-risk design than DuckStation's coarser batched dispatch, but it is not formally the same anti-drift formula. Left as-is; flagging for awareness rather than changing, since altering the rearm base risks introducing new timing bugs in a currently-working system for a theoretical, currently-inconsequential edge case. — was **High**
-3. ✅ **RESOLVED (Phase 1)** — Dead `EVQ_DMA_SPU`/`EVQ_DMA_OTC`/`EVQ_GPU` enum slots — removed (not merely documented); confirmed via grep they were never scheduled anywhere before deletion. — was **Low**
-4. ✅ **RESOLVED (Phase 0)** — Stale misleading comments. — was **Low**
-
-**Recommended action**: ~~Migrate CDROM's private `CdromEvent` array onto the real `EVQ_CDROM`/`EVQ_DMA_CDROM` mechanism...~~ Done — see Phase 1 migration note above. Build verified clean (`make clean && make`, no new warnings). Full in-emulator regression (BIOS boot + disc read, audio/video observed) was **not** completed in this session — attempted via CLI but blocked on an unrelated pre-existing CLI-arg-parsing issue (`Unknown argument` for the `.cue` path), not a Phase 1 regression; static verification (build clean, all call sites grepped and confirmed migrated, no dangling references to deleted symbols) is what this entry is based on. Recommend an actual play-test pass before relying on this for CDROM-heavy work.
+**Open**: none tracked.
 
 ---
 
-## 7. SIO / Controllers / Memory Cards
+## 7. SIO / controllers / memory cards
 
-**Files**: `src/core/sio.c` (817L), `src/core/controller.c` (112L), `include/sio.h`, `include/controller.h`.
+**Files**: `sio.c` (819L), `controller.c` (74L).
 
-**Current state**: DuckStation-ported byte-stepped SIO state machine (`IDLE`/`TRANSMITTING`/`WAITING_FOR_ACK`), digital-pad protocol (ID 0x41/0x5A, 4-step transfer), full memory-card SPI protocol with `.mcd` file persistence, event-scheduled byte transfers via `EVQ_SIO`.
+**State**: byte-stepped transfer state machine (idle → transmitting → waiting for ack) with the ack
+timing scheduled rather than immediate. Digital pad protocol (ID `0x41`/`0x5A`) complete. Memory
+cards: both slots, selected by JOY_CTRL bit 13, read/write/GetID with sector addressing and checksum,
+`.mcd` images auto-loaded and saved. Keyboard input maps to pad buttons; the button state has a
+single owner.
 
-**Gaps** — this section has the clearest missing-abstraction finding in the whole audit:
-1. **Three parallel copies of "current button state" exist simultaneously**: `Controller.button_state` (raw SDL keyboard poll result), `SioInternal.button_state` (private module-level singleton — the one actually used by the transfer state machine), and `Sio.button_state` (a field on the *public* struct that's never actually read — real state lives in the private singleton). `main.c` wires these together each frame, functionally, but the duplication is the structural root cause of gap #2 below. — **Critical**
-2. Only memory card slot 1 is functional. `card_slot2`/`mc2`/`card_slot2_present` exist in the struct and are initialized, but `sio_do_transfer()`'s device-select logic only ever checks `card_slot1_present`, and `sio_memcard_transfer()` hard-codes `s->mc1`. — **High**
-3. `ActiveDevice` enum includes `ACTIVE_DEVICE_MULTITAP` but it's never assigned or handled anywhere. — **High**
-4. Digital pad only — no analog stick/DualShock, no rumble, no lightgun/mouse. `sio.h` literally comments "Controller state (basic stub for now)." — **Low** (feature gap, not structural; most current testing doesn't need it)
-5. The public `Sio` struct duplicates several fields (`tx_data`, `rx_data`, `stat`, `mode`, `ctrl`, `baud`, `transfer_step`, `rx_buffer`/`tx_buffer`) that are dead shadows of the real state in the private `SioInternal` singleton. — **Low**
+**Open**:
+1. **No analog pad** (ID `0x73`/`0x53`) and no multitap. Some games require analog; more will refuse
+   to configure without it.
+2. **No controller abstraction.** With one device type this is fine; a second device type is the
+   point at which a small function-pointer interface should be introduced, not before.
 
-**Reference pattern**:
-- *DuckStation*: a real generic abstract `Controller` base class — virtual `GetType`/`Reset`/`DoState`/`ResetTransferState`/`Transfer(u8 in, u8* out)`/`GetButtonStateBits`/`GetAnalogInputBytes`, with a `Controller::Create(type, index)` factory. `DigitalController`/`AnalogController`/`AnalogJoystick`/`DDGoController` all derive from it — digital pad is just one concrete subclass, not hardcoded. Memory cards are a second polymorphic device family (`MemoryCard*` array parallel to `Controller*`) sharing the same port/transfer machinery. Note: DuckStation's `sio.cpp` is a *different*, near-stub physical unit (the SIO1 link-cable UART) — not to be confused with `pad.cpp` (the real controller/memcard port, SIO0). This project's `sio.c` is the SIO0/pad equivalent — worth keeping the naming distinction in mind if ever cross-referencing DuckStation source directly.
-- *PCSX-Redux*: `SIO` owns the byte-serial protocol directly; `MemoryCard` is a nested owned object with a back-pointer to `SIO`, protocol delegated there. `Pads` is a **separate** abstract plugin interface (`startPoll`/`poll`/`getCfg`/`setCfg`) that `SIO` calls into when the selected device is a pad — controller-type-specific behavior lives behind this interface, decoupled from the byte-shifting protocol itself.
-
-**Recommended action** (roadmap Phase 2): Introduce a minimal C "Controller" abstraction — a struct of function pointers (`reset`/`transfer_byte`/`get_button_state`) rather than a class hierarchy, modeled on PCSX-Redux's simpler `Pads` interface. Have `sio.c` own exactly one input-state source (delete `Controller.button_state` and the dead `Sio.button_state`, keep only the source that feeds the transfer state machine). Wire `card_slot2` through the same code path as slot 1, parametrized by index instead of hard-coded `s->mc1`. This one refactor resolves three separate gap items (#1, #2, and lays groundwork for #3) at once.
+**Priority**: Medium once a game that needs analog is in scope.
 
 ---
 
-## 8. GPU / Renderer / VRAM
+## 8. GPU / renderer / VRAM
 
-**Files**: `src/gpu/gpu_commands.c` (1480L), `renderer.c` (1499L), `gpu.c` (469L), `gpu_helpers.c` (131L), `vram.c` (101L). (`debugger.c`, 208L, moved to `src/core/` in Phase 0 — see below.)
+**Files**: `gpu_commands.c` (1509L), `renderer.c` (1779L), `gpu.c` (527L), `gpu_helpers.c` (131L),
+`vram.c` (101L). Companion deep-dive: `GPU_GAP_ANALYSIS_2026-07-15.md`.
 
-**Current state**: GP0/GP1 command coverage is essentially complete via a 256-entry dispatch table — mono/shaded/textured tri & quad (opaque/semi-transparent, raw/blend), all rectangle size variants, mono/shaded lines and polylines with terminator-detection, VRAM-to-VRAM copy, fill rectangle. Full CRTC scanline/vblank/odd-even tracking, bit-for-bit GPUSTAT reconstruction, `GetGPUInfo` subfunctions. A real OpenGL 3.3 renderer (not a stub) implements correct 4-mode semi-transparency blending, texture-window masking, and per-primitive-type dithering rules.
+**State**: GP0 dispatch is a 256-entry table with a real handler for every documented opcode —
+polygons and quads (flat/gouraud/textured, opaque/semi-transparent, raw/blended), rectangles and
+sprites including the texture flip bits, lines and poly-lines, fills, VRAM↔VRAM copies, CPU↔VRAM
+transfers. GP1 covers reset, display enable, DMA direction, display start, horizontal/vertical range,
+display mode and GetGPUInfo.
 
-**Correction to previous version of this section**: previously claimed "VRAM load/store with correct mask-bit handling" and "no TODO/stub markers found... the most mature/complete part of the codebase." A full GPU-focused pass this session (2026-07-15) found this was true only for the Fill/VRAM-copy/CPU-upload code paths — mask-bit handling has **zero effect on rasterized polygons/lines/rects**, i.e. the vast majority of real draw traffic. This is a materially different, more serious finding than the prior text implied. Full breakdown — GP0/GP1 dispatch tables, GPUSTAT bit-by-bit, renderer/rasterization architecture, CRTC timing, command-timing model, three-way comparison against DuckStation and PCSX-Redux — is now in a dedicated file, split out given the "full GPU" scope requested for this pass: **[`GPU_GAP_ANALYSIS_2026-07-15.md`](GPU_GAP_ANALYSIS_2026-07-15.md)**. This section is a summary; that file is the source of truth for GPU findings going forward.
+VRAM is **one** RGBA8 texture that is simultaneously the rasterization target, the CPU/MDEC upload
+destination and the scanout source. PSX halfwords are stored 5:5:5:1 expanded to 8 bits per channel,
+which round-trips exactly, and **alpha carries the PSX mask bit** — a drawn pixel writes 0 there
+normally, 1 when GP0(E6).0 forces it or when a textured pixel's source texel has bit 15 set
+(`124e675`). Semi-transparency blends colour only and never the alpha channel. A scanout pass
+extracts the CRTC window and unpacks it for the active depth: direct fetch at 15bpp, two-texel
+recombination with a per-pixel byte shift at 24bpp, so FMV frames display correctly.
 
-**Structural gap (carried forward)**: rendering is **exclusively hardware OpenGL** — `renderer.c`/`.h` types are OpenGL-native throughout (VAO/VBO/shader state embedded directly in the `Renderer` struct, itself embedded in `Gpu`). No renderer-abstraction interface exists, so there's no software fallback and no separation between "GPU command logic" and "GPU presentation." The GPU runs on a dedicated `SDL_Thread` with mutex/condvar handoff (double-buffered batch submission) — a legitimate threading design, but the CPU-side and render-backend state are tightly coupled.
+PSX line N is VRAM texel row N everywhere — the rasterizer's Y flip was removed so that rendering and
+uploading agree on where a scanline lives.
 
-Also: ✅ **RESOLVED (Phase 0)** — `debugger.c` (a generic CPU/memory breakpoint+watchpoint debugger, used from `cpu_execution.c`) used to live under `src/gpu/` for no GPU-specific reason; moved to `src/core/debugger.c`, Makefile updated (`EMU_GPU_SRCS` → `EMU_CORE_SRCS`).
+**Open**:
+1. **Mask-bit *test* is not applied to rasterized primitives.** The mask bit is now written
+   correctly, but `preserve_masked_pixels` (GP0(E6).1, "don't overwrite masked pixels") is only
+   honoured on the CPU-side write paths, not in the GL pipeline. Needs a per-pixel test in the
+   fragment shader against the destination's existing bit — which means either a depth/stencil
+   carrier or a read-shadow of the target.
+2. **GP0(0xC0) readback and GP0(0x80) VRAM→VRAM copy read `gpu.vram.data`**, which does not contain
+   GL-rasterized pixels. Any game that copies or reads back something it just drew gets stale data.
+   Needs a cross-thread GL readback of the unified texture.
+3. **Texture sampling still reads a separate R16UI mirror** kept in sync from `gpu.vram.data`, not
+   the unified texture, because GL 3.3 forbids sampling the bound render target. Folding it in needs
+   a read-shadow ping-pong. Until then, a texture whose source region was drawn (not uploaded) by the
+   GPU samples stale data.
+4. **CRTC is coarse** — one tick per VBlank, so there is no scanline-accurate position, no hblank
+   signal (see §5) and no per-line video mode change.
+5. **No GPU command-timing model** — GPUSTAT's ready/busy bits are static rather than reflecting a
+   FIFO depth and per-primitive cost. Games that poll for readiness see an always-ready GPU.
+6. **GPUSTAT h-resolution bit order is wrong** (found 2026-07-27, not yet fixed): the register packs
+   `hres1` into bits 16-17 and `hres2` into bit 18, but hardware has bit 16 = hres2 (368-pixel mode)
+   and bits 17-18 = hres1. Writes decode correctly, only the readback is scrambled — so anything that
+   reads GPUSTAT back to learn the current resolution is misinformed.
 
-**Headline gaps found 2026-07-15** (full detail in the linked file):
-1. **Mask-bit only applies to Fill/VRAM-copy/CPU-upload, never to rasterized polygons/lines/rects** — confirmed by grep: `vram_write_masked`/`vram_store16` are called from exactly 4 sites in `gpu_commands.c` (lines 290, 1117, 1396, 1403), none in the polygon/line/rect draw paths, which go through the OpenGL renderer and never touch the CPU-side VRAM buffer's mask logic at all. Real hardware applies mask-bit checking to all rendering commands. — **High** (known to affect specific titles, e.g. Metal Gear Solid, Silent Hill)
-2. **Rasterized OpenGL output never reads back into the CPU-visible VRAM buffer or texture sampler** — no `glReadPixels`/`glCopyTexImage`/`glBlitFramebuffer` anywhere in `renderer.c`; the CPU-side VRAM texture is only ever updated via `glTexSubImage2D` sourced from Fill/Copy/Upload paths. Render-to-texture effects, dynamic reflections, or a GP0(0xC0) VRAM→CPU read of a region just drawn by a polygon will see stale data. — **High**, likely the single most consequential GPU gap found
-3. No per-command GPU execution-timing model — GPUSTAT's "ready to receive cmd/DMA" bits (26/28) are hardcoded `true`, so games polling GPUSTAT for busy/backpressure never see a busy state (unlike DuckStation's detailed per-command tick-cost tables). — **Medium**
-4. CRTC (`gpu_crtc_tick`) only advances once per VBlank event, not per-scanline — coarse approximation of scanline-dependent timing/effects. — **Medium**
-5. 24-bit display mode is tracked in GPUSTAT state but never actually decoded on the display path (always unpacks as 5:5:5). — **Low-Medium**
-6. CPU→VRAM/VRAM→CPU only handle the exact opcodes 0xA0/0xC0, not the full documented 0xA0-0xBF/0xC0-0xDF mirror range (spec: top-3-bits-only decode). — **Low** (real games essentially always use the canonical form)
-
-**Also flagged (2026-07-15, unresolved, tied to the boot investigation)**: `Screenshot 2026-07-14 191115.png` shows the boot-logo *text* rendering correctly ("PlayStation™" / "Licensed by Sony Computer Entertainment Europe" / "SCEE™") but the accompanying graphical PlayStation logo/sprite that real hardware displays alongside it does not appear. Plausible corroborating cause: the CPU→VRAM upload opcode-range gap (#6 above) or a texture/sprite command silently failing — not root-caused this session (no live re-test performed), noted as a concrete open lead for whoever picks up the GPU work next.
-
-> **✅ RESOLVED (2026-07-23)** — root cause was **neither** GPU-side candidate above; it was a **GTE colour-FIFO bug**. `push_rgb_from_mac` (`src/gte/gte_internal.h`) wrote `RGB2 = r | g<<8 | b<<16`, dropping the CODE byte (bits 24-31) that real hardware copies from `RGBC` (data reg 6, byte 3). The 3D logo's Gouraud-lit polygons are drawn by the BIOS shell's **software ordering-table renderer**, which stores the GTE-lit colour word straight into a primitive packet and reads bits 24-31 back as the GP0 command opcode. With CODE=0 every logo primitive decoded as opcode `0x00` and was discarded by the shell's packet classifier (`0x8005fd98` → `classify` returns 0 → dropped) — the vertices were present and correct, only the opcode/colour word was zero. Fixed to `RGB2 = r | g<<8 | b<<16 | code<<24` (matches DuckStation `PushRGBFromMAC`); the full 3D PlayStation logo now renders (`Screenshot 2026-07-23 214744.png`). Found by watching the shell's shading helper's double `swc2 $22` at `0x8005bbf0/f4` write `0x20000000` then `0x00000000` into the packet colour word. Two supporting fixes landed the same day: DMA sub-word register writes (the shell enables its DMA-completion IRQs with a byte write to `DICR+2`, previously dropped) and the unwired GPU IRQ line (GP0(0x1F) never asserted I_STAT bit 1).
-
-**Reference pattern**:
-- *DuckStation*: three-layer split — CPU-thread-side GP0/GP1 decode + CRTC timing (backend-agnostic, shared) → abstract `GPUBackend` with a producer/consumer command queue to a dedicated video thread (decouples CPU-thread timing from actual render work) → concrete `GPU_HW`/`GPU_SW`/null backends. GP0 dispatch itself is a 256-entry function-pointer table, same pattern already used here. Also implements realistic per-command timing (see linked file) — the mechanism behind why its GPUSTAT ready/busy bits are trustworthy for games to poll, unlike this project's hardcoded-true bits.
-- *PCSX-Redux*: also an abstract-base `GPU` with pure-virtual backend hooks (same plugin pattern as its SPU/Pads/CDRom). Explicitly flagged by that research pass as the **least representative "plain-C" module** in an otherwise C-style codebase — the portable takeaway is just "3-bit type + 5-bit command → jump table" (already present here), not the templated-struct-with-embedded-FIFO primitive objects. Notably, PCSX-Redux's GPU timing model is closer to this project's (commands are effectively instantaneous, "ready" GPUSTAT bits never clear) than to DuckStation's — worth knowing since it means "match a reference" isn't unanimous guidance here; DuckStation's approach is the more hardware-accurate one to target if this gap is prioritized.
-
-**Priority**: **High** overall (was Medium) — the mask-bit and VRAM-readback gaps are real correctness issues affecting common rendering techniques, not just a hardware-only-vs-abstraction-layer structural preference as the previous framing suggested. Backend-abstraction structural gap remains **Medium** on its own.
-
-**Recommended action**: See `GPU_GAP_ANALYSIS_2026-07-15.md` for the full three-way comparison and suggested fix approach per gap. Highest-value first fix is likely #2 (VRAM readback) since it's the most consequential and most games touch it indirectly; #1 (mask-bit on rasterized primitives) is the more surgical, lower-risk fix to land first. ~~Move `debugger.c` out of `src/gpu/` now (Phase 0, free win, zero risk).~~ Done. Defer full backend abstraction (software rasterizer) to Phase 5 as an optional, low-urgency item — if pursued, model it as a C function-pointer vtable struct (`draw_polygon`/`draw_line`/`read_vram`/`fill_vram`/`update_display`) rather than a virtual class.
+**Priority**: High for items 1-3 (observable rendering correctness), Medium for 4-6.
 
 ---
 
 ## 9. GTE
 
-**Files**: `src/gte/gte.c` (156L), `gte_ops.c` (440L).
+**Files**: `gte_ops.c` (440L), `gte.c` (154L).
 
-**Current state**: All 22 documented GTE opcodes implemented (`RTPS, NCLIP, OP, DPCS, INTPL, MVMVA, NCDS, CDP, NCDT, NCCS, CC, NCS, NCCT, NCT, SQR, DCPL, DPCT, AVSZ3, AVSZ4, RTPT, GPF, GPL`) with correct per-opcode cycle-cost constants matching the PSX-SPX timing table, UNR reciprocal-divide table, 44-bit MAC intermediate precision with correct overflow/saturation flagging, lm=0/1 IR saturation semantics, sign-extension/zero-extension special cases, full 32+32 register file (IRGB/ORGB packing, LZCS/LZCR auto-count, SXY/SZ/RGB FIFOs), and a deliberate reproduction of the real-hardware MVMVA "far color" bug (`gte_mul_mat_vec_buggy`). COP2 dispatch correctly checks SR.CU2 before routing to GTE in `op_cop2`. The opcode math itself is genuinely solid and matches both reference emulators closely.
+**State**: all 22 opcodes implemented with the documented saturation/flag behaviour, `MVMVA` matrix
+and vector selection, IR clamping, the 33-bit MAC overflow flags and the `FLAG` error summary bit.
+Per-opcode cycle costs (5-44) are charged against the CPU through `gte_completion_tick`, and both a
+new COP2 data-op and an MFC2/CFC2 stall until the pending op completes. `LWC2`/`SWC2` raise the
+coprocessor-unusable exception when SR.CU2 is clear.
 
-**Correction to previous version of this section**: previously stated "Gap: essentially none, structurally... close to a 'no gap' finding." That assessment only covered opcode-math correctness. A dedicated pass this session (2026-07-15), focused on GTE↔CPU timing integration, found three real gaps below — this is a materially different, more serious finding than the prior "no gap" framing.
+The colour FIFO copies the `RGBC` CODE byte into the pushed colour's high byte. That single byte was
+what hid the 3D boot logo for several sessions: the BIOS shell's software ordering-table renderer
+reads that byte back as the GP0 opcode, so every lit primitive was being discarded as opcode `0x00`
+(`cff5ab7`).
 
-**Gap 1 — computed cycle cost is discarded; GTE ops cost ~1 cycle regardless of opcode (2026-07-15, new)**: `gte_execute_instruction` (`gte.c:113-156`) correctly computes and returns the documented per-opcode cost (RTPS=15 ... NCDT=44), and sets `gte->cycles_remaining`/`gte->busy`. Its only caller, `op_cop2` (`cpu_instructions.c:744-745`), discards the return value: `uint32_t cycles = gte_execute_instruction(...); (void)cycles;` — confirmed by grep, this value never reaches `cpu->downcount`. Worse: `gte->busy`/`cycles_remaining`, though correctly set and decremented once per instruction (`cpu_execution.c:51-56`), are **never read as a stall condition anywhere** (confirmed by grep across `src/`/`include/`) — nothing blocks issuing another COP2 op, or an MFC2 reading a GTE result, while the previous op is still "running" per the emulator's own bookkeeping. Net effect: every GTE op, from a 5-cycle SQR to a 44-cycle NCDT, completes in the same time as any other single instruction. — **High** (DuckStation's `AddGTETicks`/`StallUntilGTEComplete` genuinely stalls the pipeline for the declared latency before a dependent MFC2/CFC2 read. PCSX-Redux's interpreter, notably, does *not* model per-op GTE latency either — flat CPU `BIAS` for everything — so on this specific axis this project is currently closer to PCSX-Redux's simplification than to DuckStation's accuracy; a fix should target DuckStation's pattern specifically, not "whichever reference agrees")
-
-**Gap 2 — `LWC2`/`SWC2` skip the SR.CU2 check that `COP2` itself has (2026-07-15, new)**: `op_cop2` (`cpu_instructions.c:731-736`) correctly raises `EXCEPTION_COPROCESSOR_ERROR` when SR.CU2 is clear. `op_lwc2`/`op_swc2` (`cpu_instructions.c:909-916,937-944`), which move data directly between memory and GTE data registers, perform the transfer unconditionally with no equivalent check. Real hardware gates LWC2/SWC2 behind CU2 exactly like COP2 data ops. — **Medium** (narrow window — only matters to code that deliberately runs with COP2 disabled and expects a trap on LWC2/SWC2, uncommon but spec-mandated)
-
-**Gap 3 — the "GTE load-delay double-buffer" cited in §1.2 as a working reference pattern is actually dead code (2026-07-15, correction — affects §1.2 and Phase 3.5)**: §1.2 previously described `gte_load_delay_reg/value` + `gte_next_load_delay_reg/value` as "separately double-buffered... a working, in-house reference implementation," and Phase 3.5's top suspect recommended copying this exact pattern for the GPR load-delay slot. This session's GTE pass found, via full-repo grep, that `gte_next_load_delay_reg`/`value` are **only ever assigned their disabled sentinel value** (255/0) — at CPU init (`cpu_init.c:62-65`) and unconditionally at the top of every instruction (`cpu_execution.c:60-65`) — and are **never set to a real pending value anywhere in the codebase**. `cpu->gte_load_delay_reg` is therefore always 255, so MFC2's check against it (`cpu_instructions.c:752`) is always false, and MFC2 always resolves through the ordinary single-slot GPR load-delay path instead. **This is inert scaffolding, not a functioning double-buffer.** — **Medium** (correctness impact folds into Gap 1 — GTE result timing is flat 1-cycle either way, whether via the intended-but-unused double-buffer or the fallback path); **§1.2 and Phase 3.5's recommended source pattern should be corrected — see roadmap note.**
-
-**Reference pattern**:
-- *DuckStation*: `GTE::AddGTETicks(ticks)` sets a completion tick; `StallUntilGTEComplete()` is called both before dispatching a new GTE instruction and before CFC2/MFC2 reads, genuinely advancing `pending_ticks` to stall the CPU pipeline for the declared latency — the mechanism this project's dead `busy`/`cycles_remaining` fields were clearly modeled after but never wired up to actually gate anything. COP2 usable-bit and LWC2/SWC2 alignment-fault checks are both present. GTE registers live inside `CPU::State` for codegen reasons; dispatch is a plain switch, cycle cost hardcoded inline per case.
-- *PCSX-Redux*: splits register-transfer instructions (`gte-transfer.cc`) from math instructions (`gte-instructions.cc`) — a split this project's `gte.c`/`gte_ops.c` division already mirrors. Two-tier execution: interpreter dispatches all 22 opcodes via a switch; the x64 dynarec natively JIT-compiles register-transfer ops (MFC2/CFC2/MTC2/CTC2/LWC2/SWC2) plus AVSZ3/AVSZ4, falling back to real interpreter calls for the rest. **No per-instruction GTE cycle-timing model at all** (flat CPU `BIAS=2` for every instruction, matching the note in §1.1). Notably the AArch64 dynarec does *not* JIT AVSZ3/AVSZ4 (falls back too) — an asymmetry between PCSX-Redux's own two backends, evidence that even mature references don't treat GTE-JIT-coverage uniformly.
-
-**Priority**: **High** for Gap 1 (real, hardware-observable timing deviation with a concrete fix target in DuckStation's pattern); **Medium** for Gaps 2-3.
-
-**Recommended action**: Wire `gte_execute_instruction`'s returned cycle count into `cpu->downcount` (mechanical, low-risk). Then either delete the inert `gte_next_load_delay_*` scaffolding and implement a genuine stall check on `gte->busy` before issuing a new COP2 op or resolving MFC2/CFC2 (DuckStation's pattern — recommended), or populate the double-buffer for real if double-buffering is preferred over a stall-flag — either approach fixes Gap 1 and Gap 3 together. Add the missing SR.CU2 check to `op_lwc2`/`op_swc2`. Update §1.2 and Phase 3.5 to stop citing the GTE load-delay pair as a working reference implementation (done inline above; Phase 3.5's roadmap entry corrected below).
+**Open**: none tracked.
 
 ---
 
 ## 10. CDROM
 
-**Files**: `src/cdrom/cdrom_commands.c` (779L), `cdrom_disc.c` (358L), `cdrom.c` (403L), `cdrom_audio.c` (301L).
+**Files**: `cdrom_commands.c` (766L), `cdrom.c` (415L), `cdrom_disc.c` (380L), `cdrom_audio.c` (301L).
 
-**Current state**: Near-full command set (`SYNC, GETSTAT, SETLOC, PLAY, FORWARD, BACKWARD, READN, MOTORON, STOP, PAUSE, INIT, MUTE, DEMUTE, SETFILTER, SETMODE, GETPARAM, GETLOCL, GETLOCP, READT, GETTN, GETTD, SEEKL, SEEKP, SETCLOCK, GETCLOCK, TEST, GETID, READS, RESET, GETQ, READTOC, VIDEOCD`), async/threaded disc reader (`pthread_t`), event-driven command/drive/second-response scheduling with delay constants calibrated to match PCSX-Redux's timing model, BIN/CUE multi-track loading, SubQ generation, full CDDA+XA-ADPCM decode (zigzag interpolation resampler at both 37800Hz/18900Hz, filter tables, IIR predictor) feeding a dedicated audio FIFO mixed with SPU output, spec-correct volume matrix. **Zero TODO/stub markers found.**
+**State**: near-complete command set with first/second response separation and scheduled delays,
+sector reading from CUE/BIN, mode handling including whole-sector delivery, the Request Register
+(BFRD) arm/disarm semantics that real software depends on (disarm resets the read position, arm does
+not), and honest region detection — the disc's real licence sector is read once at load time and
+reported by GetID, with no region spoofing anywhere in the read path.
 
-**Reference pattern**: DuckStation models CDROM with **four separate `TimingEvent`s** (command / second-response / async-interrupt / drive-mechanism), an async disc-reader thread decoupling host I/O latency from emulated timing (this project already has the pthread equivalent), three fixed-capacity FIFOs (param/response/async-response, kept separate because async completions must queue independently of the current sync response), and double-buffered sector storage to avoid tearing. PCSX-Redux uses the same delayed-response-via-scheduled-interrupt pattern this project already implements, with multiple parallel scheduled event types rather than one FSM — matching DuckStation's multi-event split.
+XA audio is fully decoded: ADPCM chunk decode with both 4-bit and 8-bit modes, mono/stereo, and
+resampling from 37800/18900 Hz into the 44100 Hz audio FIFO.
 
-**Gap**: ✅ **RESOLVED (Phase 1)** — CDROM was already structurally well-aligned with both references' multi-event, async-reader, delayed-response design. The **only** real gap was that its scheduling rode on the private ad-hoc array in `interconnect.c` rather than the shared `event_scheduler.c` — see §6 for the migration detail. CDROM's own 3-event shape (command/drive/second-response) is now expressed directly as 3 real `EVQ_*` types rather than DuckStation's 4-event split (command/second-response/async-interrupt/drive) — this project folds the "async-interrupt" concern into the existing `interrupt_flag != 0` retry-reschedule check inside each tick function, which was already how it worked before the migration; not changed, just moved onto the shared scheduler.
+**Open**:
+1. **Async pacing is coarse** — roughly 17 completion events fire over a whole boot, with very large
+   gaps, while the BIOS busy-polls its event flags tens of thousands of times in between. It works,
+   but the drive's timing granularity is far simpler than real hardware's.
 
-**Priority**: was Low as a standalone item (the real issue was tracked centrally under Event Scheduler, now resolved there too).
-
-**Recommended action**: ~~No CDROM-specific work beyond the Phase 1 event-scheduler unification.~~ Done. Public API (`cdrom_schedule_command_event`/`_drive_event`/`_second_response_event`) unchanged — all ~15 call sites across `cdrom.c`/`cdrom_commands.c` needed no edits. An actual play-test (disc boot + read) is still recommended before treating this as fully verified — see §6 for why it wasn't completed this session.
-
-### Addendum (2026-07-13, post-live-test) — GetID region byte hardcoded
-
-Found during Phase 1 live-testing, not part of the original component pass above — this is a genuine addendum, not a correction of the §10 text.
-
-**Finding**: `cdrom_commands.c`'s `cdrom_execute_second_response()`, `case CDC_GETID` (~line 528), hardcodes the 4th SCEx response byte to `'A'` (America) unconditionally:
-```c
-cdrom_push_response(cdrom, 'S');
-cdrom_push_response(cdrom, 'C');
-cdrom_push_response(cdrom, 'E');
-cdrom_push_response(cdrom, 'A');   // always America, regardless of the loaded disc
-```
-Per `DOCS/cdromdrive.md`, this byte should reflect the actual loaded disc's licence region ('A'=America, 'E'=Europe, 'I'=Japan) — real hardware's GetID response encodes the disc's own region, not the console's. This is a bug independent of root cause: a Europe or Japan disc is currently always misreported as American to any code that trusts GetID's region byte.
-
-Initial live-test (`roms/SCPH1001.BIN` NTSC-U + `games/Ace Combat 2 (Europe).bin`, confirmed Europe/SCES via `SYSTEM.CNF`) hit `A0(0xA1) SystemError(type='B'=Boot, errorcode=0x38a)` very early in boot. A follow-up test with a region-matched PAL BIOS (`SCPH-7502`) hit the identical error — and a screenshot of that run's boot logo showed the trademark text as "SCEA" (America) despite the genuinely-PAL BIOS and Europe disc. Per `DOCS/cdromdrive.md`, that trademark text is read from the disc's licence data via `GetID`, not baked into the BIOS ROM — meaning this exact bug (`GetID` always claims `'A'`) is very likely the direct cause of the boot failure, independent of which BIOS is used. See **Phase 2.5** for the full account.
-
-**Priority**: High — this is very likely the actual root cause of the observed boot failure, not just an independent correctness gap (see Phase 2.5).
-
-**Recommended action**: see new **Phase 2.5** in the roadmap below.
+**Priority**: Low-Medium. Revisit if a game shows CD-timing-sensitive behaviour.
 
 ---
 
-## 11. SPU
+## 11. SPU / audio
 
-**Files**: `src/spu/spu_mixing.c` (454L), `spu.c` (374L), `spu_voice.c` (319L), `spu_adsr.c` (163L), `spu_dma.c` (125L), `spu_irq.c` (50L).
+**Files**: `spu_mixing.c` (363L), `spu.c` (374L), `spu_voice.c` (319L), `spu_adsr.c` (163L),
+`spu_dma.c` (125L), `spu_irq.c` (50L).
 
-**Current state**: Full 32-register reverb implementation (IIR filters, 4 accumulator taps, feedback comb, correct SPU-RAM delay-line addressing), LFSR-style noise generator with per-voice noise-mode bit, pitch modulation (voice N modulated by voice N-1's output) — **none of these are stubbed**. Full 24-voice ADPCM decode with Gaussian interpolation, complete ADSR state machine (Attack/Decay/Sustain/Release/Stopped, linear/exponential, rate tables), SPU DMA both directions, IRQ9 address-watch tied into the bus's edge-triggered I_STAT logic. Dedicated `SDL_Thread` with a lock-free SPSC ring buffer feeding SDL audio. **Zero TODO/stub markers found** — explicit PCSX-Redux attribution throughout comments; the most directly "ported-from-reference" component in the codebase.
+**State**: 24 voices with ADPCM decode and Gaussian interpolation, the full ADSR state machine with
+linear/exponential phases and the rate tables, the 32-register reverb (IIR filters, accumulator taps,
+feedback comb, correct SPU-RAM delay-line addressing), noise with the per-voice noise mode, pitch
+modulation, SPU DMA both directions, and the IRQ9 address watch. None of it is stubbed.
 
-**Reference pattern**: DuckStation also fully implements reverb/noise, with dedicated downsample/upsample ring buffers reconciling 22050Hz reverb processing against 44100Hz output, and forces `GeneratePendingSamples()` before any register write mutates state ("flush before mutate," the same idiom seen in DMA/Timers/CDROM). PCSX-Redux keeps its real SPU implementation in a separate `src/spu/` module (mirroring this project's own `src/spu/` placement) and explicitly separates per-voice `ADSRInfo` (raw register values) from `ADSRInfoEx` (derived/precomputed runtime rates).
+Sample generation is driven by the emulated clock (2026-07-28): one stereo sample per 768 CPU cycles,
+produced by a scheduled `EVQ_SPU` event in 64-sample batches, plus `spu_catch_up()` at every SPU
+register read and write so a write flushes everything it owes at the old register values before
+mutating state. Production and register access are therefore on the same thread, which removes the
+key-on/key-off latch race entirely and makes the CD-audio FIFO single-threaded end to end. Output
+reaches SDL through a single-producer/single-consumer ring; a sample is still generated when that ring
+is full, because the DSP state has to advance regardless — only the audible result is dropped, counted
+in `dropped_samples`.
 
-**Gaps**: None confirmed. Two verification items surfaced by cross-comparison, not confirmed defects:
-1. Whether the 22050Hz-vs-44100Hz reverb resample buffer sizing matches the reference approach.
-2. Whether register writes in `spu.c` flush pending samples before mutating state, matching the "flush before mutate" discipline this codebase already applies elsewhere (DMA/Timers).
+**What it replaced**, kept because the shape of the bug is instructive: two producers existed and the
+correct one was dead. `spu_step()` had zero call sites, while a wall-clock thread generated whatever
+the output ring had room for and slept 1 ms. Everything that advances per sample therefore advanced at
+the host's rate while the guest wrote registers at the emulated rate — two clocks, drifting
+permanently. Measured after the fix: 106368 samples per 81 698 760 emulated cycles against 106378
+expected (−0.01%), ring occupancy steady at 192-512 of 4096, no drops after the start-up transient.
 
-**Priority**: Low — verification items only.
+**Open**:
+1. **Output quality is unsurveyed.** The clock is right and the DSP is complete, but nobody has
+   listened critically across a range of titles yet. `emu.spu_stats()` and `scripts/spu_rate.lua`
+   are the instruments for the pacing side; the DSP side needs ears.
+2. **Start-up transient drops samples** (~2200 in the measured run, all in one burst before the audio
+   device starts draining). Harmless, but a cleaner start would prime the ring or delay the first SPU
+   event until the device is running.
 
-**Recommended action**: No SPU refactor required. Spot-check the flush-before-mutate ordering the next time `spu.c`'s register-write paths are touched for any other reason.
+**Priority**: Medium — verification, not repair.
 
 ---
 
 ## 12. MDEC
 
-**Files**: `src/core/mdec.c` (501L).
+**Files**: `mdec.c` (526L).
 
-**Current state**: Explicitly ported from DuckStation's `mdec.cpp` (credited in the file header) — `IDCT_Old`/`DecodeRLE_Old`/`YUVToRGB_Old`/`YUVToMono`/`CopyOutBlock`, a real state machine (`IDLE`/`DECODING`/`WRITING`/`SET_QTABLE`/`SET_SCALE`/`NOCOMMAND`) mirroring DuckStation's `Execute()` loop, correct RLE/zigzag/quantization/2-pass-IDCT/YUV→RGB pipeline for both mono and color output depths. Not a stub — a working decoder, zero TODO markers.
+**State**: working, and exercised end to end by real FMV playback. Command state machine, RLE/zigzag
+decode, quantisation, two-pass IDCT, YUV→RGB for both colour and mono, all four output depths, and
+the in/out FIFOs wired to DMA channels 0 and 1.
 
-**Reference pattern**: DuckStation offers two selectable IDCT/YUV code paths (this project ports only the "Old" — complete and correct on its own; "New" is a performance variant, not a correctness requirement) and paces decoded-block availability to the output FIFO via a dedicated `TimingEvent`. PCSX-Redux independently converges on the same overall shape (zigzag descan, AAN-scaled IDCT, YUV→RGB, 15/24-bit output) — cross-validating that this project's port is structurally sound.
+Two bugs found here are worth keeping in mind for any future decoder work: the scale/IDCT matrix must
+be stored **transposed** relative to the order it arrives in (getting this wrong turns every DC-only
+macroblock into a fading blob, which rendered FMV as a grid of blobs), and the DC coefficient path
+must not apply the quantisation scale.
 
-**Correction (2026-07-16)**: this section's "EVQ_MDEC already has a real, non-NULL handler" claim was already flagged wrong back in §6's Phase 1 write-up (confirmed by direct read at the time: `EVQ_MDEC`'s handler is `NULL` and it is never scheduled anywhere) — that correction was never carried back into this section until now. Also new: live-tested this session — `Ace Combat 2 (Europe)` reaches its "Presented by Namco" publisher screen (post Phase 2.6 CDROM fix) and then shows nothing where the real game's FMV intro should play; no root cause investigation was done (out of scope for this pass, user flagged it as context only) but the decoder never being wired to `EVQ_MDEC`/the real DMA-driven bitstream feed is the obvious first suspect given the confirmed-dead event slot.
-
-**Gap**: the decoder itself (`mdec.c`'s state machine/IDCT/YUV pipeline) looks structurally sound against both references — no gap identified there. The real gap is integration: `EVQ_MDEC` is dead (confirmed twice now), so whatever pacing/completion signaling real FMV playback depends on (block-ready IRQ timing, DMA channel 0/1 hand-off cadence) has no scheduled path to fire correctly. Whether MDEC ever receives real compressed bitstream data from a CD-XA STR stream in the first place is unconfirmed — not verified this pass.
-
-**Priority**: **High** (upgraded from Low) — this is the actual current blocker to reaching gameplay in any FMV-intro game, not just a verification nicety. See Phase 2.8.
-
-**Recommended action**: See Phase 2.8 below for the tracked investigation. Starting point: wire `EVQ_MDEC` to a real handler (or confirm one is genuinely unneeded for this project's synchronous DMA model, matching the CDROM ch3 precedent in §6), then verify a CD-XA STR sector actually reaches `mdec_dma_in()` during FMV playback before assuming the decoder itself needs work.
+**Open**: none tracked. The channel-kick loss described in §4 belongs to this pair of DMA channels
+and is the one remaining rough edge.
 
 ---
 
 ## 13. PCDRV
 
-**Files**: `src/core/pcdrv.c` (194L).
+**Files**: `pcdrv.c` (194L).
 
-**Current state**: Compiled into the binary, correctly implements the DuckStation-style host filesystem passthrough protocol (`PCinit/PCcreat/PCopen/PCclose/PCread/PCwrite/PClseek`, function codes 0x101-0x107 decoded from the MIPS `BREAK` instruction's 20-bit code field). **Zero call sites** exist for `PCDrv_HandleSyscall`/`_Initialize`/`_Reset`/`_Shutdown` outside `pcdrv.c` itself — `op_break` in `cpu_instructions.c` unconditionally raises `EXCEPTION_BREAK` without ever checking for a PCDrv code first.
+**State**: host-filesystem side channel for homebrew (open/read/write/seek/close). Off the critical
+path for disc games.
 
-**Reference pattern**: DuckStation intercepts exactly at this point — `RaiseBreakException` checks a `pcdrv_enable` setting and, if set, calls `PCDrv::HandleSyscall()` *before* raising the real exception; if handled, it short-circuits (advances PC, returns, no BIOS exception handler runs). Host filesystem access is sandboxed via path canonicalization + prefix check against a configured root (blocks `../` escapes — explicitly documented as traversal-prevention only, not a real sandbox). Writes are gated behind a separate `enable_writes` flag, off by default even when PCDrv itself is enabled.
-
-**Gap**: This is a pure wiring gap, not an implementation gap — the interception point and mechanism already match the reference precisely; the function is simply never called.
-
-**Priority**: Medium — zero risk to core emulation while inert, but a complete, correctly-implemented feature that's entirely unreachable is worth fixing cheaply. Flag: verify `pcdrv.c` already has path-sandboxing before enabling it by default; if not, add it as part of the same change (this is security-relevant, not purely structural, since it exposes host filesystem access to guest code once wired up).
-
-**Recommended action**: Add the interception check at the top of `op_break` — decode the 20-bit BREAK code, and if it matches a PCDrv function-code range, call `PCDrv_HandleSyscall()` and short-circuit instead of always raising `EXCEPTION_BREAK`. Mirror DuckStation's off-by-default and read-only-by-default-even-when-enabled conventions.
+**Open**: none tracked.
 
 ---
 
 ## 14. Savestates
 
-**Current state**: No savestate mechanism exists anywhere in the codebase — confirmed by absence across the full component inventory.
+**State**: **absent**. No serialisation code exists anywhere in the tree.
 
-**Reference pattern**: DuckStation serializes each active `TimingEvent` by name, with subsystems' own `DoState()` recreating events before the scheduler patches in saved timing state. PCSX-Redux uses a custom compile-time reflection/schema system (`Protobuf::Field<Type, name, id>`) that auto-generates both wire format and field layout from a single declarative tree pointing directly at live runtime state — powerful, but requires machinery this C99 codebase doesn't have and isn't idiomatic here. That research pass's own recommendation for a plain-C99 project: skip the reflection layer, use a simple per-module `void X_save(X*, Buffer*)` / `X_load(...)` pair, with one top-level `emu_save_state()` calling each module's function in sequence.
+This is worth doing sooner than its "nice to have" reputation suggests, because it is also test
+infrastructure: a state saved just before a failing moment turns a five-minute boot-and-reproduce
+cycle into a one-second one, and makes regressions comparable run to run.
 
-**Gap**: complete absence of the feature — the largest single missing-feature (as opposed to structural-gap-in-existing-feature) finding in this audit.
+**Design constraints when it is written**: every subsystem's state is already in plain structs with no
+heap ownership, which makes a straight struct-dump feasible; the two things that need care are the
+scheduler (absolute cycle values must be rebased on load) and the renderer (VRAM lives in a GL texture
+on another thread, so a save has to read it back and a load has to re-upload it).
 
-**Priority**: High as a feature, but deliberately sequenced late — every other refactor phase changes struct shapes, so implementing savestates before those stabilize means rewriting save/load code repeatedly.
-
-**Recommended action**: Defer to roadmap Phase 4, after Phases 0-3 stabilize struct shapes. Adopt the simple per-module save/load pattern; start with CPU/bus/RAM (smallest, most self-contained), expand outward to DMA/Timers/GPU/SPU/CDROM once those modules have already been cleaned up.
-
----
-
-## Cross-Cutting Themes
-
-- **Duplicate/dead code**: ~~`interrupt_controller.c/h` (fully dead)~~, ~~dual event schedulers (CDROM ad-hoc array vs `event_scheduler.c`)~~, SIO's triple button-state copies (still open, Phase 2), ~~duplicated `TIMERS_*` defines in `interconnect.h`~~, ~~several dead/stub functions (`interconnect_debug_check_irq_status`, vestigial `bios_*` timer stubs)~~, ~~dead `EVQ_DMA_SPU`/`EVQ_DMA_OTC`/`EVQ_GPU` enum slots~~ — all struck-through items resolved (Phase 0 + Phase 1); unreachable PCDrv still open (Phase 4).
-- **Missing generic abstractions**: no `Controller` interface (root cause of the SIO duplication), no savestate mechanism, no GPU backend abstraction (hardware-only, no software fallback).
-- **Test coverage gap**: `cpu_test` covers only CPU/bus/timers/GTE — no automated coverage exists for CDROM, SPU, SIO, or MDEC, despite those being among the most mature subsystems. Regressions there would go undetected by the existing test suite.
-- **Not gaps, worth stating explicitly**: GTE, SPU, MDEC, CDROM, and GPU primitive coverage are all essentially reference-quality with zero-to-minimal findings. The refactor's real work is concentrated in Bus/IRQ, the Event Scheduler, SIO, DMA edge cases, and Timer edge cases — not a full rewrite of everything.
+**Priority**: High — second after §11.
 
 ---
 
-## Prioritized Refactor Roadmap
+## Roadmap
 
-**Phase 0 — Cleanup (no behavior change)** ✅ **COMPLETE (2026-07-13)**
-Lowest-risk, highest-clarity-per-effort. Verified via `make clean && make`: builds clean, no new warnings.
-- [x] Delete `src/interrupt_controller.c` + `include/interrupt_controller.h` (§3)
-- [x] Delete dead `interconnect_debug_check_irq_status()` (§3) and `interconnect_check_bios_boot()` (§2)
-- [x] Fix duplicated `TIMERS_START/SIZE/END` defines in `interconnect.h` (§2)
-- [x] Move `debugger.c` out of `src/gpu/` → `src/core/debugger.c`, Makefile updated (§8)
-- [x] Remove vestigial commented-out HLE block + dead empty ifs in `op_jr`/`op_jalr` (§1)
-- [x] Update stale "stub" comments in `event_scheduler.c` (§6)
-- [x] Delete dead `bios_*` timer placeholder functions — 6 functions removed (§5)
+### Done
 
-**Phase 1 — Unify event scheduling** ✅ **COMPLETE (2026-07-13)**
-The single highest-impact structural fix. Verified via `make clean && make`: builds clean, no new warnings, no dangling references to deleted symbols.
-- [x] Migrate CDROM's private `CdromEvent` array (`interconnect.c`) onto the real event scheduler — landed as 3 dedicated types (`EVQ_CDROM_COMMAND`/`EVQ_CDROM_DRIVE`/`EVQ_CDROM_SECOND_RESPONSE`), matching CDROM's existing internal 3-timer shape rather than DuckStation's 4-event split (§6, §10)
-- [x] Audit rearm math for drift-correctness (`old_next_run_time + interval` vs `now + interval`) — audited, uses `now + interval`, judged low-risk here and left unchanged (§6)
-- [x] Remove the dead `EVQ_DMA_SPU`/`EVQ_DMA_OTC`/`EVQ_GPU` enum slots — removed, not merely documented (§6)
-- [x] Regression-test against known-good BIOS boot + disc read — **confirmed live by the user**: not only clean, the migration fixed latent bugs — BIOS memory card menu, previously blocked, now unblocks correctly. Removing the dual-scheduler duplication apparently resolved timing issues beyond just the CDROM path.
+| Item | Landed |
+|---|---|
+| Dead-code cleanup, duplicate interrupt controller removed | 2026-07-13 |
+| Single event-scheduler authority (CDROM's private timer array migrated) | 2026-07-13 |
+| SIO button state single-owner; memory card slot 2 | 2026-07-13 |
+| CDROM sector-buffer arm/disarm semantics; honest disc region; spoof hack removed | 2026-07-14/15 |
+| Timer sync-mode gating; GTE cycle costs, CU2 checks, dead load-delay buffers removed | 2026-07-15 |
+| Stack-overflow crash fix (multi-MB locals in `main`) | 2026-07-16 |
+| GTE colour-FIFO CODE byte → 3D boot logo renders (`cff5ab7`) | 2026-07-23 |
+| DMA sub-word register writes (`7172960`); GPU IRQ line wired (`18e0732`) | 2026-07-23 |
+| Unified VRAM texture; 24bpp scanout; Y-flip removal (`08de00b`, `86b4564`) | 2026-07-24/25 |
+| Timing unified: derived-counter timers, `system.c` frame driver (`df37550`) | 2026-07-25 |
+| MDEC scale-matrix transpose; DMA IRQ3 line (`7923c52`); block transfers read at kick (`7bf783e`) | 2026-07-26 |
+| FMV reaches the display: stale `is_viewer` flag (`43bbb0e`); real mask bit from the rasterizer (`124e675`) | 2026-07-27 |
+| SPU sample generation moved onto the emulated clock; wall-clock audio thread removed | 2026-07-28 |
 
-**Phase 2 — SIO / Controller consolidation** ✅ **MOSTLY COMPLETE (2026-07-13)**
-- [ ] Introduce a minimal C `Controller` abstraction (function-pointer struct, PCSX-Redux-`Pads`-style, not a class hierarchy) (§7) — **deliberately deferred**: with only one concrete implementation (digital pad) to validate the abstraction against, building the interface now would be speculative; the button-state collapse below achieves the "one source of truth" goal without it. Revisit if/when a second input device type (analog pad, multitap) is actually being added.
-- [x] Collapse the three duplicate button-state copies down to one source of truth — `SioInternal.button_state` is now the sole owner; `Controller.button_state` and the dead public `Sio.button_state` field deleted; `controller_update_from_keyboard()` is now a stateless poll (also removed the unused `ControllerButtons` bitfield typedef and the dead `controller_set_button`/`controller_get_button_state` functions found while touching this code)
-- [x] Wire memory card slot 2 through the same code path as slot 1, parametrized by index (§7) — found and fixed the actual root bug: `sio_load_memcard`/`sio_create_memcard` unconditionally set a `card_slot1_present` flag regardless of which card pointer was passed; replaced with `MemoryCard.present` (already correctly per-card) plus a new `active_card` pointer selected via JOY_CTRL bit 13 (`CTRL_SLOT`) at device-select time; `interconnect_init()` now loads `memcard2.mcd` alongside `memcard1.mcd`. **Live-confirmed by the user**: both cards load correctly (`[SIO] Memory card loaded: memcard2.mcd (131072 bytes)`)
+### Open, in the order they should be picked up
 
-**Phase 2.5 — CDROM Boot-Failure Investigation** *(new, added 2026-07-13 after live-test; findings revised same day after a follow-up test)*
-
-Found while live-testing Phase 1/2: booting `roms/SCPH1001.BIN` (NTSC-U BIOS) with `games/Ace Combat 2 (Europe).bin` (confirmed Europe/SCES via its own `SYSTEM.CNF`) produces a very early `A0(0xA1) SystemError(type='B'=Boot, errorcode=0x38a)`, called from inside the BIOS ROM itself (not game code). Initial hypothesis: real PS1 region lock (BIOS region NTSC-U vs disc region Europe), per `DOCS/cdromdrive.md`'s documented "PSX refuses to boot if it doesn't match up for the local region."
-
-**Follow-up test, same day**: re-ran with `roms/SCPH-7502 (3).BIN` — confirmed via MD5 (`b9d9a0286c33dc6b7237bb13cd46fdee`) to be a genuine, region-matched PAL BIOS (cross-checked against DuckStation's own hash table in `bios.cpp`, which lists this exact hash as `ConsoleRegion::PAL`) — against the same Europe disc. Result: identical `SystemError(type='B', errorcode=0x38a)`, called from the identical `$ra=0xbfc06fc4`/`PC=0xbfc0d958`, near-identical register state. Switching BIOS region changed nothing in the logs.
-
-**Root cause identified**: a screenshot of the boot logo screen (PAL BIOS run) shows the Sony trademark text as **"SCEA"** — America — despite the genuinely-PAL BIOS and genuinely-Europe disc in use. Per `DOCS/cdromdrive.md`: *"The 'SCEx' string is displayed in the intro, and the PSX refuses to boot if it doesn't match up for the local region."* — i.e. that trademark text is **not** a fixed per-BIOS bitmap, it's rendered from the disc's licence data read via `GetID`, confirming the doc's own account of real hardware behavior. Our `GetID` hardcodes that response to `'A'` (the bug already flagged in the §10 addendum above) — so the logo *always* shows "SCEA" and the BIOS *always* reads "America" back from the drive, regardless of which BIOS file or which disc is actually loaded. This self-consistently explains every earlier observation:
-- Switching to a PAL BIOS didn't help, because the mismatch isn't BIOS-region-vs-disc-region — it's GetID's fake `'A'` response vs. the disc's real embedded licence data (which genuinely says Europe, read separately by the BIOS from disc sector 4 per `DOCS/cdromformat.md`) — a contradiction that exists no matter which BIOS is loaded, since `GetID` is our own code, not something read from the BIOS ROM.
-- The `A0(open)("System Controller ROM Version..." )` garbage-string lead from the earlier investigation is very likely a downstream symptom of the BIOS's own error/retry handling after detecting this inconsistency, not a separate bug — deprioritized below pending confirmation.
-
-**This upgrades the GetID fix from "independent nice-to-have" to the primary suspected fix** for this entire boot failure. The BIOS ROM patch idea (bypass a real hardware region check) is very likely unnecessary — there may be no real region mismatch to bypass once GetID reports the disc's true region.
-
-**A second, deeper cause was found while implementing the fix**: `cdrom_commands.c`'s `cdrom_execute_drive()` (sector-read path, not GetID) contained a pre-existing, unconditional hack — "Software modchip: spoof US license data for LBA 4-11" — that rewrote the disc's real licence-string sector (the same sector `GetID`'s fix now reads honestly) to always say "America" for *every* disc, on *every* read, regardless of which BIOS was in use. This directly explains why swapping to a region-matched PAL BIOS made no difference: the disc's on-disk licence text was being actively falsified back to "America" by our own code on every sector-4 read, independent of the GetID byte. Left in place alongside a truthful GetID, this would have created a **new, guaranteed contradiction** (GetID says the disc's real region, the sector text says America) instead of fixing anything.
-
-✅ **Implemented (2026-07-13)**:
-- [x] Added `cdrom_disc_detect_region()` (`cdrom_disc.c`/`.h`) — reads the disc's real licence-string sector (LBA 4, per `DOCS/cdromformat.md`) once, returns `'A'`/`'E'`/`'I'`. This is the single, modular source of truth for disc region — not derived from `SYSTEM.CNF` parsing as originally sketched above, but directly from the same raw sector data real hardware itself reads (more faithful, and reuses the existing `cdrom_disc_read_sector()` primitive rather than adding a second, parallel detection path)
-- [x] `cdrom_load_disc()` (`cdrom.c`) calls it once at disc-load time, stores the result in a new `Cdrom.disc_region` field
-- [x] `GetID` (`cdrom_commands.c`) now returns `cdrom->disc_region` instead of the hardcoded `'A'`
-- [x] Removed the unconditional "spoof to US" hack from `cdrom_execute_drive()` entirely — kept it would have directly contradicted the new honest `GetID`/licence-sector data on every read
-- [x] Build verified clean (`make clean && make`), no new warnings, no dangling references to the removed code
-- [x] **Live-verified — did NOT fix the hang.** Region now correctly detects/reports `'E'` (confirmed via new log line `[CDROM] Disc region detected: 'E'` and `GetID second: ... region='E'`), but the identical `SystemError(type='B', errorcode=0x38a)` still occurs, from the identical call site. **The region/GetID/spoof-hack theory is now fully ruled out** by two independent empirical tests (BIOS swap, then this fix) — both real bugs fixed and worth keeping, but neither was the cause of this hang.
-- [x] **Also ruled out**: memory card slot 2 involvement — temporarily disabled the `memcard2.mcd` load added in Phase 2 and re-ran; identical crash. Not a Phase 2 regression.
-- **Apparent "corruption" was a logging bug, not a CPU bug**: what looked like `A0(read)` with garbage args (`fd=66, dst=0x38a, len=huge`) was `op_jr`'s BIOS-syscall capture reading `$t1` (the function-select register) **inside the JR instruction itself**, one instruction before the real calling convention sets it (confirmed by direct disassembly: `jr $10 ; addiu $9,$0,0xA1` — `$t1` is only valid once control reaches the vector, since the delay slot hasn't executed yet at JR-dispatch time). Fixed by moving the interception from `op_jr` (`cpu_instructions.c`) to a check on `current_pc` at the top of `cpu_run_next_instruction` (`cpu_execution.c`), firing only after the delay slot has committed. `$a0=0x42`('B')/`$a1=0x38a` were real, correctly-set `SystemError` arguments the whole time — just mislabeled as a "read" call. This is a genuine, now-fixed correctness bug in this project's own debug tooling (not upstream in DuckStation/PCSX-Redux, whose interception points don't have this hazard — see §1.5), worth keeping fixed regardless of the boot issue.
-- **True root cause, found via corrected instruction-level tracing**: with reliable logs, the real call chain was: `open("cdrom:SYSTEM.CNF;1")` succeeds → BIOS reads the licence/logo/PVD system-area sectors (LBA 4, 5-11, 16) correctly (verified byte-for-byte against the raw `.bin` file: valid "CD001" PVD signature, root directory correctly described at LBA 22, size 2048) → but **no read of LBA 22 (or any LBA beyond 16) ever occurs** — the root directory is never fetched, so the BIOS falls back to the `PSX.EXE` default path (documented in `DOCS/cdromfileformats.md` as "default filename when SYSTEM.CNF doesn't exist" — misleadingly triggered here even though SYSTEM.CNF *does* exist and opened fine), which fails (file genuinely doesn't exist on a retail disc), cascading through 2 levels of BIOS wrapper functions into `SystemError('B', 0x38a)` (itself the documented, expected error for "boot file couldn't be loaded," per `DOCS/kernelbios.md`'s description of `LoadExec`'s Part3/Part4 — confirms this errorcode family is real BIOS behavior, not something exotic).
-- **Actual bug, found by comparing the sector buffer's content against what DMA delivered to RAM**: `cdrom_disc_c`'s in-memory sector buffer had the correct PVD data (`01 43 44 30 30 31 01 00` = type=1,"CD001", matching the verified disc bytes exactly) — but the RAM address DMA channel 3 wrote it to came back **all zeros**. Traced to `cdrom_dma_read_word()`'s guard: `cdrom->data_buffer_armed=true` but the sector's `sb->valid=false`. Root cause: the CDROM Request Register (`0x1F801803` bank 0, bit 7 = BFRD) write handler in `cdrom.c` cleared `sb->valid` on **every** BFRD=0 ("disarm") write — but real software routinely writes BFRD=0 then BFRD=1 again around the same already-loaded sector (e.g. as a defensive reset before re-arming), and real hardware doesn't discard buffered-but-unread sector data just because BFRD was briefly deasserted. This project's disarm handler was destroying a correctly-loaded sector's data before DMA could read it, on every single CD data read that happened to hit this pattern — including, apparently, the root-directory read that never even got issued as a result of downstream effects, and definitely affecting delivery of already-issued reads.
-- ✅ **Fixed (2026-07-14)**: removed the `sb->valid = false` line from the BFRD=0 disarm path in `cdrom.c` — disarming now only clears `data_buffer_armed` (stop offering data), leaving the underlying sector data intact until a genuinely new sector load or full consumption invalidates it (the two paths that already correctly do so). **Live-verified**: boot now proceeds correctly through the real Sony logo screen with the correct trademark text ("Licensed by Sony Computer Entertainment Europe" / "SCEE™") — confirmed via screenshot, no garbling, matching the disc's true region. This was the actual root cause of the entire Phase 2.5 investigation.
-- **New follow-up issue found immediately after this fix, not yet root-caused**: boot now gets much further, but exhibits ~7-second mini-stalls during boot phases, then continues, then settles into a very slow (not fully frozen, but heavily throttled) loop after about a minute. `logs/Event.log`'s tail is dominated by repeated `[EVQ] Firing SIO deferred byte transfer` entries, and `logs/Timer.log` shows Timer1 mode being reconfigured multiple times in the same session (`sync=0→1`, `clkSrc` toggling) — both worth checking first. Plausible next suspects: an SIO retry loop (controller or memory-card polling not completing cleanly) and/or a timer sync-mode edge case. Deliberately not chased further this session — tracked here as the next concrete lead rather than re-opened blind.
-- Priority: The original Phase 2.5 CDROM/DMA bug is **resolved**. The new SIO/timer slow-loop symptom is a fresh, separate, lower-urgency follow-up (boot now reaches much further than at any prior point this session) — High enough to revisit soon, but not blocking further work the way the DMA bug was.
-
-**Phase 2.6 — Missing-3D symptom reframed; not a GPU/GTE bug (2026-07-15)** ✅ **RESOLVED (2026-07-15, later same day) — game boots, live-verified**
-
-Follow-up live session produced a 164MB `logs/CPU.log` and the user observed no 3D rendering at all for `games/Ace Combat 2 (Europe).cue`. Investigated by reading already-captured logs (no new live test performed):
-- `logs/GTE.log` for the entire session contains **only** `[INFO] GTE initialized` — zero GTE ops ever invoked.
-- `logs/GPU.log` (6098 lines) is **100%** `tick: scanline=... vblank=... lsb=...` CRTC-heartbeat lines — **zero** GP0/GP1/draw/polygon/rect/vram lines for the whole session.
-- `logs/CPU.log` shows `A0(SystemError/0xA1)` firing at line 533 — very early post-boot — with `type='C' (0x43), errorcode=2`, called from `$ra=0x801CF314`, then repeating for the remaining 2,670,849 lines.
-- `logs/exec_trace_systemerror_a1.log:8185-8190` shows the actual call site is **statically-linked game/library code** (`0x801CF308-0x801CF314`), not the BIOS kernel — the game itself deliberately invokes `SystemError('C', 2)`. The call chain traced back (`exec_trace_systemerror_a1.log:36,418-428`) shows a caller at `0x801CE4FC` → a function at `0x801CF26C` that runs a string-compare-style check, and on one branch outcome falls through to a `printf`-style call before reaching the `SystemError` call.
-- `DOCS/kernelbios.md:2202-2205` confirms `SystemError` functions are documented as **repeatedly jumping to themselves by design**, i.e. a deliberate hang once reached — so the millions of repeated log lines are expected BIOS/game behavior once triggered, not an emulator bug in themselves.
-
-**Conclusion**: the missing-3D symptom is fully explained without any GPU/GTE change — the game halts itself (by its own design, on some check it performs) before it ever issues a single GTE op or GP0 draw command. This reframes, but does not replace, the real GTE/Timer/GPU implementation gaps found during the dedicated pass requested for this same session — see §5, §8 (+ linked `GPU_GAP_ANALYSIS_2026-07-15.md`), §9. Those gaps are real and independent of this finding; fixing them will not by itself make Ace Combat 2 render 3D, because execution never reaches that code.
-
-**Also flagged, same session**: `Screenshot 2026-07-14 191115.png` (previously described as showing a "fully correct" boot logo) on closer look shows only the text lines — the accompanying graphical PlayStation boot logo/sprite is not rendering. See §8's "Also flagged" note and `GPU_GAP_ANALYSIS_2026-07-15.md` for the corroborating GPU-side candidates (limited CPU→VRAM opcode range, or a silently-failing texture/sprite command) — not root-caused this session either.
-
-**Follow-up session (2026-07-15): root-caused the "why" via static RE + 2 targeted live probes — PARKED here, not fixed yet.** Full chain traced from the game's own extracted EXE (`SCES_006.99`, boot file per `SYSTEM.CNF`) plus a one-shot register/memory probe added to `cpu_execution.c` for a single run, then removed:
-- `0x801CF26C` is the game's own "open one of several candidate CD paths" helper, called with 3 candidates: `\ACE2.DAT;1`, `\ACE2.STH;1`, `\ACE2.STP;1` (all three genuinely exist on the disc — confirmed via direct ISO9660 parse of the `.bin`). It calls `0x801DAE8C` (path-string parser) → `0x801DB7AC` (low-level sector-read wrapper).
-- Live probe confirmed: `0x801DB7AC` issues `Setloc LBA=16` (the PVD sector) with `Setmode` `whole=1` (2340-byte "everything except sync" mode, `DOCS/cdromdrive.md` bit5), and the read **succeeds** (`v0=1`) with byte-correct real disc data landing in RAM — confirmed via a live 32-byte memory dump matching the disc image exactly (`00 02 16 02 00 00 09 00 00 00 09 00 01 43 44 30 30 31...` = header+subheader+PVD start, `"CD001"` sitting at buffer offset **+13**, i.e. right where `data_start=12` whole-mode delivery should put it).
-- The game's own code then checks for the ISO9660 `"CD001"` signature at buffer offset **+1**, not +13 — confirmed via disassembly (`0x801DB1BC`: `ADDIU $a0,$s0,1`) and via dumping the actual reference string in the exe (`0x801CC948` = literal `"CD001\0\0\0"`). This mismatch (always exactly 12, matching `data_start`) is why the signature check always fails → search returns "not found" for all 3 candidates → `SystemError('C',2)`.
-- Deeper cause candidate found (not yet confirmed as *the* bug): `0x801DBD60`, the function that decides how many words to actually DMA, computes it from `mode & 0x30` where `mode` is the **caller's own parameter** (`a2=0x80`, not the live hardware Setmode register) — `0x80 & 0x30 == 0` selects the "512 words / 2048 bytes, data-only" branch, even though the hardware `Setmode` was configured for `whole=1` (which should select 585 words/2340 bytes per the same table, seen 3 lines below in the same function: `mode&0x30==0x20` → 585). So the driver asks hardware for header-first "whole" data, but only pulls out a 2048-byte window sized for data-only alignment — the likely source of the 12-byte mismatch. **User's read: more likely a bug on our (emulator) side than a genuine game-side quirk — plausible, not yet proven.**
-- **Original fix candidate (short-DMA-aware `data_start`) was WRONG — disproved by reference research before implementation.** A dedicated research pass read `duckstation_ref/src/core/cdrom.cpp` and `pcsx-redux/src/core/cdrom.cc`/`.h` end to end for this exact mechanism: both reference emulators use a **fixed, mode-selected start offset chosen once when the sector is delivered or the transfer is armed** (0 for whole/2340, 12 for normal/2048 — matching our `data_start` exactly), with a monotonic `position`/`m_transferIndex` cursor that DMA word-count never re-bases. No evidence anywhere of "align to the end of a short request." This ruled out the parked candidate entirely — see the research agent's full citations (DuckStation `cdrom.cpp:1379-1398` `DMARead`, PCSX-Redux `cdrom.cc:1409-1484`).
-- **Real bug found via the same research: our Request Register (BFRD, `0x1F801803` index0) arm/disarm had the `position` reset backwards.** DuckStation (`duckstation_ref/src/core/cdrom.cpp:1253-1264`, `WriteRegister` case 2): **disarm (BFRD=0) resets `sb.position=0`; arm (BFRD=1) does not touch it at all.** The comment there is explicit: *"Clearing BFRD needs to reset the position of the current buffer... during the actual game, it doesn't clear, and needs the pointer to increment."* — i.e. real software commonly issues multiple separate reads of the *same* armed sector (e.g. a short header peek, then a bulk data transfer) without ever disarming in between, and depends on `position` continuing across them. Our code had this **exactly backwards**: `case 0` (`cdrom.c`) reset `position=0` on **arm**, and did nothing on disarm. Any re-arm between two reads of the same sector (the exact "peek header, then bulk-read data" pattern DuckStation's comment describes) silently threw away all prior progress and restarted from byte 0 (header) every time — which is precisely why the game's "CD001"-at-offset+1 check kept landing on header bytes instead of PVD content, no matter how many times it read.
-- ✅ **Fixed (2026-07-15)**: swapped the reset in `cdrom.c`'s Request Register handler — disarm (BFRD=0) now resets `position=0` (and keeps the existing, correct "don't touch `->valid`" behavior from the Phase 2.5 fix); arm (BFRD=1) now only sets `data_buffer_armed=true` and leaves `position` untouched. Matches DuckStation's model exactly.
-- ✅ **Live-verified (2026-07-15)**: fresh 60s run of `games/Ace Combat 2 (Europe).cue` — `SystemError` count in `logs/CPU.log`: **0** (was up to 2.67M repeated lines before). `"File not found"` in TTY: **0** occurrences (was present every run before). `logs/CDROM.log` now shows the game successfully reading `LBA 74` and `LBA 47886` — the *real* LBAs of `ACE2.DAT;1` and `ACE2.STH;1` on the disc (confirmed against the direct ISO9660 parse done earlier this session) — i.e. the file search that always failed before now genuinely finds and reads the game's data files. **The game boots** — confirmed on-screen by the user.
-- Housekeeping done as part of the same investigation (unrelated to the bug itself): removed `bios_print_bootstrap_strings()`/`bios_print_all_hidden_strings()` (`bios.c`/`bios.h`) — a static, one-time ROM string dump done at boot that printed the same BIOS boot-banner text the real TTY capture also prints during genuine execution, creating a confusing duplicate that looked BIOS-authentic but wasn't tied to real execution flow. `bios_print_all_hidden_strings` was already fully dead (no call sites at all). Also: `capture_bios_printf` (`cpu_bios.c`) previously dumped A0/B0 `printf()`'s raw, unsubstituted format string ("PCSX-style", by design per its old comment) — user pointed out real BIOS/game TTY lines were showing literal `%s`/`%d`/`%08x` instead of real values, which was actively hampering debugging since TTY output is the primary signal for understanding BIOS/game behavior. Rewrote it to do real MIPS o32 varargs substitution ($a1-$a3, then stack) via the host's own `snprintf` per parsed directive — TTY output now shows real values (confirmed live, e.g. `"System ROM Version 4.1 12/16/97 E"`, `"VSync: timeout (24:23)"` with a genuinely incrementing counter). Zero unsubstituted `%`-directives remain in a fresh run's TTY log.
-- **New, separate, not-yet-investigated symptom found immediately after this fix**: after successfully reading `ACE2.STH`, the CPU enters a repeated-polling state calling `A0(0xA7)` (`bufs_cb_0`, an internal CD buffer-control callback, undocumented per `DOCS/kernelbios.md:348`) many times from a fixed `$ra=0x00004f6c` (BIOS kernel code). This looks like the same "joystick loop"/VSync-retry pattern the user flagged earlier this session (also consistent with the newly-fixed TTY now showing a genuinely incrementing `"VSync: timeout (N:N-1)"` counter) and with the already-documented Timer sync-mode gap (§5) — not yet root-caused, tracked as the next lead if further boot-hang symptoms appear.
-
-- Priority: **Resolved.** This was the actual blocker for the game reaching any GTE/GPU code at all; it no longer is. The GTE/Timer/GPU structural gaps found in the same session (§5/§8/§9, `GPU_GAP_ANALYSIS_2026-07-15.md`) remain open and independently tracked (Phase 3.6) — now directly relevant again since execution actually reaches that code.
-
-**Phase 2.7 — Missing boot-logo graphic: root cause narrowed to CD-sourced data, not BIOS ROM code (2026-07-15, open)**
-
-Follow-up to §8/Phase 2.6's "also flagged" note: the boot screen shows the license text correctly ("PlayStation™ / Licensed by Sony Computer Entertainment Europe / SCEE™") but not the colored 3D "PS" logo graphic above it. User provided a reference image confirming the real logo is a Gouraud-shaded 3D model (red/teal/blue/yellow, visibly faceted/extruded, not a flat sprite).
-
-**Investigation, all live-verified, all inconclusive on their own — see conclusion below:**
-- Added a one-shot targeted probe (color+vertices) to the shaded-polygon draw paths (`gpu_commands.c`, removed after use): confirms the red "P" piece of the logo **does** draw correctly — real Gouraud quad + 2 triangles, color `(178,0,0)`, vertices forming the expected diamond shape centered on-screen, redrawn every frame. **In every run captured (up to 40s, well past the point the BIOS moves on to reading `SYSTEM.CNF`), no teal/blue/yellow polygon or textured-rect ever appears** — same single-color frame repeated indefinitely.
-- Checked the GPU DMA linked-list (channel 2) delivery path directly (`bus.c` probe, removed after use): chains transfer normally, no truncation, no stuck/aborted packets — rules out a DMA/FIFO delivery bug as the cause.
-- Checked VRAM CPU-uploads (GP0 0xA0) during this phase: all are small (5×8 to 160×240) and consistent with font glyphs for the license text, not a ~150×150px logo bitmap — consistent with the logo being real-time geometry (matching the reference image), not a pre-rendered texture.
-- Attempted to trace the BIOS ROM code responsible via `$ra`/exec-trace probes and manual disassembly of the SCPH-7502 ROM shell region: **inconclusive** — the captured PC/RA reflect whatever the CPU happened to be executing when the *asynchronous* linked-list DMA slice fired (an unrelated checksum/decompression-looking loop), not the code that decided what to send; manual ROM↔RAM offset mapping for the shell region also didn't disassemble coherently, likely wrong offset assumption for this specific BIOS dump.
-- **Applied the already-planned Timer sync-mode gating fix (Phase 3.6) specifically to test whether a stuck VBlank/Timer1 gate wait was the cause (plausible: BIOS logo animations are commonly paced by waiting N vblanks per piece) — live-tested after the fix, symptom unchanged.** Rules out (at least the Timer1/vblank-gate flavor of) a timing-gate theory.
-- **Web research broke the impasse**: per [Push Square](https://www.pushsquare.com/news/2021/07/random_turns_out_the_ps1s_boot_up_logo_is_a_3d_model) (corroborated by [psx-spx kernelbios](https://psx-spx.consoledev.net/kernelbios/)) — **the 3D PS logo is loaded from the game disc itself, not stored in BIOS ROM**, and is genuinely re-rendered in 3D on every boot rather than being a fixed BIOS asset. "If non-PlayStation discs are used, the PS icon won't show up, and you'll see some strange lines and shapes instead" (i.e. the logo's presence/correctness is itself disc-data-dependent, exactly like the pieces-missing symptom here).
-- Cross-checked against our own `logs/CDROM.log`: confirmed the BIOS reads the full licence-sector range (**LBA 4, then 5 through 11** — 8 sectors, 16KB) very early in boot, before ever reading the PVD (LBA 16) — this is the same licence/region-detection area already worked on in Phase 2.5, now understood to likely *also* carry the logo's 3D geometry data, not just the region text string.
-
-**Conclusion**: this is very likely a CDROM-data-correctness issue (are we delivering the full, byte-correct content of LBA 4-11 the way the BIOS's logo-model parser expects?) rather than a GPU-rendering or BIOS-ROM-logic issue — consistent with the user's own read of the situation ("il boot lo fa il BIOS ma lo fa DAL CDROM"). **Not yet root-caused**: the exact on-disc binary format Sony uses to encode the logo's geometry within the licence-sector data is undocumented in every source checked (PSX-SPX, psxdev, this session's web search) — this would need direct byte-level comparison of LBA 5-11's content against what a working reference emulator's CD-read path delivers for the same sectors, or symbolizing the BIOS's licence-sector parser, neither attempted yet.
-
-- Priority: **Medium** — cosmetic (doesn't block the publisher-screen boot reached so far), but concrete and worth finishing once picked back up. **Correction**: this was previously described as "doesn't block gameplay, which now works" — that overstated where things stand; see Phase 2.8 for the actual current blocker. Next step for the logo itself should be dumping LBA 5-11's raw bytes and looking for recognizable geometry-like patterns (repeated fixed-size records, plausible small integer coordinate ranges) rather than more BIOS-ROM disassembly.
-
-**Phase 2.8 — FMV intro playback / MDEC integration (2026-07-16, new, open — current blocker to gameplay)**
-
-Boot now reaches Ace Combat 2's "Presented by Namco" publisher screen (Phase 2.6 fix) — the real game plays an FMV intro immediately after this screen; our emulator shows nothing there instead. User separately observed that pressing Start (the real game's skip-video input) is followed by the game appearing stuck, but this specific observation came from a run that wasn't set up to test input handling (window focus not confirmed) — **not confirmed as a real bug, not investigated, do not treat as established** until deliberately re-tested with focus confirmed.
-
-**What's confirmed**: §12's `EVQ_MDEC` dead-handler gap (known since Phase 1, never carried back into §12 until this pass) is the obvious first suspect — MDEC's decoder itself looks structurally sound (ported from DuckStation, no TODOs), but its integration into the real event-scheduled DMA/IRQ pacing real FMV playback depends on has no scheduled path. Whether CD-XA STR sector data ever reaches `mdec_dma_in()` in the first place is also unconfirmed.
-
-**Not yet done**: no live investigation this pass (explicitly out of scope — user flagged the symptom as context, not a request to dig in this turn). Next session should: (1) confirm whether MDEC ever receives real bitstream data during this game's intro (log `mdec_dma_in`/`mdec_write` call counts during the publisher-screen-to-intro transition), (2) wire or confirm-unnecessary the dead `EVQ_MDEC` slot, (3) only then, separately and with window focus deliberately confirmed, re-test the Start-to-skip input path before concluding anything about it.
-
-**New visual evidence (2026-07-18)**, now that Phase 3.8's crash/CDROM fixes let boot progress further: screenshots `Screenshot 2026-07-18 115008.png` (Namco screen, renders correctly) and `Screenshot 2026-07-18 115014.png` (immediately after — PS1 Display is black, but the VRAM Viewer panel shows a large amount of new texture/asset-looking data written since the previous frame, beyond the small font/UI rectangle already present at the Namco screen). This confirms the game *is* actively writing real data into VRAM right after the publisher screen — consistent with either MDEC decode output landing in VRAM with nothing scheduled to display it, or CPU-side asset/texture uploads proceeding normally while whatever's supposed to trigger showing them (the FMV player's own draw/display-enable calls) never fires. Strengthens the case for step (1) above (confirm MDEC actually receives bitstream data) as the next concrete action, now unblocked by Phase 3.8's fixes.
-
-**2026-07-18 (same day, continued) — step (1) done: MDEC does receive real bitstream data and does decode it. Found and fixed a real, separate data-corruption bug in the process; the FMV still doesn't play to completion, but the actual blocker has moved and is narrower than before.** Logging `mdec_dma_in`/command dispatch during the Namco-to-black transition showed MDEC receiving a genuine `SetQuantTable` → `SetScale` → `DecodeMacroblock(nwords=1216)` sequence — real CD-XA STR compressed data, not silence — and actually decoding: `logs/MDEC.log` showed dozens of macroblocks converted from YUV to RGB and pushed to the output FIFO. This **disproves** the old "MDEC never receives data" framing entirely.
-
-What was actually wrong: immediately after the first macroblock, `logs/MDEC.log` showed `"Input FIFO overflow"` repeating ~180 times, and decode then permanently stalled with real, valid compressed data still sitting unconsumed (the `remaining_halfwords` counter never reaching 0). Root cause: `interconnect_perform_dma` (`bus.c`) ran DMA channel 0 (RAM→MDEC input, `mdec_dma_in`) as one synchronous loop pushing all 1216 words in a single call, and only *afterward* did channel 1 (MDEC→RAM output, `mdec_dma_out`) get a chance to run — but `mdec.c`'s decode state machine only decodes **one macroblock at a time and then blocks until its output FIFO drains** (`mdec_decode_macroblock`'s `if (!out_empty(m)) return false;`). With nothing draining output during ch0's burst, MDEC's 2048-halfword input FIFO filled up and silently dropped the back ~180 words of real macroblock data every single frame — exactly why `EVQ_MDEC` being a dead handler (flagged back in Phase 1) turned out to matter after all, just not for the reason originally guessed (not an interrupt-timing issue — a missing DMA-channel-interleaving mechanism).
-
-**Fixed**: ch0 and ch1 now run as sliced, event-scheduled transfers (`dma_mdec_resume`, wired to `EVQ_MDEC`) that check MDEC's own FIFO readiness before each word and yield back via the event scheduler instead of overflowing — the exact same pattern already used for the GPU's FROM_RAM DMA (`dma_gpu_resume`/`dma_gpu_run_slice`), just never extended to MDEC. **Live-verified**: `"Input FIFO overflow"` count 0 (was 180+ per command), and the game now issues 23 separate ch0 (input) commands and 14 ch1 (output) transfers over a 45s run — versus exactly 3 ch0 activations total before the fix (the game gave up feeding MDEC more data after the first frame got corrupted). No crash, no regression, `SystemError` count still 0.
-
-**Not yet resolved**: decode still stalls partway through a command (71 of ~200 macroblocks decoded in the last test run, not the full frame) and the display stays black through frame 650 (`ZS1_DUMP_FRAME`-verified) — though the STR data decoded so far is consistent with a genuinely dark/near-black opening frame (RLE-compressed data was suspiciously uniform per macroblock, ~12 halfwords each, matching a mostly-solid background), so "still black at frame 650" isn't conclusive proof of a remaining bug on its own. Next steps: (1) determine why decode still stops mid-command even without overflow — likely ch1's own transfer completing/re-triggering logic needs the same scrutiny ch0 just got; (2) once a command decodes to completion, check whether the resulting RGB/YUV data in RAM ever gets uploaded to VRAM or displayed at all (a separate, not-yet-investigated link in the chain — MDEC output lands in RAM, not directly in VRAM, per DMA ch1's `TO_RAM` direction).
-
-- Priority: **High**, unchanged — closer to resolved than at any prior point (the actual data-corruption bug is fixed and live-verified), but FMV still doesn't reach the screen.
-
-- Priority: **High** — this is the actual current blocker to reaching any real gameplay, in this game and likely most disc-based titles (FMV intros are near-universal on PS1). Supersedes the old "MDEC not started" framing (README/§12 already corrected this session) — decoder exists, integration doesn't.
-
-**2026-07-18/19 (continued) — deep-dive via 3 parallel research agents + direct log analysis; one real bug found and fixed (kept, doesn't fully resolve the stall); root cause of the stall itself still open, now much better characterized; a new, separate, more urgent hang also found.**
-
-- **Bug found and fixed**: `dma_mdec_run_slice()`'s ch1 (output) section (`src/core/bus.c`) only ever called `mdec_execute()` (the decode-state-machine driver — made public, was `static`, `src/core/mdec.c`/`include/mdec.h`) reactively, from ch0 pushes or ch1 pops-to-empty. Confirmed via a DuckStation comparison (`duckstation_ref/src/core/mdec.cpp`'s `Execute()`/`CopyOutBlock`) that real hardware/DuckStation re-enters the decode driver on its own per-macroblock timing event, independent of whether a DMA channel happens to be mid-transfer — ours had no equivalent, so if ch0 went inactive at the exact instant output was momentarily empty, nothing would ever nudge decode again. Fixed: `dma_mdec_run_slice` now calls `mdec_execute()` whenever ch1 is still active but has no output ready. **Live-tested: made no difference to the actual stall** (same 71 macroblocks / 1580 halfwords remaining, byte-for-byte reproducible across 3 separate runs) — kept anyway, since it's a real, DuckStation-confirmed correctness gap independent of whether it was this bug's specific trigger.
-- **Stall re-characterized with hard evidence (not a decode-algorithm bug)**: `logs/DMA.log` across multiple runs shows the game issuing DMA ch0 (input) far more often than ch1 (output) — e.g. 20 ch0 vs 7 ch1 in one run — with every single ch1 transfer a clean, untruncated 1920 words (= exactly 10 macroblocks × 192 words/macroblock, verified via `logs/MDEC.log`'s `out_count=` field, always exactly 192, zero "Input FIFO overflow"/"Output FIFO empty on read" warnings anywhere). 7 clean ch1 batches × 10 = 70 macroblocks, matching "71 decoded" almost exactly (71st mid-flight into an uncollected 8th batch). **The game simply stops re-triggering ch1 after the 7th batch** — it doesn't retry, error, or truncate, it just moves on to only re-triggering ch0.
-- **Ruled out, with evidence**: (1) STAT-register bit computation — a full DuckStation comparison found our `mdec_get_status()` (`mdec.c:47-64`) bit-for-bit identical to DuckStation's `UpdateStatus()` for all 5 relevant bits (27/28/29/30/31); (2) DMA channel-IRQ gating/CHCR-busy-stuck theories — `dma_channel_done()` correctly clears `enable`/`trigger` on completion, verified by reading `dma.c`; (3) CD-ROM data starvation — `logs/CDROM.log` shows the disc streaming sequential XA sectors continuously (no gaps, no Setloc/Pause) straight through and past the stall point; (4) the game polling MDEC STAT at all during this window — instrumented `hw_mdec_read`'s 0x1F801824 path directly: **the game reads MDEC STAT exactly 3 times in the entire session, all early (same PC, ~627M-628M cycle range), and never again** — it does not poll MDEC status during FMV playback at all, so a STAT-bit gap can't be the mechanism regardless.
-- **Still open**: whatever paces the game's decision to re-trigger ch1 (since it isn't STAT polling, DMA IRQ never fires for ch0/ch1 either — confirmed zero "DMA ch0/ch1 done" log lines all session, only ch2/GPU's), it's internal game-code logic our reference emulators can't illuminate further (both are LLE — they run this exact game's real code, they don't reimplement its FMV-player logic, so there's no more "duckstation/redux comparison" to be had on this specific question, same limitation hit during Phase 2.7's boot-logo investigation). The only remaining path is live PC-tracing/disassembly of the game's own code right after the 7th ch1 batch completes (breakpoint + Live Disasm/Exec-Trace-dump via the in-app debugger, same technique used for Phase 2.7) — not attempted yet this pass.
-- **New, separate, more urgent finding**: during this investigation's live-testing, the emulator was observed to genuinely hang at Ace Combat 2's main menu after running for a while (VBlank counter frozen, e.g. stuck at #7560 for 47+ real seconds while CPU usage stayed at ~188%). A `SIGTERM`-triggered exec-trace dump caught the CPU inside a low-RAM kernel interrupt-entry register-save sequence (`PC≈0x00000D00-D90`, `Cause` IP2 set = hardware interrupt pending) with `logs/IRQ.log`'s tail showing a tight, uninterrupted `CDROM IRQ triggered`/`CDROM IRQ cleared` loop and no real command activity in between — consistent with a genuine IRQ storm (something re-asserting the CDROM IRQ line continuously) rather than normal menu-idle SIO/memory-card polling (which was also present but is expected/benign on its own). **Not yet root-caused** — doesn't appear related to either of tonight's two implemented fixes (semi-transparency touches only GL blend state, the MDEC ch1-nudge only touches `dma_mdec_run_slice`), so likely a pre-existing bug that just hadn't been observed before (needs enough real idle time at a menu screen to manifest). Tracked here as a new lead — reproduce with a longer main-menu idle soak test, then apply the same live PC-trace/breakpoint technique to find what's re-triggering the CDROM IRQ line without a real command behind it.
-
-**Semi-transparency renderer bug — found and fixed the same session** (technically a GPU/renderer item, logged here too since it was found during this MDEC pass): `renderer_draw_gl`'s (`src/gpu/renderer.c`) two-pass semi-transparency blend logic was gated on `b->texture_enabled`, so flat/gouraud-shaded semi-transparent primitives (dialogue/text box backgrounds, among others) always rendered fully opaque regardless of the real blend mode. Confirmed via direct code read plus the existing `GPU_GAP_ANALYSIS_2026-07-15.md`'s own overstated claim about this ("Correction" added there). **Fixed**: new single-pass blend branch added for the untextured case (no shader changes needed). Full detail, citations, and fix rationale in `GPU_GAP_ANALYSIS_2026-07-15.md`'s "Rendering gap-analysis addendum (2026-07-18, continued)". Builds clean, smoke-tested — **not yet visually confirmed** against the actual reported dialogue-box scene.
-
-**Phase 3.7 — Full GPU accuracy pass (`GPU_GAP_ANALYSIS_2026-07-15.md`)** *(new, added 2026-07-16 — the dedicated GPU file had no corresponding roadmap phase; Gap A/B are already tracked in Phase 3.6, listed here too for a single point of reference)*
-- [ ] **Gap B — VRAM readback from rasterized output** (High, do first): `glReadPixels`/`glBlitFramebuffer` from the render target into `gpu->vram.data`, either after each batch or lazily before a VRAM-copy/CPU-read/texture-sample touches a GL-rendered region. Also the architectural blocker for a clean Gap A fix. *(= Phase 3.6's GPU item, same task, cross-referenced here.)*
-- [ ] **Gap A — mask-bit on rasterized primitives** (High, do after B): extend `vram_write_masked`-style checking into the readback/blit step, or a fragment-shader-side mask test (DuckStation's depth-buffer-as-mask-carrier trick) if a per-primitive readback is too costly. *(= Phase 3.6's GPU item, same task, cross-referenced here.)*
-- [ ] GPU command-timing model + real GPUSTAT ready bits (Medium): port DuckStation's per-command tick-cost tables if precise DMA-chaining/frame-pacing games become a priority; low urgency otherwise since PCSX-Redux ships the same "always ready" simplification successfully.
-- [ ] CRTC per-scanline granularity (Medium): move `gpu_crtc_tick` off the once-per-VBlank call site onto a more frequent tick — mirrors the fix already applied to Timers' dotclock/hblank feeds (§5 history) and would also make the new Timer1/vblank gate (Phase 3.6) more temporally accurate.
-- [ ] 24-bit display mode decode (Low-Medium): tracked in GPUSTAT but display path always unpacks as 5:5:5.
-- [ ] Full CPU↔VRAM opcode range (Low): GP0(0xA0-0xBF)/(0xC0-0xDF) mirror range, currently only exact 0xA0/0xC0 handled — real games essentially never hit this, cheap to fix if touching that code anyway.
-- [ ] Software-renderer fallback / backend abstraction (Medium, structural, carried from main doc §8 Phase 5) — not GPU-correctness, just portability/debuggability.
-- Priority: High for Gap A/B (real rendering-correctness issues), Medium for timing-model/CRTC/software-fallback, Low for the rest. Full detail, citations, and DuckStation/PCSX-Redux comparison for every item in `GPU_GAP_ANALYSIS_2026-07-15.md`.
-
-**Phase 3 — DMA/Bus edge cases**
-- Implement or explicitly document-as-intentional: DMA channel 5 (PIO) (§4)
-- Verify/add infinite-loop guard on the GPU/OTC linked-list DMA walker (§4)
-- Implement `SetRCnt` BIOS syscall handler (§5)
-- Thread PAL/`VMode` flag into `timers_calculate_frame_cycles()` (§5)
-- Remove hard-coded WATCHPOINT ranges from `bus.c`'s hot path, route through the existing `Debugger` mechanism (§2)
-- Investigate top-level address routing (LUT vs switch) against PCSX-Redux's 64KB-granularity pattern (§2)
-
-**Phase 3.5 — CPU Correctness Pass** *(new, added 2026-07-13 after the deep CPU-only audit, §1)*
-Originally framed as targeting a register/stack-corruption bug from live debugging (`dev_card_format → unknown(0xC8) → longjmp(garbage retval) → read(garbage args)`). **Correction (2026-07-14, see Phase 2.5)**: that specific case turned out to be a logging artifact (`op_jr`'s premature `$t1` read), not a real corruption bug — the register values were correct all along. The two candidates below remain independently valid findings from the CPU audit itself (not dependent on that now-explained-away case), just without a live-confirmed corruption symptom motivating them anymore.
-- [ ] **Top suspect**: convert the GPR load-delay slot to a genuine double-buffered pattern. **Correction (2026-07-15, see §9 Gap 3)**: this used to say "using an in-house reference implementation one struct away" (i.e. copy the GTE load-delay pair) — that's wrong, `gte_next_load_delay_reg`/`value` are dead scaffolding, never populated with a real value anywhere in the codebase. There is no working in-house reference to copy. Use DuckStation's pattern instead (dummy 35th register slot, `load_delay_reg/value` + `next_load_delay_reg/value`, "second load to the same register drops the first value").
-- [ ] **Second suspect**: add a DuckStation-style stale-icache self-check (re-verify against RAM on a reserved-instruction hit, self-correct instead of silently misbehaving) — this project currently has no equivalent safety net (§1.4)
-- [ ] Add `SR.IsC` handling to the icache fetch path, not just the store path (§1.4) — pre-existing gap, cheap to fold into the same pass
-- [ ] Use the project's own Exec Trace debug-UI panel and `logs/exec_trace_systemerror_a1.log` for instruction-level verification once the above are in place
-- Priority: Medium (downgraded from High — the corruption symptom that originally motivated "High" turned out not to be real; the load-delay asymmetry and icache gaps are still worth fixing but are no longer blocking a known live-reproducible bug)
-
-**Phase 3.6 — GTE / Timer / GPU accuracy pass** *(new, added 2026-07-15 after a dedicated GTE+Timer+GPU gap-analysis pass, §5/§8/§9 + `GPU_GAP_ANALYSIS_2026-07-15.md`)*
-- [x] ✅ **RESOLVED (2026-07-15)** **Timers — sync-mode gating** (§5, was Critical): implemented `timers_set_gate()` + `timer_update_counting_enabled()` in `timers.c`/`.h`, porting DuckStation's `SetGate`/`UpdateCountingEnabled` model exactly (verified against `duckstation_ref/src/core/timers.cpp:163-203,457-495` directly, not from memory) — all 4 sync modes now genuinely gate/reset/pause the counter instead of free-running. Wired the one gate signal this project's CRTC model can currently produce: Timer1 ← `gpu->crtc.in_vblank`, updated every `gpu_crtc_tick()` (`gpu.c`). Timer0's gate (hblank) is *not* wired — this project's CRTC only ticks once per VBlank event (§8's coarse-CRTC gap), so there's no per-scanline hblank signal to feed it yet; the gating *logic* is fully generic and ready for it once that gap is closed. Build clean, live-verified no regression (`SystemError` still 0, boot still reaches the game). **Did not fix the missing-logo symptom** (see Phase 2.7) — tested directly, no change — but this was a real, independently-valid Critical gap regardless.
-- [x] ✅ **RESOLVED (2026-07-15)** **GTE — wire computed cycle cost into `cpu->downcount`, add a real busy-stall check** (§9 Gap 1, was High): replaced the inert `gte->busy`/`cycles_remaining` per-instruction countdown with an absolute-tick model matching the existing MULT/DIV/MFHI/MFLO stall pattern already in `cpu_instructions.c` (`muldiv_completion_tick`) — new `cpu->gte_completion_tick` field, set on every GTE data-op dispatch (`op_cop2`) from the real per-opcode cost `gte_execute_instruction()` already computed (and previously discarded via `(void)cycles`), consulted before dispatching a new COP2 data-op and before resolving MFC2/CFC2 (DuckStation's `StallUntilGTEComplete` call sites, matched exactly). GTE ops now genuinely cost their documented cycles (5-44) instead of ~1.
-- [x] ✅ **RESOLVED (2026-07-15)** **GTE — the dead load-delay double-buffer (§9 Gap 3) is now actually dead** — deleted `gte_load_delay_reg/value` + `gte_next_load_delay_reg/value` from `Cpu` (they were never populated, confirmed by grep, per the original Gap 3 finding) along with `Gte.busy`/`cycles_remaining` (superseded by the tick-based model above). MFC2/CFC2 now resolve through the ordinary single-slot GPR load-delay path after the new stall check — simpler and, unlike before, actually correct.
-- [x] ✅ **RESOLVED (2026-07-15)** **GTE — add missing SR.CU2 check to `op_lwc2`/`op_swc2`** (§9 Gap 2, was Medium): both now raise `EXCEPTION_COPROCESSOR_ERROR` when SR.CU2 is clear, matching `op_cop2`'s existing check.
-- [ ] **GPU — VRAM readback from rasterized output** (`GPU_GAP_ANALYSIS_2026-07-15.md` Gap B, High): add `glReadPixels`/`glBlitFramebuffer`-based sync so GL-rendered pixels become visible to subsequent texture-sample/VRAM-copy/VRAM-read operations — currently they never do.
-- [ ] **GPU — mask-bit on rasterized primitives** (`GPU_GAP_ANALYSIS_2026-07-15.md` Gap A, High): extend mask-bit handling beyond Fill/Copy/Upload to polygons/lines/rects; depends on the VRAM-readback fix above landing first for a clean implementation.
-- [ ] Timers — fix the dual-timing-path disagreement (event-scheduled path's stale cached `rate`) (§5, High); delete 4 confirmed-dead timer functions (§5, Low) — **not done this pass**, `timers_on_vblank()` also confirmed dead (defined, zero call sites) while working the gating fix above, added to this list
-- [ ] `SetRCnt` BIOS syscall implementation, PAL frame-cycle threading — carried forward from Phase 3 (§5)
-- Priority: Remaining items are the two GPU rasterization gaps (High, real hardware-observable correctness issues) and the Timer dual-path/dead-code cleanup (Medium/Low). GTE and Timer-gating items above are done. None of this — done or still open — was expected to resolve the Ace Combat 2 missing-logo symptom (Phase 2.7); that's now understood to have a different root cause entirely.
-
-**Phase 3.8 — CPU memory-timing accuracy + stack-overflow fix (2026-07-16, new)**
-
-Investigation into Phase 2.7 (missing PS logo) led to porting DuckStation's real per-instruction BIOS ROM wait-state model (`Bus::CalculateMemoryTiming`), which surfaced a real, unrelated crash and a real, unresolved timing regression:
-- [x] **Fixed (crash)**: `Bios`/`Ram`/`Interconnect`/`Cpu` were declared as direct stack locals in `main()` — together ~6.15MB against the default 8MB thread stack, leaving almost no headroom for the rest of the call chain. Caused an intermittent `*** stack smashing detected ***` abort, most visible on normal shutdown (`main()`'s own stack-canary check, at `return 0`). Fixed by making all four `static` (BSS, not heap — consistent with this project's no-malloc convention; there is exactly one process-lifetime instance of each).
-- [x] **Fixed (real bug, always there)**: `main()`'s per-frame loop treated `chunk` (a "cycles until next event" distance) as an *instruction count* for both the inner execute-loop bound and for `timers_step`/`cycles_run` bookkeeping. Harmless while every instruction cost a flat 1 cycle; became a real pacing bug once per-instruction cost could vary (see below) — a single `chunk` could now represent far more real cycles than intended, blowing past frame/VBlank boundaries. Fixed: the inner loop now runs until *real* elapsed cycles (`inter.cpu_cycle_counter` delta) reach `chunk`, and that same real delta is what's passed to `timers_step`/added to `cycles_run`.
-- [x] **Added (real register storage)**: MEMCTRL registers (`0x1F801000`-`0x1F801020`) previously always read back hardcoded defaults regardless of what was written. Now backed by real storage (`Interconnect.memctrl_regs`), with `bus_memctrl_recalculate()` deriving a `bios_access_cycles` value from the `bios_delay`/`common_delay` registers via DuckStation's exact nocash-spec formula (ported to C in `bus.c`).
-- [x] **Hardened (defensive, didn't fix the regression alone but is a real improvement)**: `interconnect_trigger_cdrom_irq` (`bus_irq.c`) now forces a clean low-then-high edge on every call, since `cdrom.c`'s own `interrupt_flag==0` gating already guarantees each call is a genuinely new interrupt cause — previously a stale, not-yet-I_STAT-acked line state could theoretically suppress a real new edge. `CDROM_SEEK_FAST_DELAY` (`include/cdrom.h`) raised from `0x800` (2048 cycles) to `30000`, matching DuckStation's `MIN_SEEK_TICKS` — our old value had no real-hardware basis and was ~15x smaller than the reference minimum.
-- [ ] **Not resolved**: actually *applying* the BIOS-ROM cycle cost (`charge_bios_rom_cycles` in `cpu_icache.c`) — architecturally correct, ~24-32 extra cycles per ROM word fetch, matching real MEMCTRL-configured wait-states — causes the CD-ROM command sequence to hang partway through boot. Isolated via direct testing (toggling only this one code path): with it enabled, `games/Ace Combat 2 (Europe).cue`/`.bin` boot reads never progress past a same-location `SeekL` to LBA 23 (BIOS spins forever in `TestEvent`, `I_STAT`'s CDROM bit never observed set); with it disabled, boot proceeds normally deep into game data (confirmed past LBA 191000+). Neither of the two hardening fixes above (tried specifically to fix this) resolved it, so the true mechanism is still unknown — likely a BIOS interrupt-handler/second-response IRQ race that only becomes live once ROM-resident code takes ~25-30x longer per instruction, but not proven. **Currently shipped disabled** behind `#define ZS1_ENABLE_BIOS_ROM_CYCLE_COST 0` in `cpu_icache.c`, with the reasoning and the isolation-test recipe recorded in a comment there. Do not flip it on without re-running that same test.
-- Priority: Medium — the crash fix and pacing fix are done and valuable; the cycle-cost model itself is a real accuracy gap (ties into Phase 3.5's CPU-correctness theme) but is parked, not lost, pending whoever picks this up next actually finding the interrupt-timing interaction.
-
-**Phase 4 — Savestates**
-- Only after Phases 0-3 stabilize struct shapes, to avoid rewriting save/load code repeatedly
-- Simple per-module `X_save`/`X_load` pattern, starting with CPU/bus/RAM, expanding outward (§14)
-- Wire `op_break` to check for PCDrv codes before raising `EXCEPTION_BREAK`; verify/add path-sandboxing first (§13)
-
-**Phase 5 — Optional/advanced (low priority, do only if there's a concrete reason)**
-- GPU software rasterizer fallback / backend abstraction (§8)
-- Analog controller / DualShock / rumble support, once the Controller abstraction from Phase 2 exists (§7)
-- PGXP-equivalent precision geometry — explicitly optional per PCSX-Redux's own framing, not a core gap
+1. **Savestates** (§14) — High. Also unlocks reproducible testing.
+2. **GPU: mask-bit test, GP0(C0)/(80) readback, texture read-shadow** (§8.1-8.3) — High.
+   All three are the same underlying job: give the GL side a way to read the unified texture back.
+3. **Per-scanline CRTC** (§8.4) — Medium. Unblocks Timer0's hblank gate (§5) and is a prerequisite
+   for any GPU timing model.
+4. **Audio quality survey** (§11.1) — Medium.
+5. **GPUSTAT h-resolution bit order** (§8.6) — Medium, small and self-contained.
+6. **Analog pad** (§7.1) — Medium, once a game needs it.
+7. **MDEC channel kick queueing** (§4.1) — Medium.
+8. **CPU memory-timing cost model** (§1.1) — Low; re-enable and root-cause the CD hang it caused.
+9. **CDROM async pacing granularity** (§10.1) — Low.
 
 ---
 
-## Changelog
+## Method notes
 
-**2026-07-13 — Phase 0 cleanup complete.** Files changed:
-- Deleted: `src/interrupt_controller.c`, `include/interrupt_controller.h`
-- Deleted (dead functions): `interconnect_debug_check_irq_status()` (`bus_irq.c` + `interconnect.h`), `interconnect_check_bios_boot()` (`bus.c`), 6× `bios_*` timer placeholder functions (`timers.c` + `timers.h`)
-- Moved: `src/gpu/debugger.c` → `src/core/debugger.c` (`Makefile`: `EMU_GPU_SRCS` → `EMU_CORE_SRCS`)
-- Edited: `interconnect.h` (removed duplicate `TIMERS_START/SIZE/END` block), `cpu_instructions.c` (removed dead code in `op_jr`/`op_jalr`), `event_scheduler.c` (updated stale comments)
-- Verified: `make clean && make` builds clean, no new compiler warnings introduced. `make test` could not run — `tests/` directory absent from this checkout, pre-existing and unrelated to this change.
-- Not yet done at this point: Phases 1-5 below still open.
+These are the working practices that produced the fixes above, kept because they repeatedly turned
+week-long symptom chases into single-session root causes.
 
-**2026-07-13 — Phase 1 (unify event scheduling) complete.** Files changed:
-- Deleted: `interconnect_schedule_event()`, `interconnect_check_cdrom_events()`, `CdromEvent` struct + 8-slot array (`interconnect.c` + `interconnect.h`); the per-instruction call site `interconnect_check_cdrom_events(cpu->inter)` in `cpu_execution.c` (was step 10 of every single `cpu_step()`)
-- Changed enum (`event_scheduler.h`): `EVQ_CDROM` (non-DMA, dead) → `EVQ_CDROM_COMMAND` + `EVQ_CDROM_DRIVE` + `EVQ_CDROM_SECOND_RESPONSE`; removed dead `EVQ_DMA_SPU`, `EVQ_DMA_OTC`, `EVQ_GPU` (non-DMA) — all 3 confirmed via grep to never be scheduled anywhere before removal
-- Changed (`cdrom.c` + `cdrom.h`): `cdrom_schedule_command_event`/`_drive_event`/`_second_response_event` now call `eventq_schedule(inter, EVQ_CDROM_*, cycles)` instead of `interconnect_schedule_event(...)`; the 3 static `(void*, uint32_t)` callbacks became 3 public `(struct Interconnect*)` tick functions (`cdrom_command_event_tick`/`_drive_event_tick`/`_second_response_event_tick`), declared in `cdrom.h`, operating on `&inter->cdrom` directly — public scheduling API and all ~15 call sites in `cdrom.c`/`cdrom_commands.c` unchanged
-- Changed (`event_scheduler.c`): handler table wires the 3 new CDROM tick functions directly; `evq_handle_dma_cdrom` (a separate, still-legitimate no-op for synchronous DMA ch.3) left untouched
-- Doc correction: §12 MDEC's claim that `EVQ_MDEC` "already has a real, non-NULL handler" was found to be wrong during this work — it's `NULL` and unscheduled, same as the 3 removed slots; left in the enum since MDEC event pacing is out of Phase 1's scope
-- Verified: `make clean && make` builds clean, no new warnings, grepped for dangling references to every deleted symbol (none found)
-- **Live-verified by the user**: BIOS boot + disc read confirmed working. Bonus finding — the migration fixed a **latent bug**: the BIOS memory card menu, previously blocked, now unblocks correctly. Removing the dual-scheduler duplication resolved timing issues beyond just the CDROM path itself (plausible mechanism: the per-instruction `interconnect_check_cdrom_events()` poll and the downcount-gated `eventq_dispatch_due()` were two independently-timed dispatch paths touching shared IRQ/state; unifying onto one removed a source of scheduling skew between them — not fully root-caused, but consistent with the fix).
-- Not yet done: Phases 2-5 below still open.
+- **Measure the mechanism, not the symptom.** The FMV was fixed by instrumenting the *game's own*
+  descriptor ring and the renderer's per-rect upload path, not by more decoder archaeology.
+- **One decisive measurement beats three plausible theories.** "Are the stripes already in the GL
+  texture?" split the search space in one step and killed a whole branch of hypotheses (CRTC/PAL).
+- **Prove the negative too.** Showing that the game issues *no* fill during playback, and that those
+  VRAM rows never change, is what turned "something isn't drawing" into "something is reading it
+  wrong".
+- **Diagnostics are disposable.** Temporary GPU-thread readbacks and counters are added, used once
+  and removed. Probes that stay are the ones with a permanent home: the in-app Lua console
+  (`emu.vram16`, `emu.display_area`, `emu.draw_area`, `emu.gpu_pool`, the `gp0_*` / `vblank` /
+  `mdec_macroblock` notifications) and the scripts under `scripts/`.
+- **Read the hardware documentation in `DOCS/` before deciding what "correct" means**, and when a
+  behaviour is ambiguous, check how an established emulator resolves it before writing code — but
+  port understanding, not paragraphs.
 
-**2026-07-14 — Phase 2.5 CDROM/DMA boot bug fixed and live-verified.** Root cause: CDROM Request Register (BFRD=0 disarm) handler in `cdrom.c` incorrectly cleared `sector_buffers[].valid`, discarding correctly-loaded-but-unread sector data before DMA could deliver it — root-directory reads landed as zeros in RAM, causing the BIOS to fall back to a nonexistent `PSX.EXE` and hit `SystemError('B', 0x38a)`. Fixed by removing that line; disarm now only clears `data_buffer_armed`. Also fixed, same session: `op_jr`'s BIOS-syscall capture reading `$t1` one instruction too early (moved interception to `cpu_execution.c`, after the delay slot commits) — see §1.5/Phase 3.5 correction. Live-verified: boot reaches the correct SCEE logo screen. See Phase 2.5 above for the full investigation trail (region/GetID red herring → memcard red herring → this fix).
+---
 
-**2026-07-15 — GTE/Timer/GPU gap-analysis pass, doc-only (no source changes).** Triggered by a follow-up live session showing zero GTE/GPU activity and a 164MB `SystemError`-flooded CPU log. Traced (Phase 2.6) to the game itself halting on its own check before reaching any GTE/GPU code — not a rendering bug, root cause of *why* the check fails left open as a live-debugging lead. Independently, a dedicated research pass (3 parallel agents: own codebase, DuckStation, PCSX-Redux) found and this doc now reflects real, previously-missed or previously-mis-stated gaps:
-- §5 Timers: sync modes decoded but never applied (upgraded to **Critical**, doc previously implied this worked); dual timing-path disagreement; 4 newly-found dead functions.
-- §9 GTE: previous "essentially no gap" verdict corrected — computed per-op cycle cost discarded, `busy` flag never used to stall the CPU (**High**); missing SR.CU2 check on LWC2/SWC2; the GTE load-delay double-buffer cited elsewhere in this doc (§1.2, Phase 3.5) as a working reference pattern is confirmed dead/unpopulated code, not a working implementation — both of those sections corrected inline.
-- §8 GPU: previous "correct mask-bit handling" / "most mature subsystem" framing corrected — mask-bit has zero effect on rasterized polygons/lines/rects (**High**), and rasterized GL output never reads back into CPU-visible VRAM (**High**, likely the most consequential GPU gap in the project). Full breakdown split into new file `GPU_GAP_ANALYSIS_2026-07-15.md` given scope.
-- New roadmap items: Phase 2.6 (missing-3D root cause, reframed) and Phase 3.6 (GTE/Timer/GPU accuracy pass); Phase 3.5 downgraded High→Medium and corrected (its motivating corruption case was already explained away as a logging bug on 2026-07-14, and its recommended "copy the GTE pattern" fix was invalidated by the GTE findings above).
-- Not yet done: no source changes made this pass (explicitly out of scope per user request); Phase 3.6 items are all open.
+## References
 
-**2026-07-15 (later same day) — SystemError('C',2) root-caused to a specific byte-offset mismatch (see Phase 2.6 update above); fix parked, not implemented at the time.** Deep static RE of the game's own extracted boot EXE plus 2 one-shot live register/memory probes (added to `cpu_execution.c`, removed after use — no lingering overhead) traced the exact function chain and found the game's ISO9660 `"CD001"` signature check reads 12 bytes short of where our whole-sector-mode CD read correctly places it, and a (later-disproved) fix candidate in `cdrom.c`'s `data_start` computation. Also removed dead code prompted by the same investigation: `bios_print_bootstrap_strings()`/`bios_print_all_hidden_strings()` (`bios.c`+`bios.h`, ~110 lines) — a static one-time ROM string dump at boot that duplicated real TTY-capture output in a way that looked execution-authentic but wasn't, called out by the user as confusing. Its only call site (`main.c`) removed; `bios_print_all_hidden_strings` had zero call sites already. Build verified clean. Investigation paused at this point per explicit user instruction.
-
-**2026-07-15 (same day, continued) — SystemError('C',2) actually fixed and live-verified; game boots.** User asked to resume and apply a fix, consulting DuckStation/PCSX-Redux. A dedicated research pass read both references' CDROM sector-buffer/DMA code end-to-end and **disproved** the parked `data_start` candidate above (neither reference re-bases the read offset from DMA word count — both use a fixed, mode-selected offset with a monotonic position cursor, exactly like our existing code). The same research surfaced the real bug: DuckStation's Request Register handler (`duckstation_ref/src/core/cdrom.cpp:1253-1264`) resets the sector-buffer read pointer on **disarm** (BFRD=0) and leaves it untouched on **arm** (BFRD=1) — explicitly to let software do a header peek followed by a bulk data read of the same sector without losing progress. Our `cdrom.c` had this backwards (reset on arm, not on disarm), so any re-arm between two reads of the same sector silently threw away prior progress and restarted from the sector's header every time — exactly the failure mode behind the 12-byte "CD001" offset mismatch. Fixed by swapping which branch resets `position`, matching DuckStation's model. Also fixed in the same session, prompted by the user wanting reliable TTY output while debugging: `capture_bios_printf()` (`cpu_bios.c`) previously dumped A0/B0 `printf()`'s raw format string unsubstituted (a deliberate but unhelpful "PCSX-style" design choice); rewrote it to do real MIPS o32 varargs substitution via the host's `snprintf`, so TTY output now shows real values instead of literal `%s`/`%d`/`%08x`. **Live-verified**: fresh 60s run — `SystemError` count 0 (was up to 2.67M lines), `"File not found"` count 0, CDROM log shows the game successfully reading `ACE2.DAT`/`ACE2.STH` at their real LBAs, and the game boots on-screen. Full detail and a new follow-up lead (a `bufs_cb_0`/VSync-retry polling pattern appearing right after) in the updated Phase 2.6 above.
-
-**2026-07-15 (same day, continued further) — log noise containment + GTE/Timer accuracy fixes landed; missing-logo investigation advanced but not resolved.**
-- **Log noise**: user reported CPU/BIOS log spam was making it hard to keep logging on while debugging, and that TTY output should always be visible regardless of log level. Added consecutive-duplicate collapsing to `log_print()` (`log.c`) — identical `(category, level, message)` lines in a row now collapse into a single `"... (xN repeats)"` summary (flushed on the next different line or every 200 repeats for long-running loops) instead of spamming every occurrence; live-verified: a run that previously produced hundreds of thousands of lines now produces ~500. Added `log_print_tty()`, a level-gate-bypassing path used exclusively by the real EXP2/DUART TTY capture (`bus.c`) and the A0/B0 `putc`/`printf`/`puts` capture (`cpu_bios.c`) — TTY output now always appears regardless of the log level slider, with no `[TTY]`/`[BUS]` tag clutter (just the plain program text, since the log window/category already identifies the source).
-- **GTE and Timer sync-mode gating implemented** — see Phase 3.6 above for full detail (cycle-cost + busy-stall wired in, dead load-delay buffer removed, SR.CU2 added to LWC2/SWC2; Timer1 now genuinely gated by vblank). All live-verified with no regression.
-- **Missing boot-logo graphic investigated at length** (§8/Phase 2.6's "also flagged" note, promoted to its own **Phase 2.7** above): confirmed via live probes that the logo's red "P" piece draws correctly every frame but the other 3 colored pieces never arrive, for reasons that are neither a DMA delivery bug, a VRAM-upload-path bug, nor (after directly testing the new Timer-gating fix against it) a stuck vblank-gate wait. Web research surfaced the actual likely mechanism: **the 3D logo model is loaded from the game disc's licence-sector data (LBA 4-11), not from BIOS ROM** — the same disc region already used for region detection in Phase 2.5. Not yet root-caused to a specific byte-level bug; tracked as Medium priority, next step is a raw byte-level dump/comparison of LBA 5-11, not further BIOS ROM disassembly.
-- **Housekeeping**: `.gitignore` was silently hiding 2 of the images `README.md` references (`screenshots/Screenshot 2026-05-02 212421.png` and root `Screenshot 2026-07-14 191115.png`) — added explicit `!`-exceptions and force-added both so the README renders correctly on GitHub.
-
-**2026-07-16 — Phase 2.7 deep-dived via live PC/RA/exec-trace probes; real root cause of the "only red draws" symptom found (BIOS-driven, not a data/render bug), but a detour into CPU memory-timing accuracy caused and then fixed a serious regression — see Phase 3.8 above for the timing work itself.**
-- **Phase 2.7 progress**: byte-level extraction of LBA 5-11 (`DOCS/cdromfileformats.md`'s documented TMD format) confirmed the on-disc logo data is 100% intact — 560 real primitives, all 4 real colors (red/blue/yellow/teal) present and structurally valid. Live PC-tracing found the actual BIOS render call (RAM-resident shell code, `0x80067978`/`ra=0x80067888`): it draws exactly 3 real primitives (matching the disc data) once, then enters a bounded polling wait (RAM counter at `0x8008ACFC`, threshold-gated) that gives up instead of retrying — confirmed via a 1740-vblank/29s live run that this call never fires a second time. The "red diamond" previously attributed (2026-07-15 changelog entry above) to this logo piece was re-examined via `ZS1_DUMP_FRAME` screenshots and found to actually be the earlier, unrelated SONY splash screen (a different PC range, `0x8003dd7c`-ish, ~447 draws/session) — at the actual PS-logo screen (confirmed via frame dump), *zero* geometry ever appears, not just 3 of 4 colors. Not yet fixed — the BIOS-side "why does it give up after one piece" logic itself is still open; deprioritized this session in favor of chasing the CPU-timing rabbit hole below, since that looked like the more foundational fix at the time.
-- **The detour**: consulting DuckStation's real BIOS-ROM wait-state model as a candidate fix for the above led to the crash/regression/fix cycle fully documented in the new **Phase 3.8** above. Net result of tonight: real crash bug fixed, real MEMCTRL storage added, CDROM IRQ hardening added, but the actual cycle-cost feature that motivated all of it is shipped disabled pending further investigation, and it did **not** resolve Phase 2.7's give-up-after-one-piece behavor (not retested against the disabled state, since Phase 2.7 was already stalled on a different question — whether BIOS's give-up condition is itself the bug, or working as designed).
-- Not yet done: Phase 2.7's real blocker (why the wait's retry loop gives up rather than re-polling on a later frame) — next step is disassembling the caller at `0x80067914`/`0x80067888` to find the retry/give-up logic, now that the CPU-timing distraction is parked. Re-test Phase 2.7 behavior once Phase 3.8's cycle-cost interaction is actually resolved, since enabling it would change ISR/retry timing throughout BIOS, including here.
-
-**2026-07-19 — Phase 2.7 revisited with the new in-app Lua debug console (see "Lua scripting console" changelog entry below) — corrects a stale claim from 2026-07-16 and finds a new, concrete lead.**
-- **Correction**: the 2026-07-16 entry above describes `0x80067978` as "the actual BIOS render call", separately called from a caller at `0x8006785C`/`0x80067914`. Live breakpoint data (`scripts/ps_logo_dump.lua`, a one-shot memory dump around the call site) shows this is wrong: `0x80067978` is **inside** the gate function's own body (`0x80067914`-`0x8006798C`, already fully disassembled back on 2026-07-18), reached via fallthrough once the `SLT`/`BEQ` gate check at `0x8006792C` passes — not a separately-called routine. `$ra=0x80067888` at that point is simply the return address of the *gate's own* call site (`JAL 0x80067914` at `0x80067880`), not evidence of a distinct call.
-- **New finding**: a breakpoint on `0x80067978` alone (`scripts/ps_logo.lua`) fired **millions of times** in a single session with `a0`/`a1` frozen at `0x0000000f` the entire time (confirmed by direct read of `RAM[0x8008ACFC]`, the counter, sitting at `0x0000000e` — essentially not advancing). This is a materially different picture from the "calls once, never again" characterization on 2026-07-16 (that may have been true for the specific short test run at the time; this longer/differently-timed run shows sustained rapid re-entry instead). The outer loop wrapping the `JAL 0x80067914` call (`0x8006786c`-`0x800678bc`, decoded by hand from the dump) re-invokes the gate on every pass with `a0 = counter + 1` (the `ADDIU $4,$4,1` in the JAL's delay slot) and does **not** appear to yield or wait between iterations — consistent with the counter (which some other part of the system, presumably a VBlank handler, is supposed to increment) never actually getting a chance to advance because this loop never yields long enough for that to happen.
-- **Leading hypothesis, not yet confirmed**: interrupts may be disabled (`SR.IE=0`) for the duration of this loop, which would explain why the VBlank-driven counter increment this gate depends on never fires, producing exactly this "spins forever, counter frozen" symptom. Not yet checked — the current Lua binding surface (`emu.reg()`) only exposes GPR, not COP0/SR. Next step: add an `emu.cop0(n)` (or a dedicated `emu.sr()`) binding to `src/core/lua_debug.c` and re-run to confirm/refute directly, rather than guessing further.
-- Priority: unchanged (Medium/cosmetic) but the lead is now concrete and cheap to finish checking, unlike before.
-
-**2026-07-19 (same day, continued) — MAJOR CORRECTION: `0x80067914`/`0x80067978` is not the logo-drawing code at all. Every finding above about "the gate function"/"the render call" describes a real BIOS mechanism, but not one related to the PS logo — this was a wrong identification carried forward since 2026-07-16 and never actually verified past the surface level.**
-- **What it actually is**: following the call chain one level deeper this session (`scripts/ps_logo_dump2.lua`/`ps_logo_dump3.lua`, dumping the previously-unexamined middle of the "gate" function's draw branch) found a real `JAL 0x800684A0` at `0x8006795c` that none of the earlier passes had disassembled. `0x800684A0` turns out to be a **BIOS syscall dispatch stub table** (`li $10,<0xA0/0xB0/0xC0>; jr $10; li $9,<function#>` — the exact calling convention already documented in `src/cpu/cpu_bios.c`'s own comments), and the specific entry reached from here invokes **`A(3Fh)` = `printf`** (confirmed against `DOCS/kernelbios.md:241,2383`). So the whole `0x80067914`-`0x8006798C` function is some kind of throttled/gated **debug or status TTY message print** (fires roughly once per counter-threshold crossing), not a rendering routine of any kind — it has no GP0 output, no vertex data, no GTE involvement, nothing logo-related. Every prior session's assumption that this was "the logo draw call" (2026-07-16's "draws exactly 3 real primitives", tonight's earlier "render #N" breakpoint data) was tracking the wrong code entirely; the "3 primitives" and the counter/threshold behavior documented above are real, accurately-described BIOS behaviors — just not the ones causing the missing logo.
-- **New fact that prompted re-checking this**: web research this session (see Sources below) confirms the real PS1 boot logo is a genuine rotating 3D model, transformed via the GTE (RTPS/RTPT) from TMD vertex data — not flat pre-transformed primitives — matching `DOCS/cdromfileformats.md:1649-1690`'s TMD format (raw 16-bit X/Y/Z vertex coords + normals, needing a runtime transform, not screen-space coordinates). A dedicated Lua probe (`scripts/ps_logo_gte.lua`, hooking `gte_execute_instruction` via a new `lua_debug_notify` call added in `src/gte/gte.c`) confirmed **zero GTE opcodes execute anywhere near the old gate-function window** (first GTE op — `NCLIP` — doesn't fire until ~5000 events later, clearly deep into normal 3D/menu rendering, not the boot logo) — consistent with the corrected understanding that this code path was never logo-related to begin with, rather than being evidence of a GTE-dispatch bug.
-- **Status**: Phase 2.7 is effectively **back to needing the real code path found from scratch**. What's still validly known: the on-disc TMD data (LBA 5-11) is 100% intact (560 real primitives, 4 real colors, confirmed 2026-07-16 via direct byte extraction) and requires GTE transform per the format docs; the actual BIOS routine that reads this TMD data, calls GTE per-vertex, and issues the real GP0 draws has **never been located** — next session should search for GTE activity (RTPS/RTPT specifically) occurring *before* the Namco publisher screen, using the now-working `scripts/ps_logo_gte.lua` probe as a starting point (it already proved capable of catching every GTE dispatch with a PC), rather than continuing to dig into the printf-stub code this entry corrects.
-- Priority: unchanged (Medium/cosmetic), but treat all pre-2026-07-19 "root cause" claims in this section as **not reliable** — only the disc-data-integrity and TMD-format facts survive this correction.
-
-Sources consulted this session for the "logo is a real GTE-transformed 3D model" fact: [Yes, the PS1 Boot Up Logo Is Actually a 3D Model, Not a Static Image – PlayStation LifeStyle](https://www.playstationlifestyle.net/2021/07/04/ps1-boot-logo-3d-model/), [Playstation 1 GTE · RetroReversing](https://frds.github.io/ps1-gte).
-
-**2026-07-19 (same day, continued further) — followed the TMD data forward from CDROM using a read watchpoint; found a real, previously-unknown BIOS code region, but it dead-ends without ever calling the GTE — most likely chasing RAM-buffer reuse, not the actual logo renderer.**
-- **Approach**: rather than guessing PC addresses, confirmed from `logs/DMA.log` exactly where the LBA 5-11 TMD data lands — CDROM DMA ch3, base address `0x00010800`, one 2048-byte sector per LBA, ending at `~0x00013FFF` (`scripts/ps_logo_tmd_read.lua`/`ps_logo_tmd_read2.lua`). A read watchpoint on the KSEG0 mirror (`0x80010800`) never fired in a 30+s run; the KSEG1 (uncached) mirror `0xA0010800` did — `PC=0x8004f804`, `ra=0x8004f260`, entirely new territory, never disassembled before.
-- **Chain mapped** (`scripts/ps_logo_dump3.lua` through `ps_logo_dump6.lua`, full manual disassembly): a dispatcher-like function at `0x8004f210` calls a helper at `0x80058890` — confirmed via raw opcode inspection to genuinely execute **real CTC2 (GTE control-register move) instructions**, i.e. this helper does load a rotation matrix / translation vector into the GTE. It then calls `0x8004F784`, which reads the TMD buffer (our watchpoint hit, at `+0xF8` into the buffer) and appears to unpack one structured record per call. Back in `0x8004f210`'s body, a genuine counter-bounded loop was found (RAM `0x80098770`, loops while `< 0x5b` = 91 iterations — plausibly one per vertex/primitive) calling three more functions each pass: `0x8005cfa4`, `0x8005d05c`, `0x8005cf50`.
-- **Dead end**: fully dumped all three of those loop-body functions (`0x8005cf00`-`0x8005d180`) — **zero COP2/GTE opcodes anywhere in them**, only ALU/bitmask/comparison logic against constants (`0x100`, `0x1f4`=500, `0xcdb`) that don't resemble vertex/coordinate math. Combined with the independently-confirmed fact (same session, `scripts/ps_logo_gte.lua`) that no RTPS/RTPT ever fires in this whole window, the most likely explanation is that **RAM `0x10800`-`0x13FFF` gets reused by the BIOS for an unrelated purpose** (candidates: memory-card directory scan, pad config — both run around this boot stage) before whatever *actually* consumes the TMD data runs, and this chain just happens to read the same physical buffer for that unrelated later purpose. Not confirmed which subsystem it actually is.
-- **Next session should**: not re-chase this specific chain (`0x8004f210` and everything under it) — instead, either (a) watch the *entire* `0x00010800`-`0x00013FFF` range (multiple watchpoints, one per sector start, or watch the write side to see exactly when/if this buffer gets overwritten before being consumed) to catch the real first consumer with better timing, or (b) go back to the GTE-dispatch probe (`scripts/ps_logo_gte.lua`, already proven reliable) and instead of scoping to "before the Namco screen", log *every* RTPS/RTPT call's caller PC for the first several seconds of boot unconditionally, then cross-reference which of those callers (if any) also touches the `0x10800`-`0x13FFF` range.
-- Priority: unchanged (Medium/cosmetic). Real progress (new code mapped, confirmed real GTE matrix-load exists somewhere in BIOS), but no fix, and this specific lead is now known to be a dead end — don't repeat it.
-
-**2026-07-20 — Web/docs research found the real anchor point; the actual GTE-transform loop was located and confirmed working; the bug is now narrowed to somewhere between "NCLIP says draw" and "GP0 command issued", not the transform itself.**
-- **Real anchor point found via `pcsx-redux`'s own OpenBIOS project** (a local clone we already had, not previously read for this): its README states plainly that **"the shell... is the binary that's being loaded into memory at boot time by the bios, to display the SONY sound and logo"** — a separate loaded binary, not part of kernel code — and `DOCS/expansionportpio.md`'s already-known "Mid-Boot Hook" trick documents the shell's real entry point: **`0x80030000`**. (OpenBIOS's own `main/splash.c` turned out to be a red herring for a *different* PS1-derived platform — a Konami System 573 arcade-board splash reimplementation, simple color bars, not the retail 3D logo — but the README's shell-loading description and the existing docs' address were the real payoff.)
-- **Re-anchored the whole investigation at `0x80030000`** (`scripts/ps_logo_shell_entry.lua`) instead of continuing to follow scattered addresses found reactively. From there, found the first *real* GTE transform op fires from `ra=0x8004f650` (`scripts/ps_logo_first_gte.lua`) — inside the *same* `0x8004f210` function mapped yesterday, just from an earlier call site than the one yesterday's session got stuck on (yesterday's "dead end" 91-iteration loop at `0x8004f728` is a real, different, unrelated loop later in the same function — this was a false dead-end, not a wrong function).
-- **Confirmed the GTE transform pipeline for the logo genuinely works**: `RTPT → NCLIP → AVSZ3 → NCDS` (the standard Sony-library lit-Gouraud-polygon macro sequence) fires repeatedly from that call site — over **60,000+ real GTE ops** in one run (`scripts/ps_logo_rtpt_count.lua`), consistent with ~166 real animation frames of a rotating model being transformed. **NCLIP's sign distribution is normal** (roughly 50/50 positive/negative as real rotation would produce, `scripts/ps_logo_nclip_check.lua`) — ruling out a backface-culling sign bug. **MFC2/CFC2 readback is also correct** (`op_cop2` in `cpu_instructions.c` reviewed directly — proper load-delay, correct stall-until-GTE-complete, calls the same `gte_read_data_register` our Lua probe uses) — ruling out a GTE-register-readback bug too.
-- **The real, narrowed mystery**: a new probe on real GP0 polygon/rect draw dispatch (`lua_debug_notify` added in `gpu_commands.c`'s `gpu_gp0_handle_word`, opcodes `0x20`-`0x3F`/`0x60`-`0x7F`) shows **draws essentially stop scaling with GTE activity** — from the first logo-loop GTE op through 10,000 more, the global polygon-draw counter moved by only ~5, despite roughly half of ~15,000 NCLIP calls in that window returning a positive (should-draw) MAC0. A direct correlation script (`scripts/ps_logo_correlate.lua`, started this session, results not yet in) checks whether a real GP0 draw *ever* follows shortly after a positive-MAC0 NCLIP from the logo's own call site — if it essentially never does, the gap is confirmed to sit precisely between the NCLIP pass/fail decision and GP0 command construction/submission for this code path.
-- **Secondary anomaly, not yet chased**: MAC0 reads exactly `0` on a small but steadily growing fraction of NCLIP calls (24 → 44 → 64 → 88 → 108 across 3000-call windows) — a genuinely degenerate/zero-area triangle each time, which is unusual for a smoothly rotating model and hints at a possible SXY0/1/2 pipeline-shift bug (two vertices reading as identical) rather than pure coincidence. Not the main suspect (too small a fraction to explain the draw-count gap alone) but worth keeping in mind.
-- **New Lua bindings added to support this**: `emu.cycles()` (returns `inter->cpu_cycle_counter`, for correlating script output against every other log file's cycle-stamped timestamps) and `emu.gte_data(reg)` (`gte_read_data_register` passthrough, for reading MAC0/IR/SXY etc. directly).
-- **Correlation result**: `scripts/ps_logo_correlate.lua` finished — **0 correlated hits out of 8000+ positive-MAC0 NCLIP passes** from the logo's call site. Confirmed: essentially no GP0 polygon draw ever follows a "should draw" transform result for this code path.
-- **Root cause narrowed to a specific branch, found via `emu.disasm()` (see new binding below) rather than further hand-decoding hex** — hand-decoding the same address range earlier in this session had produced a subtly wrong read (claimed `sra $8,$25,1`; the real instruction is `sra t0,t9,2`, shift amount 2 not 1) which briefly produced a contradictory result before being caught and corrected by reading the *real* disassembly instead of hex by hand. **Lesson for future sessions: use `emu.disasm(addr)` from the start for anything beyond a cursory glance — manual hex decoding after many hours is error-prone.**
-- **The real gate chain** (`0x8004f648`-`0x8004f6a8`, all addresses confirmed via `emu.disasm`, not hand decode):
-  ```
-  jal 0x8005c2b0        ; transform+clip (RTPT/NCLIP/AVSZ3 fire inside); result -> s0
-  jal 0x8005bbd8        ; shading (NCDS fires inside); result -> t9 (via stack)
-  sra  t0, t9, 2
-  blez t0, <skip>       ; Gate A: t0 must be > 0
-  slti at, t0, 1024
-  beq  at, $0, <skip>   ; Gate B: t0 must be < 1024
-  blez s0, <skip>       ; Gate C: s0 (transform/clip result) must be > 0
-  <build args, jal 0x8005f154>  ; the real draw/OT-insert call
-  ```
-  Measured over 16,000+ passes (`scripts/ps_logo_gates_check.lua`): **Gate A passes ~50%** (normal — matches NCLIP's balanced facing distribution), **Gate C passes ~100% of the time it's reached** (not the blocker), but **Gate B (`t0 < 1024`) passes 0 out of 7963+ attempts** — every single time, `t0` (derived from the shading helper's return value, `t9 >> 2`) is `>= 1024`. `1024` (`0x400`) is a strong candidate for an ordering-table size/index bound (a very common OT length choice) — if so, this reads as "this polygon's Z-sorted OT slot is always out of range", which would silently discard every logo polygon exactly as observed.
-  - **Caveat**: `0x8005f154` (the draw/OT-insert call) is reached ~9000 times in the same window (`REAL_DRAW_CALLS` in the script's output) — but that breakpoint is address-global and almost certainly catches unrelated system draws too (menu/UI), not proof the logo itself ever reaches it. The three gate counters are the reliable evidence; the raw draw-call count is not, for this specific question.
-- **Next step, precisely scoped**: disassemble `0x8005bbd8` (the shading helper whose return value becomes `t0` after `>>2`) in full — determine whether it derives `t0` from AVSZ3's `OTZ` register (already verified correct in our `gte_avsz3`, `src/gte/gte_ops.c:406-421`, matches PSX-SPX exactly) combined with something else, or from a different computation entirely. If it's an OTZ-derived scale/combination and our GTE produces a correct OTZ but this helper (real BIOS/shell code, not ours) combines it with something *our* emulation gets wrong (e.g. a different GTE register `0x8005bbd8` reads that has its own bug), that's the fix target. Use `emu.disasm()` for this pass, not manual hex decoding.
-- Priority: unchanged (Medium/cosmetic), but this is now the most precisely-scoped this bug has ever been — a future session has a single, specific function (`0x8005bbd8`) and a single, specific question ("why is its return value always `>= 4096` before the `>>2`") to resolve, rather than broad exploration.
-
-**2026-07-19 — New tooling landed this session, used for the above and worth having for future investigations:**
-- **Lua 5.4 scripting/debug console** (Redux-inspired, scoped to plain Lua rather than LuaJIT for build-simplicity reasons — see `include/lua_debug.h`/`src/core/lua_debug.c`, vendored source in `third_party/lua/`, new "Lua Console" ImGui panel in `debug_ui.cpp`). Bindings: `emu.pc/reg/read_u8/u16/u32`, `emu.add_breakpoint`/`add_read_watch`/`add_write_watch` (+ `remove_*`), `emu.pause/resume/is_paused`, `emu.on_break(fn)`/`emu.on_event(fn)`, `print`/`emu.log`. Console output mirrors immediately (line-flushed, not batched like the ImGui per-category log windows) to `logs/Lua.log`. Two native probe points (`lua_debug_notify`) added in `src/core/bus.c` for `mdec_ch1_done`/`dma_ch2_done` — internal DMA-completion transitions with no CPU-side PC to breakpoint on.
-  - **Real, pre-existing gap fixed as a prerequisite**: `debugger_check_read_watchpoint`/`write_watchpoint` (`src/core/debugger.c`) were fully implemented but never called from anywhere — `src/core/bus.c`'s six load/store functions now call them, so Lua (and native) watchpoints actually work for the first time.
-  - **Caution learned the hard way**: a breakpoint on a genuinely hot address with an uncapped `print()` in its callback produced a 764 MB / 9-million-line log in well under a minute during this session's first real use — cap any per-hit logging in a script, or gate it behind a one-shot flag, before arming a breakpoint on an address that might be hit at high frequency.
-- **Disassembler refined to match PCSX-Redux's style** (`src/cpu/cpu_disasm.c`, `disr3000a.cc` used as the reference): lowercase mnemonics, ABI register names (matching the names already used in `cpu_execution.c`'s exec-trace dump, for consistency), and the common pseudo-instructions real assemblers/disassemblers show instead of the literal encoding (`nop`, `move`, `li`, `not`, `neg`/`negu`, `b`/`bal`). Live Disasm/Exec Trace panels and `cpu_dump_exec_trace` all benefit automatically (single shared function).
-- Also used tonight for the still-open Phase 2.8 MDEC/GPU-DMA hand-off investigation (see that section) — same "exactly N hand-offs then a quiet stop, system otherwise healthy" pattern reproduced in a completely different part of the game (deep in menu/gameplay, not the FMV intro), strengthening the case that this is a structural gap (most likely Gap B / the 24bpp display gap, see `GPU_GAP_ANALYSIS_2026-07-15.md`) rather than something specific to the FMV scene.
-
-**2026-07-18 — Milestone: `Ace Combat 2 (Europe)` boots all the way to its real, fully-textured main menu, and an in-engine 3D-rendered view (cockpit HUD, lit instrument panels) is reachable from there.** Screenshots `Screenshot 2026-07-18 125717.png` (in-engine 3D cockpit) and `Screenshot 2026-07-18 125937.png` (main menu: logo, background, START GAME/LOAD/OPTION, Namco copyright) — both fully rendered with real textures, no corruption. This is the furthest boot has ever reached on a real commercial disc, following the same-day CDROM IRQ + MDEC input-FIFO-overflow fixes above (Phase 3.8 / this Phase 2.8 section) landing together.
-
-**Caveat, directly from the user**: the FMV intro that plays before this is still skipped/not working (consistent with Phase 2.8's "decode still stalls mid-command" not-yet-resolved item above — not fixed by this milestone, just no longer blocking everything downstream from happening anyway), GPU rendering is still rough in places (`GPU_GAP_ANALYSIS_2026-07-15.md`), and the emulator overall is **not yet stable** — this is confirmation that a real commercial disc *can* reach its menu/engine, not a claim of solid, repeatable end-to-end play. Phase 2.8's two open follow-ups (why MDEC decode still stalls mid-command; whether decoded output ever reaches VRAM) remain open — investigation was in progress on the second one (checking whether GPU DMA ch2 or GP0(0xA0) uploads ever source from MDEC's ch1 output addresses) when this milestone was hit and took priority to document.
-
-**Live-testing punch list (2026-07-18, user-observed, recorded but not yet investigated — priority TBD next session)**:
-- **General instability** — unspecified crashes/freezes during play, not yet reproduced/isolated to a specific trigger.
-- **Sound completely broken** — audio non-functional during this play session (SPU/DMA ch4 path suspected first, unconfirmed).
-- **GPU still missing some sprites/geometry** — beyond the already-tracked mask-bit/VRAM-readback gaps (`GPU_GAP_ANALYSIS_2026-07-15.md`); which specific sprites/geometry not yet identified.
-- **PS boot logo still not visible** — this is Phase 2.7, already deeply investigated (see above); not newly found, just still open.
-- **Clock/timing still not accurate** — overlaps directly with Phase 3.8's disabled BIOS-ROM cycle-cost model (`ZS1_ENABLE_BIOS_ROM_CYCLE_COST 0`); likely the same unresolved thread, not a new issue.
-
-**2026-07-18 (later, extended real play session, ~118s/VBlank #7080) — two new findings, documentation-only (no code changes this pass, GPU Gap B rollback stands uncommitted per standing instruction).**
-
-- **Semi-transparency not rendering on dialogue/briefing text box**: screenshot `Screenshot 2026-07-18 134701.png` — the "coup d'etat" briefing dialogue's text background renders fully opaque; on real hardware/original game this box is semi-transparent (background visible through it). Not yet investigated — first suspects are the renderer's semi-transparency blend-mode handling (`semi=` field already visible per-primitive in `GPU.log`, e.g. `semi=0` on the rects logged around this screen — worth checking whether the game is actually issuing `semi=1` primitives here and we're dropping the blend, or whether it never sets the bit and this is a draw-mode/GP0(0xE1) `semi` config gap instead) in `src/gpu/renderer.c`'s fragment shader / blend-state setup. Out of scope for this pass.
-
-- **Game freeze after the same dialogue screen, correlated against `logs/*.log` from the user's real play session**: symptom is a visually-static screen with no further game-visible progress. Log correlation:
-  - `logs/CPU.log`: repeated `A0(unknown / 0xA7)` (`bufs_cb_0`, per `DOCS/kernelbios.md:348` — an internal CD buffer-control callback, undocumented/LLE-only) called from a fixed `$ra=0x00004f6c`, **186 occurrences** total. This is the exact same lead already flagged unresolved in Phase 2.6 above (2026-07-15: *"repeated-polling state calling `A0(0xA7)`... from a fixed `$ra=0x00004f6c`... not yet root-caused, tracked as the next lead if further boot-hang symptoms appear"*) — now reproduced in a much deeper, real play session, not a new symptom.
-  - **Not a tight spin-hang**: 186 calls over ~7080 VBlanks (~1 per 38 VBlanks) is a sparse polling cadence, nothing like the previous `SystemError` bug's multi-million-line runaway spin (Phase 2.6, resolved). This looks like a slow, periodic poll, not the CPU pegged in a busy-loop.
-  - `logs/CDROM.log` (27244 lines total): CD activity is genuinely live and progressing, **not stuck** — last explicit command sequence is `Setloc LBA 131613` → `Setmode 0xC8` (`2x=1 whole=0 xa=1`, real-time XA streaming mode) → `ReadN`, after which the log is ~9100 lines of continuous `Sector LBA=N -> INT1` / `INT ACK 0x07` pairs advancing sequentially with **no further `Setloc`/`Pause`** — i.e. real-time XA streaming (audio/background data) that never gets told to stop. Total LBA range seen across the whole session: 4 → 198469. IRQ delivery for these looks structurally normal (`INT ACK` clears cleanly each time).
-  - `logs/IRQ.log` tail: `I_MASK`/CDROM IRQ trigger+clear pairs continuing normally, ending on a `VBLANK IRQ triggered` — the interrupt subsystem is not wedged.
-  - `logs/GPU.log` tail: last real content is a batch of small (8×20) textured rects (`clut=(128,490)`/`(144,490)`/`(160,490)`, `tpage_raw=0x0007`) — almost certainly the dialogue text glyphs — followed only by repeated `GP0(0xE1/E2/E3/E4/E5/E6)` draw-mode/state-setup lines (no new geometry) and a final `tick: scanline=247 vblank=0 lsb=1` heartbeat. The GPU thread is still alive and ticking scanlines/VBlank; the game simply stops submitting new primitives after the text draw.
-  - **Read together**: this is not a hard hang in the classic sense (CPU not pegged, CD not stalled, IRQs not stuck, GPU thread still ticking) — it's the *game logic* that stops advancing, while CD-XA streaming (likely background music/ambient audio bed for this scene) continues freely underneath. The sparse `bufs_cb_0` polling from a fixed return address is consistent with the game waiting on some CD-buffer-related kernel event/flag that our emulation isn't setting the way it expects, causing the scene's state machine to never transition past the dialogue box. **Not root-caused this pass** — next step (future session) is disassembling the caller at `$ra=0x00004f6c` to see exactly which kernel event/flag it's polling for, and cross-checking what our CD-XA streaming path (`cdrom_audio.c`) does/doesn't signal per-sector during real-time XA playback that a one-shot `ReadN`/`ReadS` completion would.
+Hardware behaviour is taken from the documentation in `DOCS/` (PSX-SPX and related notes) and from
+Lionel Flandrin's PlayStation emulation guide. Where a hardware detail was ambiguous, the
+DuckStation and PCSX-Redux sources were consulted as a second opinion, and the MDEC decoder's
+transform stage is implemented from `DOCS/macroblockdecodermdec.md` (rewritten 2026-08-01; this
+line previously described an earlier implementation).
+Everything else here is this project's own implementation.

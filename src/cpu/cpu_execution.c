@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "cpu.h"
 #include <string.h>
 #include <stdio.h>
@@ -8,7 +15,7 @@
 #include "log.h"
 
 // ============================================================================
-// CPU Execution Loop - DuckStation Style
+// CPU Execution Loop
 // ============================================================================
 
 // Check for pending hardware interrupt - called once per instruction
@@ -142,10 +149,18 @@ void cpu_run_next_instruction(Cpu* cpu) {
     cpu->out_regs[REG_ZERO] = 0;
 
     // --- 8. Advance Cycle Counters ---
-    cpu->inter->cpu_cycle_counter++;
-    cpu->downcount--;
+    // Base cost is one cycle, plus whatever this instruction's data access(es)
+    // owed. The bus accumulated that during execute (bus_charge_cpu_data_access);
+    // charging it here rather than inside the access keeps a single instruction's
+    // cost atomic, so an event scheduled mid-instruction cannot fire between an
+    // instruction's memory stall and its retirement.
+    uint32_t stall = cpu->inter->cpu_mem_stall_cycles;
+    cpu->inter->cpu_mem_stall_cycles = 0;
+    cpu->inter->cpu_cycle_counter += 1u + stall;
+    cpu->inter->instructions_retired++;
+    cpu->downcount -= (int32_t)(1u + stall);
 
-    // --- 9. Dispatch Events (DuckStation-style downcount) ---
+    // --- 9. Dispatch Events (event-scheduler downcount) ---
     if (cpu->downcount <= 0) {
         eventq_dispatch_due(cpu->inter);
         // Recalculate downcount = cycles until next scheduled event

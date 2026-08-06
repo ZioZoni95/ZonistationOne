@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /**
  * gpu.c
  * PlayStation GPU state management: init/reset, GP1 command handlers,
@@ -68,8 +75,7 @@ void gpu_update_display_mapping(Gpu* gpu) {
  * Derived from the real clock relationship rather than assumed: the GPU runs
  * 3413 ticks × 263 lines (NTSC) or 3406 × 314 (PAL) per frame, and GPU ticks
  * convert to system ticks by sysclk*715909/451584 (NTSC) / sysclk*709379/451584
- * (PAL) — DuckStation's GPUTicksToSystemTicks, gpu.cpp:964-989 and the
- * NTSC/PAL_TICKS_PER_LINE constants at gpu.cpp:82-85. That gives 566203 cycles
+ * (PAL) (DOCS/graphicsprocessingunitgpu.md:1305-1306). That gives 566203 cycles
  * (59.82 Hz) NTSC and 680823 (49.75 Hz) PAL.
  *
  * This used to be a single hardcoded 564480 (= 33868800/60) for both modes, so
@@ -80,14 +86,15 @@ uint32_t gpu_cycles_per_frame(const Gpu* gpu) {
 }
 
 /* CRTC (video) clock in Hz for the active video mode — the source both the
- * dotclock and the hblank/line clock divide down from. DuckStation gpu.cpp:
- * NTSC 53'693'175, PAL 53'203'425. */
+ * dotclock and the hblank/line clock divide down from: NTSC 53'693'175,
+ * PAL 53'203'425 (measured on hardware, DOCS/graphicsprocessingunitgpu.md). */
 static double gpu_crtc_hz(const Gpu* gpu) {
     return (gpu->vmode == Pal) ? 53203425.0 : 53693175.0;
 }
 
 /* Timer0 dotclock rate. dot = CRTC / divider, divider chosen by the GPUSTAT
- * horizontal-resolution field (DuckStation dot_clock_dividers {10,8,5,4,7}). */
+ * horizontal-resolution field ({10,8,5,4,7} → 256/320/512/640/368,
+ * DOCS/graphicsprocessingunitgpu.md:1325-1335). */
 double gpu_dotclock_hz(const Gpu* gpu) {
     uint32_t hres = (uint32_t)gpu->hres_raw.hr1 | ((uint32_t)gpu->hres_raw.hr2 << 2);
     uint32_t div;
@@ -102,7 +109,7 @@ double gpu_dotclock_hz(const Gpu* gpu) {
 }
 
 /* Timer1 hblank rate = scanline rate = CRTC / ticks-per-line
- * (DuckStation NTSC_TICKS_PER_LINE 3413 / PAL_TICKS_PER_LINE 3406). */
+ * (3413 NTSC / 3406 PAL, DOCS/graphicsprocessingunitgpu.md:1305-1306). */
 double gpu_hblank_hz(const Gpu* gpu) {
     return gpu_crtc_hz(gpu) / ((gpu->vmode == Pal) ? 3406.0 : 3413.0);
 }
@@ -138,8 +145,7 @@ void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
                   gpu->crtc.current_scanline, (int)gpu->crtc.in_vblank,
                   gpu->crtc.active_line_lsb);
 
-    // Timer1's external gate is VBlank (PSX-SPX; DuckStation's HBLANK_TIMER_INDEX
-    // despite the name is gated by vblank, not hblank). Timer0's gate is hblank,
+    // Timer1's external gate is VBlank (PSX-SPX). Timer0's gate is hblank,
     // which this CRTC model doesn't track at per-scanline granularity yet, so it
     // isn't wired up here.
     if (gpu->inter)
@@ -171,8 +177,7 @@ static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
     (void)value;
     gpu->interrupt = false;
     /* Deassert the GPU IRQ line so the edge detector can latch the next
-     * GP0(0x1F) — pairs with the raise in gp0_interrupt_request. Matches
-     * DuckStation's GP1(02) handler (SetLineState(IRQ::GPU, false)). */
+     * GP0(0x1F) — pairs with the raise in gp0_interrupt_request. */
     if (gpu->inter)
         interconnect_set_irq_line(gpu->inter, IRQ_GPU, false);
     LOG_GPU_DEBUG("[GPU] GPU: Acknowledge IRQ (GP1 0x02)");

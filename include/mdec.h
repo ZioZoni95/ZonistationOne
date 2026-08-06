@@ -1,16 +1,24 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef MDEC_H
 #define MDEC_H
 
 /*
  * MDEC — Macroblock Decoder
  * PSX-SPX: DOCS/macroblockdecodermdec.md
- * Algorithm ported from DuckStation (mdec.cpp, IDCT_Old / DecodeRLE_Old / YUVToRGB_Old).
+ * Decode stages written from DOCS/macroblockdecodermdec.md (rl_decode_block,
+ * real_idct_core, yuv_to_rgb, y_to_mono). See THIRD-PARTY.md.
  *
  * Registers:
  *   0x1F801820 (W): Command/Parameter   (R): Decoded Data
  *   0x1F801824 (W): Control/Reset       (R): Status
  *
- * Status register bits (per DuckStation / PSX-SPX):
+ * Status register bits (per PSX-SPX):
  *   31: data-out FIFO empty
  *   30: data-in FIFO full
  *   29: command busy

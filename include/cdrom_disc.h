@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef CDROM_DISC_H
 #define CDROM_DISC_H
 
@@ -48,6 +55,13 @@ typedef struct {
     bool            has_request;
     bool            sector_ready;
     bool            shutdown;
+    /* Which sector the buffer actually holds, and whether reading it worked.
+     * Without the tag there was nothing tying the published buffer to an LBA:
+     * queueing sector N+1 while the reader was still fetching N made the reader
+     * publish N as ready, and the consumer took it as N+1. */
+    uint32_t        ready_lba;
+    bool            read_ok;
+    bool            busy;           /* a read is in flight */
     uint8_t         sector[CDROM_RAW_SECTOR];
     CdromDisc      *disc;
 } CdromAsyncReader;
@@ -65,7 +79,9 @@ uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba);
 void cdrom_async_reader_init(CdromAsyncReader *r, CdromDisc *disc);
 void cdrom_async_reader_shutdown(CdromAsyncReader *r);
 void cdrom_async_reader_queue(CdromAsyncReader *r, uint32_t lba);
-bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector);
+/* Blocks until the reader has the sector the caller names — not merely "some
+ * sector". Re-issues the request itself if nothing is in flight for it. */
+bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector, uint32_t want_lba);
 
 static inline uint8_t cdrom_to_bcd(uint8_t v)  { return (uint8_t)(((v/10)<<4)|(v%10)); }
 static inline uint8_t cdrom_from_bcd(uint8_t b) { return (uint8_t)(((b>>4)*10)+(b&0xF)); }

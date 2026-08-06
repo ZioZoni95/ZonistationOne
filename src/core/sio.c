@@ -1,6 +1,24 @@
-// SIO (PAD) Implementation based on DuckStation
-// Implements PSX Serial I/O controller and memory card interface
-// Based on DuckStation's pad.cpp: https://github.com/stenzek/duckstation
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
+// SIO0 — the serial bus the controller and memory card ports hang off.
+//
+// Written against the hardware documentation:
+//   DOCS/serialinterfacessio.md:8-108   TX_DATA / STAT / MODE / CTRL registers
+//   DOCS/controllersandmemorycards.md:50-67   device addressing (01h pad, 81h card)
+//   DOCS/controllersandmemorycards.md:127-178 /CS, SCK, /ACK signalling
+//   DOCS/controllersandmemorycards.md:331-346 controller communication sequence
+//   DOCS/controllersandmemorycards.md:2354-2400 memory card read/write/ID sequences
+//
+// The bus is modelled the way the documentation describes it rather than as an
+// abstract transfer machine: /CS selects a port, the first byte after assertion
+// addresses a device, each byte is a full-duplex shift, and the addressed device
+// answers by pulling /ACK low to ask for another byte. When it stops pulsing
+// /ACK the packet is over. Everything else here follows from those four facts.
 
 #include "sio.h"
 #include "interconnect.h"
@@ -15,18 +33,22 @@
 // ============================================================================
 // STATE MACHINE
 // ============================================================================
+/* Where the bus is in the byte cycle of DOCS/controllersandmemorycards.md:127-142:
+ * idle with nothing on the wire, a byte being clocked out on SCK, or the byte
+ * exchanged and the device holding /ACK low to request the next one. */
 typedef enum {
-    STATE_IDLE,
-    STATE_TRANSMITTING,
-    STATE_WAITING_FOR_ACK
-} SioState;
+    SIO_BUS_IDLE,
+    SIO_BUS_SHIFTING,
+    SIO_BUS_ACK
+} SioBusPhase;
 
+/* Which device answered the address byte (:50-67). Nothing is addressed until
+ * the host sends one after asserting /CS. */
 typedef enum {
-    ACTIVE_DEVICE_NONE,
-    ACTIVE_DEVICE_CONTROLLER,
-    ACTIVE_DEVICE_MEMCARD,
-    ACTIVE_DEVICE_MULTITAP
-} ActiveDevice;
+    SIO_DEV_NONE,
+    SIO_DEV_CONTROLLER,
+    SIO_DEV_MEMCARD
+} SioAddressedDevice;
 
 // ============================================================================
 // REGISTER BITFIELDS (PSX-SPX Reference)
@@ -59,8 +81,19 @@ typedef enum {
 
 // Controller response bytes for digital pad
 #define CTRL_RESPONSE_ID       0x41  // Digital controller ID
+#define CTRL_RESPONSE_ID_ANALOG 0x73 // Analog pad ID (normal analog mode, LED=red)
+#define CTRL_RESPONSE_ID_CONFIG 0xF3 // Config-mode ID
 #define CTRL_RESPONSE_READY    0x5A  // Controller ready
 #define CTRL_NO_RESPONSE       0xFF  // No device connected
+
+// Normal-mode commands (DOCS/controllersandmemorycards.md:1209-1215)
+#define CTRL_CMD_READ_BUTTONS  0x42  // "B" Read buttons (+analog inputs in analog mode)
+#define CTRL_CMD_CONFIG        0x43  // "C" Enter/Exit config mode
+
+// Watchdog: entering config mode arms a timer that resets the pad to digital mode
+// after ~1s without communication (DOCS/controllersandmemorycards.md:1274-1281).
+// 1 second at the PSX system clock.
+#define CTRL_WATCHDOG_CYCLES   (PSX_SYSCLK_HZ)
 
 // Memory card response
 #define MEMCARD_RESPONSE_ID    0x5A  // Memory card ID
@@ -81,8 +114,9 @@ typedef struct {
     uint16_t baud;
 
     // Transfer state machine
-    SioState state;
-    ActiveDevice active_device;
+    SioBusPhase bus_phase;
+    SioAddressedDevice addressed;
+    bool txen_latched;   /* DOCS/serialinterfacessio.md:16-20 */
     uint8_t transmit_value;
     uint8_t receive_buffer;
     bool receive_buffer_full;
@@ -95,6 +129,49 @@ typedef struct {
     bool controller_connected;
     uint16_t button_state;
     uint8_t controller_transfer_step;
+
+    // DualShock analog / config-mode state (DOCS/controllersandmemorycards.md:330-433,
+    // :1202-1330). Analog pads boot in digital mode; analog mode is entered either by
+    // software (config 43h/44h) or by the host-side analog toggle.
+    bool analog_mode;          // LED red: replies ID 0x73 and appends adc0-3 to reads
+    bool config_mode;          // replies ID 0xF3, always-9-byte transfers, config commands
+    bool transfer_in_config;   // latched at the command byte: the whole in-progress transfer
+                               // replies in config style, even if config_mode flips mid-transfer
+                               // (a config 43h xx=00 exits config but still answers with 00h bytes)
+    bool analog_lock;          // set by config 44h Key=03h: ignore Analog-button toggles
+    bool watchdog_active;      // armed on first entry into config mode; a ~1s comms gap
+                               // resets the pad to digital mode (DOCS/controllersandmemorycards.md:1274-1281)
+    uint32_t last_comms_cycle; // CPU cycle of the last controller transfer (watchdog)
+    uint8_t right_x, right_y;  // right stick, adc0/adc1 (00h..FFh, 80h=centre)
+    uint8_t left_x, left_y;    // left stick, adc2/adc3 (00h..FFh, 80h=centre)
+    uint8_t cmd;               // command byte of the in-progress transfer
+    uint8_t config_p1;         // buffered config parameter (Led/ii/xx, host send step 3)
+    uint8_t config_p2;         // buffered config parameter (Key, host send step 4)
+
+    // Rumble (SCPH-1200 DualShock, two motors; DOCS/controllersandmemorycards.md:1412-1478).
+    // rumble_map[i] maps read-command byte (i+4) to a motor:
+    //   0x00 = right/small motor M2 from bit0 of that byte
+    //   0x01 = left/large motor M1 from bits0-7 of that byte
+    //   0xFF = no motor (default: motors locked until config 4Dh unlocks them)
+    uint8_t rumble_map[6];
+    uint8_t rumble_m1;         // large motor level, 00h..FFh (analog slow/fast)
+    uint8_t rumble_m2;         // small motor level, 00h or FFh (digital on/off)
+
+    // Old rumble method, one motor, no config commands (SCPH-1150, and kept for
+    // backwards compatibility on SCPH-1200/110) — DOCS/controllersandmemorycards.md:1428-1440.
+    // The motor runs when the 42h read carries xx in 40h..7Fh (bit7=0, bit6=1) at
+    // command byte 4 *and* yy with bit0=1 at byte 5; it drives the right/small
+    // motor M2 only, digital on/off.
+    //
+    // "In the initial state, aa..ff are all FFh, and the controller does then use
+    // the old rumble control method (with only one motor). However, that old
+    // method gets disabled once when having messed with config commands" (:1478-1481).
+    // The documentation does not say which config command disables it; 4Dh is the
+    // one that redefines the protocol, so that is the trigger used here — entering
+    // config mode merely to switch analog inputs on (44h) leaves old rumble working,
+    // which is the reading that keeps the most titles vibrating.
+    bool    rumble_config_used;  // a 4Dh has run: the old method is off for good
+    uint8_t rumble_old_xx;       // byte 4 of the in-progress 42h read (the on/off gate)
 
     // Memory Cards (pointers into public Sio struct — set by sio_init).
     // Presence is tracked on MemoryCard.present itself (set by sio_load/create_memcard);
@@ -130,16 +207,17 @@ static SioInternal sio_internal = {};
 // ============================================================================
 
 static void sio_soft_reset(void);
-static void sio_begin_transfer(void);
-static void sio_do_transfer(void);
-static void sio_do_ack(void);
-static void sio_end_transfer(void);
+static void sio_start_shift(void);
+static void sio_shift_byte(void);
+static void sio_pulse_ack(void);
+static void sio_release_bus(void);
 static void sio_update_joystat(void);
 static void sio_trigger_irq(const char* type);
 static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte);
 static uint8_t sio_memcard_transfer(uint8_t tx_byte);
-static bool sio_can_transfer(void);
-static void sio_reset_device_transfer_state(void);
+static bool sio_bus_ready(void);
+static void sio_release_cs(void);
+static void sio_capture_rumble(uint8_t tx_byte);
 
 // ============================================================================
 // INITIALIZATION
@@ -157,8 +235,8 @@ void sio_init(Sio* sio) {
     sio_internal.baud = 0x0088;
 
     // Initialize state machine
-    sio_internal.state = STATE_IDLE;
-    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.bus_phase = SIO_BUS_IDLE;
+    sio_internal.addressed = SIO_DEV_NONE;
     sio_internal.transmit_buffer_full = false;
     sio_internal.receive_buffer_full = false;
 
@@ -166,6 +244,11 @@ void sio_init(Sio* sio) {
     sio_internal.controller_connected = false;
     sio_internal.button_state = 0xFFFF;  // All buttons released
     sio_internal.controller_transfer_step = 0;
+    // Analog pads power up in digital mode (DOCS/controllersandmemorycards.md:436);
+    // the analog/config/lock/watchdog fields are zeroed by the memset above.
+    // Rumble motors are locked until config 4Dh unlocks them (default: no motor
+    // mapped onto any read-command byte).
+    for (int i = 0; i < 6; i++) sio_internal.rumble_map[i] = 0xFF;
 
     // Wire memory card pointers to the public Sio struct
     sio_internal.mc1 = &sio->card_slot1;
@@ -184,7 +267,7 @@ void sio_init(Sio* sio) {
     sio->baud = sio_internal.baud;
     sio->controller_connected = sio_internal.controller_connected;
 
-    LOG_SYSTEM_INFO("[SYSTEM] SIO initialized (DuckStation-style implementation)");
+    LOG_SYSTEM_INFO("[SYSTEM] SIO0 initialized");
 }
 
 void sio_set_interconnect(Sio* sio, struct Interconnect* inter) {
@@ -195,9 +278,9 @@ void sio_set_interconnect(Sio* sio, struct Interconnect* inter) {
 // Called by EVQ_SIO event handler — executes the deferred byte transfer and
 // delivers IRQ7 if enabled. Also reschedules for chained transfers.
 void sio_execute_event(Sio* sio) {
-    sio_do_transfer();
+    sio_shift_byte();
 
-    // Deliver ACK IRQ if pending (set by sio_do_ack via sio_trigger_irq)
+    // Deliver ACK IRQ if pending (set by sio_pulse_ack via sio_trigger_irq)
     if (sio_internal.pending_irq) {
         sio->pending_irq = true;
         sio_internal.pending_irq = false;
@@ -214,13 +297,14 @@ void sio_execute_event(Sio* sio) {
 // ============================================================================
 
 uint8_t sio_read8(Sio* sio, uint32_t offset) {
+    (void)sio;  /* sio_internal holds the register state — see SioInternal */
     switch (offset) {
         case 0x00: {  // JOY_DATA (1F801040h)
             // Return RX buffer
             uint8_t value = sio_internal.receive_buffer_full ? sio_internal.receive_buffer : 0xFF;
             SIO_DBG("[SIO] Read JOY_DATA = 0x%02x (full=%d, step=%d, device=%d)",
                 value, sio_internal.receive_buffer_full, sio_internal.controller_transfer_step,
-                sio_internal.active_device);
+                sio_internal.addressed);
             
             // Clear RX buffer full flag
             sio_internal.receive_buffer_full = false;
@@ -241,9 +325,12 @@ uint8_t sio_read8(Sio* sio, uint32_t offset) {
 }
 
 uint16_t sio_read16(Sio* sio, uint32_t offset) {
+    (void)sio;  /* sio_internal holds the register state — see SioInternal */
     switch (offset) {
         case 0x04: {  // JOY_STAT (1F801044h)
-            // ACK_INPUT (bit 7) is a momentary pulse — clear on read per DuckStation
+            // STAT.7 mirrors the /ACK input, which the device holds low only for a
+            // couple of microseconds (DOCS/controllersandmemorycards.md:167-169), so
+            // it reads as a pulse: report it once, then let it go high again.
             uint16_t stat = (uint16_t)sio_internal.stat;
             sio_internal.stat &= ~STAT_ACKINPUT;
             return stat;
@@ -280,6 +367,8 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
 
             sio_internal.transmit_buffer = value;
             sio_internal.transmit_buffer_full = true;
+            /* Latch TXEN as of this write — see sio_bus_ready(). */
+            sio_internal.txen_latched = (sio_internal.ctrl & CTRL_TXEN) != 0;
 
             // Fire TX interrupt if enabled
             if (sio_internal.ctrl & CTRL_TXINTEN) {
@@ -287,8 +376,8 @@ void sio_write8(Sio* sio, uint32_t offset, uint8_t value) {
             }
 
             // Start transfer if conditions allow
-            if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
-                sio_begin_transfer();
+            if (sio_internal.bus_phase == SIO_BUS_IDLE && sio_bus_ready()) {
+                sio_start_shift();
             }
             break;
 
@@ -336,17 +425,17 @@ void sio_write16(Sio* sio, uint32_t offset, uint16_t value) {
 
             // Handle SELECT deassert
             if (!(value & CTRL_SELECT)) {
-                sio_reset_device_transfer_state();
+                sio_release_cs();
             }
 
             // Handle transfer enable/disable
             if (!(value & CTRL_SELECT) || !(value & CTRL_TXEN)) {
-                if (sio_internal.state != STATE_IDLE) {
-                    sio_end_transfer();
+                if (sio_internal.bus_phase != SIO_BUS_IDLE) {
+                    sio_release_bus();
                 }
             } else {
-                if (sio_internal.state == STATE_IDLE && sio_can_transfer()) {
-                    sio_begin_transfer();
+                if (sio_internal.bus_phase == SIO_BUS_IDLE && sio_bus_ready()) {
+                    sio_start_shift();
                 }
             }
 
@@ -396,19 +485,128 @@ void sio_set_controller_connected(Sio* sio, bool connected) {
     LOG_SYSTEM_INFO("[SYSTEM] SIO: Controller %s", connected ? "connected" : "disconnected");
 }
 
+/**
+ * Feed the host sticks into the SIO analog bytes. The values are the raw
+ * -32768..32767 SDL axis positions from Controller; they map onto the 8-bit
+ * adc0-3 range (00h=min, 80h=centre, FFh=max) as (v + 32768) >> 8.
+ */
+void sio_set_analog_state(Sio* sio, int16_t lx, int16_t ly, int16_t rx, int16_t ry) {
+    (void)sio;
+    sio_internal.left_x  = (uint8_t)(((int32_t)lx + 32768) >> 8);
+    sio_internal.left_y  = (uint8_t)(((int32_t)ly + 32768) >> 8);
+    sio_internal.right_x = (uint8_t)(((int32_t)rx + 32768) >> 8);
+    sio_internal.right_y = (uint8_t)(((int32_t)ry + 32768) >> 8);
+}
+
+/* Put the rumble motors back to their power-on state: nothing mapped, both
+ * motors stopped, and the old one-motor method available again. Shared by the
+ * two events the documentation describes as resetting rumble — the watchdog
+ * timeout and a press of the Analog button. */
+static void sio_rumble_lock(void) {
+    for (int i = 0; i < 6; i++) sio_internal.rumble_map[i] = 0xFF;
+    sio_internal.rumble_m1 = 0x00;
+    sio_internal.rumble_m2 = 0x00;
+    sio_internal.rumble_old_xx = 0x00;
+    sio_internal.rumble_config_used = false;
+}
+
+/**
+ * Software side of the pad's Analog button: switch the emulated pad between
+ * digital (ID 0x41) and analog (ID 0x73) mode. Ignored while the pad is locked
+ * (config 44h Key=03h) — the same way the hardware ignores the Analog button.
+ *
+ * Pressing the button is not just a mode flip. DOCS/controllersandmemorycards.md:1283-1285
+ * (Caution 2): "A similar reset occurs when the user pushes the Analog button;
+ * this is causing rumble motors to be stopped and locked, and of course, the
+ * analog/digital state gets changed." So a press lands the same rumble reset the
+ * watchdog does.
+ */
+void sio_set_analog_mode(Sio* sio, bool analog) {
+    (void)sio;
+    if (sio_internal.analog_lock) return;
+    if (sio_internal.analog_mode != analog) {
+        sio_internal.analog_mode = analog;
+        sio_rumble_lock();
+        LOG_SYSTEM_DEBUG("[SIO] Analog mode %s (rumble stopped and locked)",
+                         analog ? "ON" : "OFF");
+    }
+}
+
+bool sio_get_analog_mode(Sio* sio) {
+    (void)sio;
+    return sio_internal.analog_mode;
+}
+
+/**
+ * Read the current rumble motor levels: m1 = large motor 00h..FFh, m2 = small
+ * motor 00h or FFh (digital). Both 0 means "motors off". The host side maps
+ * these onto SDL_GameControllerRumble.
+ */
+void sio_get_rumble(Sio* sio, uint8_t* m1, uint8_t* m2) {
+    (void)sio;
+    if (m1) *m1 = sio_internal.rumble_m1;
+    if (m2) *m2 = sio_internal.rumble_m2;
+}
+
 // ============================================================================
-// INTERNAL TRANSFER LOGIC (DuckStation-style)
+// SAVESTATE ACCESS
 // ============================================================================
 
-static bool sio_can_transfer(void) {
+size_t sio_internal_state_size(void) {
+    return sizeof(SioInternal);
+}
+
+void sio_save_internal_state(void* dst) {
+    memcpy(dst, &sio_internal, sizeof(SioInternal));
+}
+
+void sio_load_internal_state(const void* src) {
+    /* The four pointers name objects that belong to this process — the
+     * interconnect and the two memory-card slots inside the public Sio struct.
+     * The values in the file are whatever those addresses happened to be when
+     * the state was written, so they are held across the copy and put back,
+     * exactly as savestate.c does for the renderer and the disc handles.
+     *
+     * active_card is derived rather than kept: it points at mc1 or mc2, so the
+     * saved value has to be re-aimed at the corresponding live slot, and a state
+     * written mid-transfer would otherwise resume against a dangling card. */
+    struct Interconnect* inter = sio_internal.inter;
+    MemoryCard* mc1 = sio_internal.mc1;
+    MemoryCard* mc2 = sio_internal.mc2;
+
+    /* Which slot active_card pointed at is read from the incoming state, by
+     * comparing it against that state's own mc1/mc2 — the saved addresses are
+     * only meaningful relative to each other. */
+    const SioInternal* in = (const SioInternal*)src;
+    bool active_was_set = (in->active_card != NULL);
+    bool active_was_mc2 = (in->active_card == in->mc2);
+
+    memcpy(&sio_internal, src, sizeof(SioInternal));
+
+    sio_internal.inter = inter;
+    sio_internal.mc1   = mc1;
+    sio_internal.mc2   = mc2;
+    sio_internal.active_card = active_was_set ? (active_was_mc2 ? mc2 : mc1) : NULL;
+}
+
+// ============================================================================
+// BUS SEQUENCING — one byte of DOCS/controllersandmemorycards.md:127-142
+// ============================================================================
+
+/* DOCS/serialinterfacessio.md:16-20: writing TX_DATA latches TXEN, and the
+ * transfer starts if the current TXEN value OR the latched one is set — so
+ * clearing TXEN after the write does not cancel a transfer that the write
+ * already armed. The documentation names Wipeout 2097 as the title that depends
+ * on it. /CS must also be asserted (CTRL.1, :91-93). */
+static bool sio_bus_ready(void) {
     return sio_internal.transmit_buffer_full &&
            (sio_internal.ctrl & CTRL_SELECT) &&
-           (sio_internal.ctrl & CTRL_TXEN);
+           ((sio_internal.ctrl & CTRL_TXEN) || sio_internal.txen_latched);
 }
 
 static void sio_soft_reset(void) {
-    if (sio_internal.state != STATE_IDLE) {
-        sio_end_transfer();
+    if (sio_internal.bus_phase != SIO_BUS_IDLE) {
+        sio_release_bus();
     }
 
     sio_internal.ctrl = 0;
@@ -418,24 +616,28 @@ static void sio_soft_reset(void) {
     sio_internal.receive_buffer_full = false;
     sio_internal.transmit_buffer = 0;
     sio_internal.transmit_buffer_full = false;
-    sio_reset_device_transfer_state();
+    sio_internal.txen_latched = false;
+    sio_release_cs();
     sio_update_joystat();
     SIO_DBG("[SIO] Soft reset");
 }
 
-static void sio_begin_transfer(void) {
+static void sio_start_shift(void) {
     SIO_DBG("[SIO] BeginTransfer");
 
-    if (sio_internal.state != STATE_IDLE || !sio_can_transfer()) {
+    if (sio_internal.bus_phase != SIO_BUS_IDLE || !sio_bus_ready()) {
         return;
     }
 
-    sio_internal.state = STATE_TRANSMITTING;
+    sio_internal.bus_phase = SIO_BUS_SHIFTING;
     sio_internal.ctrl |= CTRL_RXEN;
     sio_internal.transmit_value = sio_internal.transmit_buffer;
     sio_internal.transmit_buffer_full = false;
+    sio_internal.txen_latched = false;   /* consumed by this transfer */
 
-    // Defer transfer via event scheduler (DuckStation: BAUD*8 cycles delay).
+    // A byte is 8 SCK periods, and SCK derives from the baud reload value
+    // (DOCS/serialinterfacessio.md:105-113), so the exchange is scheduled rather
+    // than immediate.
     // This gives the BIOS time to clear stale I_STAT[7] and set up IRQ handlers
     // before the ACK IRQ arrives — required for IRQ-driven memory card access.
     if (sio_internal.inter) {
@@ -443,11 +645,11 @@ static void sio_begin_transfer(void) {
         if (delay < 128) delay = 128;
         eventq_schedule(sio_internal.inter, EVQ_SIO, delay);
     } else {
-        sio_do_transfer();  // fallback (no interconnect, e.g. unit tests)
+        sio_shift_byte();  // fallback (no interconnect, e.g. unit tests)
     }
 }
 
-static void sio_do_transfer(void) {
+static void sio_shift_byte(void) {
     SIO_DBG("[SIO] DoTransfer");
     
     uint8_t data_out = sio_internal.transmit_value;
@@ -455,12 +657,12 @@ static void sio_do_transfer(void) {
     bool ack = false;
 
     // Try to transfer to active device
-    if (sio_internal.active_device == ACTIVE_DEVICE_NONE) {
+    if (sio_internal.addressed == SIO_DEV_NONE) {
         // Memory card device select. JOY_CTRL bit 13 (CTRL_SLOT) picks which
         // physical port's card this transfer targets — mc1 when clear, mc2 when set.
         MemoryCard* target_card = (sio_internal.ctrl & CTRL_SLOT) ? sio_internal.mc2 : sio_internal.mc1;
         if (data_out == 0x81 && target_card && target_card->present) {
-            sio_internal.active_device = ACTIVE_DEVICE_MEMCARD;
+            sio_internal.addressed = SIO_DEV_MEMCARD;
             sio_internal.active_card = target_card;
             sio_internal.mc_step = 0;
             data_in = 0xFF;  // N/A per PSX-SPX spec
@@ -469,15 +671,15 @@ static void sio_do_transfer(void) {
         } else if (sio_internal.controller_connected) {
             ack = sio_controller_transfer(data_out, &data_in);
             if (ack) {
-                sio_internal.active_device = ACTIVE_DEVICE_CONTROLLER;
+                sio_internal.addressed = SIO_DEV_CONTROLLER;
                 SIO_DBG("[SIO] Controller detected");
             }
         } else {
             ack = false;
         }
-    } else if (sio_internal.active_device == ACTIVE_DEVICE_CONTROLLER) {
+    } else if (sio_internal.addressed == SIO_DEV_CONTROLLER) {
         ack = sio_controller_transfer(data_out, &data_in);
-    } else if (sio_internal.active_device == ACTIVE_DEVICE_MEMCARD) {
+    } else if (sio_internal.addressed == SIO_DEV_MEMCARD) {
         data_in = sio_memcard_transfer(data_out);
         ack = (sio_internal.mc_step != 0xFF);
     }
@@ -495,21 +697,21 @@ static void sio_do_transfer(void) {
 
     // Device no longer responding
     if (!ack) {
-        sio_internal.active_device = ACTIVE_DEVICE_NONE;
-        sio_end_transfer();
+        sio_internal.addressed = SIO_DEV_NONE;
+        sio_release_bus();
     } else {
-        // Device still responding - wait for ACK
-        // In real DuckStation this schedules state = WAITING_FOR_ACK with a timer
-        // For simplicity, we immediately mark ACK
-        sio_internal.state = STATE_WAITING_FOR_ACK;
-        // Simulate ACK delay (in real impl this would be scheduled timer)
-        sio_do_ack();
+        // The device asks for another byte by pulling /ACK low for at least 2 us
+        // (DOCS/controllersandmemorycards.md:167-168). The pulse is raised here
+        // rather than after a timer: the kernel only observes /ACK through the
+        // interrupt, so nothing the guest can see distinguishes the two.
+        sio_internal.bus_phase = SIO_BUS_ACK;
+        sio_pulse_ack();
     }
 
     sio_update_joystat();
 }
 
-static void sio_do_ack(void) {
+static void sio_pulse_ack(void) {
     SIO_DBG("[SIO] DoACK");
     
     sio_internal.stat |= STAT_ACKINPUT;
@@ -519,32 +721,33 @@ static void sio_do_ack(void) {
         sio_trigger_irq("ACK");
     }
 
-    sio_end_transfer();
+    sio_release_bus();
     sio_update_joystat();
 
     // Chain next transfer if possible
-    if (sio_can_transfer()) {
-        sio_begin_transfer();
+    if (sio_bus_ready()) {
+        sio_start_shift();
     }
 }
 
-static void sio_end_transfer(void) {
+static void sio_release_bus(void) {
     SIO_DBG("[SIO] EndTransfer");
     
-    if (sio_internal.state == STATE_IDLE) {
+    if (sio_internal.bus_phase == SIO_BUS_IDLE) {
         return;  // Already idle
     }
 
-    sio_internal.state = STATE_IDLE;
+    sio_internal.bus_phase = SIO_BUS_IDLE;
 }
 
-static void sio_reset_device_transfer_state(void) {
+static void sio_release_cs(void) {
     SIO_DBG("[SIO] ResetDeviceTransferState (step=%d)", sio_internal.controller_transfer_step);
 
-    sio_internal.active_device = ACTIVE_DEVICE_NONE;
+    sio_internal.addressed = SIO_DEV_NONE;
     sio_internal.active_card = NULL;
     sio_internal.mc_step = 0;
-    // Always reset controller step on CS deassert (matches DuckStation behavior)
+    // Deasserting /CS ends the packet, so the next assertion starts a fresh one
+    // beginning with an address byte (DOCS/controllersandmemorycards.md:54-57).
     sio_internal.controller_transfer_step = 0;
 }
 
@@ -559,7 +762,7 @@ static void sio_update_joystat(void) {
         sio_internal.stat |= STAT_RXFIFONEMPTY;
     }
 
-    if (!sio_internal.transmit_buffer_full && sio_internal.state == STATE_IDLE) {
+    if (!sio_internal.transmit_buffer_full && sio_internal.bus_phase == SIO_BUS_IDLE) {
         sio_internal.stat |= STAT_TXDONE;
     }
 }
@@ -571,23 +774,205 @@ static void sio_trigger_irq(const char* type) {
 }
 
 // ============================================================================
-// CONTROLLER PROTOCOL (Digital Pad)
+// CONTROLLER PROTOCOL (Digital Pad + DualShock analog/config)
 // ============================================================================
 
-// Digital pad protocol (PSX-SPX): 0x01 (select) -> 0xFF ack, 0x42 (read cmd) ->
-// ID low 0x41, then ID high 0x5A, then buttons LSB, then buttons MSB (no ack
-// on this last byte — that's what tells the host the packet is complete).
+// Communication sequence (DOCS/controllersandmemorycards.md:330-347): the pad
+// answers "idlo idhi swlo swhi" (digital) and appends "adc0..adc3" in analog
+// mode. The command byte is received at transfer step 1; reply bytes follow at
+// steps 2..8, the last one sent without /ACK (EOP). Config-mode transfers are
+// always 9 bytes with ID "F3h 5Ah" (DOCS/controllersandmemorycards.md:1236).
+
+// Reply byte for the current step of a config-mode transfer (steps 3..8, after
+// the "F3h 5Ah" header). The host's command parameters stream in during the
+// same transfer (send step 3 = Led/ii/xx, send step 4 = Key), so state is
+// updated here as each byte lands, before the byte that depends on it is sent.
+// Command/response layouts: DOCS/controllersandmemorycards.md:1289-1396.
+static uint8_t sio_config_reply(uint8_t tx_byte) {
+    SioInternal* s = &sio_internal;
+    uint8_t step = s->controller_transfer_step;
+
+    switch (s->cmd) {
+        case 0x42:  // read buttons + analog inputs (even in digital mode)
+            // The config-mode send is "01h 42h 00h M2 M1 00h 00h 00h 00h"
+            // (DOCS/controllersandmemorycards.md:1289-1292): the motor bytes ride
+            // along here exactly as they do in normal mode.
+            sio_capture_rumble(tx_byte);
+            switch (step) {
+                case 3: return (uint8_t)(s->button_state & 0xFF);        // swlo
+                case 4: return (uint8_t)((s->button_state >> 8) & 0xFF); // swhi
+                case 5: return s->right_x;                               // adc0
+                case 6: return s->right_y;                               // adc1
+                case 7: return s->left_x;                                // adc2
+                case 8: return s->left_y;                                // adc3
+            }
+            return 0x00;
+
+        case 0x43:  // exit (xx=00) / stay (xx=01) in config mode
+            if (step == 3) {
+                s->config_mode = (tx_byte == 0x01);
+                LOG_SYSTEM_DEBUG("[SIO_CTRL] Config mode %s", s->config_mode ? "stay" : "exit");
+            }
+            return 0x00;
+
+        case 0x44:  // set LED state (analog mode on/off) + Analog-button lock
+            if (step == 3) {
+                s->config_p1 = tx_byte;  // Led: 00=digital/LED off, 01=analog/LED on,
+                                         // 02..FF ignored (DOCS/controllersandmemorycards.md:1316-1321)
+                if (tx_byte == 0x00 || tx_byte == 0x01)
+                    s->analog_mode = (tx_byte == 0x01);
+            } else if (step == 4) {
+                s->config_p2 = tx_byte;  // Key: 00..02 unlock, 03 lock, others AND 03
+                s->analog_lock = ((tx_byte & 0x03) == 0x03);
+            }
+            return 0x00;  // Err byte: 00h for an analog pad (only DS2 returns FFh)
+
+        case 0x45:  // get LED state + type/constants
+            switch (step) {
+                case 3: return 0x01;                       // Typ: PSX/Analog Pad
+                case 4: return 0x02;
+                case 5: return s->analog_mode ? 0x01 : 0x00;  // Led
+                case 6: return 0x02;
+                case 7: return 0x01;
+                case 8: return 0x00;
+            }
+            return 0x00;
+
+        case 0x46:  // get variable response A (PadInfoAct)
+            if (step == 3) s->config_p1 = tx_byte;  // ii
+            switch (step) {
+                case 5: return (s->config_p1 == 0x00 || s->config_p1 == 0x01) ? 0x01 : 0x00;
+                case 6: return (s->config_p1 == 0x00) ? 0x02 : 0x00;
+                case 7: return (s->config_p1 == 0x01) ? 0x01 : 0x00;
+                case 8: return (s->config_p1 == 0x00) ? 0x0A : (s->config_p1 == 0x01 ? 0x14 : 0x00);
+            }
+            return 0x00;
+
+        case 0x47:  // fixed response
+            switch (step) {
+                case 5: return 0x02;
+                case 7: return 0x01;
+            }
+            return 0x00;
+
+        case 0x48:  // unknown
+            if (step == 3) s->config_p1 = tx_byte;  // ii
+            return (step == 7 && s->config_p1 <= 1) ? 0x01 : 0x00;
+
+        case 0x4C:  // get variable response B
+            if (step == 3) s->config_p1 = tx_byte;  // ii
+            if (step == 6) {
+                if (s->config_p1 == 0x00) return 0x04;
+                if (s->config_p1 == 0x01) return 0x07;
+                return 0x00;
+            }
+            return 0x00;
+
+        case 0x4D:  // get/set rumble protocol (DOCS/controllersandmemorycards.md:1460-1478)
+            // Reply returns the OLD map value for each position; the incoming
+            // byte becomes the new map entry. The standard unlock is
+            // "01 4Dh 00h 00h 01h FFh FFh FFh FFh" (M2→byte4 bit0, M1→byte5).
+            if (step >= 3 && step <= 8) {
+                uint8_t old = s->rumble_map[step - 3];
+                s->rumble_map[step - 3] = tx_byte;
+                s->rumble_config_used = true;  /* the old method is off from here on */
+                if (s->rumble_map[step - 3] == 0xFF) {  // unmapped: drop any level
+                    if (step - 3 == 0) s->rumble_m2 = 0x00;
+                    else if (step - 3 == 1) s->rumble_m1 = 0x00;
+                }
+                return old;
+            }
+            return 0x00;
+
+        default:  // 40h/41h/49h/4Ah/4Bh/4Eh/4Fh: unused, reply with 00h bytes
+            return 0x00;
+    }
+}
+
+// Is the pad still on the old one-motor rumble method? True until a 4Dh has run,
+// and only while the map is untouched (all FFh) — the two conditions the
+// documentation gives at DOCS/controllersandmemorycards.md:1478-1481.
+static bool sio_rumble_old_method(void) {
+    if (sio_internal.rumble_config_used) return false;
+    for (int i = 0; i < 6; i++)
+        if (sio_internal.rumble_map[i] != 0xFF) return false;
+    return true;
+}
+
+// Decode a rumble byte arriving on a 42h read, in either normal or config mode
+// (the config-mode 42h send is "01h 42h 00h M2 M1 00h 00h 00h 00h",
+// DOCS/controllersandmemorycards.md:1289-1292, so it carries the motor bytes too).
+//
+// New method: each read-command byte (send step 3..8 = command byte 4..9) is
+// mapped by rumble_map to a motor — 0x00 takes M2 from bit0, 0x01 takes M1 from
+// the whole byte, 0xFF maps nothing (:1462-1470).
+//
+// Old method: bytes 4 and 5 are a two-part gate on the small motor alone
+// (:1434-1440), so byte 4 is only latched here and the decision is taken at
+// byte 5, once both halves are known.
+static void sio_capture_rumble(uint8_t tx_byte) {
+    uint8_t step = sio_internal.controller_transfer_step;
+    if (step < 3 || step > 8) return;
+
+    if (sio_rumble_old_method()) {
+        if (step == 3) {
+            sio_internal.rumble_old_xx = tx_byte;
+        } else if (step == 4) {
+            bool xx_on = (sio_internal.rumble_old_xx & 0xC0u) == 0x40u;  /* bit7=0, bit6=1 */
+            bool yy_on = (tx_byte & 0x01u) != 0;
+            sio_internal.rumble_m2 = (xx_on && yy_on) ? 0xFFu : 0x00u;
+            sio_internal.rumble_m1 = 0x00u;   /* the old method drives one motor */
+        }
+        return;
+    }
+
+    switch (sio_internal.rumble_map[step - 3]) {
+        case 0x00:  sio_internal.rumble_m2 = (tx_byte & 1) ? 0xFF : 0x00; break;
+        case 0x01:  sio_internal.rumble_m1 = tx_byte; break;
+        default:    break;  // 0xFF or unknown: no motor on this byte
+    }
+}
+
 static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
     bool ack = false;
 
-    SIO_DBG("[SIO_CTRL] Transfer step %d, TX=0x%02x, buttons=0x%04x",
-            sio_internal.controller_transfer_step, tx_byte, sio_internal.button_state);
+    // Watchdog (DOCS/controllersandmemorycards.md:1274-1281): entering config
+    // mode arms a ~1s timer that resets the pad to digital mode after a comms
+    // gap. Enforced lazily on the next byte after the gap — the only point the
+    // reset is observable. The uint32 difference is wrap-safe (cpu_cycle_counter
+    // is a 32-bit monotonic counter).
+    if (sio_internal.watchdog_active) {
+        uint32_t now = sio_internal.inter ? sio_internal.inter->cpu_cycle_counter : 0;
+        if ((now - sio_internal.last_comms_cycle) > CTRL_WATCHDOG_CYCLES) {
+            LOG_SYSTEM_DEBUG("[SIO_CTRL] Watchdog reset: ~1s without communication");
+            sio_internal.config_mode = false;
+            sio_internal.analog_mode = false;
+            sio_internal.analog_lock = false;
+            // The reset "disables and locks rumble motors" — back to the
+            // locked default (nothing mapped), motors off.
+            sio_rumble_lock();
+            // Disarm. The timer is armed by entering config mode (:1275-1277) and
+            // survives an Exit Config, but nothing re-arms it after it has fired:
+            // the pad it left behind is a plain digital one. Leaving it armed made
+            // every later comms gap re-run the reset, which silently undid the
+            // host-side Analog toggle over and over.
+            sio_internal.watchdog_active = false;
+        }
+    }
+    if (sio_internal.inter)
+        sio_internal.last_comms_cycle = sio_internal.inter->cpu_cycle_counter;
+
+    SIO_DBG("[SIO_CTRL] Transfer step %d, TX=0x%02x, buttons=0x%04x%s%s",
+            sio_internal.controller_transfer_step, tx_byte, sio_internal.button_state,
+            sio_internal.config_mode ? ", config" : "",
+            sio_internal.analog_mode ? ", analog" : "");
 
     switch (sio_internal.controller_transfer_step) {
         case 0:
             // Idle: only 0x01 (select controller) advances the state machine
             *out_byte = 0xFF;
             if (tx_byte == 0x01) {
+                sio_internal.cmd = 0;
                 sio_internal.controller_transfer_step = 1;
                 ack = true;
                 SIO_DBG("[SIO_CTRL] Step 0->1: Received 0x01 (select)");
@@ -595,12 +980,20 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
             break;
 
         case 1:
-            // Ready: only 0x42 (read digital) advances to sending the ID
-            if (tx_byte == 0x42) {
-                *out_byte = CTRL_RESPONSE_ID;  // 0x41
+            // Command byte. In config mode, 0x40..0x4F all answer with ID 0xF3;
+            // in normal mode, only 0x42 (read) and 0x43 (enter/exit config)
+            // advance, answering with the digital/analog ID.
+            sio_internal.cmd = tx_byte;
+            if (tx_byte >= 0x40 && tx_byte <= 0x4F && sio_internal.config_mode) {
+                *out_byte = CTRL_RESPONSE_ID_CONFIG;
+                sio_internal.transfer_in_config = true;
                 sio_internal.controller_transfer_step = 2;
                 ack = true;
-                SIO_DBG("[SIO_CTRL] Step 1->2: Received 0x42, sending ID low 0x41");
+            } else if (tx_byte == CTRL_CMD_READ_BUTTONS || tx_byte == CTRL_CMD_CONFIG) {
+                *out_byte = sio_internal.analog_mode ? CTRL_RESPONSE_ID_ANALOG : CTRL_RESPONSE_ID;
+                sio_internal.transfer_in_config = false;
+                sio_internal.controller_transfer_step = 2;
+                ack = true;
             } else {
                 *out_byte = 0xFF;
                 SIO_DBG("[SIO_CTRL] Step 1: Unexpected command 0x%02x", tx_byte);
@@ -615,19 +1008,86 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
             break;
 
         case 3:
-            *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // buttons LSB
-            sio_internal.controller_transfer_step = 4;
-            ack = true;
-            SIO_DBG("[SIO_CTRL] Step 3->4: Sending buttons LSB 0x%02x", *out_byte);
-            break;
+        default: {
+            if (sio_internal.transfer_in_config) {
+                *out_byte = sio_config_reply(tx_byte);
+                sio_internal.controller_transfer_step++;
+                if (sio_internal.controller_transfer_step > 8) {
+                    sio_internal.controller_transfer_step = 0;  // packet complete
+                    ack = false;  // no ack on final byte — signals end of packet
+                } else {
+                    ack = true;
+                }
+                break;
+            }
 
-        case 4:
-        default:
-            *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // buttons MSB
-            sio_internal.controller_transfer_step = 0;  // packet complete, back to idle
-            ack = false;  // no ack on final byte — signals end of packet
-            SIO_DBG("[SIO_CTRL] Step 4->0: Sending buttons MSB 0x%02x (EOP, no ack)", *out_byte);
+            // Normal mode: a 43h command carries the enter/stay byte at send step 3
+            // (00h=stay normal, 01h=enter config). Reply data is the same as a 42h
+            // read either way (DOCS/controllersandmemorycards.md:1261-1273).
+            if (sio_internal.cmd == CTRL_CMD_CONFIG &&
+                sio_internal.controller_transfer_step == 3 && tx_byte == 0x01) {
+                sio_internal.config_mode = true;
+                sio_internal.watchdog_active = true;
+                LOG_SYSTEM_DEBUG("[SIO_CTRL] Entered config mode");
+            }
+
+            // Rumble: a normal-mode 42h read carries the motor bytes at send steps
+            // 3..8, mapped onto M1/M2 via the 4Dh-unlocked map. Config-mode reads
+            // do not control rumble (DOCS/controllersandmemorycards.md:1308-1309).
+            if (sio_internal.cmd == CTRL_CMD_READ_BUTTONS)
+                sio_capture_rumble(tx_byte);
+
+            if (sio_internal.analog_mode) {
+                switch (sio_internal.controller_transfer_step) {
+                    case 3:
+                        *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // swlo
+                        sio_internal.controller_transfer_step = 4;
+                        ack = true;
+                        break;
+                    case 4:
+                        *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // swhi
+                        sio_internal.controller_transfer_step = 5;
+                        ack = true;
+                        break;
+                    case 5:
+                        *out_byte = sio_internal.right_x;  // adc0 RightJoyX
+                        sio_internal.controller_transfer_step = 6;
+                        ack = true;
+                        break;
+                    case 6:
+                        *out_byte = sio_internal.right_y;  // adc1 RightJoyY
+                        sio_internal.controller_transfer_step = 7;
+                        ack = true;
+                        break;
+                    case 7:
+                        *out_byte = sio_internal.left_x;  // adc2 LeftJoyX
+                        sio_internal.controller_transfer_step = 8;
+                        ack = true;
+                        break;
+                    case 8:
+                    default:
+                        *out_byte = sio_internal.left_y;  // adc3 LeftJoyY (EOP)
+                        sio_internal.controller_transfer_step = 0;
+                        ack = false;
+                        break;
+                }
+            } else {
+                switch (sio_internal.controller_transfer_step) {
+                    case 3:
+                        *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // swlo
+                        sio_internal.controller_transfer_step = 4;
+                        ack = true;
+                        break;
+                    case 4:
+                    default:
+                        *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // swhi (EOP)
+                        sio_internal.controller_transfer_step = 0;
+                        ack = false;
+                        break;
+                }
+            }
             break;
+        }
     }
 
     SIO_DBG("[SIO_CTRL] Response: 0x%02x ack=%d", *out_byte, ack);
@@ -666,7 +1126,8 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
             s->mc_step++;
             break;
 
-        case 4:  // Addr LSB — echo MSB back (DuckStation: m_last_byte)
+        case 4:  // Addr LSB — reply is "(pre)", the previously sent byte
+                 // (DOCS/controllersandmemorycards.md:2361)
             s->mc_sector |= tx;
             s->mc_checksum ^= tx;
             resp = s->mc_last_byte;  // echo MSBadr
@@ -705,13 +1166,13 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
                 // WRITE: steps 5..136
                 int pos = (int)s->mc_step - 5;
                 if (pos >= 0 && pos < 128) {                            // 128 data bytes
-                    resp = s->mc_last_byte;  // echo previous host byte (DuckStation)
+                    resp = s->mc_last_byte;  // "(pre)" — DOCS:2385-2387
                     s->mc_write_buf[pos] = tx;
                     s->mc_checksum ^= tx;
                     s->mc_last_byte = tx;
                     s->mc_step++;
                 } else if (pos == 128) {                                // host checksum
-                    resp = s->mc_last_byte;  // echo last data byte (DuckStation)
+                    resp = s->mc_last_byte;  // "(pre)" — DOCS:2385-2387
                     s->mc_write_ok = (tx == s->mc_checksum) &&
                                      (s->mc_sector < MEMCARD_SECTORS);
                     LOG_SYSTEM_DEBUG("[MC] WRITE sector=%u chk_host=0x%02x chk_card=0x%02x %s",

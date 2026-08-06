@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: 2002 Pete Bernert and the PCSX-Redux authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /*
  * SPU ADSR envelope — ported 1:1 from pcsx-redux (Pete Bernert / PCSX-Redux authors)
  * Original: pcsx-redux/src/spu/adsr.cc  (GPL-2.0+)
@@ -148,7 +156,7 @@ static int adsr_release(SpuVoice* voice) {
 
 /* =========================================================================
  * Public: spu_adsr_mix — called once per sample from spu_voice_get_sample
- * Returns mixing volume 0-32767 (15-bit, DuckStation-compatible precision)
+ * Returns mixing volume 0-32767 (15-bit)
  * ========================================================================= */
 int spu_adsr_mix(SpuVoice* voice) {
     adsr_init_tables();

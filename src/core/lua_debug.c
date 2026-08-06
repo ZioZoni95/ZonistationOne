@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /*
  * lua_debug.c — see lua_debug.h.
  *
@@ -8,12 +15,17 @@
  */
 #include "lua_debug.h"
 #include "interconnect.h"
+#include "spu.h"
+#include "cdrom.h"
 #include "cpu.h"
 #include "debugger.h"
 #include "ram.h"
 #include "bios.h"
 #include "gte.h"
+#include "savestate.h"
+#include "cdrom_audio.h"
 #include "log.h"
+#include <SDL2/SDL.h>
 
 #include <string.h>
 #include <stdio.h>
@@ -392,8 +404,226 @@ static int l_emu_display_area(lua_State* L) {
     return 6;
 }
 
+/* Drawing area (GP0 E3/E4) and drawing offset (GP0 E5). The GL path scissors
+ * every batch to this area, so it decides which primitives can reach the
+ * unified VRAM texture — a fill written unclipped into the CPU-side VRAM can
+ * still be clipped away on its way to the texture. */
+static int l_emu_draw_area(lua_State* L) {
+    Gpu* g = &g_inter->gpu;
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_left);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_top);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_right);
+    lua_pushinteger(L, (lua_Integer)g->drawing_area_bottom);
+    lua_pushinteger(L, (lua_Integer)g->drawing_x_offset);
+    lua_pushinteger(L, (lua_Integer)g->drawing_y_offset);
+    return 6;
+}
+
+/* SPU output-path health: samples produced from the emulated clock, samples
+ * dropped because the output ring was full, and how full that ring is right
+ * now. Sample count against emulated time is the direct check that generation
+ * is paced by the guest and not by the host. */
+static int l_emu_spu_stats(lua_State* L) {
+    Spu* spu = &g_inter->spu;
+    int head = spu->sample_buf_head, tail = spu->sample_buf_tail;
+    int used = (tail - head + SPU_SAMPLE_BUFFER_SIZE) % SPU_SAMPLE_BUFFER_SIZE;
+    lua_pushinteger(L, (lua_Integer)spu->total_samples_generated);
+    lua_pushinteger(L, (lua_Integer)spu->dropped_samples);
+    lua_pushinteger(L, (lua_Integer)used);
+    lua_pushinteger(L, (lua_Integer)SPU_SAMPLE_BUFFER_SIZE);
+    lua_pushinteger(L, (lua_Integer)spu->total_key_on_events);
+    return 5;
+}
+
+/* Reverb internal state — what a register poll cannot see. Lets a Lua trace tell
+ * "the game switched reverb off" (control/vol/EON) from "the reverb network's own
+ * tail is decaying wrong" (out_l/out_r while still enabled). Returns:
+ *   control, reverb_enable(bool), vol_l, vol_r, eon_mask, base, cur_addr,
+ *   in_l, in_r, out_l, out_r */
+static int l_emu_reverb(lua_State* L) {
+    Spu* spu = &g_inter->spu;
+    lua_pushinteger(L, (lua_Integer)spu->control);
+    lua_pushboolean(L, (spu->control & (1u << 7)) != 0);      /* SPUCNT reverb master enable */
+    lua_pushinteger(L, (lua_Integer)spu->reverb_vol_left);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_vol_right);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_on);          /* per-voice EON mask */
+    lua_pushinteger(L, (lua_Integer)spu->reverb_base);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_current_addr);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_in_l);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_in_r);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_out_l);
+    lua_pushinteger(L, (lua_Integer)spu->reverb_out_r);
+    return 11;
+}
+
+/* CD audio path health: FIFO depth, samples the drive has fed in, samples the
+ * SPU has taken out, and samples lost to overflow. During FMV playback the XA
+ * stream is the audio source, so a starving or overflowing FIFO here is heard
+ * directly. Also reports SPUCNT, whose reverb/CD-audio enables decide what the
+ * mixer is even supposed to be doing. */
+/* emu.vram_compare() — the CPU-side VRAM model against what the GPU actually holds.
+ *
+ * The renderer rasterises into a GL texture; gpu.vram.data only ever receives
+ * what the CPU or DMA wrote there. Anything a game draws with GP0 primitives and
+ * then samples back as a texture therefore exists on one side and not the other,
+ * and that gap is invisible from either side alone.
+ *
+ * Asynchronous by necessity: the GL context belongs to the GPU thread, so the
+ * first call asks for a readback and returns nil, and a later call returns the
+ * result once it has landed. Returns:
+ *   differing, colour_diff, mask_diff, gpu_only, first_x, first_y, seq
+ * where gpu_only counts pixels the GPU has and the CPU model reads as zero —
+ * that is the count that matters for "did we sample something that was never
+ * uploaded". */
+static int l_emu_vram_compare(lua_State* L) {
+    static uint32_t s_last_seq = 0;
+    static bool     s_awaiting = false;
+
+    Renderer* r = &g_inter->gpu.renderer;
+    uint32_t seq = 0;
+    const uint16_t* gpu_vram = renderer_get_vram_readback(&seq);
+
+    if (s_awaiting && gpu_vram && seq != s_last_seq) {
+        s_last_seq = seq;
+        s_awaiting = false;
+
+        const uint16_t* cpu_vram = (const uint16_t*)g_inter->gpu.vram.data;
+        uint32_t total = 0, colour = 0, mask = 0, gpu_only = 0;
+        int fx = -1, fy = -1;
+        for (uint32_t i = 0; i < 1024u * 512u; i++) {
+            uint16_t a = cpu_vram[i], b = gpu_vram[i];
+            if (a == b) continue;
+            total++;
+            if ((a & 0x7FFF) != (b & 0x7FFF)) colour++; else mask++;
+            if (a == 0 && b != 0) gpu_only++;
+            if (fx < 0) { fx = (int)(i % 1024u); fy = (int)(i / 1024u); }
+        }
+        lua_pushinteger(L, (lua_Integer)total);
+        lua_pushinteger(L, (lua_Integer)colour);
+        lua_pushinteger(L, (lua_Integer)mask);
+        lua_pushinteger(L, (lua_Integer)gpu_only);
+        lua_pushinteger(L, (lua_Integer)fx);
+        lua_pushinteger(L, (lua_Integer)fy);
+        lua_pushinteger(L, (lua_Integer)seq);
+        return 7;
+    }
+
+    if (!s_awaiting) {
+        s_awaiting = true;
+        renderer_request_vram_readback(r);
+    }
+    return 0;   /* nothing yet — call again on a later frame */
+}
+
+static int l_emu_cd_audio(lua_State* L) {
+    Cdrom* cd = &g_inter->cdrom;
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.count);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_pushed);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_popped);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_dropped);
+    lua_pushinteger(L, (lua_Integer)cd->audio_fifo.total_starved);
+    lua_pushinteger(L, (lua_Integer)g_inter->spu.control);
+    lua_pushinteger(L, (lua_Integer)cd->sectors_read_total);
+    lua_pushinteger(L, (lua_Integer)cd->xa_sectors_total);
+    return 8;
+}
+
+/* Host wall-clock milliseconds. Emulated cycles against this is the emulator's
+ * real-time speed, which is what decides whether the audio device can be fed at
+ * the rate it drains. */
+static int l_emu_host_ms(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)SDL_GetTicks());
+    return 1;
+}
+
+/* Interrupt controller state: I_STAT (latched requests), I_MASK (enables), and
+ * the per-source line levels. A source that latches in I_STAT but is masked, or
+ * that stays latched forever, means the guest's handler is not running — which
+ * looks from the guest's side like an event that never arrives. */
+static int l_emu_irq(lua_State* L) {
+    lua_pushinteger(L, (lua_Integer)g_inter->irq_status);
+    lua_pushinteger(L, (lua_Integer)g_inter->irq_mask);
+    lua_pushinteger(L, (lua_Integer)(uint32_t)g_cpu->sr);
+    lua_pushinteger(L, (lua_Integer)(uint32_t)g_cpu->cause);
+    return 4;
+}
+
+
+/* emu.save_state(path) / emu.load_state(path) — reach a state once by hand,
+ * then re-enter it from a script instead of replaying the boot every run. */
+static char g_pending_state_save[512];
+static bool g_have_pending_state_save;
+
+static int l_emu_save_state(lua_State* L) {
+    const char* path = luaL_optstring(L, 1, SAVESTATE_DEFAULT_PATH);
+    if (!g_inter || !g_cpu) { lua_pushboolean(L, 0); return 1; }
+    /* Deferred for the same reason as the load, and with a sharper consequence:
+     * a script's callbacks run from inside the event dispatch, and the VBlank
+     * handler re-arms itself *after* notifying scripts. Writing the machine out
+     * from in there captures a state with no VBlank scheduled, which on reload
+     * never produces another frame — black screen, silent SPU. */
+    snprintf(g_pending_state_save, sizeof(g_pending_state_save), "%s", path);
+    g_have_pending_state_save = true;
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+bool lua_debug_take_pending_state_save(char* out, size_t out_size) {
+    if (!g_have_pending_state_save) return false;
+    g_have_pending_state_save = false;
+    if (out && out_size) snprintf(out, out_size, "%s", g_pending_state_save);
+    return true;
+}
+
+/* Deferred on purpose. A script's callbacks run from inside the event dispatch,
+ * which is itself inside cpu_run_next_instruction: restoring the PC, the
+ * downcount and the whole event queue underneath that call returns into a
+ * machine that no longer matches the frame the caller is still executing. The
+ * request is parked and the host loop applies it between frames. */
+static char g_pending_state_load[512];
+static bool g_have_pending_state_load;
+
+static int l_emu_load_state(lua_State* L) {
+    const char* path = luaL_optstring(L, 1, SAVESTATE_DEFAULT_PATH);
+    if (!g_inter || !g_cpu) { lua_pushboolean(L, 0); return 1; }
+    snprintf(g_pending_state_load, sizeof(g_pending_state_load), "%s", path);
+    g_have_pending_state_load = true;
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+bool lua_debug_take_pending_state_load(char* out, size_t out_size) {
+    if (!g_have_pending_state_load) return false;
+    g_have_pending_state_load = false;
+    if (out && out_size) snprintf(out, out_size, "%s", g_pending_state_load);
+    return true;
+}
+
+/* emu.audio_stats() — the two opposite delivery failures, side by side.
+ * Returns: cd_pushed, cd_popped, cd_dropped, cd_queued,
+ *          spu_generated, spu_ring_drops, spu_underrun_events,
+ *          spu_underrun_samples, spu_ring_used */
+static int l_emu_audio_stats(lua_State* L) {
+    if (!g_inter) return 0;
+    const AudioFifo* f = &g_inter->cdrom.audio_fifo;
+    const Spu* spu = &g_inter->spu;
+    lua_pushinteger(L, (lua_Integer)f->total_pushed);
+    lua_pushinteger(L, (lua_Integer)f->total_popped);
+    lua_pushinteger(L, (lua_Integer)f->total_dropped);
+    lua_pushinteger(L, (lua_Integer)f->count);
+    lua_pushinteger(L, (lua_Integer)spu->total_samples_generated);
+    lua_pushinteger(L, (lua_Integer)spu->dropped_samples);
+    lua_pushinteger(L, (lua_Integer)spu->underrun_events);
+    lua_pushinteger(L, (lua_Integer)spu->underrun_samples);
+    lua_pushinteger(L, (lua_Integer)spu_ring_used(spu));
+    return 9;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
     {"log",               l_emu_log},
+    {"save_state",        l_emu_save_state},
+    {"load_state",        l_emu_load_state},
+    {"audio_stats",       l_emu_audio_stats},
     {"pc",                l_emu_pc},
     {"cycles",            l_emu_cycles},
     {"gte_data",          l_emu_gte_data},
@@ -417,6 +647,13 @@ static const luaL_Reg s_emu_funcs[] = {
     {"gp0_word_count",    l_emu_gp0_word_count},
     {"gp0_word",          l_emu_gp0_word},
     {"gpustat",           l_emu_gpustat},
+    {"draw_area",         l_emu_draw_area},
+    {"spu_stats",         l_emu_spu_stats},
+    {"reverb",            l_emu_reverb},
+    {"cd_audio",          l_emu_cd_audio},
+    {"vram_compare",      l_emu_vram_compare},
+    {"host_ms",           l_emu_host_ms},
+    {"irq",               l_emu_irq},
     {"vram_upload_rect",  l_emu_vram_upload_rect},
     {"gpu_pool",          l_emu_gpu_pool},
     {"mdec_block",        l_emu_mdec_block},

@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef INTERCONNECT_H // Include guard
 #define INTERCONNECT_H
 
@@ -143,7 +150,7 @@ typedef struct Interconnect {
     bool     frame_complete;                     // Set by the VBlank event; ends system_run_frame()
     // --------------------------------
 
-    // --- BIOS TTY line buffer (DuckStation-style EXP2 offset 0x23 capture) ---
+    // --- BIOS TTY line buffer (EXP2 offset 0x23 capture) ---
     char tty_line_buf[256];
     int  tty_line_len;
 
@@ -156,12 +163,26 @@ typedef struct Interconnect {
     Debugger debugger;
 
     // --- Memory Control 1 (0x1F801000-0x1F801020) — real register storage + derived timing ---
-    // Ported from DuckStation's Bus::CalculateMemoryTiming (nocash spec): real games/BIOS
+    // Timing model from DOCS/memorycontrol.md:136-145 (nocash spec): real games/BIOS
     // configure these delay registers, and un-cached/BIOS-ROM instruction fetches cost several
     // cycles each on real hardware, not the flat 1 cycle/instruction this project previously used.
     uint32_t memctrl_regs[9];    // exp1_base, exp2_base, exp1_delay, exp3_delay, bios_delay,
                                  // spu_delay, cdrom_delay, exp2_delay, common_delay
     uint32_t bios_access_cycles; // extra cycles (beyond the base 1/instruction) per BIOS ROM word fetch
+
+    // Stall cycles owed by the data access(es) of the instruction currently
+    // executing. The bus adds to it; cpu_run_next_instruction drains it into the
+    // cycle counter and the downcount once the instruction retires, so an
+    // instruction's memory cost lands in one place instead of being charged
+    // half-way through its own execution. Always zero between instructions,
+    // which is why it does not travel in a savestate.
+    uint32_t cpu_mem_stall_cycles;
+
+    // Instructions retired, for measuring cycles-per-instruction against the
+    // cycle counter. The two were the same number until data accesses started
+    // costing more than one cycle; their ratio is now the check that the memory
+    // cost model produces a believable CPI rather than one tuned to a single loop.
+    uint64_t instructions_retired;
 
 } Interconnect;
 

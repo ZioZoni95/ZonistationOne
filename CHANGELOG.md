@@ -7,13 +7,124 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Every last DuckStation reference is gone from `src/` and `include/`**: the comments that named
+  DuckStation for behaviour or constants (timing models, dispatch tables, hardware constants,
+  "DuckStation-style" architecture) are replaced with the specification they restate — the DOT/line
+  counts and dot-clock dividers from `DOCS/graphicsprocessingunitgpu.md:1305-1306,1325-1335`, the
+  CD speed-change cost from `DOCS/cdromdrive.md:1896-1908`, the noise-LFSR generator from
+  `DOCS/soundprocessingunitspu.md:534`, the mul/div latencies from the Guide's table — or with the
+  bare hardware fact. DuckStation has been CC BY-NC-ND since 2024-09-01, so no name of it may
+  remain in the code tree. `grep -rn "DuckStation" src/ include/` is now empty; the only external
+  references left are PCSX-Redux (GPL-2.0+, compatible), credited in the SPU ports and the DMA
+  sub-word comment where they are the actual source.
+- **The default build is optimised (`-O3 -march=native`)**: the Makefile compiled with `-g -Wall
+  -Wextra` and no `-O` flag, i.e. `-O0`. For an interpreter whose hot path is the per-instruction
+  decode/execute loop that is ~2x slower than an optimised build — measured during the BIOS 3D boot
+  logo, per-frame emulation time dropped from ~15–31 ms (averaging above the 20.1 ms PAL frame budget,
+  so the core could not hold real time and any debug instrumentation tipped it into audio drift) to
+  ~7–13 ms (comfortably under budget, with headroom for the debug panels and Lua probes). `make DEBUG=1`
+  restores an `-O0 -g` build for stepping in gdb. `-march=native` tunes the binary to the build machine —
+  rebuild when moving to a different CPU.
+
 ### Added
-- **`src/core/system.c` / `include/system.h` — unified core "run one frame" driver**: extracted the CPU + event-scheduler timing loop out of `main.c`. `system_init()` seeds the VBlank and timer events; `system_run_frame()` runs the machine until the VBlank event marks the frame boundary (`Interconnect.frame_complete`). `main.c` is now a thin host shell (SDL/GL/audio/threads + framecap) whose per-frame work is a single `system_run_frame()` call — the ~40-line nested chunk loop is gone. Threading is unchanged (GPU render thread + SPU audio thread still started by `main.c`). Mirrors the DuckStation/PCSX-Redux split of a thin outer loop over a core that owns all timing.
+- **Every source file carries an SPDX header** (`GPL-3.0-or-later`, `SPDX-FileCopyrightText`), 76 in
+  all, with the upstream authors named in the header of the files that have them so the attribution
+  travels with the code rather than only with `THIRD-PARTY.md`. `src/utils/rxi_log.*` are marked MIT,
+  which is what they are. `CLAUDE.md` now states the constraint the tree is maintained under.
+- **The documented latched-TXEN behaviour** (`DOCS/serialinterfacessio.md:16-20`): writing TX_DATA
+  latches TXEN, and the transfer starts if either the current or the latched value is set, so
+  clearing TXEN afterwards does not cancel a transfer the write already armed. The documentation
+  names Wipeout 2097 as the title that depends on it.
+
+- **`LICENSE` (GPL-3.0) is now actually in the repository** — it existed on disk but had never been
+  committed — and **`THIRD-PARTY.md`** records every component with an upstream author, its licence,
+  and the parts written from `DOCS/` that have no third-party origin.
+
+- **Savestates (F5 saves, F8 loads, `savestates/slot0.zst`)**: the machine can now be captured and
+  restored, so a defect that only appears twenty minutes into a game no longer costs a clean boot to
+  reach. `src/core/savestate.c` writes CPU (with the GTE and the I-cache), RAM, scratchpad, interrupt
+  controller, event queue, GPU state and VRAM, DMA, timers, CDROM, SPU with its RAM, SIO and the MDEC.
+  What is deliberately *not* written is anything the host owns rather than the guest — GL object names,
+  the GPU and CD reader threads, the open `FILE` per disc track, the debugger's breakpoints — so those
+  members are excluded by span (`offsetof`) rather than stored and restored as dead values. Sections
+  carry their size and are checked on load: a struct that changed shape is refused with a message
+  instead of being read into a mismatched layout. Also exposed to Lua as `emu.save_state(path)` /
+  `emu.load_state(path)`, and `scripts/audio_delivery_probe.lua` uses it to re-enter a state instead of
+  replaying the boot on every run.
+- **Frame inspector (debug UI phase 4)**: `include/frame_events.h` + `src/core/frame_events.c` are a
+  double-buffered per-frame event ring with CPU-cycle timestamps, recorded at VRAM uploads and copies,
+  draw batches, DMA channel 2 completions and XA sectors, and published at the frame boundary. The
+  Frame view plots each event by its cycle within the frame, with a marker where the nominal budget was
+  overrun. The renderer already recorded op *order* (it has to, or a texture page re-uploaded mid-frame
+  replays wrong); this records *time*, which is the axis "thirteen of twenty columns never arrived" is
+  a question about. Recording is enabled only while that view is the active mode — the standing
+  constraint from `docs/ui/README.md` is that the panels cost, not the core.
+- **VRAM CPU-vs-GPU comparison (debug UI phase 5)**: `renderer_request_vram_readback` /
+  `renderer_get_vram_readback` are a request/response channel across the GPU thread, which owns the GL
+  context. The Inspector reports how many VRAM halfwords differ between `gpu.vram.data` and the unified
+  texture, split into colour bits, mask bit only, and pixels the GPU has where the CPU model has none —
+  a direct measure of gaps 3.1–3.3, since every one of those is a pixel `GP0(0xC0)` readback,
+  `GP0(0x80)` copy and texture sampling cannot see. Asynchronous by design: a *synchronous* mid-frame
+  readback additionally needs a partial frame flush, and that is a change to the frame protocol.
+- **SPU underrun and ring-drop counters, shown in the Audio panel**: the SDL callback pads with silence
+  when the ring runs dry, and the SPU discards generated samples when it is full. Both insert
+  discontinuities into a continuous stream, both are heard as grit rather than as a dropout, and they
+  have opposite causes — so "is the emulator keeping up" is now read off two counters instead of being
+  argued about. Reachable from Lua as `emu.audio_stats()` alongside the CD FIFO's push/pop/drop totals.
+- **The startup log names the GPU that took the GL context** (`GL_VERSION | GL_RENDERER | GL_VENDOR`).
+  On a hybrid machine the same binary lands on the integrated or the discrete card depending on the
+  PRIME environment, and "is this a driver bug" is not answerable without knowing which.
+
+- **SPU reverb input/output resampling (39-tap FIR)**: the reverb unit runs at 22050 Hz, and hardware
+  feeds it through a 39-tap half-band FIR — the 44100 Hz mixer signal is downsampled into the network
+  and its 22050 Hz output upsampled back. This replaced the crude "average two input samples, hold the
+  output across two" approximation the code admitted to. Coefficients and behaviour are the hardware's,
+  from `DOCS/soundprocessingunitspu.md` ("Reverb Buffer Resampling"); the implementation
+  (`rev_reverb_resample` in `src/spu/spu_mixing.c`, using the `reverb_ds_buf`/`reverb_us_buf` rings that
+  were already in the struct) is this project's own — no reference emulator code was copied. Improves the
+  reverb's quality (band-limiting, smoother tail) at an unchanged output level.
+- **`emu.reverb()` Lua binding + `scripts/reverb_boot_trace.lua`**: exposes the SPU reverb's internal
+  state (SPUCNT reverb-enable, output volume, per-voice EON mask, work-area base/cursor, and the live
+  input/output magnitudes) so a trace can tell "the game switched reverb off" from "the reverb network's
+  own tail is decaying wrong" without adding a temporary `printf` to the mixer.
+- **Debug UI rebuilt around the data path (`docs/ui/` direction, phases 1–3)**: the floating-panel grid
+  (one window per subsystem) is replaced by a **machine bar + mode rail + stage + log dock** layout,
+  because every defect that has cost a session lived *between* two subsystems, not inside one. New in
+  `src/debug_ui.cpp`:
+  - A blued-graphite `ImGuiStyle` (`apply_zonistation_style`) with the `docs/ui/` design tokens. The two
+    accents encode the data path — cyan is the video chain (CD→MDEC→DMA→VRAM), rose the audio chain
+    (XA→SPU→device); severity colours (ok/warn/crit) are kept separate.
+  - A **machine bar** (`draw_machine_bar`): BIOS/disc/PC and the live vitals — real-time %, frame ms,
+    audio-queue depth, SPU drift — fed once per frame from `debug_ui_set_vitals`/`debug_ui_set_machine_info`
+    (`include/debug_ui.h`) using counters `main.c` already holds (frame budget vs. measured wall time,
+    `spu_ring_used`, an SPU sample-delta drift). Cheap by construction: two perf-counter reads, no
+    logging. A **Controls** popup folds in pause/step, the log level and the log windows (the old menu
+    bar is gone).
+  - A **mode rail** (Pipeline / Display / Frame / Code / Memory / Audio / VRAM / Script, F1–F8) with a
+    per-mode dock layout rebuilt on switch (`rebuild_layout`). The emulated screen is pinned to the top
+    of the stage in every mode; Display gives it the whole stage.
+  - A **Pipeline** view (`draw_pipeline_view`): CD → XA → MDEC → DMA → VRAM on one bordered row with
+    live per-second rates from real counters — CD sectors (`cdrom.sectors_read_total`), XA samples
+    (`audio_fifo.total_pushed`), GPU ch2 uploads (new `Dma.stat_ch2_uploads`, incremented in
+    `dma_ch2_signal_done`), MDEC in/out queue depth — sampled over a 0.5 s window. Stages without a
+    counter yet show `n/a` rather than a fabricated number.
+  - A **Memory** hex view (`draw_memory_view`/`mem_peek`): address gutter + 16 bytes + ASCII over RAM,
+    scratchpad and BIOS, with a goto and region jumps. Reads the storage buffers directly, never an I/O
+    port, so inspecting memory has no device side effects.
+  - Frame timeline, the inspector's VRAM CPU-vs-GPU diff and pinned Lua watches are stubbed with honest
+    "pending" notes — they need the phase 4–6 work (a cycle-timestamped event ring, cross-thread GL
+    readback, per-frame Lua evaluation) called out in `docs/ui/README.md`.
+  - Host window opens maximised with its titlebar buttons (`SDL_WINDOW_RESIZABLE` + `SDL_MaximizeWindow`
+    after the GL context exists); **Alt+Enter** toggles borderless fullscreen.
+- **`src/core/system.c` / `include/system.h` — unified core "run one frame" driver**: extracted the CPU + event-scheduler timing loop out of `main.c`. `system_init()` seeds the VBlank and timer events; `system_run_frame()` runs the machine until the VBlank event marks the frame boundary (`Interconnect.frame_complete`). `main.c` is now a thin host shell (SDL/GL/audio/threads + framecap) whose per-frame work is a single `system_run_frame()` call — the ~40-line nested chunk loop is gone. Threading: the GPU render thread is started by `main.c`; the SPU's own thread was later removed when sample generation moved onto the emulated clock. Mirrors the DuckStation/PCSX-Redux split of a thin outer loop over a core that owns all timing.
 
 - **VRAM Viewer (PCSX-Redux-style)**: Rebuilt the ImGui VRAM viewer (`src/debug_ui.cpp`) to match Redux's `vram-viewer` widget: selectable decode modes (4/8/16/24 bpp), 24bpp byte-phase shift, selectable CLUT (right-click a pixel), greyscale and mask-bit views, a 16×16 pixel grid and a 64×256 texture-page grid, an outline of the active CRTC display area, cursor-anchored wheel zoom, drag-to-pan, a magnifier lens, and an exact per-pixel readout (raw / 5:5:5 / mask / bytes / 24bpp / tpage) read straight from the CPU-side VRAM buffer. Decode modes are driven through a new `VramViewParams` on the renderer (`renderer_set_vram_view_params`, `include/renderer.h`). The 2 MB/frame VRAM→RGBA8 snapshot is now only taken while the window is open (`debug_ui_vram_viewer_open`).
-- **Lua debug bindings**: `emu.gpustat`, `emu.display_area`, `emu.vram16(x,y)`, `emu.vram_upload_rect`, `emu.gpu_pool`, `emu.gp0_opcode/word/word_count`, `emu.timer(i)`, and `emu.mdec_block/info/scale/qtable/in_peek/in_count/dma` — query-only helpers (zero cost unless a script calls them) plus a few `lua_debug_notify` probe points (`mdec_macroblock`, `gp0_vram_upload/copy/image_start`, `vram_full_upload`) for live MDEC/GPU pipeline tracing.
+- **Lua debug bindings**: `emu.spu_stats` (samples produced, samples dropped, output-ring occupancy, key-on count — sample count against emulated time is the direct check that audio is paced by the guest), `emu.draw_area` (drawing area + drawing offset — the GL path scissors every batch to it, so it decides which primitives can reach the unified VRAM texture) and a `gp0_fill` probe point for GP0(0x02); plus `emu.gpustat`, `emu.display_area`, `emu.vram16(x,y)`, `emu.vram_upload_rect`, `emu.gpu_pool`, `emu.gp0_opcode/word/word_count`, `emu.timer(i)`, and `emu.mdec_block/info/scale/qtable/in_peek/in_count/dma` — query-only helpers (zero cost unless a script calls them) plus a few `lua_debug_notify` probe points (`mdec_macroblock`, `gp0_vram_upload/copy/image_start`, `vram_full_upload`) for live MDEC/GPU pipeline tracing.
 - **MDEC (Macroblock Decoder)**: Full implementation in `src/core/mdec.c` / `include/mdec.h`.
-  - State machine ported 1:1 from DuckStation (`IDCT_Old`, `DecodeRLE_Old`, `YUVToRGB_Old`).
+  - Decode stages implemented from `DOCS/macroblockdecodermdec.md` (rl_decode_block,
+    real_idct_core, yuv_to_rgb, y_to_mono). *(Superseded 2026-08-01: this line described the
+    earlier implementation and was corrected when the stages were rewritten against the spec.)*
   - 6-block color path (Cr,Cb,Y1-Y4) and mono path; 4-bit, 8-bit, 24-bit, 15-bit output modes.
   - DMA in/out FIFO (2048 HW in, 768 W out); integrated with DMA ch0 (MDECin) and ch1 (MDECout).
   - Status register: data-out-empty, data-in-full, command-busy, DMA-request bits.
@@ -23,11 +134,74 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - FLAG byte (0x08 = directory unread on powerup) per PSX-SPX spec.
 
 ### Changed
+- **Host pacing follows the audio queue when a sound device is open**: the frame loop used to spin on the performance counter until the emulated refresh period had elapsed. Audio is the least tolerant consumer in the machine — the device drains 44100 samples every real second whatever the emulator is doing — so the loop now runs ahead only until the SPU's output ring holds `SPU_RING_TARGET_SAMPLES` (~46 ms) and then waits for the device to drain some. Frame-pacing jitter no longer reaches the audio, and the busy-wait is gone (it is kept as the fallback when no device could be opened). This bounds latency but cannot manufacture throughput: if the emulator runs below 100% of real time the ring still empties. (A "85-95% of real time" figure recorded during this work was measured with stderr logging and per-vblank Lua probes active and has been withdrawn — the core keeps real time with the debug interface closed; it is the debug panels under WSL that cost.)
+- **The XA audio queue's standing latency is bounded**: sectors arrive in interleave bursts, so some buffering is needed, but the queue could grow to its full 2 s capacity and put hundreds of milliseconds between a picture and its sound. Past four sectors' worth it now drops the oldest frame rather than the newest, so the delay stops growing while the stream stays continuous.
 - **Logging defaults to INFO again, and the level is settable per run**: `current_log_level` had drifted to `DEBUG`, contradicting the documented default. The hot paths log per DMA transfer, per GP0 command and per MDEC macroblock — thousands of formatted lines per frame during FMV playback, enough to visibly drag the emulator below real time until the level was lowered by hand. Default is INFO, and `ZS1_LOG_LEVEL=silent|error|warn|info|debug|trace` sets it at startup. Measured after the change: ~87% of real time during FMV playback.
 - **VRAM unified into one GL texture (DuckStation `GPU_HW` model)**: the renderer kept three unsynchronized VRAM stores and the display sampled the wrong one — rasterized primitives lived only in `display_texture` (never written back to VRAM: "Gap B"), while CPU/MDEC uploads lived in `gpu.vram.data` and only reached the screen through a fragile 24bpp mirror hack whose column mapping depended on the current `display_x`, decoupled from the game's double buffering. Now ONE RGBA8 texture is the FBO colour attachment (rasterization target), the CPU/MDEC upload target, and the scanout source, so what is written to VRAM is what the display reads. PSX halfwords are stored 5:5:5:1 expanded to 8 bits/channel (`(v<<3)|(v>>2)`), which round-trips losslessly so CLUT index bits survive. A new scanout-extract pass renders the CRTC display window out of that texture, unpacking per depth (15bpp direct fetch; 24bpp recombines two texels and byte-shifts per pixel — DuckStation `GenerateVRAMExtractFragmentShader` / `GPU_SW::CopyOut24Bit`), and `draw_ps1_display` shows it 1:1 instead of cropping the FBO. The rasterizer's Y flip was removed (vertex shader + scissor) so PSX line N is VRAM texel row N — the same row an upload writes and the scanout reads; rendering flipped while uploading unflipped was why FMV frames and rasterized output disagreed about where a scanline lives. Removed with it: the 24bpp mirror hack and its `dst_x`/`depth24` fields, the disabled `renderer_apply_vram_readback` bridge and its 1.5 MB buffer, and the throttled `glGetTexImage` that fed it. (Texture sampling still uses the R16UI mirror; folding that in via a read-shadow ping-pong remains for a follow-up.)
 - **Timing unified under one scheduler authority (interpreter-native, PCSX-Redux `Counters` model)**: timers were the only subsystem not driven by the event scheduler — they were stepped by hand in the main loop (`timers_step`) once per coarse chunk, alongside a half-wired, conflicting `EVQ_TIMER0/1/2` event path. Timers are now first-class scheduled events. The counter is **derived on read** as `(cpu_cycle_counter - cycle_start) / rate` (no per-tick increment loop, no fractional accumulator — `src/core/timers.c`, reusing the existing `cycle_start`/`rate` fields), IRQ/reset fires from the scheduled event at the next target/overflow through a single shared IRQ path, and every register read/write/gate-change catches the timer up on demand. Dotclock (Timer0) / hblank (Timer1) rates now derive from the GPU's active video mode via `gpu_dotclock_hz`/`gpu_hblank_hz` (CRTC 53'693'175 NTSC / 53'203'425 PAL, dotclock divider from GPUSTAT h-res, hblank per-scanline), not fixed NTSC constants. Not DuckStation's two-counter `pending_ticks` model — unnecessary for an interpreter whose `cpu_cycle_counter` is always "now". New `src/core/system.c` owns the per-frame run loop; `main.c` shrank to a thin host shell.
 
 ### Fixed
+- **SIO0 bus sequencing rewritten around the documented signal model.** It was structured as an
+  abstract transfer machine; it now follows what the documentation describes on the wire — /CS
+  selects a port, the first byte after assertion addresses a device
+  (`DOCS/controllersandmemorycards.md:50-67`), each byte is a full-duplex shift, and the addressed
+  device pulls /ACK low to request another (`:127-178`). The phase enum and the functions are named
+  after those signals. The device protocols themselves already followed the published sequences at
+  `:331-346` and `:2354-2400`. Verified: BIOS boots, pad input works, both memory card slots load,
+  are detected, written and saved.
+- **MDEC decode stages rewritten against the hardware documentation.** `rl_decode_block`,
+  `real_idct_core`, `yuv_to_rgb` and `y_to_mono` now follow
+  `DOCS/macroblockdecodermdec.md:138-158, :192-245`, and the `zagzig` table is generated by the
+  documented rule at `:292-295` from the zigzag table at `:271-282` rather than stored as a literal —
+  verified to reproduce the previous table exactly.
+- **MDEC scale-table orientation** (regression from the rewrite above, caught in playback): the table
+  was transposed on load, which was right for the old inner loop reading `scale_table[y*8+u]` but one
+  transpose too many for the documented indexing `scaletable[x+z*8]`, which already accounts for the
+  mirroring. Every 8x8 block decoded with its edge row and column too dark, putting a regular
+  8-pixel grid over FMV playback. The table is now stored as delivered, and the comment records that
+  the orientation and the indexing are one decision rather than two.
+- **`calc_memory_timing_word_cycles` comment corrected.** It transcribes the 1ST/SEQ/MIN pseudocode
+  published at `DOCS/memorycontrol.md:136-145` line for line, with field positions from `:37-53` and
+  `:126-132`. No code change, so the timing model this depends on is untouched.
+- **SPU noise waveform was wrong for half of its state space.** The 64-entry tap table repeated its
+  first 32 entries instead of carrying their bit-reverse, so the parity was wrong for every LFSR state
+  with bit 15 set. The table is gone: the shifted-in bit is computed from the generator published at
+  `DOCS/soundprocessingunitspu.md:534`, which removes the whole class of transcription error.
+- **SPU 4-point Gaussian interpolation used a differently normalised table.** The console's own
+  512-entry table is published at `DOCS/soundprocessingunitspu.md:225-291` and is now used with the
+  documented `SAR 15` formula from `:215-224`. The transcription self-checks: the documentation notes
+  at `:295-299` that the real table's groups of four sum to 7F7Fh..7F81h rather than the theoretical
+  8000h, and it reproduces exactly that range.
+- **SPU ADPCM fed the unclamped prediction back into the filter.** The decoded sample is saturated to
+  16 bits before it becomes filter state — the same rule the CD-XA decoder already followed
+  (`DOCS/cdromformat.md:836-837`). Without it one overflowing nibble poisons the remaining 27 samples
+  of the block and leaves out-of-range values in `SB[]` that are only clamped after the envelope and
+  volume have scaled them.
+- **README's licence section contradicted `LICENSE`**, saying "Educational purposes only" where the
+  file is GPL-3.0. It now states GPL-3.0-or-later and what that grants. `timers.c`'s attribution named
+  no licence ("used under open source license") and now names GPL-2.0-or-later, and the vendored Dear
+  ImGui and Lua copies carry the MIT notices their terms require.
+- **A textured polygon's Texpage attribute did not persist as draw-mode state**: PSX-SPX
+  (`DOCS/graphicsprocessingunitgpu.md:356-360`) specifies that bits 0-8 of the attribute are the same as
+  `GP0(E1)` bits 0-8 — a textured polygon *is* a draw-mode write. The primitive itself sampled correctly,
+  because it carries its own texpage, but rectangles and lines take theirs from `GP0(E1)` state, so any
+  sprite drawn after a textured polygon sampled whichever page the last explicit `GP0(E1)` had set. The
+  polygon's own semi-transparency mode came from the same stale state rather than from its attribute.
+  `ZS1_GPU_NO_TEXPAGE_ATTR=1` restores the previous behaviour, so the change can be bisected against a
+  regression in a single run. Bit 11 is deliberately not applied: on a retail v0 GPU it only means
+  "texture disable" once `GP1(09h)` has enabled it, which this core treats as a no-op.
+- **Space was bound to both Pause and the pad's START button**: the debug UI took `Space` for
+  pause/resume while `controller.c` reads the same key as START from the raw SDL keyboard state, so
+  every press of START also halted the machine. Pause moved to **F10** (and the dedicated `Pause` key).
+- **XA coding-info bits were read from the wrong positions**: the sample rate is bit 2 and the bit depth is bit 4 (`DOCS/cdromformat.md:664-671`, `DOCS/cdromdrive.md:265-278`), but the decoder tested `0x04` for 8-bit and `0x08` for 18900 Hz. Every stream that was not the common 37800 Hz 4-bit case therefore decoded as noise, and 18900 Hz was never detected at all, leaving `resample_xa_18900` unreachable. That resampler was also wrong when it did run: 18900 → 44100 is **7 output samples per 3 inputs**, not the 7-per-6 of the 37800 path, so 18900 Hz material would have played an octave low at half speed. It now carries its ratio in a credit counter that survives sector boundaries. Also on the same path: the ADPCM filter now feeds back the *clamped* sample as the documentation specifies (`DOCS/cdromformat.md:836-837`) instead of the raw prediction, which could let the IIR state run away on loud material.
+- **The SPU reverb wrote into the voices' sample data, even with reverb switched off**: `mBASE` is a full 16-bit address divided by 8 covering all 512 KB of SPU RAM, but it was masked to 14 bits, putting the work area roughly 384 KB too low — for the documented "Room" preset, byte 0x1D940 instead of 0x7D940, i.e. on top of the ADPCM sample region that starts at 0x1000. Compounding it, SPUCNT bit 7 was applied to the output mix when it actually disables *writes* to the reverb buffer while reads and output continue (`DOCS/soundprocessingunitspu.md:826-835`, confirmed by the bus-timing table at `:1113-1123`). So a game that switched the unit off still had its samples overwritten. The mask is gone and the write gate moved into `rev_wr`.
+- **Volume sweeps ran in the wrong direction and started from a meaningless level**: the direction is bit 13 (`DOCS/soundprocessingunitspu.md:366-387`), not bit 7, which is documented as unused. And a sweep-mode write used to store the configuration bits into the current level, where the documentation says a sweep starts from wherever the volume already is — so both the per-voice and the main volume registers now leave the level alone unless the write is in fixed mode.
+- **A queued CDROM second response was discarded instead of rescheduled**: `cdrom_schedule_second_response_event` refused to arm if one was already pending, so a second command's INT2 fired at the first command's deadline or never. Measured on a boot: twelve `Init` commands produced three second responses, and a burst of ten produced one.
+- **CDROM timing: the Pause delays were swapped and a speed change cost nothing**: hardware pauses in 2 168 860 cycles at 1x and 1 097 107 at 2x (`DOCS/cdromdrive.md:1888-1889`) — a faster drive pauses sooner — where this had the two the other way round. And changing the read speed with Setmode spins the drive up or down, about 0.6 s for 1x→2x and 0.7 s the other way; that cost is now carried and charged to the next seek, which is where DuckStation accounts for it too.
+- **XA-ADPCM sectors claimed eight times their sample count (FMV audio was noise)**: `cdrom_audio_decode_xa` computed `samples_per_chunk = num_blocks * words_per_block * (bits8 ? 4 : 8)`. A 128-byte sound group holds `num_blocks` blocks of 28 samples — 224 for 4-bit XA, 112 for 8-bit — and there is no further multiplier. The extra factor of 8 made a sector claim 18816 output frames where it has 2352, so seven eighths of everything pushed into the audio FIFO was whatever happened to be left in the decode buffer. It was partly masked by a `if (fifo->count > 2048) return;` guard that discarded whole sectors once the queue filled — audible as "FMV audio is noise". Measured after the fix: 44688 samples/s pushed against 44144 consumed (was ~94000 pushed with half of it dropped), queue depth 300-2100 frames instead of 5000-18500, zero drops.
+- **Reverb ran at the wrong rate and addressed its buffer wrongly (metallic crackle over everything)**: the unit runs at 22050 Hz on hardware — one step per two output samples, which is also what advances its delay line — and every src/dst/disp register is an SPU address *divided by 8*, relative to the current buffer address. This implementation stepped the whole IIR/comb network at 44100 Hz and treated the address registers as halfword offsets, so each read and write landed at a quarter of its intended distance; the writes fell outside the reverb work area, on top of the voices' own sample data, which is what made the corruption audible on everything rather than just on the reverb tail. `reverb_process` is now written from the documented formula (same-side and different-side reflection, 4-tap comb, two all-pass stages) at half rate, with addresses resolved in halfwords and wrapped inside mBASE..end-of-RAM, and a write to mBASE resets the current buffer address as hardware does. Only voices whose bit is set in the per-voice reverb mask feed the unit (that mask was stored and never read). Measured over a 30 s capture of the emulator's own output: sample-to-sample jumps above 8000 LSB went from 10302 (0.79%) to 44 (0.002%), against 11 with the reverb bypassed entirely.
+- **SPU generated audio on wall-clock time instead of emulated time (sound completely broken)**: two sample producers existed and the correct one was dead. `spu_step()` (`src/spu/spu_mixing.c`) produces one stereo sample per 768 CPU cycles — the 44100 Hz the hardware runs its DSP at — and had **zero call sites**; the live producer was a dedicated thread that watched the free space in the output ring, generated up to 512 samples and slept 1 ms. Everything that advances with a sample (ADSR envelopes, ADPCM positions, the reverb delay line, the CD-audio FIFO) therefore advanced at whatever rate the host audio device drained the ring, while the guest's key-on/key-off and register writes arrived on the emulation thread at emulated rate — two independent clocks, drifting permanently, so note lengths and envelope shapes were wrong whenever the emulator was not at exactly 100% of real time (measured ≈87% during FMV playback). The voice registers were also read from the audio thread without synchronisation, so a key-on/key-off latch could be missed or applied twice. Now the emulated clock drives generation: a scheduled `EVQ_SPU` event (64-sample batches) plus `spu_catch_up()` on every SPU register read and write, so a write flushes everything owed at the old register values before mutating state. The wall-clock thread is gone; production and register access are on the same thread, which also makes the CD-audio FIFO single-threaded end to end. A sample is still generated when the output ring is full — the DSP state has to advance regardless — and only the audible result is dropped, counted in a new `dropped_samples`. Measured after the change: 106368 samples per 81 698 760 emulated cycles against 106378 expected (−0.01%), ring occupancy steady at 192-512 of 4096, and no drops after the start-up transient.
+- **Rasterized pixels always set the mask bit (green FMV letterbox)**: the unified VRAM texture stores the PSX mask bit (bit 15) in its alpha channel, but the fragment shader emitted `vec4(colour, 1.0)` unconditionally, so every rasterized pixel came back out of VRAM as `0x8000 | colour`. In 15bpp display modes bit 15 is ignored on scanout and nothing showed; in 24bpp it is *picture data*, so an area painted black by the GPU decoded as halfwords `0x8000` — bytes `00 80 00 80 …` — i.e. mid-green. That is exactly what the letterbox bands around Ace Combat 2's 320×160 FMV were: rows the movie never uploads, last painted black by the game's own clear. The shader now emits the real mask bit: 0 by default, 1 when GP0(E6).0 forces it (new `u_set_mask` uniform, plumbed as batch state through `renderer_set_mask_mode` so it survives the CPU→GPU-thread batch replay), or when a textured pixel's source texel has bit 15 set (PSX-SPX "Mask bit": the STP bit is copied to the framebuffer). Semi-transparency blending now uses `glBlendFuncSeparate`/`glBlendEquationSeparate` with `GL_ONE, GL_ZERO` on alpha, since hardware writes the source pixel's mask bit whatever the colour blend does. Measured first: `scripts/fmv_fill_watch.lua` showed the game issues **no** fill at all during playback (8 in a whole run: two at boot, six after the movie), and `scripts/letterbox_history.lua` showed those rows do not change in CPU VRAM for the whole movie — so the bands could not be a missing write, only a misread of what was already there.
 - **Upload rects were routed into the debug VRAM-Viewer texture (FMV display striping)**: `renderer_record_vram_update` (`src/gpu/renderer.c`) wrote every field of the `GpuVramUpdate` entry except `is_viewer`. That array lives in the per-frame command list and is reused frame after frame, so an index that had once held the VRAM-Viewer's 2 MB snapshot (`renderer_update_vram_viewer`, the only setter of the flag) kept `is_viewer = true` forever — and from then on every upload rect recorded at that index was executed as a viewer upload, never reaching the unified VRAM texture. The poisoned set grew during boot as frames with different upload counts put the viewer entry at different indices, so during FMV playback 13 of the 20 macroblock columns of each frame never updated on screen: the display kept showing the previous frame's pixels there, as a fixed pattern of grey/stale vertical bands, while the CPU-side VRAM model (and the VRAM Viewer) held a perfect frame. Localised by reading the unified texture back on the GPU thread and comparing each rect against the CPU halfwords staged for it — 13/20 rects mismatched 3840/3840 pixels while the staging bytes were provably identical between execution and check, and the rects that did take the VRAM path matched byte-for-byte immediately after upload; 0/20 mismatches after the fix, on both double-buffer halves. Not a CRTC/PAL issue: the display window measured correct throughout (`disp=(512,0)`↔`(512,240)`, 320×240, 24bpp, h-range 2560 ticks / dot divider 8 = 320 px, v-range 240 lines).
 - **DMA completion interrupts were lost after the first DICR acknowledge (FMV playback blocker)**: `interconnect_set_irq_line` only latches I_STAT on a low→high edge, but the DICR acknowledge path in `dma.c` cleared `irq_status` while leaving `irq_line_state` high, and the four completion sites poked the line directly from behind a `!(irq_status & IRQ_DMA)` guard. Once a game acknowledged through DICR alone, the DMA line stayed logically high forever and every later completion produced no edge — the interrupt simply vanished. Ace Combat 2's movie player is a direct casualty: its CD ISR marks a sector descriptor "transfer running" when it kicks the ch3 payload DMA and relies on the DMA interrupt handler to mark it "ready", so the descriptors of one frame froze and the movie died after 49 of its 1905 frames while the drive kept streaming. New `dma_update_irq()` (`src/core/dma.c`) is now the only place allowed to touch the line: it recomputes DICR's master flag and acts on the transition — asserting on false→true, deasserting on true→false. Re-asserting an already-high line instead restarts the interrupt on every call and traps the CPU in the handler (reproduced as a freeze on the SONY splash). Every DICR write goes through it too, so a game that enables interrupts *after* writing CHCR still gets its completion. Mirrors DuckStation's `DMA::UpdateIRQ` (`dma.cpp:500-507`) and its `UpdateIRQ()` call on the DICR write path (`dma.cpp:457`, see the note at `dma.cpp:401`). Measured over the same 130 s run: MDEC frame commands 46 → 386, decoded macroblocks 9121 → 365 800, MDEC busy continuously instead of stalling after ~2 s of movie.
 - **GPU block DMA sampled guest RAM too late (FMV column striping)**: `REQUEST`/`MANUAL` transfers on ch2 were sliced across event ticks like the linked-list path, so the source words were read long after the guest kicked the transfer. The movie player owns only two staging buffers and refills one as soon as its transfer is kicked, so the deferred read picked up the *next* column's pixels — VRAM ended up holding just two distinct payloads repeated across all twenty 16-pixel columns of a frame (measured: 20 uploads, 2 unique hashes). Block transfers now consume the buffer at kick time, as both references do (DuckStation delays only the completion, never the data read; PCSX-Redux copies immediately and schedules just the IRQ). The linked list stays sliced — its node chain is built before the kick and is not rewritten under us.

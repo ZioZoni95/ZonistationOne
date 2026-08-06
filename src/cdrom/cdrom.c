@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 /*
  * CDROM Controller core: init, register I/O, interrupt delivery, event callbacks.
  * Command handlers live in cdrom_commands.c.
@@ -75,7 +82,10 @@ void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->second_event_pending) return;
+    /* Re-schedule rather than refuse. Dropping the new deadline made a second
+     * command's INT2 fire at the first command's time, or not at all: measured
+     * on a boot, twelve Init commands produced three second responses and a
+     * burst of ten produced one. */
     cdrom->second_event_pending = true;
     if (cdrom->inter)
         eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE, cycles);
@@ -300,14 +310,12 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
     case 3:
         switch (cdrom->index) {
         case 0:
-            /* Request register. Reset-point matches DuckStation's model
-             * (duckstation_ref/src/core/cdrom.cpp, WriteRegister case 2):
-             * disarm (BFRD=0) resets the read pointer, arm (BFRD=1) does NOT.
-             * This lets software issue several separate reads of the SAME
-             * sector (e.g. a short header peek followed by a bulk data
-             * transfer) without losing progress across re-arms — armed-only
-             * transitions must leave ->position exactly where it was. A
-             * fresh sector load (cdrom_execute_drive) already resets
+            /* Request register: disarm (BFRD=0) resets the read pointer,
+             * arm (BFRD=1) does NOT. This lets software issue several separate
+             * reads of the SAME sector (e.g. a short header peek followed by a
+             * bulk data transfer) without losing progress across re-arms —
+             * armed-only transitions must leave ->position exactly where it
+             * was. A fresh sector load (cdrom_execute_drive) already resets
              * ->position=0 on its own, so this only handles the explicit
              * software-driven "restart from the top" case. Previously this
              * was backwards (reset on arm, not on disarm), which silently

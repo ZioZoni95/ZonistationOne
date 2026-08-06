@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: The PCSX ReARMed authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 // timers.c
 #include "timers.h"
 #include "interconnect.h" // Needed for interconnect_request_irq and IRQ defines
@@ -8,8 +16,13 @@
 #include "log.h"
 #include "event_scheduler.h" // For eventq_schedule
 
+/* The double-typed clock this file's rate arithmetic divides by. Note that
+ * cdrom_disc.h already defines PSX_SYSCLK_HZ as the same figure in integer form;
+ * this file used to redefine that name as a double, which shadowed it with a
+ * different type. Nothing here ever read it — every rate below uses PSX_CPU_HZ
+ * directly — so the redefinition was only a warning and a trap waiting for the
+ * first person to use the name and get integer or float arithmetic by accident. */
 #define PSX_CPU_HZ 33868800.0
-#define PSX_SYSCLK_HZ PSX_CPU_HZ // System Clock is the same as the CPU clock for timers
 #define DOTCLOCK_NTSC_HZ 25175000.0
 #define DOTCLOCK_PAL_HZ 25200000.0 // PAL frequency, for completeness
 #define HBLANK_NTSC_HZ 15625.0 // Horizontal blanking frequency for NTSC
@@ -19,13 +32,15 @@
 
 // Logging: Only use LOG_ERROR for timer hardware faults. No per-frame or per-IRQ logs.
 
-// BIOS syscall handler for SetRCnt (0xBC)
 #include "cpu.h"
-void timers_handle_setrcnt(Timers* timers, Cpu* cpu) {
-    // TODO: Implement SetRCnt logic based on BIOS arguments in cpu registers
-    // Example: uint32_t timer_id = cpu_reg(cpu, 4); uint32_t mode = cpu_reg(cpu, 5);
-// For now, just log the call. Implement full logic per DOCS/timers.md and DuckStation.
-}
+
+/* A timers_handle_setrcnt() stub used to live here: declared in timers.h, called
+ * by nobody, and an empty body. Removed rather than silenced. This project runs
+ * the BIOS low-level, so SetRCnt(0xBC) executes as real BIOS code writing the
+ * timer registers, and those writes already land in this file through the normal
+ * register path — there is nothing for a side-channel handler to do. Leaving a
+ * no-op with the name of a syscall handler invited someone to call it and
+ * believe the syscall had been handled. */
 
 // Derived-counter model forward declarations (definitions further down).
 static uint32_t timer_rate_cycles(Timers* timers, Timer* t, int i);
@@ -34,9 +49,8 @@ static void timer_rebase(Timers* timers, int i);
 
 /**
  * @brief Recomputes counting_enabled from sync_enable/sync_mode/gate.
- * Matches DuckStation's Timers::UpdateCountingEnabled exactly, including
- * Timer2's gate-less special case (its sync bit selects a stop/free-run
- * behavior instead of real gating).
+ * Includes Timer2's gate-less special case (its sync bit selects a
+ * stop/free-run behavior instead of real gating).
  */
 static void timer_update_counting_enabled(Timer* t, int timer_index) {
     if (timer_index != 2) {
@@ -245,7 +259,7 @@ static void timer_rebase(Timers* timers, int i) {
 void timer_write16(Timers* timers, int timer_index, uint32_t offset, uint16_t value) {
     Timer* t = &timers->timers[timer_index];
     /* Catch up to the exact write cycle before applying, so the change takes
-     * effect from now (DuckStation/Redux both sync on register writes). */
+     * effect from now (register writes are synchronous). */
     timers_catch_up_one(timers, timer_index);
 
     if (offset == TIMER_MODE_OFFSET) {
@@ -443,8 +457,11 @@ static inline float timer0_to_x_coord(uint16_t timer0, bool is_ntsc) {
     return base * (is_ntsc ? 0.198166f : 0.196358f);
 }
 
-// --- BEGIN: PCSX ReARMed-inspired Timer Event Handlers ---
-// Copyright (c) PCSX ReARMed authors. Used under open source license.
+// --- BEGIN: Timer Event Handlers ---
+// Structure inspired by PCSX ReARMed's timer handling (GPL-2.0-or-later,
+// Copyright (c) PCSX ReARMed authors). The counter model itself is derived
+// on read from DOCS/timers.md rather than ticked, so this is the scheduling
+// shape rather than the arithmetic.
 // These handlers are called by the event queue when a timer event fires.
 static void timer_event_handler(Timers* timers, int timer_index) {
     /* The event fires at the timer's next boundary: catch it up (which crosses

@@ -1,7 +1,18 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ * SPDX-FileCopyrightText: 2002 Pete Bernert and the PCSX-Redux authors
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "spu.h"
 #include "interconnect.h"
 #include "log.h"
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <SDL2/SDL.h>
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);
@@ -20,12 +31,22 @@ static int32_t clamp16(int32_t v) {
  * Noise Generator (Dr. Hell's algorithm)
  * ========================================================================= */
 
-static const uint8_t noise_wave_add[64] = {
-    1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0,
-    1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0, 1,0,0,1,0,1,1,0,
-};
-
 static const uint8_t noise_freq_add[5] = { 0, 84, 140, 180, 210 };
+
+/* The bit shifted into the noise LFSR, straight from the documented generator
+ * (`DOCS/soundprocessingunitspu.md:534`):
+ *
+ *     ParityBit = NoiseLevel.Bit15 xor Bit12 xor Bit11 xor Bit10 xor 1
+ *
+ * This used to be a 64-entry lookup indexed by `(noise_level >> 10) & 63` —
+ * the same function, since index bit N is level bit 10+N, so the entry is
+ * `idx5 ^ idx2 ^ idx1 ^ idx0 ^ 1`. The table's second half was a copy of its
+ * first, which made the parity wrong for every state with bit 15 set: half the
+ * sequence. Computing it removes the whole class of transcription error, and
+ * the result matches PCSX-Redux's table entry for entry. */
+static inline uint32_t noise_parity(uint32_t level) {
+    return ((level >> 15) ^ (level >> 12) ^ (level >> 11) ^ (level >> 10) ^ 1u) & 1u;
+}
 
 static void noise_tick(Spu* spu) {
     uint32_t clock = (spu->control >> 8) & 0x3F;
@@ -38,8 +59,7 @@ static void noise_tick(Spu* spu) {
 
     if (spu->noise_count >= level) {
         spu->noise_count %= level;
-        spu->noise_level = (spu->noise_level << 1) |
-            noise_wave_add[(spu->noise_level >> 10) & 63];
+        spu->noise_level = (spu->noise_level << 1) | noise_parity(spu->noise_level);
     }
 }
 
@@ -59,120 +79,235 @@ static void capture_increment(Spu* spu) {
 }
 
 /* =========================================================================
- * Reverb (simplified but functional)
+ * Reverb
+ *
+ * Implemented from the formula in DOCS/soundprocessingunitspu.md ("SPU Reverb
+ * Formula"): same-side and different-side reflection, a 4-tap comb early echo,
+ * then two all-pass stages, all running at 22050 Hz.
+ *
+ * Addressing is the part that is easy to get wrong: every src/dst/disp register
+ * holds an SPU address *divided by 8*, and src/dst are relative to the current
+ * buffer address while disp registers are relative to those. Internally this
+ * works in halfwords, hence the x4. Treating the registers as halfword offsets
+ * (which this code used to do) puts every read and write at a quarter of its
+ * intended distance — inside the buffer they alias each other, and outside it
+ * they land on the voices' own sample data.
+ *
+ * The buffer runs from mBASE to the end of SPU RAM and advances one halfword
+ * per step; everything wraps inside that window.
  * ========================================================================= */
 
-static uint32_t reverb_mem_addr(Spu* spu, uint32_t offset) {
-    uint32_t mask = (SPU_RAM_SIZE - 1) / 2;
-    uint32_t addr = spu->reverb_current_addr + (offset & mask);
-    addr += ((uint32_t)spu->reverb_base) & ((addr << 13) >> 31);
-    return (addr & mask) * 2;
+/* Resolve an offset (in halfwords, may be negative) against the current buffer
+ * address, wrapped into mBASE..end-of-RAM. */
+static uint32_t rev_addr(const Spu* spu, int32_t off_hw) {
+    const int32_t end = (int32_t)(SPU_RAM_SIZE / 2);
+    int32_t base = (int32_t)spu->reverb_base * 4;
+    if (base < 0 || base >= end) base = 0;
+    const int32_t span = end - base;
+    int32_t a = ((int32_t)spu->reverb_current_addr + off_hw - base) % span;
+    if (a < 0) a += span;
+    return (uint32_t)(base + a);
 }
 
-static int16_t reverb_read(Spu* spu, uint32_t offset) {
-    uint32_t addr = reverb_mem_addr(spu, offset) / 2;
-    return spu->ram[addr];
+static int16_t rev_rd(const Spu* spu, int32_t off_hw) {
+    return (int16_t)spu->ram[rev_addr(spu, off_hw)];
 }
 
-static void reverb_write(Spu* spu, uint32_t offset, int16_t value) {
-    uint32_t addr = reverb_mem_addr(spu, offset) / 2;
-    spu->ram[addr] = (uint16_t)value;
+/* Values written to the reverb buffer are saturated to 16 bits. */
+/* SPUCNT bit 7 disables *writes* to the reverb work area; reads keep happening
+ * and the unit keeps producing output (DOCS/soundprocessingunitspu.md:826-835,
+ * confirmed by the bus-timing table at :1113-1123). Gating the output instead —
+ * which is what this used to do — meant the reverb went on scribbling over SPU
+ * RAM while a game believed it had switched the unit off. */
+static void rev_wr(Spu* spu, int32_t off_hw, int32_t value) {
+    if (!(spu->control & SPU_CTRL_REVERB_ENABLE)) return;
+    spu->ram[rev_addr(spu, off_hw)] = (uint16_t)(int16_t)clamp16(value);
 }
 
-static void iiasm(int16_t alpha, int32_t* out, int32_t insamp) {
-    if (alpha == -32768) {
-        *out = (insamp == -32768) ? 0 : insamp * (int64_t)(-65536);
-    } else {
-        *out = insamp * (32768 - alpha);
-    }
-}
+/* Volume registers are signed 16-bit; products are divided by 0x8000. */
+#define RV(name)  ((int32_t)(int16_t)spu->reverb_regs[REVERB_REG_##name / 2])
+/* Address registers are SPU addresses / 8 — x4 to reach halfwords. */
+#define RA(name)  ((int32_t)spu->reverb_regs[REVERB_REG_##name / 2] * 4)
+#define RMUL(a, b) (((int32_t)(a) * (int32_t)(b)) >> 15)
 
 static void reverb_process(Spu* spu, int32_t input_l, int32_t input_r,
                            int32_t* out_l, int32_t* out_r) {
-    if (!(spu->control & SPU_CTRL_REVERB_ENABLE)) {
-        *out_l = 0;
-        *out_r = 0;
-        return;
+    /* Register aliases, doc name on the left. The names in the register map are
+     * this project's older ones; the mapping is fixed by the register order. */
+    const int32_t vLIN  = RV(IN_COEF_L),  vRIN  = RV(IN_COEF_R);
+    const int32_t vIIR  = RV(IIR_ALPHA),  vWALL = RV(IIR_COEF);
+    const int32_t vAPF1 = RV(FB_ALPHA),   vAPF2 = RV(FB_X);
+    const int32_t vC1   = RV(ACC_COEF_A), vC2   = RV(ACC_COEF_B);
+    const int32_t vC3   = RV(ACC_COEF_C), vC4   = RV(ACC_COEF_D);
+
+    const int32_t dAPF1 = RA(FB_SRC_A),   dAPF2 = RA(FB_SRC_B);
+    const int32_t mLSAME = RA(IIR_DEST_A0), mRSAME = RA(IIR_DEST_A1);
+    const int32_t mLDIFF = RA(IIR_DEST_B0), mRDIFF = RA(IIR_DEST_B1);
+    const int32_t dLSAME = RA(IIR_SRC_A0),  dRSAME = RA(IIR_SRC_A1);
+    const int32_t dLDIFF = RA(IIR_SRC_B1),  dRDIFF = RA(IIR_SRC_B0);
+    const int32_t mLCOMB1 = RA(ACC_SRC_A0), mRCOMB1 = RA(ACC_SRC_A1);
+    const int32_t mLCOMB2 = RA(ACC_SRC_B0), mRCOMB2 = RA(ACC_SRC_B1);
+    const int32_t mLCOMB3 = RA(ACC_SRC_C0), mRCOMB3 = RA(ACC_SRC_C1);
+    const int32_t mLCOMB4 = RA(ACC_SRC_D0), mRCOMB4 = RA(ACC_SRC_D1);
+    const int32_t mLAPF1 = RA(MIX_DEST_A0), mRAPF1 = RA(MIX_DEST_A1);
+    const int32_t mLAPF2 = RA(MIX_DEST_B0), mRAPF2 = RA(MIX_DEST_B1);
+
+    /* Input from the mixer */
+    const int32_t Lin = RMUL(vLIN, clamp16(input_l));
+    const int32_t Rin = RMUL(vRIN, clamp16(input_r));
+
+    /* Same side reflection (L-to-L, R-to-R) */
+    {
+        int32_t prev = rev_rd(spu, mLSAME - 1);
+        rev_wr(spu, mLSAME, RMUL(Lin + RMUL(rev_rd(spu, dLSAME), vWALL) - prev, vIIR) + prev);
+        prev = rev_rd(spu, mRSAME - 1);
+        rev_wr(spu, mRSAME, RMUL(Rin + RMUL(rev_rd(spu, dRSAME), vWALL) - prev, vIIR) + prev);
     }
 
-    int16_t in_coef_l = (int16_t)spu->reverb_regs[REVERB_REG_IN_COEF_L / 2];
-    int16_t in_coef_r = (int16_t)spu->reverb_regs[REVERB_REG_IN_COEF_R / 2];
-    int16_t iir_coef  = (int16_t)spu->reverb_regs[REVERB_REG_IIR_COEF / 2];
-    int16_t iir_alpha = (int16_t)spu->reverb_regs[REVERB_REG_IIR_ALPHA / 2];
-    int16_t fb_alpha  = (int16_t)spu->reverb_regs[REVERB_REG_FB_ALPHA / 2];
-    int16_t fb_x      = (int16_t)spu->reverb_regs[REVERB_REG_FB_X / 2];
-
-    int16_t acc_a = (int16_t)spu->reverb_regs[REVERB_REG_ACC_COEF_A / 2];
-    int16_t acc_b = (int16_t)spu->reverb_regs[REVERB_REG_ACC_COEF_B / 2];
-    int16_t acc_c = (int16_t)spu->reverb_regs[REVERB_REG_ACC_COEF_C / 2];
-    int16_t acc_d = (int16_t)spu->reverb_regs[REVERB_REG_ACC_COEF_D / 2];
-
-    int32_t iir_in_a = ((int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_IIR_SRC_A0 / 2]) * iir_coef) >> 14;
-    iir_in_a += ((input_l * in_coef_l) >> 14);
-    iir_in_a >>= 1;
-
-    int32_t iir_in_b = ((int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_IIR_SRC_B0 / 2]) * iir_coef) >> 14;
-    iir_in_b += ((input_r * in_coef_r) >> 14);
-    iir_in_b >>= 1;
-
-    int32_t iir_dest_a = reverb_read(spu, spu->reverb_regs[REVERB_REG_IIR_DEST_A0 / 2]);
-    int32_t iir_val_a;
-    iiasm(iir_alpha, &iir_val_a, iir_dest_a);
-    int32_t iir_a = ((iir_in_a * iir_alpha) >> 14) + (iir_val_a >> 14);
-    iir_a >>= 1;
-
-    int32_t iir_dest_b = reverb_read(spu, spu->reverb_regs[REVERB_REG_IIR_DEST_B0 / 2]);
-    int32_t iir_val_b;
-    iiasm(iir_alpha, &iir_val_b, iir_dest_b);
-    int32_t iir_b = ((iir_in_b * iir_alpha) >> 14) + (iir_val_b >> 14);
-    iir_b >>= 1;
-
-    reverb_write(spu, spu->reverb_regs[REVERB_REG_IIR_DEST_A0 / 2] + 1, (int16_t)iir_a);
-    reverb_write(spu, spu->reverb_regs[REVERB_REG_IIR_DEST_B0 / 2] + 1, (int16_t)iir_b);
-
-    int32_t acc_l = 0;
-    acc_l += (int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_ACC_SRC_A0 / 2]) * acc_a;
-    acc_l += (int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_ACC_SRC_B0 / 2]) * acc_b;
-    acc_l += (int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_ACC_SRC_C0 / 2]) * acc_c;
-    acc_l += (int32_t)reverb_read(spu, spu->reverb_regs[REVERB_REG_ACC_SRC_D0 / 2]) * acc_d;
-    acc_l >>= 14;
-
-    uint32_t fb_src_a = spu->reverb_regs[REVERB_REG_FB_SRC_A / 2];
-    uint32_t fb_src_b = spu->reverb_regs[REVERB_REG_FB_SRC_B / 2];
-    uint32_t mix_a0   = spu->reverb_regs[REVERB_REG_MIX_DEST_A0 / 2];
-    uint32_t mix_b0   = spu->reverb_regs[REVERB_REG_MIX_DEST_B0 / 2];
-
-    int32_t fb_a = reverb_read(spu, mix_a0 - fb_src_a);
-    int32_t fb_b = reverb_read(spu, mix_b0 - fb_src_b);
-
-    int32_t mda = (acc_l + ((fb_a * (int32_t)(-fb_alpha)) >> 14)) >> 1;
-    int32_t mdb = fb_a + (((mda * fb_alpha) >> 14) + ((fb_b * (int32_t)(-fb_x)) >> 14));
-
-    int32_t out = fb_b + ((mdb * fb_x) >> 15);
-
-    reverb_write(spu, mix_a0, (int16_t)mda);
-    reverb_write(spu, mix_b0, (int16_t)mdb);
-
-    int32_t clamped = out;
-    if (clamped > 32767) clamped = 32767;
-    if (clamped < -32768) clamped = -32768;
-
-    int32_t vol_l = (int32_t)(int16_t)spu->reverb_vol_left;
-    int32_t vol_r = (int32_t)(int16_t)spu->reverb_vol_right;
-
-    *out_l = (clamped * vol_l) >> 15;
-    *out_r = (clamped * vol_r) >> 15;
-
-    spu->reverb_current_addr++;
-    uint32_t reverb_mask = (SPU_RAM_SIZE / 2) - 1;
-    if (spu->reverb_current_addr > reverb_mask) {
-        spu->reverb_current_addr = (uint32_t)spu->reverb_base;
+    /* Different side reflection (R-to-L, L-to-R) */
+    {
+        int32_t prev = rev_rd(spu, mLDIFF - 1);
+        rev_wr(spu, mLDIFF, RMUL(Lin + RMUL(rev_rd(spu, dRDIFF), vWALL) - prev, vIIR) + prev);
+        prev = rev_rd(spu, mRDIFF - 1);
+        rev_wr(spu, mRDIFF, RMUL(Rin + RMUL(rev_rd(spu, dLDIFF), vWALL) - prev, vIIR) + prev);
     }
+
+    /* Early echo: 4-tap comb filter reading from the buffer */
+    int32_t Lout = RMUL(vC1, rev_rd(spu, mLCOMB1)) + RMUL(vC2, rev_rd(spu, mLCOMB2))
+                 + RMUL(vC3, rev_rd(spu, mLCOMB3)) + RMUL(vC4, rev_rd(spu, mLCOMB4));
+    int32_t Rout = RMUL(vC1, rev_rd(spu, mRCOMB1)) + RMUL(vC2, rev_rd(spu, mRCOMB2))
+                 + RMUL(vC3, rev_rd(spu, mRCOMB3)) + RMUL(vC4, rev_rd(spu, mRCOMB4));
+
+    /* All-pass 1, fed by the comb output */
+    {
+        int32_t tl = rev_rd(spu, mLAPF1 - dAPF1);
+        int32_t tr = rev_rd(spu, mRAPF1 - dAPF1);
+        Lout -= RMUL(vAPF1, tl);
+        Rout -= RMUL(vAPF1, tr);
+        rev_wr(spu, mLAPF1, Lout);
+        rev_wr(spu, mRAPF1, Rout);
+        Lout = RMUL(Lout, vAPF1) + tl;
+        Rout = RMUL(Rout, vAPF1) + tr;
+    }
+
+    /* All-pass 2, fed by all-pass 1 */
+    {
+        int32_t tl = rev_rd(spu, mLAPF2 - dAPF2);
+        int32_t tr = rev_rd(spu, mRAPF2 - dAPF2);
+        Lout -= RMUL(vAPF2, tl);
+        Rout -= RMUL(vAPF2, tr);
+        rev_wr(spu, mLAPF2, Lout);
+        rev_wr(spu, mRAPF2, Rout);
+        Lout = RMUL(Lout, vAPF2) + tl;
+        Rout = RMUL(Rout, vAPF2) + tr;
+    }
+
+    /* Raw 22050 Hz reverb output — the output resampler and vLOUT/vROUT are
+     * applied by the caller (rev_reverb_resample). */
+    *out_l = clamp16(Lout);
+    *out_r = clamp16(Rout);
+
+    /* One halfword per 22050 Hz step, wrapped inside the work area. */
+    {
+        const int32_t end = (int32_t)(SPU_RAM_SIZE / 2);
+        int32_t base = (int32_t)spu->reverb_base * 4;
+        if (base < 0 || base >= end) base = 0;
+        int32_t next = (int32_t)spu->reverb_current_addr + 1;
+        if (next >= end || next < base) next = base;
+        spu->reverb_current_addr = (uint32_t)next;
+    }
+}
+
+#undef RV
+#undef RA
+#undef RMUL
+
+/* =========================================================================
+ * Reverb input/output resampling (39-tap half-band FIR).
+ *
+ * The SPU reverb unit runs at 22050 Hz. Rather than the crude "average two
+ * input samples, hold the output across two" this used to do, hardware feeds
+ * the unit through a 39-tap FIR: the mixer's 44100 Hz signal is downsampled to
+ * 22050 Hz for the reverb network, and the network's 22050 Hz output is
+ * upsampled back to 44100 Hz. Skipping it left the reverb dull and quiet — the
+ * boot chime came out nearly dry. Coefficients and behaviour are the hardware's,
+ * from DOCS/soundprocessingunitspu.md ("Reverb Buffer Resampling"); the code is
+ * this project's own.
+ *
+ * The rings are stored doubled (…_buf[.. .. ] repeated at +half) so a 39/20-wide
+ * window can be read contiguously without wrapping mid-loop.
+ * ========================================================================= */
+
+static const int32_t s_rev_fir[39] = {
+    -0x0001, 0x0000,  0x0002, 0x0000, -0x000A, 0x0000,  0x0023, 0x0000,
+    -0x0067, 0x0000,  0x010A, 0x0000, -0x0268, 0x0000,  0x0534, 0x0000,
+    -0x0B90, 0x0000,  0x2806, 0x4000,  0x2806, 0x0000, -0x0B90, 0x0000,
+     0x0534, 0x0000, -0x0268, 0x0000,  0x010A, 0x0000, -0x0067, 0x0000,
+     0x0023, 0x0000, -0x000A, 0x0000,  0x0002, 0x0000, -0x0001
+};
+
+/* Downsample 44100 -> 22050: full 39-tap FIR over the input ring, window
+ * ending at the current (odd) position. >>15 for unity gain. */
+static int32_t rev_fir_down(const int16_t* ring /*[128], doubled at +64*/, int pos) {
+    int base = (pos - 38) & 0x3F;
+    int64_t acc = 0;
+    for (int k = 0; k < 39; k++)
+        acc += (int64_t)s_rev_fir[k] * ring[base + k];
+    return clamp16((int32_t)(acc >> 15));
+}
+
+/* Upsample 22050 -> 44100. Odd host samples interpolate with the 20 non-zero
+ * even taps (>>14, the polyphase gain); even host samples pass the aligned
+ * reverb sample straight through (the FIR's centre tap). */
+static int32_t rev_fir_up(const int16_t* ring /*[64], doubled at +32*/, int pos) {
+    int base = ((pos >> 1) - 19) & 0x1F;
+    if (pos & 1) {
+        int64_t acc = 0;
+        for (int k = 0; k < 20; k++)
+            acc += (int64_t)s_rev_fir[k * 2] * ring[base + k];
+        return clamp16((int32_t)(acc >> 14));
+    }
+    return ring[base + 9];
+}
+
+/* One 44100 Hz reverb sample: push input into the downsample ring; every second
+ * host sample run the reverb network on the downsampled input and store its
+ * output in the upsample ring; then reconstruct this host sample and apply the
+ * reverb output volume. */
+static void rev_reverb_resample(Spu* spu, int32_t in_l, int32_t in_r,
+                                int32_t* out_l, int32_t* out_r) {
+    int pos = (int)spu->reverb_resample_pos & 0x3F;
+    int dp = pos;                 /* 0..63 index into the 128-wide doubled ring */
+    int16_t il = (int16_t)clamp16(in_l), ir = (int16_t)clamp16(in_r);
+    spu->reverb_ds_buf[0][dp] = spu->reverb_ds_buf[0][dp + 64] = il;
+    spu->reverb_ds_buf[1][dp] = spu->reverb_ds_buf[1][dp + 64] = ir;
+
+    if (pos & 1) {
+        int32_t dl = rev_fir_down(spu->reverb_ds_buf[0], pos);
+        int32_t dr = rev_fir_down(spu->reverb_ds_buf[1], pos);
+        int32_t rl = 0, rr = 0;
+        reverb_process(spu, dl, dr, &rl, &rr);   /* raw 22050 Hz output */
+        int up = (pos >> 1) & 0x1F;
+        spu->reverb_us_buf[0][up] = spu->reverb_us_buf[0][up + 32] = (int16_t)clamp16(rl);
+        spu->reverb_us_buf[1][up] = spu->reverb_us_buf[1][up + 32] = (int16_t)clamp16(rr);
+    }
+
+    int32_t ul = rev_fir_up(spu->reverb_us_buf[0], pos);
+    int32_t ur = rev_fir_up(spu->reverb_us_buf[1], pos);
+
+    /* Reverb output volume (vLOUT/vROUT), signed 16-bit, product >>15. */
+    *out_l = clamp16(((int32_t)ul * (int32_t)spu->reverb_vol_left)  >> 15);
+    *out_r = clamp16(((int32_t)ur * (int32_t)spu->reverb_vol_right) >> 15);
+
+    spu->reverb_resample_pos = (spu->reverb_resample_pos + 1) & 0x3F;
 }
 
 void spu_reverb_init(Spu* spu) {
     spu->reverb_current_addr = 0;
     memset(spu->reverb_regs, 0, sizeof(spu->reverb_regs));
+    memset(spu->reverb_ds_buf, 0, sizeof(spu->reverb_ds_buf));
+    memset(spu->reverb_us_buf, 0, sizeof(spu->reverb_us_buf));
+    spu->reverb_resample_pos = 0;
 }
 
 /* =========================================================================
@@ -183,28 +318,52 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     /* Process key on/off at start of batch */
     spu_process_key_on_off(spu);
 
-    /* Mix all 24 voices — accumulate int32, apply L/R vol, clamp once (pcsx-redux model) */
-    int32_t mix_l = 0;
-    int32_t mix_r = 0;
+    /* Mix all 24 voices — accumulate int32, apply L/R vol, clamp once.
+     *
+     * A voice feeds the reverb unit only when its bit is set in the per-voice
+     * reverb mask (0x1D98/0x1D9A, "voice reverb mode"); the dry mix always gets
+     * every voice. Feeding the whole mix into the reverb — which is what this
+     * did before — drives the feedback network with far more energy than the
+     * game asked for, and the network's own output is what comes back out. */
+    int32_t mix_l = 0, mix_r = 0;
+    int32_t rev_in_l = 0, rev_in_r = 0;
 
     for (int v = 0; v < NUM_VOICES; v++) {
         int32_t sval = spu_voice_get_sample(spu, inter, v);
         SpuVoice* voice = &spu->voices[v];
         spu_voice_sweep_tick(voice);
-        mix_l += ((int32_t)sval * voice->vol_left)  >> 15;
-        mix_r += ((int32_t)sval * voice->vol_right) >> 15;
+        int32_t vl = ((int32_t)sval * voice->vol_left)  >> 15;
+        int32_t vr = ((int32_t)sval * voice->vol_right) >> 15;
+        mix_l += vl;
+        mix_r += vr;
+        if (spu->reverb_on & (1u << v)) {
+            rev_in_l += vl;
+            rev_in_r += vr;
+        }
     }
 
     /* Clamp accumulated sum */
     mix_l = clamp16(mix_l);
     mix_r = clamp16(mix_r);
+    rev_in_l = clamp16(rev_in_l);
+    rev_in_r = clamp16(rev_in_r);
 
-    /* CD audio mixing through SPU */
-    if (spu->control & SPU_CTRL_CD_AUDIO_EN) {
-        mix_l += (int32_t)spu->cd_audio_left;
-        mix_r += (int32_t)spu->cd_audio_right;
-        mix_l = clamp16(mix_l);
-        mix_r = clamp16(mix_r);
+    /* CD audio mixing through SPU — separately routable to the reverb.
+     *
+     * ZS1_SPU_NO_CDAUDIO=1 drops the CD/XA contribution, the counterpart to
+     * ZS1_SPU_NO_REVERB. In a scene where XA streams at the full sample rate and
+     * the voices only fire effects, the two switches split the output into its
+     * two sources, and an artefact that survives both is in neither. */
+    static int s_no_cdaudio = -1;
+    if (s_no_cdaudio < 0) s_no_cdaudio = getenv("ZS1_SPU_NO_CDAUDIO") ? 1 : 0;
+
+    if (!s_no_cdaudio && (spu->control & SPU_CTRL_CD_AUDIO_EN)) {
+        mix_l = clamp16(mix_l + (int32_t)spu->cd_audio_left);
+        mix_r = clamp16(mix_r + (int32_t)spu->cd_audio_right);
+        if (spu->control & SPU_CTRL_CD_REVERB) {
+            rev_in_l = clamp16(rev_in_l + (int32_t)spu->cd_audio_left);
+            rev_in_r = clamp16(rev_in_r + (int32_t)spu->cd_audio_right);
+        }
     }
 
     /* Write capture buffer */
@@ -217,11 +376,26 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
     /* Noise tick */
     noise_tick(spu);
 
-    /* Reverb */
-    int32_t rev_l, rev_r;
-    reverb_process(spu, mix_l, mix_r, &rev_l, &rev_r);
+    /* Reverb. ZS1_SPU_NO_REVERB=1 bypasses the stage entirely — an A/B switch
+     * for deciding whether an audible artefact comes from here or from the
+     * voice/mix path. */
+    static int s_no_reverb = -1;
+    if (s_no_reverb < 0) s_no_reverb = getenv("ZS1_SPU_NO_REVERB") ? 1 : 0;
 
-    if (spu->control & SPU_CTRL_REVERB_ENABLE) {
+    /* The reverb unit runs at 22050 Hz, half the output rate. The 44100 Hz
+     * mixer signal is downsampled into the network and its output upsampled
+     * back, both through the hardware's 39-tap FIR (rev_reverb_resample), which
+     * also steps the reverb delay line once per two host samples. */
+    int32_t rev_l = 0, rev_r = 0;
+    if (!s_no_reverb) {
+        rev_reverb_resample(spu, rev_in_l, rev_in_r, &rev_l, &rev_r);
+        spu->reverb_in_l  = rev_in_l;   /* kept for the debug meter / emu.reverb() */
+        spu->reverb_in_r  = rev_in_r;
+        spu->reverb_out_l = rev_l;
+        spu->reverb_out_r = rev_r;
+    }
+
+    if (!s_no_reverb) {
         mix_l = clamp16(mix_l + rev_l);
         mix_r = clamp16(mix_r + rev_r);
     }
@@ -247,6 +421,32 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
                      mv_l, mv_r, spu->muted ? 1 : 0, spu->total_key_on_events);
     }
 
+    /* ZS1_AUDIO_DUMP=<path>: raw interleaved s16 of exactly what the device
+     * receives, so the output can be looked at instead of guessed about. */
+    {
+        static FILE* s_dump = NULL;
+        static int    s_dump_tried = 0;
+        static unsigned s_dump_frames = 0;
+        if (!s_dump_tried) {
+            s_dump_tried = 1;
+            const char* path = getenv("ZS1_AUDIO_DUMP");
+            if (path) {
+                s_dump = fopen(path, "wb");
+                LOG_SPU_INFO("[SPU] Dumping raw output to %s (reverb %s, SPUCNT=0x%04x)",
+                             path, s_no_reverb ? "bypassed" : "on", spu->control);
+            }
+        }
+        if (s_dump) {
+            int16_t f[2] = { (int16_t)final_l, (int16_t)final_r };
+            fwrite(f, sizeof(int16_t), 2, s_dump);
+            /* Flushed about ten times a second. Nothing closes this file, and a
+             * run that ends on a signal — a timeout, a kill, the crash being
+             * investigated — takes the whole stdio buffer with it, which is how
+             * a 30-second capture came back zero bytes. */
+            if ((++s_dump_frames & 4095u) == 0) fflush(s_dump);
+        }
+    }
+
     *left_out = (int16_t)final_l;
     *right_out = (int16_t)final_r;
 
@@ -258,76 +458,16 @@ static void spu_generate_one_sample(Spu* spu, struct Interconnect* inter, int16_
 }
 
 /* =========================================================================
- * SPU Dedicated Thread (Phase 1 threading refactor)
+ * Sample generation, driven by the emulated clock
  *
- * Generates audio samples independently of CPU execution.
- * Wall-clock driven: produces 128 samples (~2.9ms) per iteration, then
- * sleeps 2ms. Ring buffer gives ~93ms underrun headroom at 4096 slots.
+ * One stereo sample every CPU_TICKS_PER_SPU_TICK (768) CPU cycles, i.e. the
+ * 44100 Hz the hardware runs its DSP at. Everything that advances with a sample
+ * — ADSR envelopes, ADPCM positions, the reverb delay line, the CD audio FIFO —
+ * therefore advances in step with the guest's own sense of time, which is what
+ * makes note lengths and envelope shapes come out right.
  *
- * Shared state: voice registers written by CPU thread, read here without
- * mutex (PCSX-Redux pattern — benign stale reads, no structural corruption).
- * CDROM audio FIFO pop is the only write from this thread to shared state;
- * the FIFO is a single-consumer SPSC (this thread = consumer).
- * ========================================================================= */
-
-typedef struct { Spu* spu; struct Interconnect* inter; } SpuThreadArg;
-static SpuThreadArg s_spu_thread_arg;
-
-static int spu_thread_main(void* userdata) {
-    SpuThreadArg* arg = (SpuThreadArg*)userdata;
-    Spu* spu = arg->spu;
-    struct Interconnect* inter = arg->inter;
-
-    while (!SDL_AtomicGet(&spu->spu_stop)) {
-        /* Occupancy-driven rate control: generate at CPU speed until buffer is
-         * nearly full, then sleep 1ms. SDL_Delay(N) on Linux sleeps 10-50ms
-         * regardless of N — using a fixed delay causes underruns. */
-        int head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
-        int used = (spu->sample_buf_tail - head + SPU_SAMPLE_BUFFER_SIZE) % SPU_SAMPLE_BUFFER_SIZE;
-        int free_slots = SPU_SAMPLE_BUFFER_SIZE - 1 - used;
-
-        if (free_slots < 256) {
-            SDL_Delay(1);
-            continue;
-        }
-
-        int to_gen = (free_slots < 512) ? (free_slots - 256) : 512;
-        for (int i = 0; i < to_gen; i++) {
-            /* Pull one CDROM audio sample into SPU CD inputs */
-            {
-                int16_t cl = 0, cr = 0;
-                if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo))
-                    cdrom_audio_fifo_pop(&inter->cdrom.audio_fifo, &cl, &cr);
-                int32_t cv_l = (int32_t)(int16_t)spu->cd_vol_left;
-                int32_t cv_r = (int32_t)(int16_t)spu->cd_vol_right;
-                if (cv_l == 0 && cv_r == 0) { cv_l = 0x7FFF; cv_r = 0x7FFF; }
-                spu->cd_audio_left  = (int16_t)(((int32_t)cl * cv_l) >> 15);
-                spu->cd_audio_right = (int16_t)(((int32_t)cr * cv_r) >> 15);
-            }
-
-            int16_t l, r;
-            spu_generate_one_sample(spu, inter, &l, &r);
-
-            int next_tail = (spu->sample_buf_tail + 1) % SPU_SAMPLE_BUFFER_SIZE;
-            int cur_head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
-            if (next_tail != cur_head) {
-                int tidx = spu->sample_buf_tail * 2;
-                spu->sample_buffer[tidx]     = l;
-                spu->sample_buffer[tidx + 1] = r;
-                __atomic_store_n(&spu->sample_buf_tail, next_tail, __ATOMIC_RELEASE);
-                spu->sample_buf_count++;
-                spu->total_samples_generated++;
-            }
-        }
-        /* Decay peak levels once per batch */
-        spu->peak_level_left  = (spu->peak_level_left  * 15) >> 4;
-        spu->peak_level_right = (spu->peak_level_right * 15) >> 4;
-    }
-    return 0;
-}
-
-/* =========================================================================
- * SPU Step (called from main loop with CPU cycles)
+ * A sample is always generated even when the output ring is full: the state has
+ * to advance regardless, only the audible result is dropped.
  * ========================================================================= */
 
 void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
@@ -341,9 +481,39 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
          * The CDROM audio FIFO holds XA/CDDA at 44100 Hz stereo.
          * cd_vol_left/right are PSX-standard 15-bit signed scale factors. */
         {
-            int16_t cl = 0, cr = 0;
-            if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo))
+            /* Hold the last CD sample when the FIFO has nothing, rather than
+             * falling to zero.
+             *
+             * The rates match exactly on average — at double speed with the
+             * interleave of 8 this stream uses, XA delivers 44100 frames a second
+             * and the SPU consumes 44100 — but neither side is smooth. A sector
+             * lands 2352 frames at once every 53 ms while the SPU drains in bursts
+             * of 64, so the queue bottoms out and momentarily has nothing, about
+             * 230 times a second on the measured scene. total_dropped never saw
+             * this: nothing is discarded, a frame is simply missing.
+             *
+             * Zeroing turned each of those into a step to silence and back, which
+             * is a click; 230 a second is the buzz that was audible over speech.
+             * The CD input on hardware is a continuous signal that the SPU samples,
+             * so repeating the previous value is much closer to the truth than
+             * dropping to zero, and one held sample is inaudible where a zero is
+             * not. The counter stays, because a starving queue is still a fault
+             * worth seeing even once it stops being audible. */
+            /* File-static rather than a field on Spu: adding one would change
+             * sizeof(Spu), and the savestate stores the SPU as one sized span, so
+             * every existing state would stop loading. This is a single sample of
+             * hold state — losing it across a save and load costs one frame of a
+             * signal that is already continuous. */
+            static int16_t s_cd_last_l = 0, s_cd_last_r = 0;
+
+            int16_t cl = s_cd_last_l, cr = s_cd_last_r;
+            if (!cdrom_audio_fifo_empty(&inter->cdrom.audio_fifo)) {
                 cdrom_audio_fifo_pop(&inter->cdrom.audio_fifo, &cl, &cr);
+                s_cd_last_l = cl;
+                s_cd_last_r = cr;
+            } else {
+                inter->cdrom.audio_fifo.total_starved++;
+            }
             /* Apply CD input volume (cd_vol default 0x7FFF = full) */
             int32_t cv_l = (int32_t)(int16_t)spu->cd_vol_left;
             int32_t cv_r = (int32_t)(int16_t)spu->cd_vol_right;
@@ -372,6 +542,8 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
                 __atomic_store_n(&spu->sample_buf_tail, next_tail, __ATOMIC_RELEASE);
                 spu->sample_buf_count++;  /* approximate, for debug display */
                 spu->total_samples_generated++;
+            } else {
+                spu->dropped_samples++;   /* ring full: state advanced, audio lost */
             }
         }
     }
@@ -379,6 +551,42 @@ void spu_step(struct Interconnect* inter, uint32_t cpu_cycles) {
     /* Decay peak levels */
     spu->peak_level_left = (spu->peak_level_left * 15) >> 4;
     spu->peak_level_right = (spu->peak_level_right * 15) >> 4;
+}
+
+int spu_ring_used(const Spu* spu) {
+    int head = __atomic_load_n(&spu->sample_buf_head, __ATOMIC_ACQUIRE);
+    return (spu->sample_buf_tail - head + SPU_SAMPLE_BUFFER_SIZE) % SPU_SAMPLE_BUFFER_SIZE;
+}
+
+/* Generate everything owed since the last call. Called from the scheduled SPU
+ * event and before every SPU register access, so a write can never land in the
+ * middle of a sample the guest believes it already produced.
+ *
+ * The elapsed count is a uint32 difference, so it stays correct across the
+ * cycle-counter wrap. It is capped at one second of audio: the only ways to owe
+ * more than that are a debugger pause or the very first call, and generating
+ * 44100 samples' worth of catch-up in one go would stall the emulator without
+ * making anything audible. */
+/* Wall-clock nanoseconds spent generating samples, for the frame profiler. */
+uint64_t g_spu_gen_ticks = 0;
+
+void spu_catch_up(struct Interconnect* inter) {
+    Spu* spu = &inter->spu;
+    static int s_prof = -1;
+    if (s_prof < 0) s_prof = getenv("ZS1_FRAME_PROFILE") ? 1 : 0;
+    uint64_t t_begin = s_prof ? SDL_GetPerformanceCounter() : 0;
+    uint32_t now     = inter->cpu_cycle_counter;
+    uint32_t elapsed = now - spu->last_update_cycle;
+
+    const uint32_t max_elapsed = (uint32_t)CPU_TICKS_PER_SPU_TICK * SAMPLE_RATE;
+    if (elapsed > max_elapsed) {
+        elapsed = 0;                 /* resynchronise, do not flood the ring */
+        spu->spu_tick_counter = 0;
+    }
+
+    spu->last_update_cycle = now;
+    if (elapsed) spu_step(inter, elapsed);
+    if (s_prof) g_spu_gen_ticks += SDL_GetPerformanceCounter() - t_begin;
 }
 
 /* =========================================================================
@@ -411,6 +619,10 @@ void spu_fill_audio(Spu* spu, int16_t* stream, int num_stereo_samples) {
     int filled = spu_get_samples(spu, stream, num_stereo_samples);
 
     /* Fill remaining with silence if buffer underrun */
+    if (filled < num_stereo_samples) {
+        spu->underrun_events++;
+        spu->underrun_samples += (uint32_t)(num_stereo_samples - filled);
+    }
     for (int i = filled; i < num_stereo_samples; i++) {
         stream[i * 2] = 0;
         stream[i * 2 + 1] = 0;
@@ -428,27 +640,4 @@ void spu_generate_samples(Spu* spu, int16_t* buffer, int num_samples) {
         buffer[s * 2] = l;
         buffer[s * 2 + 1] = r;
     }
-}
-
-/* =========================================================================
- * SPU Thread Lifecycle (start/stop called from main.c)
- * ========================================================================= */
-
-void spu_thread_start(Spu* spu, struct Interconnect* inter) {
-    SDL_AtomicSet(&spu->spu_stop, 0);
-    s_spu_thread_arg.spu   = spu;
-    s_spu_thread_arg.inter = inter;
-    spu->spu_thread = SDL_CreateThread(spu_thread_main, "SPU", &s_spu_thread_arg);
-    if (!spu->spu_thread)
-        LOG_SPU_ERROR("[SPU] Failed to create SPU thread: %s", SDL_GetError());
-    else
-        LOG_SPU_INFO("[SPU] SPU thread started (wall-clock, 128 samples / 2ms batch)");
-}
-
-void spu_thread_stop(Spu* spu) {
-    if (!spu->spu_thread) return;
-    SDL_AtomicSet(&spu->spu_stop, 1);
-    SDL_WaitThread(spu->spu_thread, NULL);
-    spu->spu_thread = NULL;
-    LOG_SPU_INFO("[SPU] SPU thread stopped");
 }

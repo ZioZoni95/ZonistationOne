@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef RENDERER_H
 #define RENDERER_H
 
@@ -69,7 +76,7 @@ typedef struct {
     GLuint shader_program;  // ID of the compiled and linked GLSL shader program
     GLuint vram_texture;    // Texture object for VRAM
 
-    // --- Unified VRAM (DuckStation GPU_HW pattern) ---
+    // --- Unified VRAM (single GL texture) ---
     // ONE RGBA8 texture is the rasterization target, the CPU/MDEC upload
     // target, and the scanout source, so anything written to VRAM is on screen
     // by construction. PSX 16-bit halfwords are stored 5:5:5:1 expanded to 8
@@ -102,6 +109,8 @@ typedef struct {
     GLint uniform_tex_window_loc;   // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
     GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
     GLint uniform_stp_mode_loc;     /* -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0) */
+    GLint uniform_set_mask_loc;     /* Location for u_set_mask (GP0(E6).0) */
+    GLint uniform_mask_test_loc;    /* Location for u_mask_test (GP0(E6).1) */
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -120,6 +129,8 @@ typedef struct {
     bool semi_trans_enabled;    // Whether semi-transparency blending is active
     uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
     bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
+    bool set_mask_enabled;      // GP0(E6).0 — force bit 15 set on every pixel drawn
+    bool mask_test_enabled;     // GP0(E6).1 — skip pixels whose destination bit 15 is set
 
     /* Cached pipeline state — snapshot into each batch for GPU thread replay */
     int16_t  cached_offset_x, cached_offset_y;
@@ -190,6 +201,21 @@ GLuint renderer_get_scanout_texture(Renderer* renderer);
 void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
+
+/* --- Phase 5: cross-thread VRAM readback ---------------------------------
+ * The GPU thread owns the GL context, so the CPU cannot read vram_tex. Raise
+ * a request, then poll: the sequence number changes once the GPU thread has
+ * published a fresh copy. Asynchronous by design - the returned buffer is the
+ * VRAM as of some recent frame, not as of this instant.
+ * -------------------------------------------------------------------------- */
+void            renderer_request_vram_readback(Renderer* renderer);
+const uint16_t* renderer_get_vram_readback(uint32_t* seq_out);
+
+/* Synchronous readback of one VRAM rect into the CPU-side VRAM: flushes the
+ * ops queued so far, then copies the rendered pixels back. What GP0(0xC0)
+ * and GP0(0x80) need to see polygons the rasterizer drew. */
+bool renderer_read_vram_rect(Renderer* renderer, uint16_t* vram,
+                             uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
 /**
  * @brief Buffers a triangle's vertex data for later drawing.
@@ -356,6 +382,22 @@ void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode
  * @param enabled   True to enable dithering.
  */
 void renderer_set_dither_mode(Renderer* renderer, bool enabled);
+
+/**
+ * @brief Sets GP0(0xE6) bit 0 — force the mask bit set on every pixel drawn.
+ * The unified VRAM texture keeps the PSX mask bit in its alpha channel, so a
+ * rasterized pixel has to carry the same bit 15 a CPU write would: 0 normally,
+ * 1 when this is enabled (or when a textured pixel's source texel has it set).
+ * In 24bpp display modes that bit is picture data, so getting it wrong tints
+ * whole areas of the screen.
+ * @param renderer  Pointer to the Renderer.
+ * @param enabled   True when GP0(E6).0 is set.
+ */
+void renderer_set_mask_mode(Renderer* renderer, bool enabled);
+/* GP0(E6).1 - skip drawing a pixel whose destination halfword already has bit
+ * 15 set. Honoured only where the texture barrier lets a shader read the render
+ * target; without it the test cannot see rasterized pixels and is ignored. */
+void renderer_set_mask_test(Renderer* renderer, bool enabled);
 
 /**
  * @brief Sets the PSX display region to crop from the FBO when blitting to screen.

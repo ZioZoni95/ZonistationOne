@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef EVENT_SCHEDULER_H
 #define EVENT_SCHEDULER_H
 
@@ -53,6 +60,10 @@ void eventq_dispatch_due(struct Interconnect* sys);
  * @return The cycle count of the next scheduled event.
  */
 uint32_t eventq_next_cycle(const struct Interconnect* sys);
+
+/* Rebuild the next-event anchor from the pending set. Needed after a
+ * savestate load, where evq_next_cycle arrives as stored data. */
+void eventq_recompute_next(struct Interconnect* sys);
 
 /**
  * @brief Returns CPU cycles until the next scheduled event.

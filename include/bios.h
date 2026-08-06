@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #ifndef BIOS_H       // Include guard
 #define BIOS_H
 
@@ -49,7 +56,7 @@ uint32_t bios_load32(Bios* bios, uint32_t offset);
 uint16_t bios_load16(Bios* bios, uint32_t offset);
 
 // Patch BIOS ROM in memory to skip the shell (and region check).
-// DuckStation-style fast boot: replaces shell entry with display-enable + jr $ra.
+// Fast boot: replaces shell entry with display-enable + jr $ra.
 void bios_apply_fastboot_patch(Bios* bios);
 
 #endif // BIOS_H

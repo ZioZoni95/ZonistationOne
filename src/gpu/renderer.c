@@ -1,6 +1,14 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2025-2026 ZioZoni95
+ *
+ * Part of ZoniStation One, a PlayStation 1 emulator.
+ * See LICENSE for the full licence text and THIRD-PARTY.md for the
+ * components of this project that have other authors.
+ */
 #include "renderer.h"
 #include "log.h"
 #include "lua_debug.h"
+#include "frame_events.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +22,10 @@
  * CPU runs next frame immediately while GPU renders previous frame.
  * ========================================================================= */
 
-#define GPU_MAX_BATCHES        1024
+/* Ace Combat 2 draws well past a thousand primitives in a frame once the line
+ * commands it sends are actually accepted. At 1024 the tail of every busy
+ * frame was dropped with "batch overflow". */
+#define GPU_MAX_BATCHES        8192
 /* An FMV frame arrives as dozens of narrow VRAM upload strips per frame, on
  * top of the 2 MB VRAM-viewer snapshot and any full-VRAM upload, so both the
  * update count and the staging pool have to carry a whole frame's worth or
@@ -31,6 +42,8 @@ typedef struct {
     bool raw_texture_enabled;
     bool semi_trans_enabled;
     bool dither_enabled;
+    bool set_mask_enabled;      /* GP0(E6).0 — force bit 15 on drawn pixels */
+    bool mask_test_enabled;     /* GP0(E6).1 — skip pixels whose destination bit 15 is set */
     uint8_t semi_trans_mode;
     float screen_w, screen_h;
     int16_t offset_x, offset_y;
@@ -89,6 +102,83 @@ static uint32_t  s_vram_pool_peak;       /* high-water mark of a single frame's 
 
 /* Frame command lists */
 static GpuFrame  s_frame[2];
+
+/* =========================================================================
+ * Phase 5 — cross-thread VRAM readback
+ *
+ * The GPU thread owns the GL context, so nothing on the CPU side can read
+ * vram_tex directly. This is the request/response channel: the CPU raises a
+ * request, the GPU thread services it at a point in the frame where vram_tex
+ * holds every rasterized pixel, and publishes the result plus a sequence
+ * number the CPU polls.
+ *
+ * Deliberately asynchronous. A synchronous mid-frame readback — what
+ * GP0(0xC0) and GP0(0x80) will eventually need — requires a partial frame
+ * flush, because the ops the caller wants to read back are still sitting
+ * unexecuted in the CPU's write slot. That is a change to the frame protocol
+ * and is not this. What is here serves the Inspector's CPU-vs-GPU comparison,
+ * which only ever wants "the VRAM as of some recent frame".
+ * ========================================================================= */
+/* Whether this driver supports reading the render target with a barrier. Decided
+ * once at init; picks the texture the shader samples and whether barriers are
+ * emitted between batches. */
+static bool s_texture_barrier = false;
+
+static SDL_atomic_t s_readback_request;   /* CPU sets 1; GPU clears when done */
+static SDL_atomic_t s_readback_seq;       /* incremented after each completed readback */
+static uint16_t     s_readback_vram[1024 * 512];   /* packed 1555, mask bit in 15 */
+static uint8_t      s_readback_rgba[1024 * 512 * 4];
+
+/* GPU thread. Unpacks vram_tex (RGBA8, 5:5:5:1 expanded as (v<<3)|(v>>2),
+ * alpha carrying the PSX mask bit) back into PSX halfwords. */
+static void renderer_service_vram_readback(Renderer* renderer) {
+    if (!SDL_AtomicGet(&s_readback_request)) return;
+
+    glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    for (uint32_t i = 0; i < 1024u * 512u; i++) {
+        const uint8_t* p = &s_readback_rgba[i * 4];
+        s_readback_vram[i] = (uint16_t)(((uint16_t)(p[0] >> 3))
+                                      | ((uint16_t)(p[1] >> 3) << 5)
+                                      | ((uint16_t)(p[2] >> 3) << 10)
+                                      | (p[3] >= 128 ? 0x8000u : 0u));
+    }
+
+    SDL_AtomicSet(&s_readback_request, 0);
+    SDL_AtomicAdd(&s_readback_seq, 1);
+}
+
+void renderer_request_vram_readback(Renderer* renderer) {
+    if (!renderer || !renderer->gpu_thread) return;
+    SDL_AtomicSet(&s_readback_request, 1);
+}
+
+const uint16_t* renderer_get_vram_readback(uint32_t* seq_out) {
+    if (seq_out) *seq_out = (uint32_t)SDL_AtomicGet(&s_readback_seq);
+    return s_readback_vram;
+}
+
+/* --- Synchronous mid-frame readback (GP0(0xC0), GP0(0x80)) ----------------
+ *
+ * What the paragraph above called "not this". The BIOS menu needs it: it
+ * draws an object with polygons, reads the result back with GP0(0xC0), and
+ * re-uploads it as a texture with GP0(0xA0). Reading the CPU-side VRAM there
+ * returns zeros, because rasterized pixels only ever existed in vram_tex —
+ * which is why the menu's 3D objects were missing entirely.
+ *
+ * The caller's ops are still queued in the CPU's write slot, so the GPU
+ * thread first executes that slot's outstanding ops (partial flush) and then
+ * reads the rect. s_exec_from[] remembers how far each slot has been run so
+ * the ops are not replayed when the full frame is submitted — replaying a
+ * semi-transparent draw would blend it twice. */
+static uint32_t     s_exec_from[2];       /* first unexecuted op, per slot */
+static SDL_cond*    s_sync_rb_done;
+static SDL_atomic_t s_sync_rb_pending;    /* CPU sets 1; GPU clears when done */
+static int          s_sync_rb_slot;
+static uint16_t     s_sync_rb_x, s_sync_rb_y, s_sync_rb_w, s_sync_rb_h;
+static uint16_t*    s_sync_rb_dst;        /* full 1024x512 CPU VRAM, written in place */
 
 // --- Helper: Check for OpenGL Errors ---
 void check_gl_error(const char* location) {
@@ -171,12 +261,46 @@ const char* fragment_shader_source =
     "in vec2 tex_coord;\n"
     "flat in uvec2 tpage_info; // x=CLUT, y=TPage\n"
     "\n"
-    "uniform usampler2D vram_texture;\n"  // Integer sampler for R16UI
+    /* VRAM read. Two sources, chosen at init and selected by a #define prepended
+     * to this source (see build_fragment_shader):
+     *
+     *   UNIFIED_VRAM   sample vram_tex, the RGBA8 texture the rasterizer draws
+     *                  into. It holds everything — CPU uploads *and* pixels drawn
+     *                  by earlier primitives — so a game that renders into VRAM and
+     *                  then textures from it reads what it actually wrote. Reading
+     *                  the bound render target is a feedback loop, which is legal
+     *                  only with glTextureBarrier between the draws that write and
+     *                  the draws that read.
+     *
+     *   otherwise      sample the separate R16UI mirror, synced from gpu.vram.data.
+     *                  That mirror never receives rasterized pixels, so render-to-
+     *                  texture samples garbage — the BIOS memory-card menu draws its
+     *                  labels and samples them straight back, and they came out as
+     *                  speckle. Kept only for a driver without the barrier.
+     */
+    "#ifdef UNIFIED_VRAM\n"
+    "uniform sampler2D vram_texture;\n"
+    /* Recover the PS1 halfword from the 5:5:5:1-expanded RGBA8 texel. The
+     * expansion ((v<<3)|(v>>2)) is exactly invertible, so this is lossless. */
+    "uint to16(vec4 t){\n"
+    "  uint r = uint(t.r*255.0+0.5)>>3;\n"
+    "  uint g = uint(t.g*255.0+0.5)>>3;\n"
+    "  uint b = uint(t.b*255.0+0.5)>>3;\n"
+    "  uint a = (t.a > 0.5) ? 1u : 0u;\n"
+    "  return r | (g<<5) | (b<<10) | (a<<15);\n"
+    "}\n"
+    "uint vram_read(ivec2 p){ return to16(texelFetch(vram_texture, p, 0)); }\n"
+    "#else\n"
+    "uniform usampler2D vram_texture;\n"
+    "uint vram_read(ivec2 p){ return texelFetch(vram_texture, p, 0).r; }\n"
+    "#endif\n"
+    "uniform int u_mask_test;    // GP0(E6).1 — skip pixels whose destination bit 15 is set\n"
     "uniform int use_texture;\n"
     "uniform ivec4 u_texWindow; // (and_x, and_y, or_x, or_y) pre-computed masks\n"
     "uniform int raw_texture; // 1 = use texture color directly (no modulation)\n"
     "uniform int u_dither_enable; // 1 = apply PSX 4x4 dither before 15-bit quantization\n"
     "uniform int u_stp_mode;     // -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0)\n"
+    "uniform int u_set_mask;     // GP0(E6).0 — force bit 15 set on every pixel drawn\n"
     "\n"
     // Output: Final color of the fragment (RGBA)
     "out vec4 frag_color;\n"
@@ -190,7 +314,28 @@ const char* fragment_shader_source =
     "}\n"
     "\n"
     "void main() {\n"
-    "    vec4 final_color = vec4(color, 1.0);\n"
+    /* Alpha is not opacity here: the unified VRAM texture stores the PSX mask
+     * bit (bit 15) in it, so a drawn pixel must carry the same bit a CPU write
+     * would. Untextured primitives write 0 unless GP0(E6).0 forces it; textured
+     * ones copy the source texel's bit 15 (the STP bit), OR'd with the force
+     * flag — PSX-SPX "Mask bit". Writing a constant 1.0 here made every
+     * rasterized pixel come back as 0x8000, which 24bpp scanout reads as
+     * picture data (black areas turned green). */
+    /* Mask-bit *test* — GP0(E6).1. Hardware skips a pixel whose destination
+     * halfword already has bit 15 set, which is how games protect sprites they
+     * have drawn from being overpainted. Reading the destination is the same
+     * feedback loop the texture path needs, so it is only correct where the
+     * barrier is: without UNIFIED_VRAM the mirror has no rasterized pixels to
+     * test against and the check would pass everything, which is what the
+     * renderer did before. */
+    "#ifdef UNIFIED_VRAM\n"
+    "    if (u_mask_test == 1) {\n"
+    "        uint dst = vram_read(ivec2(gl_FragCoord.xy));\n"
+    "        if ((dst & 0x8000u) != 0u) discard;\n"
+    "    }\n"
+    "#endif\n"
+    "    float mask_a = (u_set_mask != 0) ? 1.0 : 0.0;\n"
+    "    vec4 final_color = vec4(color, mask_a);\n"
     "    if (use_texture == 1) {\n"
     // "        frag_color = vec4(1.0, 0.0, 0.0, 1.0); return;\n" // DEBUG: Uncomment to verify geometry
     "        uint clut = tpage_info.x;\n"
@@ -201,9 +346,20 @@ const char* fragment_shader_source =
     "        uint clut_x = (clut & 0x3Fu) * 16u;\n"
     "        uint clut_y = (clut >> 6) & 0x1FFu;\n"
     "\n"
-    "        // Apply Texture Window to UV coordinates (0-255)\n"
-    "        uint u_raw = uint(tex_coord.x) & 0xFFu;\n"
-    "        uint v_raw = uint(tex_coord.y) & 0xFFu;\n"
+    "        // Apply Texture Window to UV coordinates (0-255).\n"
+    "        //\n"
+    "        // Converting through int, not uint, then clamping. GLSL leaves\n"
+    "        // float->uint undefined for negative inputs (GLSL 3.30 section 5.4.1),\n"
+    "        // and tex_coord is interpolated: a vertex UV of 0 can arrive at a\n"
+    "        // fragment as a value a fraction below zero purely from interpolation\n"
+    "        // rounding. NVIDIA saturates that to 0; Mesa wraps it to 0xFFFFFFFF,\n"
+    "        // which the 0xFF mask turns into column 255 — the wrong end of the\n"
+    "        // texture page. On a primitive whose UVs are all 0 that mis-samples\n"
+    "        // the entire surface, which is why textures came out as flat blocks\n"
+    "        // of one colour on the Intel iGPU and looked correct on the dGPU.\n"
+    "        // float->int is defined for negatives, so clamp there instead.\n"
+    "        uint u_raw = uint(clamp(int(tex_coord.x), 0, 255));\n"
+    "        uint v_raw = uint(clamp(int(tex_coord.y), 0, 255));\n"
     "        uint u = (u_raw & uint(u_texWindow.x)) | uint(u_texWindow.z);\n"
     "        uint v = (v_raw & uint(u_texWindow.y)) | uint(u_texWindow.w);\n"
     "\n"
@@ -213,11 +369,11 @@ const char* fragment_shader_source =
     "        if (depth == 0u) { // 4-bit paletted\n"
     "            uint tex_x = page_x + (u / 4u);\n"
     "            uint tex_y = page_y + v;\n"
-    "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
+    "            uint raw_word = vram_read(ivec2(tex_x, tex_y));\n"
     "            uint shift = (u & 3u) * 4u;\n"
     "            uint index = (raw_word >> shift) & 0xFu;\n"
     "            uint clut_pos_x = clut_x + index;\n"
-    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_y), 0).r;\n"
+    "            raw_color = vram_read(ivec2(clut_pos_x, clut_y));\n"
     "            if (raw_color == 0u) discard;\n"
     "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"  /* pass1: discard STP=1 */
     "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"  /* pass2: discard STP=0 */
@@ -226,11 +382,11 @@ const char* fragment_shader_source =
     "        } else if (depth == 1u) { // 8-bit paletted\n"
     "            uint tex_x = page_x + (u / 2u);\n"
     "            uint tex_y = page_y + v;\n"
-    "            uint raw_word = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
+    "            uint raw_word = vram_read(ivec2(tex_x, tex_y));\n"
     "            uint shift = (u & 1u) * 8u;\n"
     "            uint index = (raw_word >> shift) & 0xFFu;\n"
     "            uint clut_pos_x = clut_x + index;\n"
-    "            raw_color = texelFetch(vram_texture, ivec2(clut_pos_x, clut_y), 0).r;\n"
+    "            raw_color = vram_read(ivec2(clut_pos_x, clut_y));\n"
     "            if (raw_color == 0u) discard;\n"
     "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"
     "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"
@@ -239,17 +395,18 @@ const char* fragment_shader_source =
     "        } else { // 15-bit direct color (depth == 2 or 3)\n"
     "            uint tex_x = page_x + u;\n"
     "            uint tex_y = page_y + v;\n"
-    "            raw_color = texelFetch(vram_texture, ivec2(tex_x, tex_y), 0).r;\n"
+    "            raw_color = vram_read(ivec2(tex_x, tex_y));\n"
     "            if (raw_color == 0u) discard;\n"
     "            if (u_stp_mode == 0 && (raw_color & 0x8000u) != 0u) discard;\n"
     "            if (u_stp_mode == 1 && (raw_color & 0x8000u) == 0u) discard;\n"
     "            tex_rgb = psx_to_rgb(raw_color);\n"
     "        }\n"
     "\n"
+    "        if ((raw_color & 0x8000u) != 0u) mask_a = 1.0;\n"
     "        if (raw_texture == 1) {\n"
-    "            final_color = vec4(tex_rgb, 1.0);\n"
+    "            final_color = vec4(tex_rgb, mask_a);\n"
     "        } else {\n"
-    "            final_color = vec4(tex_rgb * color * 2.0, 1.0);\n"
+    "            final_color = vec4(tex_rgb * color * 2.0, mask_a);\n"
     "        }\n"
     "    }\n"
     // PSX 4x4 dithering matrix (applied before 24-to-15bit quantization).
@@ -373,11 +530,57 @@ bool renderer_init(Renderer* renderer) {
     }
 
 
+    /* Can this driver let a shader read the texture it is drawing into?
+     *
+     * Sampling the bound render target is a feedback loop, undefined in GL unless
+     * glTextureBarrier() separates the write from the read. With it, texturing and
+     * the mask test can use the one texture that holds everything — CPU uploads and
+     * rasterized pixels alike — instead of a mirror that only ever sees the former.
+     * Without it, the old mirror path stays, wrong in the same way it always was
+     * but no worse.
+     *
+     * Core in GL 4.5 and present as ARB or NV on every driver this runs on, but
+     * the emulator asks for a 3.3 core context, so it has to be asked for. */
+    s_texture_barrier = (GLEW_ARB_texture_barrier || GLEW_NV_texture_barrier) &&
+                        glTextureBarrier != NULL;
+    LOG_RENDERER_INFO("[RENDERER] Unified VRAM sampling: %s",
+                      s_texture_barrier
+                        ? "on (texture barrier available — render-to-texture and the "
+                          "mask-bit test are correct)"
+                        : "OFF (no texture barrier — texturing falls back to the "
+                          "upload-only mirror; pixels drawn by primitives will not "
+                          "be visible to later texture reads)");
+
+    /* One program either way: the source carries both paths and the #define picks
+     * one, so there is no second pipeline to keep in step with the first. */
+    const char* frag_sources[2] = {
+        s_texture_barrier ? "#define UNIFIED_VRAM 1\n" : "",
+        fragment_shader_source
+    };
+    char* frag_combined = NULL;
+    {
+        size_t n0 = strlen(frag_sources[0]), n1 = strlen(frag_sources[1]);
+        frag_combined = (char*)malloc(n0 + n1 + 1);
+        if (!frag_combined) {
+            LOG_RENDERER_ERROR("[RENDERER] Out of memory assembling the fragment shader");
+            return false;
+        }
+        /* The #version line must come first, so the define is spliced in after it
+         * rather than pasted in front of the whole source. */
+        const char* nl = strchr(frag_sources[1], '\n');
+        size_t head = nl ? (size_t)(nl - frag_sources[1] + 1) : 0;
+        memcpy(frag_combined, frag_sources[1], head);
+        memcpy(frag_combined + head, frag_sources[0], n0);
+        memcpy(frag_combined + head + n0, frag_sources[1] + head, n1 - head);
+        frag_combined[n0 + n1] = '\0';
+    }
+
     // Compile Shaders
     LOG_RENDERER_DEBUG("[RENDERER] Compiling vertex shader...");
     GLuint vs = compile_shader(vertex_shader_source, GL_VERTEX_SHADER);
     LOG_RENDERER_DEBUG("[RENDERER] Compiling fragment shader...");
-    GLuint fs = compile_shader(fragment_shader_source, GL_FRAGMENT_SHADER);
+    GLuint fs = compile_shader(frag_combined, GL_FRAGMENT_SHADER);
+    free(frag_combined);
     if (vs == 0 || fs == 0) {
         LOG_RENDERER_ERROR("[RENDERER] Renderer Init Failed: Shader compilation error.");
         if (vs != 0) glDeleteShader(vs); // Clean up if one succeeded
@@ -540,7 +743,7 @@ bool renderer_init(Renderer* renderer) {
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("[RENDERER] VRAM Texture created (ID: %u) as R16UI.", renderer->vram_texture);
 
-    // --- Unified VRAM texture: the FBO colour attachment (DuckStation GPU_HW) ---
+    // --- Unified VRAM texture: the FBO colour attachment (hardware-accelerated path) ---
     // Rasterization renders into this; CPU/MDEC uploads write into this; the
     // scanout pass reads this. One object, so uploaded content is displayable
     // by construction.
@@ -563,6 +766,14 @@ bool renderer_init(Renderer* renderer) {
                        renderer->display_fbo, renderer->vram_tex);
     // Note: We leave display_fbo bound so all PSX rendering goes here!
 
+    /* GL_DITHER is enabled by default, and it is not ours to want: the PSX's own
+     * 4x4 dither is applied in the fragment shader before the 15-bit quantize,
+     * so a second dither on the way to the render target is noise on top of a
+     * signal that is already correct. It also diverges by driver — NVIDIA
+     * generally ignores the state on 8-bit targets, Mesa honours it — which
+     * makes the same frame come out differently on the iGPU and the dGPU. */
+    glDisable(GL_DITHER);
+
     // --- VRAM viewer texture (RGBA8, updated on CPU each frame) ---
     glGenTextures(1, &renderer->vram_viewer_texture);
     glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
@@ -574,8 +785,7 @@ bool renderer_init(Renderer* renderer) {
 
     // --- Scanout-extract pass ---
     // Fullscreen triangle that reads the CRTC display window out of the unified
-    // VRAM texture and unpacks it for the active depth, mirroring DuckStation's
-    // GenerateVRAMExtractFragmentShader / GPU_SW::CopyOut15Bit|CopyOut24Bit.
+    // VRAM texture and unpacks it for the active depth (15/24bpp repacking).
     {
         static const char* scanout_vs =
             "#version 330 core\n"
@@ -609,8 +819,8 @@ bool renderer_init(Renderer* renderer) {
             "  int py = int(v_uv.y * float(u_disp_size.y));\n"
             "  int y  = u_disp_off.y + py;\n"
             "  if (u_depth24 == 1) {\n"
-            /* 24bpp: 3 bytes per pixel spanning 1.5 halfwords — recombine two
-             * texels and byte-shift on odd pixels (DuckStation SampleVRAM24). */
+             /* 24bpp: 3 bytes per pixel spanning 1.5 halfwords — recombine two
+              * texels and byte-shift on odd pixels. */
             "    int hx = u_disp_off.x + (px*3)/2;\n"
             "    uint s0 = to16(texelFetch(u_vram, ivec2(hx,   y), 0));\n"
             "    uint s1 = to16(texelFetch(u_vram, ivec2(hx+1, y), 0));\n"
@@ -632,7 +842,19 @@ bool renderer_init(Renderer* renderer) {
 
         glGenTextures(1, &renderer->scanout_texture);
         glBindTexture(GL_TEXTURE_2D, renderer->scanout_texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 1024, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        /* GL_RGBA8, not the unsized GL_RGB this used to ask for.
+         *
+         * An unsized internal format lets the driver pick whatever sized format
+         * it likes, and GL 3.3 core only guarantees the *sized* formats are
+         * colour-renderable — this texture is a framebuffer attachment. NVIDIA
+         * resolves GL_RGB to RGBA8 and the picture came out right; Mesa is free
+         * to choose something narrower, and a low-precision choice crushes every
+         * gradient to the nearest primary. That is what the flat blocks of pure
+         * blue, magenta, green and yellow on the Intel iGPU were: not mis-sampled
+         * textures, but the finished picture quantized on its way into this
+         * texture. Menus hid it because they are already saturated colour on
+         * black; the 3D scene showed it immediately. */
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -667,6 +889,10 @@ bool renderer_init(Renderer* renderer) {
     if (renderer->uniform_tex_window_loc >= 0) glUniform4i(renderer->uniform_tex_window_loc, 0xFF, 0xFF, 0, 0);
     renderer->uniform_stp_mode_loc = glGetUniformLocation(renderer->shader_program, "u_stp_mode");
     if (renderer->uniform_stp_mode_loc >= 0) glUniform1i(renderer->uniform_stp_mode_loc, -1);
+    renderer->uniform_set_mask_loc = glGetUniformLocation(renderer->shader_program, "u_set_mask");
+    renderer->uniform_mask_test_loc = glGetUniformLocation(renderer->shader_program, "u_mask_test");
+    if (renderer->uniform_mask_test_loc >= 0) glUniform1i(renderer->uniform_mask_test_loc, 0);
+    if (renderer->uniform_set_mask_loc >= 0) glUniform1i(renderer->uniform_set_mask_loc, 0);
     if (renderer->uniform_raw_texture_loc >= 0) glUniform1i(renderer->uniform_raw_texture_loc, 0);
     if (renderer->uniform_dither_loc >= 0) glUniform1i(renderer->uniform_dither_loc, 0);
     glUseProgram(0);
@@ -841,7 +1067,7 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y) {
     if (!renderer->initialized) return;
 
-    // Calculate AND/OR masks based on DuckStation/Nocash logic
+    // Calculate AND/OR masks from the GP0(0xE2) mask/offset registers:
     // Mask: 0=Don't mask, 1-31=Mask (size = 8, 16, 32... 256 pixels)
     // Offset: Base address of the window (in 8 pixel steps)
     
@@ -942,6 +1168,30 @@ void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
     renderer_record_vram_update(renderer, vram_data, x, y, w, h, true);
 }
 
+/* Semi-transparency blend setup for one of the four PSX modes. The alpha
+ * channel is NOT blended: it carries the PSX mask bit, and hardware writes the
+ * source pixel's mask bit as-is, whatever the colour blend does. */
+static void apply_semi_trans_blend(uint8_t mode) {
+    GLenum src = GL_ONE, dst = GL_ONE, eq = GL_FUNC_ADD;
+    switch (mode) {
+        case 0:  /* B/2 + F/2 */
+            src = GL_CONSTANT_ALPHA; dst = GL_CONSTANT_ALPHA;
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
+            break;
+        case 1:  /* B + F */
+            break;
+        case 2:  /* B - F */
+            eq = GL_FUNC_REVERSE_SUBTRACT;
+            break;
+        case 3:  /* B + F/4 */
+            src = GL_CONSTANT_ALPHA; dst = GL_ONE;
+            glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
+            break;
+    }
+    glBlendEquationSeparate(eq, GL_FUNC_ADD);
+    glBlendFuncSeparate(src, dst, GL_ONE, GL_ZERO);
+}
+
 /* -------------------------------------------------------------------------
  * renderer_draw_gl — INTERNAL: called by GPU thread to execute one batch.
  * All GL calls are here; CPU thread never calls this directly.
@@ -963,6 +1213,10 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
                     b->tex_window[2], b->tex_window[3]);
     if (renderer->uniform_dither_loc >= 0)
         glUniform1i(renderer->uniform_dither_loc, b->dither_enabled ? 1 : 0);
+    if (renderer->uniform_set_mask_loc >= 0)
+        glUniform1i(renderer->uniform_set_mask_loc, b->set_mask_enabled ? 1 : 0);
+    if (renderer->uniform_mask_test_loc >= 0)
+        glUniform1i(renderer->uniform_mask_test_loc, b->mask_test_enabled ? 1 : 0);
     glUniform1i(renderer->uniform_use_texture_loc, b->texture_enabled ? 1 : 0);
     if (renderer->uniform_raw_texture_loc >= 0)
         glUniform1i(renderer->uniform_raw_texture_loc, b->raw_texture_enabled ? 1 : 0);
@@ -972,7 +1226,25 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
     glEnable(GL_SCISSOR_TEST);
     glScissor(b->scissor[0], b->scissor[1], b->scissor[2], b->scissor[3]);
 
-    if (b->texture_enabled) {
+    /* Bind whichever VRAM the shader was built to read, and make the pixels the
+     * previous batch drew visible to this one.
+     *
+     * With the barrier the sampled texture *is* the render target, so every draw
+     * that reads it has to be separated from the draws that wrote it. One barrier
+     * per batch is the coarse but correct placement: batches are already the unit
+     * at which state changes are flushed, and a game that draws into VRAM and
+     * samples it back does so across batches, never inside one.
+     *
+     * The mask test reads the destination too, so it needs the same separation
+     * even when the batch is untextured — hence the barrier is not conditional on
+     * texture_enabled the way the bind is. */
+    if (s_texture_barrier) {
+        glTextureBarrier();
+        /* Bound unconditionally: an untextured batch still samples through this
+         * unit when the mask test is on. */
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+    } else if (b->texture_enabled) {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, renderer->vram_texture);
     }
@@ -1001,26 +1273,7 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
         glDrawArrays(prim, 0, vc);
 
         glEnable(GL_BLEND);
-        switch (b->semi_trans_mode) {
-            case 0:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
-                break;
-            case 1:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 2:
-                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 3:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
-                break;
-        }
+        apply_semi_trans_blend(b->semi_trans_mode);
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, 1);
         glDrawArrays(prim, 0, vc);
@@ -1034,26 +1287,7 @@ static void renderer_draw_gl(Renderer* renderer, const GpuBatch* b, int slot) {
         if (renderer->uniform_stp_mode_loc >= 0)
             glUniform1i(renderer->uniform_stp_mode_loc, -1);
         glEnable(GL_BLEND);
-        switch (b->semi_trans_mode) {
-            case 0:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_CONSTANT_ALPHA);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.5f);
-                break;
-            case 1:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 2:
-                glBlendEquation(GL_FUNC_REVERSE_SUBTRACT);
-                glBlendFunc(GL_ONE, GL_ONE);
-                break;
-            case 3:
-                glBlendEquation(GL_FUNC_ADD);
-                glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE);
-                glBlendColor(0.0f, 0.0f, 0.0f, 0.25f);
-                break;
-        }
+        apply_semi_trans_blend(b->semi_trans_mode);
         glDrawArrays(prim, 0, vc);
     } else {
         if (renderer->uniform_stp_mode_loc >= 0)
@@ -1091,6 +1325,39 @@ void renderer_draw(Renderer* renderer) {
         return;
     }
 
+    frame_events_record(FEV_DRAW_BATCH, vtx_count);
+
+    /* ZS1_GPU_TRACE_BATCH=1: one line per *distinct* combination of the state a
+     * textured draw samples with. Frame captures are the wrong instrument for
+     * "which page and depth is this primitive reading" — they show the result,
+     * and only if the run happens to reach the frame. This shows the inputs, and
+     * a seen-set keeps it to a handful of lines however long the run is. */
+    {
+        static int s_trace = -1;
+        if (s_trace < 0) s_trace = getenv("ZS1_GPU_TRACE_BATCH") ? 1 : 0;
+        if (s_trace && vtx_count > 0) {
+            const RendererTPage* tp = &renderer->tpage_data[0];
+            uint32_t key = ((uint32_t)tp->tpage << 16) | tp->clut;
+            key = (key * 2u) | (renderer->texture_enabled ? 1u : 0u);
+            static uint32_t seen[64];
+            static int seen_n = 0;
+            bool known = false;
+            for (int i = 0; i < seen_n; i++) if (seen[i] == key) { known = true; break; }
+            if (!known && seen_n < 64) {
+                seen[seen_n++] = key;
+                uint16_t t = tp->tpage;
+                LOG_RENDERER_INFO("[GPU] batch: tex=%d tpage=0x%04x (pageX=%u pageY=%u "
+                                  "semi=%u depth=%u) clut=0x%04x -> clutX=%u clutY=%u "
+                                  "| raw=%d blend=%d semimode=%u",
+                                  renderer->texture_enabled ? 1 : 0, t,
+                                  t & 0xF, (t >> 4) & 1, (t >> 5) & 3, (t >> 7) & 3,
+                                  tp->clut, (tp->clut & 0x3F) * 16, (tp->clut >> 6) & 0x1FF,
+                                  renderer->raw_texture_enabled ? 1 : 0,
+                                  renderer->semi_trans_enabled ? 1 : 0, renderer->semi_trans_mode);
+            }
+        }
+    }
+
     /* Copy vertex data to pool */
     memcpy(&s_pos[wi][vtx_start], renderer->positions_data, vtx_count * sizeof(RendererPosition));
     memcpy(&s_col[wi][vtx_start], renderer->colors_data,    vtx_count * sizeof(RendererColor));
@@ -1109,6 +1376,8 @@ void renderer_draw(Renderer* renderer) {
     b->semi_trans_enabled = renderer->semi_trans_enabled;
     b->semi_trans_mode    = renderer->semi_trans_mode;
     b->dither_enabled     = renderer->dither_enabled;
+    b->set_mask_enabled   = renderer->set_mask_enabled;
+    b->mask_test_enabled  = renderer->mask_test_enabled;
     b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
     b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;
     b->offset_x           = renderer->cached_offset_x;
@@ -1263,6 +1532,33 @@ void renderer_set_dither_mode(Renderer* renderer, bool enabled)
     // Uniform is set per-draw in renderer_draw(); no immediate GL call needed.
 }
 
+// ---------------------------------------------------------------------------
+// renderer_set_mask_mode — GP0(0xE6).0, force the mask bit on drawn pixels.
+// The unified texture keeps bit 15 in alpha, so this has to be batch state.
+// ---------------------------------------------------------------------------
+void renderer_set_mask_mode(Renderer* renderer, bool enabled)
+{
+    if (!renderer->initialized) return;
+    if (renderer->set_mask_enabled == enabled) return;
+
+    renderer_draw(renderer); // flush before changing mask state
+    renderer->set_mask_enabled = enabled;
+}
+
+// ---------------------------------------------------------------------------
+// renderer_set_mask_test — GP0(0xE6).1, skip pixels whose destination has bit 15.
+// The test reads the render target, so it is only honoured where the texture
+// barrier is available; see the shader's UNIFIED_VRAM branch.
+// ---------------------------------------------------------------------------
+void renderer_set_mask_test(Renderer* renderer, bool enabled)
+{
+    if (!renderer->initialized) return;
+    if (renderer->mask_test_enabled == enabled) return;
+
+    renderer_draw(renderer); // flush before changing mask state
+    renderer->mask_test_enabled = enabled;
+}
+
 // renderer_set_semi_trans_mode — enable/disable GL blending for semi-trans
 // ---------------------------------------------------------------------------
 void renderer_set_semi_trans_mode(Renderer* renderer, bool enabled, uint8_t mode)
@@ -1290,12 +1586,33 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     int wi = renderer->write_idx;
     GpuFrame* frame = &s_frame[wi];
 
-    if (frame->batch_count >= GPU_MAX_BATCHES) {
-        LOG_RENDERER_WARN("[RENDERER] batch overflow in push_line — skipping");
-        return;
-    }
     if (s_vtx[wi] + 2 > VERTEX_BUFFER_LEN) {
         LOG_RENDERER_WARN("[RENDERER] vertex pool overflow in push_line — skipping");
+        return;
+    }
+
+    /* Consecutive lines under identical state extend the batch instead of
+     * starting a new one. One batch per line is what made a wireframe frame
+     * run into GPU_MAX_BATCHES and lose everything after it. */
+    GpuBatch* prev = NULL;
+    if (frame->op_count > 0 && frame->batch_count > 0) {
+        const GpuOp* last = &frame->ops[frame->op_count - 1];
+        if (last->type == GPU_OP_BATCH && last->index == frame->batch_count - 1) {
+            GpuBatch* c = &frame->batches[last->index];
+            if (c->is_lines && !c->texture_enabled && !c->semi_trans_enabled
+                && c->vertex_start + c->vertex_count == s_vtx[wi]
+                && c->dither_enabled    == renderer->dither_enabled
+                && c->set_mask_enabled  == renderer->set_mask_enabled
+                && c->mask_test_enabled == renderer->mask_test_enabled
+                && c->offset_x == renderer->cached_offset_x
+                && c->offset_y == renderer->cached_offset_y
+                && memcmp(c->scissor, renderer->cached_scissor, sizeof(c->scissor)) == 0)
+                prev = c;
+        }
+    }
+
+    if (!prev && frame->batch_count >= GPU_MAX_BATCHES) {
+        LOG_RENDERER_WARN("[RENDERER] batch overflow in push_line — skipping");
         return;
     }
 
@@ -1308,6 +1625,11 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     s_tpg[wi][vs]     = zero_tp; s_tpg[wi][vs+1] = zero_tp;
     s_vtx[wi] += 2;
 
+    if (prev) {
+        prev->vertex_count += 2;
+        return;
+    }
+
     uint32_t line_batch_idx = frame->batch_count++;
     GpuBatch* b = &frame->batches[line_batch_idx];
     b->vertex_start       = vs;
@@ -1317,6 +1639,8 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     b->raw_texture_enabled = false;
     b->semi_trans_enabled = false;
     b->dither_enabled     = renderer->dither_enabled;
+    b->set_mask_enabled   = renderer->set_mask_enabled;
+    b->mask_test_enabled  = renderer->mask_test_enabled;
     b->semi_trans_mode    = 0;
     b->screen_w           = renderer->screen_width  ? renderer->screen_width  : 1024.0f;
     b->screen_h           = renderer->screen_height ? renderer->screen_height : 512.0f;
@@ -1534,6 +1858,58 @@ typedef struct {
 
 static GpuThreadArg s_gpu_thread_arg;
 
+/* GPU thread. Runs the write slot's outstanding ops so vram_tex holds every
+ * pixel the caller has drawn so far, then copies the requested rect back into
+ * the CPU-side VRAM. */
+static void renderer_service_sync_readback(Renderer* renderer, int wi) {
+    glBindFramebuffer(GL_FRAMEBUFFER, renderer->display_fbo);
+    glViewport(0, 0, 1024, 512);
+    for (uint32_t i = s_exec_from[wi]; i < s_frame[wi].op_count; i++) {
+        const GpuOp* op = &s_frame[wi].ops[i];
+        if (op->type == GPU_OP_VRAM_UPDATE)
+            renderer_execute_one_vram_update(renderer, &s_frame[wi].vram_updates[op->index], wi);
+        else
+            renderer_draw_gl(renderer, &s_frame[wi].batches[op->index], wi);
+    }
+    s_exec_from[wi] = s_frame[wi].op_count;
+
+    /* Read only the rect. display_fbo has vram_tex as its colour attachment and
+     * glReadPixels returns rows in the same order glTexSubImage2D uploads them,
+     * so framebuffer row y is VRAM row y. Pulling the whole 2 MB texture back
+     * instead cost ~2.3ms per call, and a burst of 50 in one second stalled the
+     * emulator thread for 115ms — long enough to drain the audio ring.
+     *
+     * A rect that wraps the VRAM edges is read whole; that case is rare and not
+     * worth a second code path. */
+    bool wraps = (uint32_t)s_sync_rb_x + s_sync_rb_w > 1024u
+              || (uint32_t)s_sync_rb_y + s_sync_rb_h > 512u;
+    if (wraps) {
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    } else {
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(s_sync_rb_x, s_sync_rb_y, s_sync_rb_w, s_sync_rb_h,
+                     GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    for (uint16_t row = 0; row < s_sync_rb_h; row++) {
+        uint32_t y = (uint32_t)((s_sync_rb_y + row) & 0x1FF);
+        for (uint16_t col = 0; col < s_sync_rb_w; col++) {
+            uint32_t x = (uint32_t)((s_sync_rb_x + col) & 0x3FF);
+            const uint8_t* p = wraps ? &s_readback_rgba[(y * 1024u + x) * 4u]
+                                     : &s_readback_rgba[((uint32_t)row * s_sync_rb_w + col) * 4u];
+            s_sync_rb_dst[y * 1024u + x] = (uint16_t)(((uint16_t)(p[0] >> 3))
+                                                    | ((uint16_t)(p[1] >> 3) << 5)
+                                                    | ((uint16_t)(p[2] >> 3) << 10)
+                                                    | (p[3] >= 128 ? 0x8000u : 0u));
+        }
+    }
+}
+
 static int gpu_thread_main(void* userdata) {
     GpuThreadArg* arg = (GpuThreadArg*)userdata;
     Renderer*   renderer = arg->renderer;
@@ -1550,11 +1926,22 @@ static int gpu_thread_main(void* userdata) {
 
     while (!SDL_AtomicGet(&renderer->gpu_stop)) {
         SDL_LockMutex(renderer->gpu_mutex);
-        while (renderer->frames_pending == 0 && !SDL_AtomicGet(&renderer->gpu_stop))
+        while (renderer->frames_pending == 0 && !SDL_AtomicGet(&s_sync_rb_pending)
+               && !SDL_AtomicGet(&renderer->gpu_stop))
             SDL_CondWait(renderer->frame_ready, renderer->gpu_mutex);
         if (SDL_AtomicGet(&renderer->gpu_stop)) {
             SDL_UnlockMutex(renderer->gpu_mutex);
             break;
+        }
+        if (SDL_AtomicGet(&s_sync_rb_pending)) {
+            int wi = s_sync_rb_slot;
+            SDL_UnlockMutex(renderer->gpu_mutex);
+            renderer_service_sync_readback(renderer, wi);
+            SDL_LockMutex(renderer->gpu_mutex);
+            SDL_AtomicSet(&s_sync_rb_pending, 0);
+            SDL_CondSignal(s_sync_rb_done);
+            SDL_UnlockMutex(renderer->gpu_mutex);
+            continue;
         }
         int ri = 1 - renderer->write_idx; /* read slot = opposite of current write slot */
         SDL_UnlockMutex(renderer->gpu_mutex); /* frames_pending stays 1 until render+reset done */
@@ -1565,13 +1952,18 @@ static int gpu_thread_main(void* userdata) {
 
         /* Replay VRAM updates and draw batches in original submission order —
          * required when a texture page is re-uploaded mid-frame (see GpuOp). */
-        for (uint32_t i = 0; i < s_frame[ri].op_count; i++) {
+        for (uint32_t i = s_exec_from[ri]; i < s_frame[ri].op_count; i++) {
             const GpuOp* op = &s_frame[ri].ops[i];
             if (op->type == GPU_OP_VRAM_UPDATE)
                 renderer_execute_one_vram_update(renderer, &s_frame[ri].vram_updates[op->index], ri);
             else
                 renderer_draw_gl(renderer, &s_frame[ri].batches[op->index], ri);
         }
+
+        /* Serviced here: every op for this frame has run, so vram_tex holds
+         * both the uploads and the rasterized pixels, and the scanout pass
+         * below does not touch it. */
+        renderer_service_vram_readback(renderer);
 
         /* Scanout: extract the CRTC display window from the unified VRAM into
          * scanout_texture, unpacking for the active depth. This is the single
@@ -1606,7 +1998,18 @@ static int gpu_thread_main(void* userdata) {
                 int target = 300;
                 const char* target_env = getenv("ZS1_DUMP_FRAME_N");
                 if (target_env) target = atoi(target_env);
-                if (s_dump_counter == target) {
+                /* ZS1_DUMP_EVERY=1 turns the single shot into a repeating one that
+                 * overwrites the same file, so whenever the run ends the file holds
+                 * the most recent frame. Waiting for an exact frame number means
+                 * losing the capture entirely if the run is shorter than expected,
+                 * which is how several attempts at catching the BIOS menu were
+                 * lost — the emulator reached it and exited before the count. */
+                static int s_every = -1;
+                if (s_every < 0) s_every = getenv("ZS1_DUMP_EVERY") ? 1 : 0;
+                bool fire = s_every
+                          ? (target > 0 && s_dump_counter > 0 && (s_dump_counter % target) == 0)
+                          : (s_dump_counter == target);
+                if (fire) {
                     /* Dump what the screen shows (scanout) by default; set
                      * ZS1_DUMP_VRAM=1 to dump the whole unified VRAM instead. */
                     GLuint dtex = getenv("ZS1_DUMP_VRAM") ? renderer->vram_tex
@@ -1651,6 +2054,7 @@ static int gpu_thread_main(void* userdata) {
         s_frame[ri].imgui_draw_data    = NULL;
         s_vtx[ri]                      = 0;
         s_vram_pool_used[ri]           = 0;
+        s_exec_from[ri]                = 0;
 
         /* Signal CPU that frame is done — set pending=0 here (after render+reset) */
         SDL_LockMutex(renderer->gpu_mutex);
@@ -1685,8 +2089,11 @@ void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLCon
         s_frame[i].imgui_draw_data   = NULL;
         s_vtx[i]           = 0;
         s_vram_pool_used[i] = 0;
+        s_exec_from[i]      = 0;
     }
     renderer->write_idx = 0;
+    s_sync_rb_done = SDL_CreateCond();
+    SDL_AtomicSet(&s_sync_rb_pending, 0);
 
     s_gpu_thread_arg.renderer   = renderer;
     s_gpu_thread_arg.window     = window;
@@ -1710,6 +2117,7 @@ void renderer_stop_gpu_thread(Renderer* renderer) {
     SDL_DestroyMutex(renderer->gpu_mutex);
     SDL_DestroyCond(renderer->frame_ready);
     SDL_DestroyCond(renderer->frame_done);
+    if (s_sync_rb_done) { SDL_DestroyCond(s_sync_rb_done); s_sync_rb_done = NULL; }
     renderer->gpu_mutex   = NULL;
     renderer->frame_ready = NULL;
     renderer->frame_done  = NULL;
@@ -1753,6 +2161,30 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     renderer->frames_pending = 1;
     SDL_CondSignal(renderer->frame_ready);
     SDL_UnlockMutex(renderer->gpu_mutex);
+}
+
+bool renderer_read_vram_rect(Renderer* renderer, uint16_t* vram,
+                             uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    if (!renderer || !renderer->gpu_thread || !vram || !w || !h || !s_sync_rb_done)
+        return false;
+
+    /* Push the batch still open on the CPU side into the write slot, or the
+     * primitive the caller just drew would not be in the rect it reads back. */
+    renderer_draw(renderer);
+
+    SDL_LockMutex(renderer->gpu_mutex);
+    while (renderer->frames_pending > 0)
+        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+
+    s_sync_rb_slot = renderer->write_idx;
+    s_sync_rb_x = x; s_sync_rb_y = y; s_sync_rb_w = w; s_sync_rb_h = h;
+    s_sync_rb_dst = vram;
+    SDL_AtomicSet(&s_sync_rb_pending, 1);
+    SDL_CondSignal(renderer->frame_ready);
+    while (SDL_AtomicGet(&s_sync_rb_pending))
+        SDL_CondWait(s_sync_rb_done, renderer->gpu_mutex);
+    SDL_UnlockMutex(renderer->gpu_mutex);
+    return true;
 }
 
 void renderer_wait_frame_done(Renderer* renderer) {
