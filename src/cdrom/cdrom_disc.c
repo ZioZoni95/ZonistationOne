@@ -309,13 +309,25 @@ uint8_t cdrom_disc_get_track_at_lba(CdromDisc *disc, uint32_t lba) {
 uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba) {
     if (from_lba == to_lba) return CDROM_SEEK_FAST_DELAY;
     uint32_t dist = from_lba > to_lba ? from_lba - to_lba : to_lba - from_lba;
-    /* Tier-based curve matching pcsx-redux hardware tests.
-     * Short: cdReadTime*4 base. Long: add proportional term, cap at ~60s. */
-    uint32_t base = CDROM_SEEK_DELAY;
-    if (dist <= 10) return base;
-    uint32_t extra = (dist * CDROM_SECTOR_TIME) / 1000u;
-    uint32_t cap   = CDROM_SECTOR_TIME * 60u;
-    return base + (extra < cap ? extra : cap);
+    /* Two regimes. A short move steps the head track by track and costs roughly
+     * 7ms per sector; past a handful of sectors the drive switches to a coarse
+     * seek whose cost is nearly flat over a wide range (~51ms was observed for
+     * anything between 147 and 164 sectors), plus a proportional term for
+     * genuinely long moves.
+     *
+     * DOCS/cdromdrive.md:1896-1908 states outright that the seek timings are
+     * undocumented and "probably quite complicated" — the drive splits the
+     * distance into coarse and fine steps and the data density varies along the
+     * spiral. So these two slopes are calibration against observed drive
+     * behaviour, not a documented curve. What they replace was a single flat
+     * step: everything up to 10 sectors cost the same 53ms, which made a
+     * one-sector nudge as expensive as a 10-sector move and a 2-sector move
+     * 4x too expensive. */
+    uint64_t fine   = (uint64_t)dist * CDROM_SEEK_FINE_PER_LBA;
+    uint32_t extra  = (dist * CDROM_SECTOR_TIME) / 1000u;
+    uint32_t cap    = CDROM_SECTOR_TIME * 60u;
+    uint32_t coarse = CDROM_SEEK_DELAY + (extra < cap ? extra : cap);
+    return fine < (uint64_t)coarse ? (uint32_t)fine : coarse;
 }
 
 /* =========================================================================
@@ -333,12 +345,20 @@ static void *async_reader_thread(void *arg) {
 
         uint32_t lba = r->requested_lba;
         r->has_request = false;
+        r->busy        = true;
         pthread_mutex_unlock(&r->mutex);
 
-        bool ok = cdrom_disc_read_sector(r->disc, lba, r->sector);
+        /* Into a local: r->sector is shared, and filling it with the mutex
+         * released let the consumer memcpy a half-written sector. */
+        uint8_t tmp[CDROM_RAW_SECTOR];
+        bool ok = cdrom_disc_read_sector(r->disc, lba, tmp);
 
         pthread_mutex_lock(&r->mutex);
-        r->sector_ready = ok;
+        memcpy(r->sector, tmp, CDROM_RAW_SECTOR);
+        r->ready_lba    = lba;
+        r->read_ok      = ok;
+        r->sector_ready = true;
+        r->busy         = false;
         pthread_cond_signal(&r->cond_done);
         pthread_mutex_unlock(&r->mutex);
     }
@@ -375,13 +395,28 @@ void cdrom_async_reader_queue(CdromAsyncReader *r, uint32_t lba) {
     pthread_mutex_unlock(&r->mutex);
 }
 
-bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector) {
+bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector, uint32_t want_lba) {
     pthread_mutex_lock(&r->mutex);
-    while (!r->sector_ready && !r->shutdown)
+    for (;;) {
+        if (r->shutdown) { pthread_mutex_unlock(&r->mutex); return false; }
+
+        if (r->sector_ready) {
+            if (r->ready_lba == want_lba) {
+                bool ok = r->read_ok;
+                if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
+                r->sector_ready = false;
+                pthread_mutex_unlock(&r->mutex);
+                return ok;
+            }
+            r->sector_ready = false;   /* a sector we no longer want */
+        }
+        /* Nothing in flight for what we want, so ask. Covers both a queue()
+         * that was overwritten by a later one and a caller that never queued. */
+        if (!r->busy && !r->has_request) {
+            r->requested_lba = want_lba;
+            r->has_request   = true;
+            pthread_cond_signal(&r->cond_req);
+        }
         pthread_cond_wait(&r->cond_done, &r->mutex);
-    bool ok = r->sector_ready;
-    if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
-    r->sector_ready = false;
-    pthread_mutex_unlock(&r->mutex);
-    return ok;
+    }
 }
