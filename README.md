@@ -11,6 +11,48 @@ discs boot, play their FMV intros and reach their menus and 3D engines.
 
 ## Screenshots
 
+### Boot to gameplay, start to finish (August 6 2026)
+
+A full session on one disc: power on, BIOS shell, disc boot, movie, mission. A level was played to
+completion, saved and reloaded.
+
+![Sony Computer Entertainment boot logo](screenshots/2026-08-06-boot-sony.png)
+![PlayStation logo and the SCEE licence screen](screenshots/2026-08-06-boot-playstation.png)
+
+The BIOS shell's menu had been missing its 3D objects — the spheres were simply absent and the paint
+splashes rendered as speckle. The cause was not in the drawing but in the reading back of it: the
+shell draws each object with polygons, reads the result out of VRAM with `GP0(C0)`, and re-uploads it
+as a texture with `GP0(A0)`. `GP0(C0)` read the CPU-side VRAM model, which only ever receives what the
+CPU or DMA wrote — every rasterized pixel lived in the GL texture and nowhere else, so the readback
+returned zeros and the re-uploaded texture was black. A `scripts/sphere_probe.lua` trace put the
+120×120 upload at 0 of 900 sampled pixels non-zero before the fix and 679 after, which is about what a
+circle covers in its bounding square.
+
+![BIOS shell menu with its 3D objects](screenshots/2026-08-06-bios-menu.png)
+
+![Ace Combat 2 (Europe): the FMV intro](screenshots/2026-08-06-ace-combat-2-fmv.png)
+![Ace Combat 2 (Europe): in-engine 3D with the HUD](screenshots/2026-08-06-ace-combat-2-ingame.png)
+
+Two more defects were found by running a reference emulator on the same disc and comparing behaviour,
+not code. Line commands decode only bits 28, 27 and 25 — bits 26 and 24 are not decoded at all
+(`DOCS/graphicsprocessingunitgpu.md:219-229`) — but the GP0 dispatch table was indexed by the exact
+command byte, so `0x4C`, `0x4E` and `0x55` fell through as unhandled and those lines were never drawn.
+Accepting them exposed what had been hiding behind them: one batch was opened per line, so a frame
+with more than 1024 primitives lost everything after the limit. 5900 dropped primitives in a 90 second
+run, now none.
+
+The CD drive was also handing over data far too early. Over the first 20 seconds of a boot it charged
+212 ms of drive time where a reference run charges 2332 ms; it is now 2210 ms, and short seeks land
+within 1% (13.86 ms against 13.96 for a two-sector move). Three causes: the 1x→2x spin-up was only
+charged on a seek and never on a read, `Init` did not apply its own documented effect of dropping the
+drive to single speed (`DOCS/cdromdrive.md:535-537`), and seek distance was measured from a position
+that runs ahead of where the head actually is.
+
+And a genuine race: the async disc reader published its buffer with a bare "ready" flag and nothing
+recording which sector was in it, so queueing sector N+1 while the thread was still fetching N made
+the consumer take N believing it had asked for N+1. The XA decoder then saw a sector whose header did
+not follow the last one — 7 sequence breaks over a 60 second run, and none now.
+
 ### New debug interface — the pipeline view during Ace Combat 2 in-engine 3D (July 30 2026)
 ![Reorganised debug UI: machine bar, mode rail, stage and the CD→XA→MDEC→DMA→VRAM pipeline](Screenshot%202026-07-30%20192724.png)
 
@@ -76,6 +118,12 @@ make
 
 Requirements: `gcc`, `g++`, `SDL2`, `OpenGL`, `GLEW`.
 
+`make` builds every translation unit in parallel by default and tracks header dependencies, so editing
+anything in `include/` rebuilds exactly what included it. A clean build is about 9 seconds here against
+33 serial; touching one `.c` is under half a second. `make clean && make` is no longer needed after a
+header change — it used to be, and forgetting it produced a binary with mismatched struct layouts that
+crashed or misbehaved without saying why. `make DEBUG=1` gives an `-O0 -g` build for stepping in gdb.
+
 The BIOS must match the disc's region, as on hardware: a PAL disc booted with the US BIOS is rejected
 and you are left at the BIOS menu. BIOS tested: SCPH-1001 (US), SCPH-7502 (PAL). The game path has to
 be passed as `--game=<cue>`; a bare positional path is treated as the BIOS path.
@@ -126,10 +174,14 @@ a 3.3 core context and NVIDIA returns exactly that, while Mesa reports the highe
 
 ---
 
-## Current status (July 28 2026)
+## Current status (August 6 2026)
 
-The BIOS boots to its menu. `Ace Combat 2 (Europe)` boots from a real disc image, plays its FMV intro
-correctly, and reaches its textured main menu and an in-engine 3D cockpit view.
+The BIOS boots to its menu, with the 3D objects the shell draws there. `Ace Combat 2 (Europe)` boots
+from a real disc image, plays its FMV intro, reaches its menus and its 3D engine, and a mission has
+been played through to completion — saved, reloaded and finished. That is one game on one machine, not
+a compatibility claim.
+
+Rendering is OpenGL 3.3 only; there is no Vulkan or software renderer.
 
 **Audio now runs on the emulated clock** (July 28 2026). The SPU's DSP was already complete — 24
 voices with ADPCM decode and Gaussian interpolation, the full ADSR state machine, the 32-register
@@ -163,14 +215,25 @@ surface as `emu.save_state(path)` / `emu.load_state(path)`, which park their req
 between frames — a script's callbacks run from inside the event dispatch, and writing the machine out
 from in there captures a state with no VBlank scheduled, which never produces another frame.
 
-Known rendering gaps: the mask-bit *test* (don't overwrite masked pixels) is not applied to rasterized
-primitives, VRAM readback and VRAM→VRAM copy still read the CPU-side VRAM model, and texture sampling
-reads a separate mirror — so render-to-texture effects don't work. The CRTC advances once per frame
-rather than per scanline, which also leaves Timer0's hblank gate unwired. Details and priorities in
-`GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `GPU_GAP_ANALYSIS_2026-07-15.md`.
+**Controllers**: a DualShock 4 over USB or Bluetooth, through `SDL_GameController`, with hot-plug; the
+keyboard stays live alongside it. That is the pad that has been tested — no other controller has.
+Rumble is implemented on both the old one-motor method and the newer `4Dh`-mapped one but has never
+been confirmed against real hardware, and there is no UI for pad state or button remapping; the
+mapping is hard-coded in `src/core/controller.c`.
 
-This is a real disc booting to its menu and playing its movies — not a claim of finished, stable
-gameplay.
+Render-to-texture now works: `GP0(C0)` and `GP0(0x80)` read the rendered VRAM back through a
+synchronous cross-thread readback, and textured batches sample the render target through
+`ARB_texture_barrier` where the driver has it. The mask-bit *test* reaches rasterized primitives too.
+Those three were the long-standing renderer gaps; the readback is what the BIOS menu needed, but the
+other two have not yet been checked against a case that exercises them. Still open: the CRTC advances
+once per frame rather than per scanline, which leaves Timer0's hblank gate unwired, and texpage bit 11
+(Y base 2) is not applied. Details in `GAP_ANALYSIS_REFACTOR_2026-07-13.md` and
+`GPU_GAP_ANALYSIS_2026-07-15.md`.
+
+Known audio behaviour: the emulated machine generates a small surplus over 44100 samples a second and
+the ring never overflows, but a long disc seek blocks the emulation thread on real file I/O — stalls of
+115 to 232 ms were measured against a ring that holds about 55 ms, and each one is heard as a dropout.
+`scripts/audio_underrun_probe.lua` is what separates that from silence the game asked for.
 
 ### Component status
 
@@ -183,15 +246,15 @@ gameplay.
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
-| CDROM | Working | Async command/response model, disc region detection, XA audio decode |
-| SIO / controllers | Working | Digital pad, both memory card slots. No analog pad or multitap yet |
+| CDROM | Working | Async command/response model, disc region detection, XA audio decode, drive seek and spin-up timing |
+| SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; DualShock analog protocol 41h/73h/F3h, both memory card slots. Rumble unverified on hardware. No multitap |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
-| GPU / renderer | Working | Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp display |
+| GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp display, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
-| SPU / audio | Working | Emulated-clock sample generation; output quality not yet surveyed |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load |
+| SPU / audio | Working | Emulated-clock sample generation. Dropouts remain where a long disc seek blocks the emulation thread |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v4 |
 
 ---
 

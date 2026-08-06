@@ -285,9 +285,12 @@ distribution.
 
 **Traps that have each cost a session**:
 
-- The Makefile has no header dependency tracking. After editing anything in `include/`, run
-  `make clean && make` — an incremental build after a struct change produces a binary with mixed
-  layouts, which segfaults or misbehaves silently.
+- ~~The Makefile has no header dependency tracking.~~ Fixed 2026-08-06: `-MMD -MP` plus `-include` of
+  the generated `.d` files, so editing anything in `include/` rebuilds exactly what included it. The
+  `make clean && make` ritual is no longer needed. `make` is also parallel by default (`-j$(nproc)`);
+  an explicit `-j` on the command line still wins.
+- `make test` is broken and was already broken before this: `tests/` does not exist in the tree,
+  though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
   time" that was later withdrawn.
