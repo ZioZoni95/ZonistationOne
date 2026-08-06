@@ -127,8 +127,17 @@ void spu_set_control(Spu* spu, uint16_t value) {
         }
     }
 
-    /* Update status mode bits */
-    spu->status = (spu->status & ~SPU_STATUS_MODE) | (value & SPU_CTRL_TRANSFER_MODE);
+    /* SPUSTAT.5-0 mirrors SPUCNT.5-0 in full — not just the transfer mode in
+     * bits 5-4 (DOCS/soundprocessingunitspu.md:579). Every documented SPUCNT
+     * sequence ends with "wait until it is applied in SPUSTAT" (:566-568,
+     * :635-651), so a driver that writes SPUCNT and polls SPUSTAT for the same
+     * low bits never sees its write land if bits 3-0 are dropped. Ace Combat 2
+     * writes 0xC085 (low bits 05h: CD audio + CD reverb) at the handover to the
+     * game engine, and stayed there with main volume at zero.
+     * Bit 7 repeats SPUCNT.5 (:577). */
+    spu->status = (uint16_t)((spu->status & ~(SPU_STATUS_MODE | SPU_STATUS_DMA_REQUEST))
+                             | (value & SPU_STATUS_MODE)
+                             | ((value & (1u << 5)) ? SPU_STATUS_DMA_REQUEST : 0u));
 
     if (value != old) {
         LOG_SPU_INFO("[SPU] Control=0x%04X (enable=%d, muted=%d, irq=%d, mode=%d)",

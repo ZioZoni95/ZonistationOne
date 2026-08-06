@@ -1873,18 +1873,35 @@ static void renderer_service_sync_readback(Renderer* renderer, int wi) {
     }
     s_exec_from[wi] = s_frame[wi].op_count;
 
-    /* GL 3.3 has no glGetTextureSubImage, so the whole target comes back and
-     * the rect is cropped out of it. GP0(0xC0) is rare (a few dozen per boot). */
-    glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    /* Read only the rect. display_fbo has vram_tex as its colour attachment and
+     * glReadPixels returns rows in the same order glTexSubImage2D uploads them,
+     * so framebuffer row y is VRAM row y. Pulling the whole 2 MB texture back
+     * instead cost ~2.3ms per call, and a burst of 50 in one second stalled the
+     * emulator thread for 115ms — long enough to drain the audio ring.
+     *
+     * A rect that wraps the VRAM edges is read whole; that case is rare and not
+     * worth a second code path. */
+    bool wraps = (uint32_t)s_sync_rb_x + s_sync_rb_w > 1024u
+              || (uint32_t)s_sync_rb_y + s_sync_rb_h > 512u;
+    if (wraps) {
+        glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    } else {
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glReadPixels(s_sync_rb_x, s_sync_rb_y, s_sync_rb_w, s_sync_rb_h,
+                     GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     for (uint16_t row = 0; row < s_sync_rb_h; row++) {
         uint32_t y = (uint32_t)((s_sync_rb_y + row) & 0x1FF);
         for (uint16_t col = 0; col < s_sync_rb_w; col++) {
             uint32_t x = (uint32_t)((s_sync_rb_x + col) & 0x3FF);
-            const uint8_t* p = &s_readback_rgba[(y * 1024u + x) * 4u];
+            const uint8_t* p = wraps ? &s_readback_rgba[(y * 1024u + x) * 4u]
+                                     : &s_readback_rgba[((uint32_t)row * s_sync_rb_w + col) * 4u];
             s_sync_rb_dst[y * 1024u + x] = (uint16_t)(((uint16_t)(p[0] >> 3))
                                                     | ((uint16_t)(p[1] >> 3) << 5)
                                                     | ((uint16_t)(p[2] >> 3) << 10)
