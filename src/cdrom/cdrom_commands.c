@@ -64,6 +64,7 @@ void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles);
 
 static void begin_reading(Cdrom *cdrom) {
     bool location_changed = false;
+    uint32_t from_lba = cdrom->head_lba;
     if (cdrom->setloc_pending) {
         location_changed      = (cdrom->setloc_lba != cdrom->current_lba);
         cdrom->current_lba    = cdrom->setloc_lba;
@@ -73,9 +74,26 @@ static void begin_reading(Cdrom *cdrom) {
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
     cdrom->drive_state = DRIVE_READING;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
-    /* Location changed: head needs extra seek time before first sector */
+    /* Location changed: the head has to get there before the first sector. That
+     * is a seek, so it costs what a seek of that distance costs — a flat 30
+     * sectors (400ms) regardless of distance both overcharged short moves and
+     * undercharged long ones, and stacked on top of the SeekL the game had
+     * usually already issued. */
     uint32_t base = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
-    uint32_t delay = location_changed ? CDROM_SEEK_CHANGE_DELAY : base;
+    uint32_t delay = location_changed
+        ? base + cdrom_disc_get_seek_ticks(from_lba, cdrom->current_lba)
+        : base;
+    /* A speed change owed by Setmode is paid here too, not only on a seek. The
+     * boot sequence is Setloc, SeekL, Setmode 0x80, ReadN — the Setmode lands
+     * after the seek, so charging it only in begin_seeking() let the first read
+     * skip the whole spin-up and deliver its sector ~600ms early. */
+    uint32_t speed = cdrom->pending_speed_change;
+    delay += speed;
+    cdrom->pending_speed_change = 0;
+    LOG_CDROM_DEBUG("[CDROM] Read start LBA %u: %u (%.3f ms)%s%s",
+                    cdrom->current_lba, delay, delay / 33868.8,
+                    location_changed ? " (location changed)" : "",
+                    speed ? " (incl. speed change)" : "");
     cdrom_schedule_drive_event(cdrom, delay);
 }
 
@@ -99,6 +117,8 @@ static void begin_playing(Cdrom *cdrom, uint8_t track_param) {
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
     uint32_t base = cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X;
     uint32_t delay = location_changed ? CDROM_SEEK_CHANGE_DELAY : base;
+    delay += cdrom->pending_speed_change;   /* same reason as begin_reading() */
+    cdrom->pending_speed_change = 0;
     cdrom_schedule_drive_event(cdrom, delay);
 }
 
@@ -110,14 +130,20 @@ static void begin_seeking(Cdrom *cdrom, bool read_after, bool play_after) {
         cdrom->setloc_pending = false;
     }
     LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> SEEKING (LBA %u -> %u)",
-                    cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba, cdrom->target_lba);
+                    cdrom_drive_state_name(cdrom->drive_state), cdrom->head_lba, cdrom->target_lba);
     cdrom->drive_state = DRIVE_SEEKING;
-    /* Use fast delay when head is already at target (pcsx-redux: 0x800 cycles) */
-    uint32_t delay = (cdrom->target_lba == cdrom->current_lba)
+    /* Distance from where the head is, not from the next sector queued. */
+    uint32_t delay = (cdrom->target_lba == cdrom->head_lba)
         ? CDROM_SEEK_FAST_DELAY
-        : cdrom_disc_get_seek_ticks(cdrom->current_lba, cdrom->target_lba);
-    delay += cdrom->pending_speed_change;   /* see Setmode */
+        : cdrom_disc_get_seek_ticks(cdrom->head_lba, cdrom->target_lba);
+    uint32_t speed = cdrom->pending_speed_change;   /* see Setmode */
+    delay += speed;
     cdrom->pending_speed_change = 0;
+    LOG_CDROM_DEBUG("[CDROM] Seek time %u -> %u (%d LBA): %u (%.3f ms)%s",
+                    cdrom->head_lba, cdrom->target_lba,
+                    (int)cdrom->target_lba - (int)cdrom->head_lba,
+                    delay, delay / 33868.8,
+                    speed ? " (incl. speed change)" : "");
     cdrom_schedule_second_response_event(cdrom, delay);
 }
 
@@ -258,12 +284,17 @@ void cdrom_execute_command(Cdrom *cdrom) {
     }
 
     /* --- 0x0A Init --- */
-    case CDC_INIT:
+    case CDC_INIT: {
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_INIT;
-        cdrom_schedule_second_response_event(cdrom, CDROM_INIT_DELAY);
+        /* Init drops the drive back to single speed (see the second response),
+         * so it owes the spin-down before it can answer. */
+        uint32_t delay = CDROM_INIT_DELAY;
+        if (cdrom->double_speed) delay += CDROM_SPEED_DOWN_DELAY;
+        cdrom_schedule_second_response_event(cdrom, delay);
         break;
+    }
 
     /* --- 0x0B Mute --- */
     case CDC_MUTE:
@@ -554,7 +585,19 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     case CDC_INIT:
         cdrom->motor_on    = cdrom->disc_present;
         cdrom->drive_state = DRIVE_IDLE;
-        cdrom->mode        = 0;
+        /* "Sets mode=20h, activates drive motor, Standby, abort all commands"
+         * (DOCS/cdromdrive.md:535-537). Setting the register without deriving
+         * the flags from it left double_speed set, so the Setmode 0x80 the
+         * BIOS sends next was a no-op and never charged its 1x->2x spin-up —
+         * the boot then ran most of a second ahead of the drive. */
+        cdrom->mode             = 0x20;
+        cdrom->double_speed     = false;
+        cdrom->xa_adpcm_enable  = false;
+        cdrom->whole_sector     = true;   /* bit 5 */
+        cdrom->xa_filter_enable = false;
+        cdrom->report_enable    = false;
+        cdrom->auto_pause       = false;
+        cdrom->cdda_enable      = false;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_complete(cdrom);
         break;
@@ -585,6 +628,7 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     case CDC_SEEKL:
     case CDC_SEEKP:
         cdrom->current_lba = cdrom->target_lba;
+        cdrom->head_lba    = cdrom->target_lba;   /* the head has arrived */
         cdrom->drive_state = DRIVE_IDLE;
         /* update SubQ for new position */
         cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
@@ -623,7 +667,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
     if (cdrom->drive_state == DRIVE_READING) {
         /* Retrieve sector from async reader */
         uint8_t raw[2352];
-        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw);
+        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw, cdrom->current_lba);
         if (!ok) {
             /* No-disc → NOT_READY (0x80): BIOS retries. Disc error → SEEK_ERROR (0x04): BIOS aborts. */
             uint8_t err_reason = cdrom->disc_present ? 0x04 : 0x80;
@@ -713,6 +757,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
                                    raw + 24, xa_stereo, xa_8bit, xa_18900,
                                    cdrom->muted);
 
+            cdrom->head_lba = cdrom->current_lba;   /* the sector just transferred */
             cdrom->current_lba++;
             if (cdrom->drive_state == DRIVE_READING) {
                 cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
@@ -750,6 +795,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
             lua_debug_notify("cdrom_int1");
 
+            cdrom->head_lba = cdrom->current_lba;   /* the sector just transferred */
             cdrom->current_lba++;
             if (cdrom->drive_state == DRIVE_READING)
                 cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
@@ -758,7 +804,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
     } else if (cdrom->drive_state == DRIVE_PLAYING) {
         /* CDDA */
         uint8_t raw[2352];
-        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw);
+        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw, cdrom->current_lba);
         if (!ok) {
             LOG_CDROM_ERROR("[CDROM] CDDA read failed at LBA %u", cdrom->current_lba);
             cdrom->drive_state = DRIVE_IDLE;

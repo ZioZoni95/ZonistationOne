@@ -49,6 +49,10 @@ struct Interconnect;
  * no longer enough headroom. */
 #define CDROM_SEEK_FAST_DELAY    30000  /* setloc_pending, no head movement */
 #define CDROM_SEEK_DELAY         (CDROM_SECTOR_TIME * 4u)      /* real seek base */
+/* Per-sector cost of a short head move, ~6.93 ms at 33.8688 MHz. Calibrated
+ * against observed drive behaviour, not documented — see
+ * cdrom_disc_get_seek_ticks(). */
+#define CDROM_SEEK_FINE_PER_LBA  234700u
 #define CDROM_SEEK_CHANGE_DELAY  (CDROM_SECTOR_TIME * 30u)     /* post-location-change first read */
 
 /* Spinup */
@@ -233,6 +237,13 @@ typedef struct Cdrom {
 
     /* --- Position --- */
     uint32_t current_lba;
+    /* Where the pickup physically sits: the last sector actually transferred.
+     * current_lba runs ahead of it — it is advanced to the next sector to fetch
+     * as soon as one is delivered, and jumped to the Setloc target before the
+     * head has moved. Measuring seek distance from it made almost every seek
+     * come out as zero distance and cost 0.9ms instead of ~20ms, which is most
+     * of why the boot ran seconds ahead of the drive. */
+    uint32_t head_lba;
     uint32_t target_lba;
     uint32_t setloc_lba;
     bool     setloc_pending;

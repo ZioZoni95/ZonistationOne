@@ -19,7 +19,11 @@
 #include <sys/stat.h>
 
 #define ZS1_STATE_MAGIC   0x5A533153u   /* "ZS1S" */
-#define ZS1_STATE_VERSION 3u   /* 3: added SIOI — the SIO0 protocol state */
+/* 3: added SIOI — the SIO0 protocol state
+ * 4: Cdrom gained head_lba, so every field after it moved. The CDRH/CDRT
+ *    sections are raw byte ranges of the struct, so a v3 state would load
+ *    shifted and appear to work while the drive state was nonsense. */
+#define ZS1_STATE_VERSION 4u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
