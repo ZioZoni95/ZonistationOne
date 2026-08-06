@@ -461,6 +461,60 @@ static int l_emu_reverb(lua_State* L) {
  * stream is the audio source, so a starving or overflowing FIFO here is heard
  * directly. Also reports SPUCNT, whose reverb/CD-audio enables decide what the
  * mixer is even supposed to be doing. */
+/* emu.vram_compare() — the CPU-side VRAM model against what the GPU actually holds.
+ *
+ * The renderer rasterises into a GL texture; gpu.vram.data only ever receives
+ * what the CPU or DMA wrote there. Anything a game draws with GP0 primitives and
+ * then samples back as a texture therefore exists on one side and not the other,
+ * and that gap is invisible from either side alone.
+ *
+ * Asynchronous by necessity: the GL context belongs to the GPU thread, so the
+ * first call asks for a readback and returns nil, and a later call returns the
+ * result once it has landed. Returns:
+ *   differing, colour_diff, mask_diff, gpu_only, first_x, first_y, seq
+ * where gpu_only counts pixels the GPU has and the CPU model reads as zero —
+ * that is the count that matters for "did we sample something that was never
+ * uploaded". */
+static int l_emu_vram_compare(lua_State* L) {
+    static uint32_t s_last_seq = 0;
+    static bool     s_awaiting = false;
+
+    Renderer* r = &g_inter->gpu.renderer;
+    uint32_t seq = 0;
+    const uint16_t* gpu_vram = renderer_get_vram_readback(&seq);
+
+    if (s_awaiting && gpu_vram && seq != s_last_seq) {
+        s_last_seq = seq;
+        s_awaiting = false;
+
+        const uint16_t* cpu_vram = (const uint16_t*)g_inter->gpu.vram.data;
+        uint32_t total = 0, colour = 0, mask = 0, gpu_only = 0;
+        int fx = -1, fy = -1;
+        for (uint32_t i = 0; i < 1024u * 512u; i++) {
+            uint16_t a = cpu_vram[i], b = gpu_vram[i];
+            if (a == b) continue;
+            total++;
+            if ((a & 0x7FFF) != (b & 0x7FFF)) colour++; else mask++;
+            if (a == 0 && b != 0) gpu_only++;
+            if (fx < 0) { fx = (int)(i % 1024u); fy = (int)(i / 1024u); }
+        }
+        lua_pushinteger(L, (lua_Integer)total);
+        lua_pushinteger(L, (lua_Integer)colour);
+        lua_pushinteger(L, (lua_Integer)mask);
+        lua_pushinteger(L, (lua_Integer)gpu_only);
+        lua_pushinteger(L, (lua_Integer)fx);
+        lua_pushinteger(L, (lua_Integer)fy);
+        lua_pushinteger(L, (lua_Integer)seq);
+        return 7;
+    }
+
+    if (!s_awaiting) {
+        s_awaiting = true;
+        renderer_request_vram_readback(r);
+    }
+    return 0;   /* nothing yet — call again on a later frame */
+}
+
 static int l_emu_cd_audio(lua_State* L) {
     Cdrom* cd = &g_inter->cdrom;
     lua_pushinteger(L, (lua_Integer)cd->audio_fifo.count);
@@ -597,6 +651,7 @@ static const luaL_Reg s_emu_funcs[] = {
     {"spu_stats",         l_emu_spu_stats},
     {"reverb",            l_emu_reverb},
     {"cd_audio",          l_emu_cd_audio},
+    {"vram_compare",      l_emu_vram_compare},
     {"host_ms",           l_emu_host_ms},
     {"irq",               l_emu_irq},
     {"vram_upload_rect",  l_emu_vram_upload_rect},

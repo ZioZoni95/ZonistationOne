@@ -110,6 +110,7 @@ typedef struct {
     GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
     GLint uniform_stp_mode_loc;     /* -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0) */
     GLint uniform_set_mask_loc;     /* Location for u_set_mask (GP0(E6).0) */
+    GLint uniform_mask_test_loc;    /* Location for u_mask_test (GP0(E6).1) */
 
     // CPU-Side Buffers (Temporary storage before uploading to GPU)
     // These hold the data pushed by the GPU command handlers.
@@ -129,6 +130,7 @@ typedef struct {
     uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
     bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
     bool set_mask_enabled;      // GP0(E6).0 — force bit 15 set on every pixel drawn
+    bool mask_test_enabled;     // GP0(E6).1 — skip pixels whose destination bit 15 is set
 
     /* Cached pipeline state — snapshot into each batch for GPU thread replay */
     int16_t  cached_offset_x, cached_offset_y;
@@ -208,6 +210,12 @@ GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
  * -------------------------------------------------------------------------- */
 void            renderer_request_vram_readback(Renderer* renderer);
 const uint16_t* renderer_get_vram_readback(uint32_t* seq_out);
+
+/* Synchronous readback of one VRAM rect into the CPU-side VRAM: flushes the
+ * ops queued so far, then copies the rendered pixels back. What GP0(0xC0)
+ * and GP0(0x80) need to see polygons the rasterizer drew. */
+bool renderer_read_vram_rect(Renderer* renderer, uint16_t* vram,
+                             uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
 /**
  * @brief Buffers a triangle's vertex data for later drawing.
@@ -386,6 +394,10 @@ void renderer_set_dither_mode(Renderer* renderer, bool enabled);
  * @param enabled   True when GP0(E6).0 is set.
  */
 void renderer_set_mask_mode(Renderer* renderer, bool enabled);
+/* GP0(E6).1 - skip drawing a pixel whose destination halfword already has bit
+ * 15 set. Honoured only where the texture barrier lets a shader read the render
+ * target; without it the test cannot see rasterized pixels and is ignored. */
+void renderer_set_mask_test(Renderer* renderer, bool enabled);
 
 /**
  * @brief Sets the PSX display region to crop from the FBO when blitting to screen.

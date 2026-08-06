@@ -228,6 +228,33 @@ static inline uint16_t make_tpage(Gpu* gpu) {
                       ((uint16_t)gpu->texture_depth << 7));
 }
 
+/* ZS1_GPU_TRACE_BATCH=1: dump the whole command for the first few distinct
+ * textured primitives. The batch trace shows the texpage we ended up with; this
+ * shows the words it was taken from, which is the only way to tell "the guest
+ * asked for page 11" from "we read the wrong word of the command". */
+static void trace_textured_primitive(const Gpu* gpu, const char* what,
+                                     uint16_t clut, uint16_t texpage) {
+    static int s_trace = -1;
+    if (s_trace < 0) s_trace = getenv("ZS1_GPU_TRACE_BATCH") ? 1 : 0;
+    if (!s_trace) return;
+
+    static uint32_t seen[24]; static int n = 0;
+    uint32_t key = ((uint32_t)texpage << 16) | clut;
+    for (int i = 0; i < n; i++) if (seen[i] == key) return;
+    if (n >= 24) return;
+    seen[n++] = key;
+
+    char words[256]; int off = 0;
+    uint32_t count = gpu->gp0_command_buffer.count;
+    if (count > 12) count = 12;
+    for (uint32_t i = 0; i < count && off < (int)sizeof(words) - 12; i++)
+        off += snprintf(words + off, sizeof(words) - (size_t)off, "%08x ",
+                        gpu->gp0_command_buffer.buffer[i]);
+    LOG_GPU_INFO("[GPU] %s cmd=0x%02x clut=0x%04x tpage=0x%04x (pageX=%u depth=%u) | %s",
+                 what, (unsigned)(gpu->gp0_command_buffer.buffer[0] >> 24),
+                 clut, texpage, texpage & 0xF, (texpage >> 7) & 3, words);
+}
+
 // ---------------------------------------------------------------------------
 // Helper: apply a Texpage attribute to the draw-mode state
 //
@@ -346,6 +373,26 @@ static void gp0_fill_rectangle(Gpu* gpu) {
 // ---------------------------------------------------------------------------
 static void gp0_draw_mode(Gpu* gpu) {
     uint32_t value = gpu->gp0_command_buffer.buffer[0];
+    /* ZS1_GPU_TRACE_BATCH=1 also reports every distinct GP0(E1) the guest writes,
+     * so a wrong texture depth can be attributed to the guest asking for it or to
+     * this decode getting it wrong — the batch trace alone cannot tell them apart. */
+    {
+        static int s_trace = -1;
+        if (s_trace < 0) s_trace = getenv("ZS1_GPU_TRACE_BATCH") ? 1 : 0;
+        if (s_trace) {
+            static uint32_t seen[32]; static int n = 0;
+            bool known = false;
+            for (int i = 0; i < n; i++) if (seen[i] == (value & 0x3FFF)) { known = true; break; }
+            if (!known && n < 32) {
+                seen[n++] = value & 0x3FFF;
+                LOG_GPU_INFO("[GPU] GP0(E1) raw=0x%08x -> pageX=%u pageY=%u semi=%u depth=%u "
+                             "dither=%u todisp=%u texdis=%u",
+                             value, value & 0xF, (value >> 4) & 1, (value >> 5) & 3,
+                             (value >> 7) & 3, (value >> 9) & 1, (value >> 10) & 1,
+                             (value >> 11) & 1);
+            }
+        }
+    }
     gpu->page_base_x = (uint8_t)(value & 0xF);
     gpu->page_base_y = (uint8_t)((value >> 4) & 1);
     gpu->semi_transparency = (uint8_t)((value >> 5) & 3);
@@ -379,6 +426,26 @@ static void gp0_texture_window(Gpu* gpu) {
     LOG_GPU_DEBUG("[GPU] GP0(0xE2): Texture Window -> Mask(%u,%u) Offset(%u,%u)",
         gpu->texture_window_x_mask, gpu->texture_window_y_mask,
         gpu->texture_window_x_offset, gpu->texture_window_y_offset);
+    {
+        static int s_trace = -1;
+        if (s_trace < 0) s_trace = getenv("ZS1_GPU_TRACE_BATCH") ? 1 : 0;
+        if (s_trace) {
+            static uint32_t seen[16]; static int n = 0;
+            bool known = false;
+            for (int i = 0; i < n; i++) if (seen[i] == (value & 0xFFFFF)) { known = true; break; }
+            if (!known && n < 16) {
+                seen[n++] = value & 0xFFFFF;
+                LOG_GPU_INFO("[GPU] GP0(E2) raw=0x%08x -> maskX=%u maskY=%u offX=%u offY=%u "
+                             "(window %ux%u at %u,%u)",
+                             value, gpu->texture_window_x_mask, gpu->texture_window_y_mask,
+                             gpu->texture_window_x_offset, gpu->texture_window_y_offset,
+                             (unsigned)((~(gpu->texture_window_x_mask * 8u) & 0xFF) + 1),
+                             (unsigned)((~(gpu->texture_window_y_mask * 8u) & 0xFF) + 1),
+                             (unsigned)((gpu->texture_window_x_offset & gpu->texture_window_x_mask) * 8u),
+                             (unsigned)((gpu->texture_window_y_offset & gpu->texture_window_y_mask) * 8u));
+            }
+        }
+    }
 }
 
 static void gp0_drawing_area_top_left(Gpu* gpu) {
@@ -425,6 +492,11 @@ static void gp0_mask_bit_setting(Gpu* gpu) {
      * force-set flag has to follow the drawing state, not just the CPU-side
      * vram_write_masked() path. */
     renderer_set_mask_mode(&gpu->renderer, gpu->force_set_mask_bit);
+    /* Bit 1 is the *test*: skip a pixel whose destination already carries bit 15.
+     * The CPU-side path has always honoured it (vram_write_masked), but rasterized
+     * primitives ignored it entirely, so anything a game protected by setting the
+     * mask bit got overpainted anyway. */
+    renderer_set_mask_test(&gpu->renderer, gpu->preserve_masked_pixels);
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +593,7 @@ static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "poly", clut, texpage);
     gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     for (int i = 0; i < 3; i++) {
@@ -630,6 +703,7 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture)
     // (bit24), not from tpage bit15 which is reserved/always 0 on real hardware.
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "poly", clut, texpage);
     gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     for (int i = 0; i < 3; i++) {
@@ -739,6 +813,7 @@ static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "poly", clut, texpage);
     gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     for (int i = 0; i < 4; i++) {
@@ -846,6 +921,7 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture
     // which is reserved/always 0 on real hardware.
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "poly", clut, texpage);
     gpu_unpack_tpage(texpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     // Validate texture coordinates
@@ -1060,6 +1136,7 @@ static void gp0_rect_var_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "rect", clut, tpage);
     gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
@@ -1114,6 +1191,7 @@ static void gp0_rect_fixed_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture,
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
     bool raw_tex_unused;
+    trace_textured_primitive(gpu, "rect", clut, tpage);
     gpu_unpack_tpage(tpage, &page_x, &page_y, &depth, &raw_tex_unused);
 
     if (!gpu_validate_texture_coords(page_x, page_y, depth, tex.u, tex.v)) {
@@ -1171,6 +1249,10 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     LOG_VRAM_DEBUG("Copy rectangle from VRAM to VRAM src=(%u,%u), dst=(%u,%u), size=(%u,%u) [%u pixels]",
                    src_x, src_y, dst_x, dst_y, w, h, (uint32_t)w * h);
 
+    /* Same reason as GP0(0xC0): the source rect may be something the
+     * rasterizer drew, which the CPU-side VRAM has never seen. */
+    renderer_read_vram_rect(&gpu->renderer, (uint16_t*)gpu->vram.data, src_x, src_y, w, h);
+
     // Overlap-safe directional copy
     int16_t step_x = 1, step_y = 1;
     int16_t start_x = 0, start_y = 0, end_x = w, end_y = h;
@@ -1212,6 +1294,25 @@ static void gp0_image_load(Gpu* gpu) {
     if (gpu->vram_load_h == 0) gpu->vram_load_h = 512;
     if (gpu->vram_load_w > VRAM_WIDTH)  gpu->vram_load_w = VRAM_WIDTH;
     if (gpu->vram_load_h > VRAM_HEIGHT) gpu->vram_load_h = VRAM_HEIGHT;
+    {
+        static int s_trace = -1;
+        if (s_trace < 0) s_trace = getenv("ZS1_GPU_TRACE_BATCH") ? 1 : 0;
+        if (s_trace) {
+            static int n = 0;
+            if (n < 400 && gpu->vram_load_w > 8) {
+                n++;
+                if (gpu->gp0_mode == GP0_MODE_IMAGE_LOAD)
+                    LOG_GPU_WARN("[GPU] A0: previous upload ABANDONED at %u of %u pixels",
+                                 gpu->vram_load_count,
+                                 (unsigned)((uint32_t)gpu->vram_load_w * gpu->vram_load_h));
+                LOG_GPU_INFO("[GPU] A0 upload -> (%u,%u) %ux%u  [page %u..%u]",
+                             gpu->vram_load_x, gpu->vram_load_y,
+                             gpu->vram_load_w, gpu->vram_load_h,
+                             gpu->vram_load_x / 64u,
+                             (gpu->vram_load_x + gpu->vram_load_w - 1) / 64u);
+            }
+        }
+    }
 
     uint32_t pixels = (uint32_t)gpu->vram_load_w * gpu->vram_load_h;
     uint32_t words  = (pixels + 1) & ~1; words >>= 1;
@@ -1258,9 +1359,19 @@ static void gp0_image_store(Gpu* gpu) {
     gpu->gp0_words_remaining = words;
     gpu->vram_load_count = 0;
     gpu->gp0_mode = GP0_MODE_IMAGE_STORE;
+
+    /* Pull the rendered pixels back before GPUREAD starts serving them. The
+     * CPU-side VRAM only ever holds uploads; everything the rasterizer drew
+     * lives in vram_tex. The BIOS menu draws its 3D objects, reads them back
+     * here, and re-uploads them as textures — without this it reads zeros and
+     * the objects vanish. */
+    renderer_read_vram_rect(&gpu->renderer, (uint16_t*)gpu->vram.data, x, y, w, h);
     LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM->CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
     LOG_VRAM_DEBUG("Copy rectangle from VRAM to CPU offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
                    x, y, w, h, (uint32_t)w * h, words, x / 64);
+    if (getenv("ZS1_GPU_TRACE_BATCH") && w > 8)
+        LOG_GPU_INFO("[GPU] C0 readback <- (%u,%u) %ux%u  [page %u..%u]",
+                     x, y, w, h, x / 64, (x + w - 1) / 64);
 }
 
 // ---------------------------------------------------------------------------
@@ -1482,6 +1593,14 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
         gpu->gp0_words_remaining--;
         if (gpu->gp0_words_remaining == 0) {
             gpu->gp0_mode = GP0_MODE_COMMAND;
+            if (getenv("ZS1_GPU_TRACE_BATCH") && gpu->vram_load_w > 8) {
+                LOG_GPU_INFO("[GPU] A0 mask state at completion: force_set=%d preserve=%d",
+                             gpu->force_set_mask_bit, gpu->preserve_masked_pixels);
+                LOG_GPU_INFO("[GPU] A0 COMPLETE (%u,%u) %ux%u — %u of %u pixels written",
+                             gpu->vram_load_x, gpu->vram_load_y,
+                             gpu->vram_load_w, gpu->vram_load_h, gpu->vram_load_count,
+                             (unsigned)((uint32_t)gpu->vram_load_w * gpu->vram_load_h));
+            }
             renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
                                       gpu->vram_load_x, gpu->vram_load_y,
                                       gpu->vram_load_w, gpu->vram_load_h);
