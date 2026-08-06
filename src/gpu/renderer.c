@@ -22,7 +22,10 @@
  * CPU runs next frame immediately while GPU renders previous frame.
  * ========================================================================= */
 
-#define GPU_MAX_BATCHES        1024
+/* Ace Combat 2 draws well past a thousand primitives in a frame once the line
+ * commands it sends are actually accepted. At 1024 the tail of every busy
+ * frame was dropped with "batch overflow". */
+#define GPU_MAX_BATCHES        8192
 /* An FMV frame arrives as dozens of narrow VRAM upload strips per frame, on
  * top of the 2 MB VRAM-viewer snapshot and any full-VRAM upload, so both the
  * update count and the staging pool have to carry a whole frame's worth or
@@ -1583,12 +1586,33 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     int wi = renderer->write_idx;
     GpuFrame* frame = &s_frame[wi];
 
-    if (frame->batch_count >= GPU_MAX_BATCHES) {
-        LOG_RENDERER_WARN("[RENDERER] batch overflow in push_line — skipping");
-        return;
-    }
     if (s_vtx[wi] + 2 > VERTEX_BUFFER_LEN) {
         LOG_RENDERER_WARN("[RENDERER] vertex pool overflow in push_line — skipping");
+        return;
+    }
+
+    /* Consecutive lines under identical state extend the batch instead of
+     * starting a new one. One batch per line is what made a wireframe frame
+     * run into GPU_MAX_BATCHES and lose everything after it. */
+    GpuBatch* prev = NULL;
+    if (frame->op_count > 0 && frame->batch_count > 0) {
+        const GpuOp* last = &frame->ops[frame->op_count - 1];
+        if (last->type == GPU_OP_BATCH && last->index == frame->batch_count - 1) {
+            GpuBatch* c = &frame->batches[last->index];
+            if (c->is_lines && !c->texture_enabled && !c->semi_trans_enabled
+                && c->vertex_start + c->vertex_count == s_vtx[wi]
+                && c->dither_enabled    == renderer->dither_enabled
+                && c->set_mask_enabled  == renderer->set_mask_enabled
+                && c->mask_test_enabled == renderer->mask_test_enabled
+                && c->offset_x == renderer->cached_offset_x
+                && c->offset_y == renderer->cached_offset_y
+                && memcmp(c->scissor, renderer->cached_scissor, sizeof(c->scissor)) == 0)
+                prev = c;
+        }
+    }
+
+    if (!prev && frame->batch_count >= GPU_MAX_BATCHES) {
+        LOG_RENDERER_WARN("[RENDERER] batch overflow in push_line — skipping");
         return;
     }
 
@@ -1600,6 +1624,11 @@ void renderer_push_line(Renderer* renderer, RendererPosition pos[2], RendererCol
     s_tex[wi][vs]     = zero_tc; s_tex[wi][vs+1] = zero_tc;
     s_tpg[wi][vs]     = zero_tp; s_tpg[wi][vs+1] = zero_tp;
     s_vtx[wi] += 2;
+
+    if (prev) {
+        prev->vertex_count += 2;
+        return;
+    }
 
     uint32_t line_batch_idx = frame->batch_count++;
     GpuBatch* b = &frame->batches[line_batch_idx];

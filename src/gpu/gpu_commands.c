@@ -1624,6 +1624,16 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_words_remaining == 0) {
         // Start of a new command
         uint8_t opcode = (uint8_t)(word >> 24);
+
+        /* Line commands decode only bit 28 (gouraud), bit 27 (polyline) and
+         * bit 25 (semi-transparent) — bits 26 and 24 are not decoded at all
+         * (DOCS/graphicsprocessingunitgpu.md:219-229). The dispatch table is
+         * indexed by the exact byte, so 0x4C, 0x4E and 0x55 — the same
+         * commands with the undecoded bits set — were dropped as unhandled and
+         * the lines never drawn. Ace Combat 2 sends all three. */
+        if ((opcode >> 5) == 0x2)
+            opcode &= (uint8_t)~0x05u;
+
         gpu->gp0_current_opcode = opcode;
         gpu_clear_cmd_buf(gpu);
 
