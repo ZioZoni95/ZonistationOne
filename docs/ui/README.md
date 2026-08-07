@@ -1,8 +1,6 @@
 # Interface direction
 
-`ui_direction.html` is a static mockup — open it in a browser. It is the target the debug interface
-is being rebuilt against, kept in the repo so the design is a thing to check work against rather than
-something remembered from a conversation.
+`ui_direction.html` and `ui_direction_enhanced.html` are static mockups — open them in a browser. They are the targets the debug interface is being rebuilt against, kept in the repo so the design is a thing to check work against rather than something remembered from a conversation.
 
 ## Why change anything
 
