@@ -33,6 +33,8 @@ void spu_init(Spu* spu) {
     if (!spu) return;
     memset(spu, 0, sizeof(Spu));
     spu_reverb_init(spu);
+    spu_stretch_reset(&spu->stretch);
+    spu->stretch_tempo = 1.0;
     LOG_SPU_DEBUG("[SPU] SPU initialized (MMIO %08x-%08x, RAM %u bytes)",
                   SPU_START, SPU_END, SPU_RAM_SIZE);
 }
@@ -45,6 +47,8 @@ void spu_reset(Spu* spu) {
     memcpy(spu->ram, ram_copy, SPU_RAM_SIZE);
     free(ram_copy);
     spu_reverb_init(spu);
+    spu_stretch_reset(&spu->stretch);
+    spu->stretch_tempo = 1.0;
     LOG_SPU_INFO("[SPU] SPU reset (RAM preserved)");
 }
 
