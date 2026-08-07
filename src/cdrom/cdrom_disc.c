@@ -395,28 +395,30 @@ void cdrom_async_reader_queue(CdromAsyncReader *r, uint32_t lba) {
     pthread_mutex_unlock(&r->mutex);
 }
 
-bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector, uint32_t want_lba) {
+CdromSectorStatus cdrom_async_reader_poll(CdromAsyncReader *r, uint8_t *out_sector,
+                                          uint32_t want_lba) {
     pthread_mutex_lock(&r->mutex);
-    for (;;) {
-        if (r->shutdown) { pthread_mutex_unlock(&r->mutex); return false; }
 
-        if (r->sector_ready) {
-            if (r->ready_lba == want_lba) {
-                bool ok = r->read_ok;
-                if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
-                r->sector_ready = false;
-                pthread_mutex_unlock(&r->mutex);
-                return ok;
-            }
-            r->sector_ready = false;   /* a sector we no longer want */
+    if (r->shutdown) { pthread_mutex_unlock(&r->mutex); return CDROM_SECTOR_FAILED; }
+
+    if (r->sector_ready) {
+        if (r->ready_lba == want_lba) {
+            bool ok = r->read_ok;
+            if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
+            r->sector_ready = false;
+            pthread_mutex_unlock(&r->mutex);
+            return ok ? CDROM_SECTOR_READY : CDROM_SECTOR_FAILED;
         }
-        /* Nothing in flight for what we want, so ask. Covers both a queue()
-         * that was overwritten by a later one and a caller that never queued. */
-        if (!r->busy && !r->has_request) {
-            r->requested_lba = want_lba;
-            r->has_request   = true;
-            pthread_cond_signal(&r->cond_req);
-        }
-        pthread_cond_wait(&r->cond_done, &r->mutex);
+        r->sector_ready = false;   /* a sector we no longer want */
     }
+
+    /* Nothing in flight for what we want, so ask. Covers both a queue() that
+     * was overwritten by a later one and a caller that never queued. */
+    if (!r->busy && !r->has_request) {
+        r->requested_lba = want_lba;
+        r->has_request   = true;
+        pthread_cond_signal(&r->cond_req);
+    }
+    pthread_mutex_unlock(&r->mutex);
+    return CDROM_SECTOR_PENDING;
 }

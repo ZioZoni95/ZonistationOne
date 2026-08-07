@@ -452,11 +452,27 @@ void cdrom_execute_command(Cdrom *cdrom) {
     case CDC_TEST: {
         uint8_t sub = cdrom_pop_param(cdrom);
         switch (sub) {
-        case 0x20:  /* BIOS version: 94/09/19, vC0 */
-            cdrom_push_response(cdrom, 0x94);
-            cdrom_push_response(cdrom, 0x09);
-            cdrom_push_response(cdrom, 0x19);
-            cdrom_push_response(cdrom, 0xC0);
+        case 0x20:
+            /* HC05 controller firmware date/version, BCD (DOCS/cdromdrive.md:1136-1155).
+             * 95h,05h,16h,C1h is the LATE-PU-8, 16 May 1995.
+             *
+             * What this value is decides which boot path the BIOS takes, so it is
+             * not cosmetic. It was 94h,09h,19h,C0h — a PU-7 from Sep 1994 — and
+             * DOCS:1170 says vC0 cannot answer Test 19h,22h at all, so the BIOS
+             * never asked this machine what region it was and the region gate
+             * simply never ran. That is why a PAL disc booted regardless of what
+             * the drive claimed.
+             *
+             * vC2 (PU-18, 97h,01h,10h) is the generation that actually shipped
+             * the SCPH-7002/7502 BIOS, but it sends the BIOS down a ReadTOC-based
+             * identification path that stops here: the command is a stub that
+             * never builds a TOC, and boot waits on it forever. vC1 is the oldest
+             * version that supports the region string (DOCS:1170) and keeps the
+             * boot path we do serve. Moving to vC2 means implementing ReadTOC. */
+            cdrom_push_response(cdrom, 0x95);
+            cdrom_push_response(cdrom, 0x05);
+            cdrom_push_response(cdrom, 0x16);
+            cdrom_push_response(cdrom, 0xC1);
             cdrom_send_ack(cdrom);
             break;
         case 0x04:  /* reset SCEx, force motor on */
@@ -470,16 +486,25 @@ void cdrom_execute_command(Cdrom *cdrom) {
             cdrom_push_response(cdrom, 0x00);
             cdrom_send_ack(cdrom);
             break;
-        case 0x22:  /* region string */
-            cdrom_push_response(cdrom, 'f');
-            cdrom_push_response(cdrom, 'o');
-            cdrom_push_response(cdrom, 'r');
-            cdrom_push_response(cdrom, ' ');
-            cdrom_push_response(cdrom, 'U');
-            cdrom_push_response(cdrom, '/');
-            cdrom_push_response(cdrom, 'C');
+        case 0x22: {
+            /* Region ID string (DOCS/cdromdrive.md:1168-1181). This is the
+             * drive's own region — it decides which SCEx discs the machine
+             * accepts — so it has to follow the BIOS that is running, not the
+             * disc that happens to be in the tray. It was hardcoded to "for U/C"
+             * (North America), which no BIOS ever read because we also reported
+             * a vC0 controller, and vC0 cannot answer this at all. */
+            const char *s;
+            switch (cdrom->console_region) {
+                case 'E': s = "for Europe"; break;
+                case 'I':
+                case 'J': s = "for Japan";  break;
+                default:  s = "for U/C";    break;   /* 'A', North America */
+            }
+            for (const char *p = s; *p; p++)
+                cdrom_push_response(cdrom, (uint8_t)*p);
             cdrom_send_ack(cdrom);
             break;
+        }
         default:
             cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
             cdrom_send_ack(cdrom);
@@ -531,7 +556,7 @@ void cdrom_execute_command(Cdrom *cdrom) {
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_READTOC;
-        cdrom_schedule_second_response_event(cdrom, CDROM_INIT_DELAY);
+        cdrom_schedule_second_response_event(cdrom, CDROM_READTOC_DELAY);
         break;
 
     /* --- 0x1F VideoCD (not emulated) --- */
@@ -667,8 +692,18 @@ void cdrom_execute_drive(Cdrom *cdrom) {
     if (cdrom->drive_state == DRIVE_READING) {
         /* Retrieve sector from async reader */
         uint8_t raw[2352];
-        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw, cdrom->current_lba);
-        if (!ok) {
+        CdromSectorStatus st = cdrom_async_reader_poll(&cdrom->async_reader, raw,
+                                                       cdrom->current_lba);
+        if (st == CDROM_SECTOR_PENDING) {
+            /* The disc has not delivered yet. Waiting here stopped the whole
+             * emulation thread on real file I/O: a seek to a cold part of a
+             * 580 MB image froze it for 115-232ms, which is a dropped frame and
+             * an audible gap in an audio ring that holds about 55ms. Come back
+             * shortly instead — the drive is late, not the machine. */
+            cdrom_schedule_drive_event(cdrom, CDROM_READ_RETRY_DELAY);
+            return;
+        }
+        if (st == CDROM_SECTOR_FAILED) {
             /* No-disc → NOT_READY (0x80): BIOS retries. Disc error → SEEK_ERROR (0x04): BIOS aborts. */
             uint8_t err_reason = cdrom->disc_present ? 0x04 : 0x80;
             LOG_CDROM_DEBUG("[CDROM] Read failed at LBA %u (disc_present=%d, err=0x%02x)",
@@ -804,8 +839,13 @@ void cdrom_execute_drive(Cdrom *cdrom) {
     } else if (cdrom->drive_state == DRIVE_PLAYING) {
         /* CDDA */
         uint8_t raw[2352];
-        bool ok = cdrom_async_reader_wait(&cdrom->async_reader, raw, cdrom->current_lba);
-        if (!ok) {
+        CdromSectorStatus st = cdrom_async_reader_poll(&cdrom->async_reader, raw,
+                                                       cdrom->current_lba);
+        if (st == CDROM_SECTOR_PENDING) {   /* same reason as the read path */
+            cdrom_schedule_drive_event(cdrom, CDROM_READ_RETRY_DELAY);
+            return;
+        }
+        if (st == CDROM_SECTOR_FAILED) {
             LOG_CDROM_ERROR("[CDROM] CDDA read failed at LBA %u", cdrom->current_lba);
             cdrom->drive_state = DRIVE_IDLE;
             return;

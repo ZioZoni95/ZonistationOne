@@ -17,6 +17,47 @@
 #define LOG_BIOS_TRACE_ENABLED 0
 #endif
 
+// Reads the console region out of the image's own version banner.
+//
+// Every retail image carries "System ROM Version <v> <mm/dd/yy> <R>" where R is
+// the region letter — 'A' America, 'E' Europe, 'I'/'J' Japan. It is the same
+// text the BIOS prints on the TTY at boot, so a region taken from here cannot
+// disagree with the ROM that is running. Both known images hold it at 0x7FF32,
+// but the string is searched for rather than read from a fixed offset, because
+// nothing documents that offset as fixed.
+//
+// The image also contains an earlier, shorter "System ROM Version" without the
+// date (a format string), so the scan keeps the last match: the banner is the
+// one at the end of the ROM.
+void bios_detect_region(Bios* bios) {
+    static const char kNeedle[] = "System ROM Version ";
+    const size_t nlen = sizeof(kNeedle) - 1;
+
+    bios->region = 0;
+    for (size_t i = 0; i + nlen < BIOS_SIZE; i++) {
+        if (memcmp(&bios->data[i], kNeedle, nlen) != 0) continue;
+
+        // Walk to the end of the NUL-terminated string, then back over trailing
+        // blanks; the region letter is the last printable character.
+        size_t j = i + nlen;
+        size_t end = j;
+        while (end < BIOS_SIZE && bios->data[end] >= 0x20 && bios->data[end] < 0x7F)
+            end++;
+        while (end > j && bios->data[end - 1] == ' ') end--;
+        if (end == j) continue;
+
+        char r = (char)bios->data[end - 1];
+        if (r == 'A' || r == 'E' || r == 'I' || r == 'J') bios->region = r;
+    }
+
+    if (!bios->region) {
+        // An image whose banner cannot be read is more likely a US one than
+        // anything else, and saying so in the log beats guessing silently.
+        bios->region = 'A';
+        LOG_BIOS_WARN("[BIOS] No region letter in the version banner — assuming 'A'");
+    }
+}
+
 // Loads the BIOS ROM content from a file specified by 'path' into the Bios struct.
 // Based on Guide Section 2.7 Loading the BIOS [cite: 117]
 bool bios_load(Bios* bios, const char* path) {
@@ -48,8 +89,11 @@ bool bios_load(Bios* bios, const char* path) {
     // Optional: Verify the BIOS checksum against known values (Guide Table 3) [cite: 115]
     // Add MD5 or SHA1 checksum calculation and comparison logic here if desired.
 
+    bios_detect_region(bios);
+
     // Print a success message including the path and size.
-    LOG_BIOS_WARN("[BIOS] BIOS loaded successfully from %s (%d bytes)", path, BIOS_SIZE);
+    LOG_BIOS_WARN("[BIOS] BIOS loaded successfully from %s (%d bytes, region '%c')",
+                  path, BIOS_SIZE, bios->region);
     // bios_apply_fastboot_patch(bios);  // disabled: only helps when region check passes
     return true;
 }

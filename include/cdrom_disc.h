@@ -79,9 +79,18 @@ uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba);
 void cdrom_async_reader_init(CdromAsyncReader *r, CdromDisc *disc);
 void cdrom_async_reader_shutdown(CdromAsyncReader *r);
 void cdrom_async_reader_queue(CdromAsyncReader *r, uint32_t lba);
-/* Blocks until the reader has the sector the caller names — not merely "some
- * sector". Re-issues the request itself if nothing is in flight for it. */
-bool cdrom_async_reader_wait(CdromAsyncReader *r, uint8_t *out_sector, uint32_t want_lba);
+typedef enum {
+    CDROM_SECTOR_READY,     /* out_sector filled with want_lba */
+    CDROM_SECTOR_FAILED,    /* that LBA could not be read */
+    CDROM_SECTOR_PENDING    /* not here yet — ask again shortly */
+} CdromSectorStatus;
+
+/* Non-blocking. Returns PENDING rather than waiting, and issues the request
+ * itself if nothing is in flight for want_lba. The emulation thread must never
+ * block on disc I/O: while it is stopped no VBlank fires and the audio ring
+ * drains, so a cold read shows up as a dropped frame and an audible gap. */
+CdromSectorStatus cdrom_async_reader_poll(CdromAsyncReader *r, uint8_t *out_sector,
+                                          uint32_t want_lba);
 
 static inline uint8_t cdrom_to_bcd(uint8_t v)  { return (uint8_t)(((v/10)<<4)|(v%10)); }
 static inline uint8_t cdrom_from_bcd(uint8_t b) { return (uint8_t)(((b>>4)*10)+(b&0xF)); }

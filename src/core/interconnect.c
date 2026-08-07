@@ -38,6 +38,9 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     memset(inter->scratchpad, 0, SCRATCHPAD_SIZE);
 
     cdrom_init(&inter->cdrom,inter);
+    /* The drive's region is the console's, not the disc's, so it comes from the
+     * ROM that is running. Set after cdrom_init, which clears the struct. */
+    inter->cdrom.console_region = bios ? bios->region : 'A';
     // Initialize Interrupt Controller state
     inter->irq_status = 0;     // No pending interrupts (I_STAT)
     inter->irq_mask = 0;       // Mask all IRQs at startup (I_MASK)
