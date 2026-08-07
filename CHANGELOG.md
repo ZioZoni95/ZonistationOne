@@ -8,6 +8,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Games saw a digital pad even with an analog controller plugged in.** The emulated pad powered up
+  in digital mode, as hardware does, and the only way out was a DS4 touchpad click — so the sticks
+  reached the game solely through the left-stick-to-D-pad fold in `controller.c`, which is why they
+  appeared to work while every title reported a digital controller. Three parts to it:
+  the pad now boots in analog mode (`ZS1_PAD_MODE=digital` restores the hardware default);
+  the Analog button is on **F12** as well as the touchpad, which
+  `DOCS/controllersandmemorycards.md:437-440` calls essential, naming Gran Turismo 1 as a title that
+  never asks for analog on its own; and the stick-to-D-pad fold is now suppressed while the pad is in
+  an analog mode, since otherwise every push arrived twice, once as a direction and once as adc2/adc3.
+- **The Analog button press could be swallowed by the debug UI.** It was an edge detected inside
+  `controller_update()`, and the controller window polls that function too — whichever caller ran
+  second saw no edge. It is latched from the SDL event now and consumed once by the frame loop.
+- **A resting stick did not read centre.** The raw SDL axes went straight to adc0-3, so a pad with any
+  rest offset held a permanent lean. A radial deadzone with rescaling above it puts the resting
+  position back on 80h without losing the start of the travel.
 - **The CD-ROM region check never ran.** The drive reported HC05 firmware `94/09/19 vC0` — a PU-7 from
   September 1994 — and `DOCS/cdromdrive.md:1170` states that vC0 cannot answer `Test 19h,22h` at all,
   so the BIOS never asked the machine what region it was. The answer was hardcoded to `"for U/C"`
@@ -42,6 +57,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   kept separate, because 480i puts 480 rows into the same 240 scanlines.
 
 ### Added
+- **Analog-stick "flight mode" (ID 5A53h, LED green)** alongside the analog pad (5A73h) and digital
+  (5A41h). `DOCS/controllersandmemorycards.md:483-489` gives the difference — the stick ID, and L3/R3
+  reported as permanently released — and `:496` names the titles that want it: MechWarrior 2, Colony
+  Wars, Descent Maximum, and Ace Combat 2, which is the disc this emulator is tested against. F12 and
+  the DS4 touchpad cycle digital → analog → stick; `ZS1_PAD_MODE=digital|analog|stick` picks the boot
+  mode, and the Controller window shows the current one with a button to cycle it. Both changes of
+  mode reset the rumble motors, as a real Analog-button press does (`:1283-1285`).
+- **Optional × / ○ swap** (`ZS1_PAD_SWAP_XO=1`, or a checkbox in the Controller window). The button
+  bits are not regional — `DOCS/controllersandmemorycards.md:405-421` puts × on bit 14 and ○ on bit 13
+  for every pad ever sold — but the software convention is: the PS1 shell and Japanese-developed
+  titles confirm with ○. The swap changes which physical button drives which bit. Off by default,
+  because reporting the button that was actually pressed is the honest default.
 - **WSOLA time-stretch on the audio output** (`src/spu/spu_stretch.c`). The producer generates on the
   emulated clock and the device drains on the host clock; the ring level wanders, and the wander ends
   either in silence or in discarded samples, both heard as a cut. Reading the ring at tempo T while

@@ -98,10 +98,31 @@ void sio_write32(Sio* sio, uint32_t offset, uint32_t value);
 void sio_set_button_state(Sio* sio, uint16_t buttons);
 void sio_set_controller_connected(Sio* sio, bool connected);
 
-// DualShock analog support
+// DualShock analog support.
+//
+// The pad answers with one of three IDs (DOCS/controllersandmemorycards.md:369-372):
+// 5A41h digital (LED off), 5A73h analog pad (LED red), 5A53h analog stick — the
+// Dual Analog's "flight mode" (LED green), which a handful of stick titles want,
+// Ace Combat 2 among them (:496). Analog and stick mode both append adc0-3 to a
+// 42h read; stick mode additionally reports L3/R3 as always-released (:486).
+typedef enum {
+    SIO_PAD_DIGITAL = 0,   // ID 0x41, 2 data bytes, LED off — the power-on state
+    SIO_PAD_ANALOG  = 1,   // ID 0x73, 6 data bytes, LED red
+    SIO_PAD_STICK   = 2    // ID 0x53, 6 data bytes, LED green, L3/R3 disabled
+} SioPadMode;
+
 void sio_set_analog_state(Sio* sio, int16_t lx, int16_t ly, int16_t rx, int16_t ry);
 void sio_set_analog_mode(Sio* sio, bool analog);
 bool sio_get_analog_mode(Sio* sio);
+
+// The pad's Analog button, host side. set/get move the whole tri-state; cycle
+// steps digital -> analog -> stick -> digital, which is what a key or a pad
+// button is bound to. All three are ignored while the pad is locked by a config
+// 44h Key=03h, exactly as the hardware ignores the button then.
+void       sio_set_pad_mode(Sio* sio, SioPadMode mode);
+SioPadMode sio_get_pad_mode(Sio* sio);
+void       sio_cycle_pad_mode(Sio* sio);
+const char* sio_pad_mode_name(SioPadMode mode);
 
 // Rumble: current motor levels (m1 = large 00h..FFh, m2 = small 00h/FFh)
 void sio_get_rumble(Sio* sio, uint8_t* m1, uint8_t* m2);

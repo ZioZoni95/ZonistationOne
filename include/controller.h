@@ -19,13 +19,22 @@
 typedef struct {
     bool connected;              // host input enabled/disabled (not the PSX-side pad connection)
     SDL_GameController* gc;      // active DS4; NULL when none present
-    int16_t left_x, left_y;      // left stick raw (-32768..32767), for dpad emulation
-    int16_t right_x, right_y;    // right stick raw (unused until the analog protocol lands)
-    bool analog_toggle;          // rising edge of the DS4 touchpad click — the stand-in for
-                                 // the pad's Analog button. Set true for one frame per press;
-                                 // the caller toggles SIO analog mode and may leave it as-is.
-    bool gc_touchpad_prev;       // touchpad state of the previous frame (edge detection)
+    int16_t left_x, left_y;      // left stick raw (-32768..32767), deadzoned
+    int16_t right_x, right_y;    // right stick raw (-32768..32767), deadzoned
+    bool analog_active;          // the emulated pad is in analog or stick mode. Set by the
+                                 // caller from sio_get_pad_mode() before each update; it
+                                 // suppresses the left-stick-to-D-pad fold, which would
+                                 // otherwise deliver every stick push twice.
+    bool analog_toggle;          // latched press of the pad's Analog button (touchpad click).
+                                 // Set from the SDL event, cleared by
+                                 // controller_take_analog_toggle() — never by polling, so a
+                                 // second poller (the debug UI) cannot eat the press.
+    bool gc_touchpad_prev;       // unused; kept so the struct layout does not shift
     bool rumble_active;          // true while SDL rumble is firing (stop-on-zero edge)
+    bool swap_cross_circle;      // report the pad's bottom button as ○ and its right one as ×.
+                                 // Off by default (the hardware layout); ZS1_PAD_SWAP_XO=1 or
+                                 // the checkbox in the Controller window turns it on, for
+                                 // software that confirms with ○.
     int key_map[16];             // scancode mapping for 16 PSX buttons
 } Controller;
 
@@ -45,6 +54,11 @@ void controller_process_event(Controller* ctrl, const SDL_Event* ev);
 // two sticks into ctrl->left_x/left_y/right_x/right_y (raw -32768..32767) for the
 // SIO analog protocol. Callers own the returned value.
 uint16_t controller_update(Controller* ctrl);
+
+// Consume a pending Analog-button press: returns true once per press and clears
+// the latch. Poll-safe — the value is set from the SDL event stream, so calling
+// controller_update() any number of times in a frame cannot lose it.
+bool controller_take_analog_toggle(Controller* ctrl);
 
 // Poll SDL keyboard and return the current PSX button state (16-bit, 0=pressed,
 // 1=released). Stateless aside from `connected`/internal change-log tracking —

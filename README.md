@@ -55,6 +55,31 @@ Three things trip people up, in order of how often:
    rejected and you are left sitting at the BIOS menu, which looks like a boot regression.
 3. **The game path needs `--game=`.** A bare positional path is taken as the BIOS path.
 
+### Controllers
+
+A DualShock 4 over USB or Bluetooth is picked up automatically, hot-plug included, and the keyboard
+stays live beside it (`WASD` D-pad, `E C Z X` for △○×□, `Q R` shoulders, `Shift Ctrl` triggers,
+`Space` START, `Tab` SELECT).
+
+The emulated pad boots **in analog mode**, which hardware does not do — a real pad starts digital with
+its LED off and waits for its Analog button. Booting analog means the sticks reach the game as analog
+inputs without a keypress first, and digital-only titles read the same button bytes as before.
+**F12**, or a click on the DS4 touchpad, is the Analog button:
+
+```
+digital (ID 41h, LED off) → analog pad (73h, LED red) → analog stick (53h, LED green) → digital
+```
+
+The green stick mode is what a few flight titles expect instead of a DualShock, Ace Combat 2 among
+them. `ZS1_PAD_MODE=digital|analog|stick` sets the boot mode; the Controller window in the debug UI
+shows the current one and cycles it. A game that drives the pad itself through the config commands
+overrides all of this, as on hardware.
+
+Button bits are the same in every region — the pad's bottom button is × (bit 14) and its right button
+○ (bit 13) worldwide. What varies is the software: the PS1 shell and Japanese-developed titles confirm
+with ○, most Western ones with ×. `ZS1_PAD_SWAP_XO=1`, or the checkbox in the Controller window,
+swaps which physical button drives which bit if you prefer × to confirm everywhere.
+
 ### Environment variables
 
 | Variable | Effect |
@@ -69,6 +94,8 @@ Three things trip people up, in order of how often:
 | `ZS1_SPU_NO_STRETCH=1` | Bypass the output time-stretch, same purpose |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |
+| `ZS1_PAD_MODE=digital\|analog\|stick` | Pad mode at boot (default `analog`; `digital` is what hardware does) |
+| `ZS1_PAD_SWAP_XO=1` | Report the pad's bottom button as ○ and its right one as × |
 
 `ZS1_GPU` sets the PRIME offload variables the driver stack already reads, before the GL context is
 created; setting them by hand works identically. The run always logs which driver it ended up on and
@@ -89,12 +116,12 @@ is a normal failure, and it is a real source of rendering differences.
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
 | CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing |
-| SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; analog protocol 41h/73h/F3h, both memory card slots |
+| SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v4 |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v5 |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 
@@ -120,8 +147,7 @@ Accepted for now. Each is understood well enough to say what it is and what it i
   is doing meanwhile — `scripts/recenter_watch.lua` reports the sector rate inside the window.
 - **Occasional small audio underruns** during play. One event in that same 212-second session.
 - **Rumble is unverified.** Implemented on both the one-motor and the `4Dh`-mapped methods, never
-  confirmed against a real pad. There is also no UI for pad state or remapping; the mapping is
-  hard-coded in `src/core/controller.c`.
+  confirmed against a real pad.
 - **No multitap, no DualShock 2 pressure sensing.**
 - **The CRTC advances once per frame**, not per scanline, which leaves Timer0's hblank gate unwired.
   Texpage bit 11 (Y base 2) is not applied.
