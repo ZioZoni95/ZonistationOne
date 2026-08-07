@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 // --- OpenGL Includes ---
 // Make sure you have GLEW (or GLAD) headers included correctly in your project setup
@@ -154,10 +154,10 @@ typedef struct {
 
     /* GPU render thread (Phase 2 threading refactor) */
     SDL_Thread*  gpu_thread;
-    SDL_mutex*   gpu_mutex;
-    SDL_cond*    frame_ready;   /* GPU wakes when CPU submits a frame */
-    SDL_cond*    frame_done;    /* CPU waits if GPU is behind */
-    SDL_atomic_t gpu_stop;
+    SDL_Mutex*   gpu_mutex;
+    SDL_Condition*    frame_ready;   /* GPU wakes when CPU submits a frame */
+    SDL_Condition*    frame_done;    /* CPU waits if GPU is behind */
+    SDL_AtomicInt gpu_stop;
     int          write_idx;     /* CPU writes to slot [write_idx]; GPU reads [1-write_idx] */
     int          frames_pending;
     SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */

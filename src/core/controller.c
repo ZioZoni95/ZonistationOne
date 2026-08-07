@@ -7,7 +7,7 @@
  */
 #include "controller.h"
 #include "log.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,6 +32,7 @@ void controller_init(Controller* ctrl) {
     ctrl->key_map[13] = SDL_SCANCODE_C;          // CIRCLE
     ctrl->key_map[14] = SDL_SCANCODE_Z;          // CROSS
     ctrl->key_map[15] = SDL_SCANCODE_X;          // SQUARE
+    ctrl->led_rgb = -1;           // nothing pushed yet; 0 would mean "black, already sent"
     {
         const char* env = getenv("ZS1_PAD_SWAP_XO");
         ctrl->swap_cross_circle = (env && env[0] == '1');
@@ -59,30 +60,30 @@ Controller* controller_get_active(void) {
  * would make every push arrive twice.
  */
 static uint16_t controller_update_from_gamepad(Controller* ctrl) {
-    SDL_GameController* gc = ctrl->gc;
+    SDL_Gamepad* gc = ctrl->gc;
     uint16_t buttons = 0xFFFF;
 
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK))        buttons &= ~(1u << 0);  // SELECT
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_LEFTSTICK))   buttons &= ~(1u << 1);  // L3
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_RIGHTSTICK))  buttons &= ~(1u << 2);  // R3
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START))       buttons &= ~(1u << 3);  // START
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_UP))     buttons &= ~(1u << 4);  // UP
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))  buttons &= ~(1u << 5);  // RIGHT
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_DOWN))   buttons &= ~(1u << 6);  // DOWN
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_LEFT))   buttons &= ~(1u << 7);  // LEFT
-    if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT)  >  16384) buttons &= ~(1u << 8);   // L2
-    if (SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) >  16384) buttons &= ~(1u << 9);   // R2
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) buttons &= ~(1u << 10);  // L1
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) buttons &= ~(1u << 11); // R1
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_Y))            buttons &= ~(1u << 12);  // TRIANGLE
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B))            buttons &= ~(1u << 13);  // CIRCLE
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A))            buttons &= ~(1u << 14);  // CROSS
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_X))            buttons &= ~(1u << 15);  // SQUARE
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_BACK))        buttons &= ~(1u << 0);  // SELECT
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_LEFT_STICK))   buttons &= ~(1u << 1);  // L3
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_RIGHT_STICK))  buttons &= ~(1u << 2);  // R3
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_START))       buttons &= ~(1u << 3);  // START
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_DPAD_UP))     buttons &= ~(1u << 4);  // UP
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_DPAD_RIGHT))  buttons &= ~(1u << 5);  // RIGHT
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_DPAD_DOWN))   buttons &= ~(1u << 6);  // DOWN
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_DPAD_LEFT))   buttons &= ~(1u << 7);  // LEFT
+    if (SDL_GetGamepadAxis(gc, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)  >  16384) buttons &= ~(1u << 8);   // L2
+    if (SDL_GetGamepadAxis(gc, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >  16384) buttons &= ~(1u << 9);   // R2
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) buttons &= ~(1u << 10);  // L1
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) buttons &= ~(1u << 11); // R1
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_NORTH))            buttons &= ~(1u << 12);  // TRIANGLE
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_EAST))            buttons &= ~(1u << 13);  // CIRCLE
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_SOUTH))            buttons &= ~(1u << 14);  // CROSS
+    if (SDL_GetGamepadButton(gc, SDL_GAMEPAD_BUTTON_WEST))            buttons &= ~(1u << 15);  // SQUARE
 
     // Left-stick-to-dpad fallback with centre deadzone — digital mode only.
     if (!ctrl->analog_active) {
-        int16_t lx = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTX);
-        int16_t ly = SDL_GameControllerGetAxis(gc, SDL_CONTROLLER_AXIS_LEFTY);
+        int16_t lx = SDL_GetGamepadAxis(gc, SDL_GAMEPAD_AXIS_LEFTX);
+        int16_t ly = SDL_GetGamepadAxis(gc, SDL_GAMEPAD_AXIS_LEFTY);
         if (lx >  16384) buttons &= ~(1u << 5);  // RIGHT
         if (lx < -16384) buttons &= ~(1u << 7);  // LEFT
         if (ly >  16384) buttons &= ~(1u << 6);  // DOWN
@@ -100,25 +101,34 @@ static uint16_t controller_update_from_gamepad(Controller* ctrl) {
 }
 
 void controller_process_event(Controller* ctrl, const SDL_Event* ev) {
-    if (ev->type == SDL_CONTROLLERDEVICEADDED) {
+    if (ev->type == SDL_EVENT_GAMEPAD_ADDED) {
         if (ctrl->gc) return;  // first pad wins
-        ctrl->gc = SDL_GameControllerOpen(ev->cdevice.which);
+        ctrl->gc = SDL_OpenGamepad(ev->gdevice.which);
         if (ctrl->gc) {
             ctrl->connected = true;
-            LOG_SYSTEM_INFO("[SYSTEM] Controller connected (DS4)");
+            /* Asked once, here, rather than inferred from a failing write every
+             * frame: a pad with no light bar must not be written to at all. */
+            ctrl->gc_has_led = SDL_GetBooleanProperty(SDL_GetGamepadProperties(ctrl->gc),
+                                                      SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN,
+                                                      false);
+            ctrl->led_rgb = -1;
+            LOG_SYSTEM_INFO("[SYSTEM] Controller connected (DS4)%s",
+                            ctrl->gc_has_led ? ", light bar available" : "");
         } else {
             LOG_SYSTEM_WARN("[SYSTEM] Controller open failed: %s", SDL_GetError());
         }
-    } else if (ev->type == SDL_CONTROLLERDEVICEREMOVED) {
+    } else if (ev->type == SDL_EVENT_GAMEPAD_REMOVED) {
         /* The PSX-side pad stays connected: the BIOS/game sees a silent,
          * unresponsive pad rather than one that vanished mid-poll; a missing
          * response (0xFF) already reads as "no button pressed" to the protocol. */
-        SDL_GameController* closing = ctrl->gc;
+        SDL_Gamepad* closing = ctrl->gc;
         ctrl->gc = NULL;
-        if (closing) SDL_GameControllerClose(closing);
+        ctrl->gc_has_led = false;
+        ctrl->led_rgb = -1;
+        if (closing) SDL_CloseGamepad(closing);
         LOG_SYSTEM_INFO("[SYSTEM] Controller disconnected");
-    } else if (ev->type == SDL_CONTROLLERBUTTONDOWN &&
-               ev->cbutton.button == SDL_CONTROLLER_BUTTON_TOUCHPAD) {
+    } else if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+               ev->gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
         // DS4 touchpad click is the stand-in for the Analog button that real
         // analog pads carry (DOCS/controllersandmemorycards.md:437-440, which
         // calls a manual toggle essential). Latched here rather than polled:
@@ -199,10 +209,10 @@ uint16_t controller_update(Controller* ctrl) {
     }
 
     if (ctrl->gc) {
-        ctrl->left_x  = SDL_GameControllerGetAxis(ctrl->gc, SDL_CONTROLLER_AXIS_LEFTX);
-        ctrl->left_y  = SDL_GameControllerGetAxis(ctrl->gc, SDL_CONTROLLER_AXIS_LEFTY);
-        ctrl->right_x = SDL_GameControllerGetAxis(ctrl->gc, SDL_CONTROLLER_AXIS_RIGHTX);
-        ctrl->right_y = SDL_GameControllerGetAxis(ctrl->gc, SDL_CONTROLLER_AXIS_RIGHTY);
+        ctrl->left_x  = SDL_GetGamepadAxis(ctrl->gc, SDL_GAMEPAD_AXIS_LEFTX);
+        ctrl->left_y  = SDL_GetGamepadAxis(ctrl->gc, SDL_GAMEPAD_AXIS_LEFTY);
+        ctrl->right_x = SDL_GetGamepadAxis(ctrl->gc, SDL_GAMEPAD_AXIS_RIGHTX);
+        ctrl->right_y = SDL_GetGamepadAxis(ctrl->gc, SDL_GAMEPAD_AXIS_RIGHTY);
         apply_deadzone(&ctrl->left_x,  &ctrl->left_y);
         apply_deadzone(&ctrl->right_x, &ctrl->right_y);
 
@@ -224,7 +234,7 @@ uint16_t controller_update(Controller* ctrl) {
 /**
  * Route SIO rumble levels to the DS4. M1 (large motor, analog slow/fast) maps to
  * SDL's low-frequency channel, M2 (small motor, digital) to the high-frequency
- * channel, both scaled from 8-bit to 16-bit. SDL_GameControllerRumble has a
+ * channel, both scaled from 8-bit to 16-bit. SDL_RumbleGamepad has a
  * finite duration, so re-fire every frame while a motor is active — games send
  * M1/M2 on every 42h read while vibrating, so the state only decays when the
  * game actually stops. Stop once on the transition to both-zero.
@@ -237,7 +247,7 @@ void controller_update_rumble(Controller* ctrl, uint8_t m1, uint8_t m2) {
 
     if (m1 == 0 && m2 == 0) {
         if (ctrl->rumble_active) {
-            SDL_GameControllerRumble(ctrl->gc, 0, 0, 1);
+            SDL_RumbleGamepad(ctrl->gc, 0, 0, 1);
             ctrl->rumble_active = false;
         }
         return;
@@ -245,8 +255,32 @@ void controller_update_rumble(Controller* ctrl, uint8_t m1, uint8_t m2) {
 
     uint16_t low  = (uint16_t)(((uint16_t)m1 << 8) | m1);  // 8-bit → 0..0xFFFF
     uint16_t high = m2 ? 0xFFFF : 0x0000;
-    SDL_GameControllerRumble(ctrl->gc, low, high, 200);
+    SDL_RumbleGamepad(ctrl->gc, low, high, 200);
     ctrl->rumble_active = true;
+}
+
+/**
+ * Push a light-bar colour, at most once per change.
+ *
+ * The caller decides the colour from the emulated pad's mode; the documented
+ * mapping is in controller.h. Kept here rather than in the caller's loop because
+ * the "only on change" part is the whole point: SDL_SetGamepadLED sends a HID
+ * report, and a report per frame over Bluetooth competes with the input reports
+ * coming the other way.
+ */
+void controller_set_led(Controller* ctrl, uint8_t r, uint8_t g, uint8_t b) {
+    if (!ctrl->gc || !ctrl->gc_has_led) return;
+
+    int32_t packed = (int32_t)(((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b);
+    if (ctrl->led_rgb == packed) return;
+
+    if (SDL_SetGamepadLED(ctrl->gc, r, g, b)) {
+        ctrl->led_rgb = packed;
+    } else {
+        /* Stop asking: the capability said yes but the write does not work. */
+        ctrl->gc_has_led = false;
+        LOG_SYSTEM_WARN("[SYSTEM] Light bar write failed: %s — LED disabled", SDL_GetError());
+    }
 }
 
 /**
@@ -267,11 +301,11 @@ uint16_t controller_update_from_keyboard(Controller* ctrl) {
     }
 
     uint16_t buttons = 0xFFFF;
-    const uint8_t* keys = SDL_GetKeyboardState(NULL);
+    const bool* keys = SDL_GetKeyboardState(NULL);
 
     for (int i = 0; i < 16; i++) {
         int scancode = ctrl->key_map[i];
-        if (scancode > 0 && scancode < SDL_NUM_SCANCODES && keys[scancode]) {
+        if (scancode > 0 && scancode < SDL_SCANCODE_COUNT && keys[scancode]) {
             buttons &= ~(1u << i);
         }
     }

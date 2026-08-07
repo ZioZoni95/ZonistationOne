@@ -61,11 +61,4 @@ void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector, bool m
 /* Pop one stereo frame for SPU/SDL output */
 void cdrom_audio_get_frame(AudioFifo *fifo, int16_t *left, int16_t *right);
 
-/* SDL audio setup — call once after SDL_Init(SDL_INIT_AUDIO) */
-bool cdrom_audio_sdl_open(AudioFifo *fifo);
-void cdrom_audio_sdl_close(void);
-
-/* Set SPU pointer for mixing (call after init) */
-void cdrom_audio_set_spu(void *spu_ptr);
-
 #endif /* CDROM_AUDIO_H */

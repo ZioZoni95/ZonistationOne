@@ -4,11 +4,17 @@
 CC = gcc
 CXX = g++
 
-# Common includes and libs
+# Common includes and libs.
+#
+# SDL3 comes from pkg-config on both sides, not a bare -lSDL3: the library is
+# built from source into /usr/local (Ubuntu 24.04 and its derivatives ship no
+# libsdl3-dev), so the linker needs the -L and the -rpath that sdl3.pc carries.
 INCLUDES = -Iinclude -Ithird_party/imgui -Ithird_party/imgui/backends -Ithird_party/lua
-LIBS = -lSDL2 -lGL -lGLEW -lm -lpthread
 
-SDL_CFLAGS = $(shell pkg-config --cflags sdl2)
+SDL_CFLAGS = $(shell pkg-config --cflags sdl3)
+SDL_LIBS   = $(shell pkg-config --libs sdl3)
+
+LIBS = $(SDL_LIBS) -lGL -lGLEW -lm -lpthread
 
 # Build mode. Default is an optimised build — the emulator is an interpreter on
 # the hot path, so an unoptimised (-O0) build ran ~3-5x slower than the machine,
@@ -98,11 +104,11 @@ EMU_CXX_SRCS = src/debug_ui.cpp \
                third_party/imgui/imgui_draw.cpp \
                third_party/imgui/imgui_widgets.cpp \
                third_party/imgui/imgui_tables.cpp \
-               third_party/imgui/backends/imgui_impl_sdl2.cpp \
+               third_party/imgui/backends/imgui_impl_sdl3.cpp \
                third_party/imgui/backends/imgui_impl_opengl3.cpp
 
 EMU_OBJS = $(EMU_C_SRCS:.c=.o) $(EMU_CXX_SRCS:.cpp=.o)
-EMU_BIN = myps1_emu
+EMU_BIN = ZoniStation_One
 
 # --- Test files ---
 TEST_SRCS = tests/cpu_minimal_test.c \

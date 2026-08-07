@@ -7,7 +7,7 @@
 -- the reverb network and the delivery counters were doing at that moment.
 --
 -- Run:  ZS1_LUA_SCRIPT=scripts/spu_pop_capture.lua ZS1_AUDIO_DUMP=/path/out.raw \
---         ./myps1_emu roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"
+--         ./ZoniStation_One roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"
 -- A/B:  add ZS1_SPU_NO_REVERB=1 to take the reverb network out of the path.
 
 local STATE       = "savestates/slot0.zst"

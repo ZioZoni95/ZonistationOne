@@ -10,7 +10,6 @@
 #include "spu.h"
 #include "log.h"
 #include <string.h>
-#include <SDL2/SDL.h>
 #include "frame_events.h"
 
 /* =========================================================================
@@ -331,60 +330,9 @@ void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector, bool m
     }
 }
 
-/* =========================================================================
- * SDL Audio Output
- * ========================================================================= */
-
-static AudioFifo     *s_sdl_fifo = NULL;
-static SDL_AudioDeviceID s_sdl_dev = 0;
-static Spu           *s_spu = NULL;
-
-void cdrom_audio_set_spu(void *spu_ptr) {
-    s_spu = (Spu*)spu_ptr;
-}
-
-static void sdl_audio_callback(void *userdata, uint8_t *stream, int len) {
-    (void)userdata;
-    int16_t *out = (int16_t *)stream;
-    int num_stereo = len / (sizeof(int16_t) * 2);
-
-    if (s_spu) {
-        /* Fill from SPU circular buffer (generated during emulation) */
-        spu_fill_audio(s_spu, out, num_stereo);
-    } else {
-        /* No SPU: just output CD audio */
-        for (int i = 0; i < num_stereo; i++) {
-            int16_t l = 0, r = 0;
-            if (s_sdl_fifo) cdrom_audio_fifo_pop(s_sdl_fifo, &l, &r);
-            out[i*2] = l;
-            out[i*2+1] = r;
-        }
-    }
-}
-
-bool cdrom_audio_sdl_open(AudioFifo *fifo) {
-    s_sdl_fifo = fifo;
-    SDL_AudioSpec want = {0}, have;
-    want.freq     = 44100;
-    want.format   = AUDIO_S16LSB;
-    want.channels = 2;
-    want.samples  = 4096;
-    want.callback = sdl_audio_callback;
-
-    s_sdl_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (s_sdl_dev == 0) {
-        LOG_CDROM_ERROR("[CDROM] SDL_OpenAudioDevice: %s", SDL_GetError());
-        return false;
-    }
-    SDL_PauseAudioDevice(s_sdl_dev, 0);
-    LOG_CDROM_INFO("[CDROM] SDL audio opened: %u Hz, %u ch", have.freq, have.channels);
-    return true;
-}
-
-void cdrom_audio_sdl_close(void) {
-    if (s_sdl_dev) {
-        SDL_CloseAudioDevice(s_sdl_dev);
-        s_sdl_dev = 0;
-    }
-    s_sdl_fifo = NULL;
-}
+/* A second audio device used to be opened here, with its own callback that
+ * pulled from the SPU ring exactly as main.c's does. Nothing ever called it —
+ * main.c has owned the one device since the SPU path was built — and porting a
+ * dead SDL2 pull callback to SDL3's stream API would have been work spent on
+ * code with no caller. Removed with the SDL3 migration; the CD audio FIFO above
+ * is untouched and still feeds the SPU, which is the path that actually runs. */

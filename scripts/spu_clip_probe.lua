@@ -18,7 +18,7 @@
 -- scene where the pops are heard instead of booting to it. Set STATE to nil to
 -- probe from a cold boot instead.
 --
--- Run:  ZS1_LUA_SCRIPT=scripts/spu_clip_probe.lua ./myps1_emu <bios> --game=<bin>
+-- Run:  ZS1_LUA_SCRIPT=scripts/spu_clip_probe.lua ./ZoniStation_One <bios> --game=<bin>
 -- A/B:  add ZS1_SPU_NO_REVERB=1 to take the reverb network out of the path.
 
 local STATE = "savestates/slot0.zst"

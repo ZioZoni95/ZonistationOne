@@ -4,7 +4,7 @@ A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 rendere
 debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
 boots them.
 
-SDL2 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc has been played
+SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc has been played
 past the halfway point — boot, FMV, menus, missions, saves — and it is stable there. That is one game
 on one machine, not a compatibility claim.
 
@@ -25,9 +25,22 @@ Power on, BIOS shell, disc boot, movie, mission.
 ## Build
 
 ```sh
-sudo apt install build-essential libsdl2-dev libglew-dev libgl1-mesa-dev
+sudo apt install build-essential libglew-dev libgl1-mesa-dev
 make
 ```
+
+SDL3 is not packaged on Ubuntu 24.04 or its derivatives. Build it once:
+
+```sh
+sudo apt install cmake libwayland-dev libxkbcommon-dev libx11-dev libxext-dev libasound2-dev
+git clone --depth 1 --branch release-3.2.24 https://github.com/libsdl-org/SDL.git
+cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+cmake --build SDL/build -j"$(nproc)"
+sudo cmake --install SDL/build && sudo ldconfig
+```
+
+Where SDL3 *is* packaged, `sudo apt install libsdl3-dev` replaces that block. Either way the Makefile
+finds it through `pkg-config sdl3`.
 
 ImGui and Lua are vendored in `third_party/`. `make` is parallel by default and tracks header
 dependencies, so `make clean` is not needed after editing a header. `make DEBUG=1` gives an `-O0 -g`
@@ -36,8 +49,8 @@ build for gdb.
 ## Run
 
 ```sh
-./myps1_emu roms/SCPH-7502.BIN                                              # BIOS menu
-./myps1_emu roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"     # a disc
+./ZoniStation_One roms/SCPH-7502.BIN                                              # BIOS menu
+./ZoniStation_One roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"     # a disc
 ```
 
 You supply the BIOS and the discs; neither is in this repository.
@@ -74,6 +87,18 @@ The green stick mode is what a few flight titles expect instead of a DualShock, 
 them. `ZS1_PAD_MODE=digital|analog|stick` sets the boot mode; the Controller window in the debug UI
 shows the current one and cycles it. A game that drives the pad itself through the config commands
 overrides all of this, as on hardware.
+
+A DS4's light bar shows those colours, so the mode a game selected is visible on the pad. It needs
+access to the pad's hidraw node, which is root-only by default; without it SDL uses the kernel evdev
+path — buttons, sticks and rumble work, the light bar does not.
+
+```sh
+echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="054c", MODE="0660", TAG+="uaccess"' \
+  | sudo tee /etc/udev/rules.d/99-sony-hidraw.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Replug the pad afterwards.
 
 Button bits are the same in every region — the pad's bottom button is × (bit 14) and its right button
 ○ (bit 13) worldwide. What varies is the software: the PS1 shell and Japanese-developed titles confirm
@@ -160,7 +185,7 @@ Accepted for now. Each is understood well enough to say what it is and what it i
 
 ## Debug UI
 
-The SDL2 window is an ImGui workspace; nothing goes to the terminal. A **machine bar** carries BIOS,
+The SDL3 window is an ImGui workspace; nothing goes to the terminal. A **machine bar** carries BIOS,
 disc, live PC and the vitals (frame ms, audio-queue depth, drift). A **mode rail** on F1–F8 replaces
 what used to be a grid of floating panels:
 
@@ -204,8 +229,8 @@ Design notes worth knowing before changing anything:
 - **The event scheduler is the single timing authority.** Nothing else may schedule work.
 - **No `malloc` in hot paths.** Structs are embedded, not heap-allocated.
 
-Memory map, per-subsystem state and the open work queue: `GAP_ANALYSIS_REFACTOR_2026-07-13.md`,
-`GPU_GAP_ANALYSIS_2026-07-15.md`, `docs/study/README.md`, and `docs/ui/` for the interface direction.
+Memory map, per-subsystem state and the open work queue: `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md`,
+`docs/GPU_GAP_ANALYSIS_2026-07-15.md`, `docs/study/README.md`, and `docs/ui/` for the interface direction.
 
 ---
 

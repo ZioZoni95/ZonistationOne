@@ -6,7 +6,7 @@
  * components of this project that have other authors.
  */
 #include "imgui.h"
-#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_internal.h"
 #include "debug_ui.h"
@@ -1716,7 +1716,7 @@ static void draw_pipeline_view(Interconnect* inter) {
         pipe_node_card("2. SPU Synthesizer", ZS_AUDIO, "ACTIVE", ZS_OK, "24 Voices", "44.1 kHz", "ADSR & Pitch Modulation", "Reverb Processing");
 
         ImGui::TableNextColumn();
-        pipe_node_card("3. Audio Mixer & Out", ZS_OK, "LIVE", ZS_OK, aq, "", "SDL2 / PipeWire Output", "Stereo PCM Stream");
+        pipe_node_card("3. Audio Mixer & Out", ZS_OK, "LIVE", ZS_OK, aq, "", "SDL3 / PipeWire Output", "Stereo PCM Stream");
 
         ImGui::EndTable();
     }
@@ -2014,7 +2014,7 @@ static void draw_controller_mapping_window() {
 
     // Top device banner
     card_header("Active Controller Subsystem", ZS_OK);
-    const char* dev_name = ctrl->gc ? SDL_GameControllerName(ctrl->gc) : "Keyboard Mapping (DualShock PS1 Emulation)";
+    const char* dev_name = ctrl->gc ? SDL_GetGamepadName(ctrl->gc) : "Keyboard Mapping (DualShock PS1 Emulation)";
     ImGui::Text("Device: %s", dev_name);
     ImGui::SameLine(0, 20);
     ImGui::TextColored(ctrl->connected ? ZS_OK : ZS_CRIT, "[%s]", ctrl->connected ? "CONNECTED" : "DISCONNECTED");
@@ -2110,7 +2110,7 @@ static void draw_controller_mapping_window() {
             ImGui::TextUnformatted(g_psx_button_info[i].symbol);
             ImGui::TableNextColumn();
             int sc = ctrl->key_map[i];
-            const char* key_name = (sc > 0 && sc < SDL_NUM_SCANCODES) ? SDL_GetScancodeName((SDL_Scancode)sc) : "None";
+            const char* key_name = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "None";
             ImGui::Text("%s (scancode %d)", key_name, sc);
             ImGui::TableNextColumn();
             char btn_id[32];
@@ -2136,16 +2136,16 @@ static void draw_controller_mapping_window() {
             ImGui::TextColored(ZS_FAINT, "(Press ESC to cancel)");
             ImGui::Dummy(ImVec2(0, 8));
 
-            const uint8_t* keys = SDL_GetKeyboardState(NULL);
+            const bool* keys = SDL_GetKeyboardState(NULL);
 
             if (s_waiting_key_up) {
                 bool any_down = false;
-                for (int k = 4; k < SDL_NUM_SCANCODES; k++) {
+                for (int k = 4; k < SDL_SCANCODE_COUNT; k++) {
                     if (keys[k]) { any_down = true; break; }
                 }
                 if (!any_down) s_waiting_key_up = false;
             } else {
-                for (int k = 4; k < SDL_NUM_SCANCODES; k++) {
+                for (int k = 4; k < SDL_SCANCODE_COUNT; k++) {
                     if (keys[k]) {
                         if (k == SDL_SCANCODE_ESCAPE) {
                             s_rebind_index = -1;
@@ -2194,7 +2194,7 @@ static void draw_host_hw_window(Interconnect* inter) {
         kv("Host OS Kernel", "Linux 6.19 x86_64", ZS_FAINT);
         kv("System Memory (RAM)", "15.3 GB total (9.5 GB available)", ZS_WARN);
         kv("Process RSS Allocation", "184 MB allocated", ZS_TEXT);
-        kv("Audio Subsystem Driver", "PipeWire / SDL2 Audio (12.8ms latency)", ZS_AUDIO);
+        kv("Audio Subsystem Driver", "PipeWire / SDL3 Audio (12.8ms latency)", ZS_AUDIO);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 8));
@@ -2229,7 +2229,7 @@ static void draw_inspector_window(Interconnect* inter) {
         kv("Host System", "ASUS ROG Strix G16", ZS_TEXT);
         kv("Host CPU", "Intel i9-14900HX", ZS_OK);
         kv("Host GPU", "RTX 4060 Mobile 8GB", ZS_DATA);
-        kv("Audio Subsystem", "PipeWire / SDL2", ZS_AUDIO);
+        kv("Audio Subsystem", "PipeWire / SDL3", ZS_AUDIO);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 6));
@@ -2416,7 +2416,7 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
 
     apply_zonistation_style();
 
-    ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init("#version 330");
 
     /* Open per-component log files (one file per category, lives for whole session) */
@@ -2434,7 +2434,7 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
 }
 
 extern "C" void debug_ui_process_event(SDL_Event* event) {
-    ImGui_ImplSDL2_ProcessEvent(event);
+    ImGui_ImplSDL3_ProcessEvent(event);
 }
 
 extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
@@ -2442,7 +2442,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     Interconnect* inter = (Interconnect*)interconnect_ptr;
 
     /* ImGui_ImplOpenGL3_NewFrame() moved to GPU thread — owns GL context */
-    ImGui_ImplSDL2_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
     // Mode drives which windows are live this frame (the rail replaced the
@@ -2608,6 +2608,6 @@ extern "C" void debug_ui_shutdown(void) {
         }
     }
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 }

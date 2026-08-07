@@ -7,7 +7,7 @@
 -- sio.c, and restoring it has to put the host pointers back or the first byte
 -- clocked after the load dereferences an address from the writing process.
 --
--- Run: ZS1_LUA_SCRIPT=scripts/savestate_roundtrip.lua ./myps1_emu <bios> --game=<bin>
+-- Run: ZS1_LUA_SCRIPT=scripts/savestate_roundtrip.lua ./ZoniStation_One <bios> --game=<bin>
 
 local PATH   = "savestates/roundtrip.zst"
 local SAVE_F = 240    -- ~4 s in: past BIOS handover, pad polling underway

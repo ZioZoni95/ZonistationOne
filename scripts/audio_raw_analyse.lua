@@ -16,7 +16,7 @@
 -- Speech is smooth between samples: at 44.1 kHz even a bright consonant moves a
 -- few hundred units per sample. A jump of thousands is not signal.
 --
--- Run: ZS1_AUDIO_RAW=<path> ZS1_LUA_SCRIPT=scripts/audio_raw_analyse.lua ./myps1_emu ...
+-- Run: ZS1_AUDIO_RAW=<path> ZS1_LUA_SCRIPT=scripts/audio_raw_analyse.lua ./ZoniStation_One ...
 -- (analysis runs once at startup, before the machine does anything interesting)
 
 local PATH       = os.getenv("ZS1_AUDIO_RAW") or "audio.raw"

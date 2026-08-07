@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-PS1 emulator written in C. SDL2 + OpenGL 3.3 (GLEW). Early development.
+PS1 emulator written in C. SDL3 + OpenGL 3.3 (GLEW). Early development.
 
 ```bash
 make                    # build
 make clean && make      # clean build
 make test               # run cpu_minimal_test
-./myps1_emu roms/SCPH1001.BIN                                           # BIOS menu
-./myps1_emu "roms/SCPH-7502 (3).BIN" --game="games/Ace Combat 2 (Europe).cue"
+./ZoniStation_One roms/SCPH1001.BIN                                           # BIOS menu
+./ZoniStation_One "roms/SCPH-7502 (3).BIN" --game="games/Ace Combat 2 (Europe).cue"
 ```
 
 The game path must be passed as `--game=<cue>`; a bare positional path is rejected. Run PAL discs
@@ -171,7 +171,7 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 - Pure C (C99). C++ only in `src/debug_ui.cpp` (ImGui wrapper).
 - No `malloc` in hot paths. Structs embedded, not heap-allocated.
-- SDL2 + GLEW + OpenGL 3.3 Core. ImGui via `third_party/imgui/`.
+- SDL3 + GLEW + OpenGL 3.3 Core. ImGui via `third_party/imgui/`.
 - `inter->cpu` pointer set after CPU init via `interconnect_set_cpu()`.
 - IRQ lines are edge-triggered: `interconnect_set_irq_line(inter, IRQ_X, true/false)`.
 - Exception flow: `cpu_exception(cpu, EXCEPTION_*)` saves EPC, updates SR mode stack.
@@ -197,8 +197,10 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   boot mode. In analog and stick mode the left stick no longer folds onto the D-pad, so a push
   arrives once, as adc2/adc3. Stick mode is what a few titles want by name
   (DOCS/controllersandmemorycards.md:496: Ace Combat 2, MechWarrior 2, Colony Wars).
-- Controllers: DS4 over USB/Bluetooth via SDL_GameController, hot-plug, keyboard live alongside it,
-  radial stick deadzone so a resting stick reads 80h
+- Controllers: DS4 over USB/Bluetooth via SDL_Gamepad, hot-plug, keyboard live alongside it,
+  radial stick deadzone so a resting stick reads 80h. The DS4's light bar mirrors the emulated pad's
+  documented LED colour (`DOCS/controllersandmemorycards.md:369-372` — digital off, analog red,
+  stick green), written only when the colour changes; it needs hidraw access, see the traps below
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
 - SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
@@ -228,8 +230,8 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
 
-See `GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
-`GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
+See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
+`docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
 over this file for status.
 
 ---
@@ -243,8 +245,20 @@ speed.
 **Build dependencies** (Ubuntu/Debian):
 
 ```sh
-sudo apt install build-essential libsdl2-dev libglew-dev libgl1-mesa-dev
-make clean && make
+sudo apt install build-essential libglew-dev libgl1-mesa-dev
+make
+```
+
+SDL3 is not packaged on Ubuntu 24.04 or its derivatives (Zorin 18 included), so it is built from
+source once and installed to `/usr/local`; the Makefile picks it up through `pkg-config sdl3`, which
+is what supplies the `-L` and the `-rpath`:
+
+```sh
+sudo apt install cmake libwayland-dev libxkbcommon-dev libx11-dev libxext-dev libasound2-dev
+git clone --depth 1 --branch release-3.2.24 https://github.com/libsdl-org/SDL.git
+cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+cmake --build SDL/build -j"$(nproc)"
+sudo cmake --install SDL/build && sudo ldconfig
 ```
 
 Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
@@ -260,7 +274,7 @@ Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulat
   in `ZS1_FRAME_PROFILE=1` before looking anywhere else.
 - Read `docs/study/README.md` first: the combined CDROM/SPU work queue, ordered by impact per unit of
   effort, plus what is already verified correct so it is not re-investigated. Item 9 (VSync) is done.
-- `GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `GPU_GAP_ANALYSIS_2026-07-15.md` hold per-subsystem state.
+- `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `docs/GPU_GAP_ANALYSIS_2026-07-15.md` hold per-subsystem state.
   `docs/ui/` holds the interface direction the debug UI is being rebuilt against.
 - The build emits **zero warnings from this project's own sources**. Keep it that way; the only one
   left is `tmpnam` from vendored Lua at link time.
@@ -308,6 +322,15 @@ interpolation tables in `cdrom_audio.c`, which are the constants printed at
 has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
+
+- A DS4's light bar stays dark unless the user can open `/dev/hidraw*`. Default is `root:root 0600`,
+  so SDL's HIDAPI PS4 driver cannot claim the pad and falls back to the kernel evdev path — buttons,
+  sticks and force-feedback rumble all still work, which is why it looks like nothing is wrong, but
+  `SDL_PROP_GAMEPAD_CAP_RGB_LED_BOOLEAN` reads false and `SDL_SetGamepadLED` fails. Fix is a udev
+  rule, then replug the pad:
+  `KERNEL=="hidraw*", ATTRS{idVendor}=="054c", MODE="0660", TAG+="uaccess"` in
+  `/etc/udev/rules.d/99-sony-hidraw.rules`, followed by
+  `sudo udevadm control --reload-rules && sudo udevadm trigger`.
 
 - ~~The Makefile has no header dependency tracking.~~ Fixed 2026-08-06: `-MMD -MP` plus `-include` of
   the generated `.d` files, so editing anything in `include/` rebuilds exactly what included it. The
