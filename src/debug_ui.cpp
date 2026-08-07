@@ -2019,6 +2019,24 @@ static void draw_controller_mapping_window() {
     ImGui::SameLine(0, 20);
     ImGui::TextColored(ctrl->connected ? ZS_OK : ZS_CRIT, "[%s]", ctrl->connected ? "CONNECTED" : "DISCONNECTED");
 
+    // Emulated pad mode — what the game sees on the wire, not what the host pad is.
+    ImGui::Dummy(ImVec2(0, 4));
+    card_header("Emulated Pad Mode (Analog button)", ZS_DATA);
+    SioPadMode pad_mode = sio_get_pad_mode(nullptr);
+    ImGui::TextColored(pad_mode == SIO_PAD_DIGITAL ? ZS_WARN : ZS_OK, "%s",
+                       sio_pad_mode_name(pad_mode));
+    ImGui::SameLine(0, 16);
+    if (ImGui::Button("Cycle (F12 / touchpad)")) sio_cycle_pad_mode(nullptr);
+    ImGui::TextColored(ZS_MUTED,
+                       "Digital: sticks fold onto the D-pad. Analog/Stick: sticks reach the "
+                       "game as adc0-3. Stick mode is the LED=green flight mode some "
+                       "stick titles want (Ace Combat 2, MechWarrior 2, Colony Wars).");
+    ImGui::Checkbox("Swap X / O", &ctrl->swap_cross_circle);
+    ImGui::SameLine(0, 12);
+    ImGui::TextColored(ZS_MUTED,
+                       "Off = the pad's bottom button is Cross, as on hardware. On = bottom "
+                       "reports Circle, for software that confirms with Circle.");
+
     // Real-time Input Tester
     uint16_t state = controller_update(ctrl); // 0=pressed, 1=released
     ImGui::Dummy(ImVec2(0, 4));

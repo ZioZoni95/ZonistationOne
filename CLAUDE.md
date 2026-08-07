@@ -20,7 +20,8 @@ with the PAL BIOS (`SCPH-7502`) — region mismatch is detected and rejected as 
 Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as well as the ImGui
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
-`ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`.
+`ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
+default analog).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -188,14 +189,22 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - DMA: all channels, linked-list + block, completion interrupts
 - Timers 0/1/2: derived counters, sync modes, video-mode-derived rates
 - CDROM: async command/response, disc region detection, XA audio decode
-- SIO: digital pad, DualShock analog protocol (ID 73h/F3h, adc0-3, config commands), rumble on both
-  the old one-motor and the new 4Dh-mapped method, both memory card slots
-- Controllers: DS4 over USB/Bluetooth via SDL_GameController, hot-plug, keyboard live alongside it
+- SIO: digital pad, DualShock analog protocol (ID 73h/F3h, adc0-3, config commands), analog-stick
+  "flight mode" (ID 53h, L3/R3 disabled), rumble on both the old one-motor and the new 4Dh-mapped
+  method, both memory card slots
+- Pad mode: **analog by default**, not digital as on hardware — F12 or the DS4 touchpad click is the
+  Analog button and cycles digital -> analog -> stick; `ZS1_PAD_MODE=digital|analog|stick` sets the
+  boot mode. In analog and stick mode the left stick no longer folds onto the D-pad, so a push
+  arrives once, as adc2/adc3. Stick mode is what a few titles want by name
+  (DOCS/controllersandmemorycards.md:496: Ace Combat 2, MechWarrior 2, Colony Wars).
+- Controllers: DS4 over USB/Bluetooth via SDL_GameController, hot-plug, keyboard live alongside it,
+  radial stick deadzone so a resting stick reads 80h
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
 - SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
-- **Savestates**: full machine, format **v3**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
-  from Lua. v2 states are refused — the SIOI section (SIO0 protocol state) arrived in v3.
+- **Savestates**: full machine, format **v5**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
+  from Lua. Older states are refused: the SIOI section (SIO0 protocol state) arrived in v3, v4 moved
+  Cdrom fields, v5 added the pad's stick mode inside SIOI.
 - CPU memory timing: RAM data **loads** cost 3 cycles (1 documented from RAM_SIZE bit 7, 2
   calibrated); stores are free because the write buffer absorbs them. CPI lands ~1.6, tracked and
   printed by `ZS1_FRAME_PROFILE=1`. This is what stopped the BIOS printing `VSync: timeout` on

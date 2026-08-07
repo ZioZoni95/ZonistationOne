@@ -493,6 +493,12 @@ int main(int argc, char* argv[]) {
             else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F8 && !ev.key.repeat) {
                 load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
             }
+            /* F12 is the Analog button for players without a touchpad pad.
+             * F1..F9 pick the debug UI mode, F10/F11 pause and step; F12 is the
+             * only function key left unclaimed. */
+            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F12 && !ev.key.repeat) {
+                sio_cycle_pad_mode(&inter.sio);
+            }
         }
 
         /* A script's emu.load_state() parks its request rather than restoring
@@ -505,10 +511,14 @@ int main(int argc, char* argv[]) {
                 load_state_guarded(pending, &cpu, &inter);
         }
 
+        /* The pad's Analog button: DS4 touchpad click, or F12 on the keyboard.
+         * Cycles digital -> analog -> stick. Taken before the poll so the mode it
+         * selects is the one this frame's read is folded against. */
+        if (controller_take_analog_toggle(&gamepad))
+            sio_cycle_pad_mode(&inter.sio);
+        gamepad.analog_active = (sio_get_pad_mode(&inter.sio) != SIO_PAD_DIGITAL);
+
         sio_set_button_state(&inter.sio, controller_update(&gamepad));
-        // Touchpad-click edge → pad's Analog button: toggle SIO analog mode.
-        if (gamepad.analog_toggle)
-            sio_set_analog_mode(&inter.sio, !sio_get_analog_mode(&inter.sio));
         // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
         sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
                              gamepad.right_x, gamepad.right_y);
