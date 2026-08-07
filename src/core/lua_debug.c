@@ -619,7 +619,24 @@ static int l_emu_audio_stats(lua_State* L) {
     return 9;
 }
 
+/* emu.stretch() — what the consumer-side time-stretch is doing.
+ * Returns: tempo, active(bool), periods, blocks_stretched, queued_frames.
+ * The stretcher runs on the audio thread; these are read without a lock, which
+ * is right for a probe — a torn read costs one wrong line, a lock would change
+ * the timing being measured. */
+static int l_emu_stretch(lua_State* L) {
+    if (!g_inter) return 0;
+    const Spu* spu = &g_inter->spu;
+    lua_pushnumber(L, spu->stretch_tempo);
+    lua_pushboolean(L, spu->stretch_active);
+    lua_pushinteger(L, (lua_Integer)spu->stretch_periods);
+    lua_pushinteger(L, (lua_Integer)spu->stretch.blocks_stretched);
+    lua_pushinteger(L, (lua_Integer)spu_stretch_queued(&spu->stretch));
+    return 5;
+}
+
 static const luaL_Reg s_emu_funcs[] = {
+    {"stretch",           l_emu_stretch},
     {"log",               l_emu_log},
     {"save_state",        l_emu_save_state},
     {"load_state",        l_emu_load_state},

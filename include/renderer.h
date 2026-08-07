@@ -100,6 +100,17 @@ typedef struct {
     GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
     VramViewParams vram_view;   // how the viewer decodes VRAM (set from the UI)
 
+    // VRAM-viewer pass: decodes the unified VRAM into vram_viewer_texture on
+    // the GPU thread. It has to read vram_tex, not the CPU-side mirror: the
+    // mirror only ever receives uploads and DMA, so everything the game
+    // rasterises was missing from the viewer and the display area showed black.
+    GLuint viewer_fbo;
+    GLuint viewer_program;
+    GLint  viewer_vram_loc;
+    GLint  viewer_mode_loc;
+    GLint  viewer_clut_loc;
+    GLint  viewer_flags_loc;   // x=greyscale, y=show_alpha, z=shift24
+
     // Shader Uniform Location
     GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
     GLint uniform_use_texture_loc;

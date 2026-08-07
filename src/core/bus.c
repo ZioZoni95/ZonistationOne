@@ -714,17 +714,7 @@ void interconnect_store8(Interconnect* inter, uint32_t address, uint8_t value) {
     if (phys >= 0x1F802000 && phys < 0x1F804000) {
         uint32_t offset = phys - 0x1F802000;
         if (offset == 0x23 || offset == 0x80) {
-            char ch = (char)(value & 0xFF);
-            if ((uint8_t)ch >= 0x20 && (uint8_t)ch < 0x7F) {
-                if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
-                    inter->tty_line_buf[inter->tty_line_len++] = ch;
-            } else if (ch == '\n' || ch == '\r') {
-                if (inter->tty_line_len > 0) {
-                    inter->tty_line_buf[inter->tty_line_len] = '\0';
-                    log_print_tty(inter->tty_line_buf);
-                    inter->tty_line_len = 0;
-                }
-            }
+            interconnect_tty_char(inter, (char)(value & 0xFF), true);
         } else if (offset == 0x41 || offset == 0x42) {
             LOG_BIOS_DEBUG("[BUS] BIOS POST status: 0x%02x", (unsigned)(value & 0x0F));
         } else if (offset == 0x70) {

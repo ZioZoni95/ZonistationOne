@@ -79,6 +79,9 @@ typedef struct {
     void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
     uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
     bool           disp_depth24;     /* snapshot of GPUSTAT.21 for the scanout pass */
+    /* The viewer decode is driven from the UI thread; snapshot it with the
+     * frame rather than letting the GPU thread read renderer->vram_view live. */
+    VramViewParams view;
 } GpuFrame;
 
 /* Record submission order for the GPU thread — see GpuOp comment above. */
@@ -774,7 +777,7 @@ bool renderer_init(Renderer* renderer) {
      * makes the same frame come out differently on the iGPU and the dGPU. */
     glDisable(GL_DITHER);
 
-    // --- VRAM viewer texture (RGBA8, updated on CPU each frame) ---
+    // --- VRAM viewer texture (RGBA8, produced by the viewer pass below) ---
     glGenTextures(1, &renderer->vram_viewer_texture);
     glBindTexture(GL_TEXTURE_2D, renderer->vram_viewer_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1024, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -782,6 +785,111 @@ bool renderer_init(Renderer* renderer) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
     LOG_RENDERER_DEBUG("[RENDERER] VRAM viewer texture created (ID: %u).", renderer->vram_viewer_texture);
+
+    // --- VRAM viewer pass ---
+    // Decodes the whole unified VRAM into vram_viewer_texture, one RGBA8 texel
+    // per VRAM halfword, so the viewer image is always 1024x512 and VRAM
+    // coordinates map 1:1 regardless of the decode mode.
+    //
+    // This used to be a CPU loop over gpu.vram.data uploaded every frame. That
+    // buffer is only the CPU-side model — it receives uploads, fills and DMA,
+    // never the rasteriser — so every pixel a game draws with GP0 primitives was
+    // absent and the display area came out black. Reading vram_tex here is the
+    // whole point; it also drops a 2 MB upload per frame.
+    {
+        static const char* viewer_vs =
+            "#version 330 core\n"
+            "out vec2 v_uv;\n"
+            "void main(){\n"
+            "  vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2));\n"
+            "  v_uv = p;\n"
+            "  gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);\n"
+            "}\n";
+        static const char* viewer_fs =
+            "#version 330 core\n"
+            "in vec2 v_uv;\n"
+            "out vec4 o_col;\n"
+            "uniform sampler2D u_vram;\n"
+            "uniform int   u_mode;\n"     /* 0=4bpp 1=8bpp 2=16bpp 3=24bpp */
+            "uniform ivec2 u_clut;\n"
+            "uniform ivec3 u_flags;\n"    /* x=greyscale y=show_alpha z=shift24 */
+            /* Same 5:5:5:1 recovery the scanout pass uses — bit 15 included,
+             * because in 24bpp it is a data bit and in mask view it is the value
+             * being looked at. */
+            "uint to16(ivec2 p){\n"
+            "  vec4 t = texelFetch(u_vram, ivec2(clamp(p.x,0,1023), clamp(p.y,0,511)), 0);\n"
+            "  uint r = uint(t.r*255.0+0.5)>>3;\n"
+            "  uint g = uint(t.g*255.0+0.5)>>3;\n"
+            "  uint b = uint(t.b*255.0+0.5)>>3;\n"
+            "  uint a = (t.a > 0.5) ? 1u : 0u;\n"
+            "  return r | (g<<5) | (b<<10) | (a<<15);\n"
+            "}\n"
+            "vec3 expand(uint v){\n"
+            "  return vec3(float((v      )&0x1Fu),\n"
+            "              float((v >>  5)&0x1Fu),\n"
+            "              float((v >> 10)&0x1Fu)) * (8.0/255.0);\n"
+            "}\n"
+            /* One VRAM halfword lives at linear index y*1024+x; the indexed modes
+             * need arbitrary CLUT entries, so index arithmetic is done flat and
+             * folded back to 2D. */
+            "uint at(int idx){ return to16(ivec2(idx & 1023, (idx >> 10) & 511)); }\n"
+            "void main(){\n"
+            "  int x = int(v_uv.x * 1024.0);\n"
+            "  int y = int(v_uv.y * 512.0);\n"
+            "  int idx = y*1024 + x;\n"
+            "  uint raw = at(idx);\n"
+            "  vec3 c;\n"
+            "  if (u_mode == 0) {\n"
+            /* 4bpp: four indices per halfword, averaged into this slot so the
+             * whole page stays visible at 1:1. */
+            "    int base = u_clut.y*1024 + u_clut.x;\n"
+            "    c = vec3(0.0);\n"
+            "    for (int n = 0; n < 4; n++)\n"
+            "      c += expand(at(base + int((raw >> uint(n*4)) & 0xFu)));\n"
+            "    c *= 0.25;\n"
+            "  } else if (u_mode == 1) {\n"
+            "    int base = u_clut.y*1024 + u_clut.x;\n"
+            "    vec3 e0 = expand(at(base + int(raw & 0xFFu)));\n"
+            "    vec3 e1 = expand(at(base + int((raw >> 8) & 0xFFu)));\n"
+            "    c = (e0 + e1) * 0.5;\n"
+            "  } else if (u_mode == 3) {\n"
+            /* 24bpp: three bytes per pixel straddling halfwords — read the byte
+             * stream at this slot, offset by the phase. */
+            "    int off = idx*2 + u_flags.z;\n"
+            "    uint b0 = (at(off>>1) >> uint((off&1)*8)) & 0xFFu;\n"
+            "    uint b1 = (at((off+1)>>1) >> uint(((off+1)&1)*8)) & 0xFFu;\n"
+            "    uint b2 = (at((off+2)>>1) >> uint(((off+2)&1)*8)) & 0xFFu;\n"
+            "    c = vec3(float(b0), float(b1), float(b2)) / 255.0;\n"
+            "  } else {\n"
+            "    c = expand(raw);\n"
+            "  }\n"
+            "  if (u_flags.y != 0) {\n"
+            /* Mask bit only — makes write-protected pixels obvious. */
+            "    float a = ((raw & 0x8000u) != 0u) ? 1.0 : 0.0;\n"
+            "    c = vec3(a);\n"
+            "  } else if (u_flags.x != 0) {\n"
+            "    float l = dot(c, vec3(77.0, 150.0, 29.0) / 256.0);\n"
+            "    c = vec3(l);\n"
+            "  }\n"
+            "  o_col = vec4(c, 1.0);\n"
+            "}\n";
+        GLuint vvs = compile_shader(viewer_vs, GL_VERTEX_SHADER);
+        GLuint vfs = compile_shader(viewer_fs, GL_FRAGMENT_SHADER);
+        renderer->viewer_program = link_program(vvs, vfs);
+        glDeleteShader(vvs); glDeleteShader(vfs);
+        renderer->viewer_vram_loc  = glGetUniformLocation(renderer->viewer_program, "u_vram");
+        renderer->viewer_mode_loc  = glGetUniformLocation(renderer->viewer_program, "u_mode");
+        renderer->viewer_clut_loc  = glGetUniformLocation(renderer->viewer_program, "u_clut");
+        renderer->viewer_flags_loc = glGetUniformLocation(renderer->viewer_program, "u_flags");
+
+        glGenFramebuffers(1, &renderer->viewer_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, renderer->viewer_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                               renderer->vram_viewer_texture, 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            LOG_RENDERER_ERROR("[RENDERER] VRAM viewer FBO incomplete");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
 
     // --- Scanout-extract pass ---
     // Fullscreen triangle that reads the CRTC display window out of the unified
@@ -1989,6 +2097,30 @@ static int gpu_thread_main(void* userdata) {
             glBindTexture(GL_TEXTURE_2D, 0);
         }
 
+        /* VRAM viewer: decode the whole unified VRAM for the debug window. Runs
+         * after scanout so it shows the same frame the screen shows, and reads
+         * vram_tex — the CPU-side mirror never sees rasterised pixels. */
+        if (renderer->viewer_program) {
+            const VramViewParams* vv = &s_frame[ri].view;
+            glBindFramebuffer(GL_FRAMEBUFFER, renderer->viewer_fbo);
+            glViewport(0, 0, 1024, 512);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_BLEND);
+            glUseProgram(renderer->viewer_program);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+            glUniform1i(renderer->viewer_vram_loc, 0);
+            glUniform1i(renderer->viewer_mode_loc, (GLint)vv->mode);
+            glUniform2i(renderer->viewer_clut_loc, (GLint)vv->clut_x, (GLint)vv->clut_y);
+            glUniform3i(renderer->viewer_flags_loc,
+                        vv->greyscale ? 1 : 0, vv->show_alpha ? 1 : 0, (GLint)vv->shift24);
+            glBindVertexArray(renderer->dummy_vao);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+            glUseProgram(0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         {
@@ -2157,6 +2289,7 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     f->disp_w = renderer->display_w;
     f->disp_h = renderer->display_h;
     f->disp_depth24 = renderer->display_depth24;
+    f->view = renderer->vram_view;
     renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
     renderer->frames_pending = 1;
     SDL_CondSignal(renderer->frame_ready);

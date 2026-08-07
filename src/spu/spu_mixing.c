@@ -615,8 +615,76 @@ int spu_get_samples(Spu* spu, int16_t* buffer, int max_samples) {
  * SPU Fill Audio (SDL callback helper)
  * ========================================================================= */
 
+/* How far ahead of its working set the stretcher is allowed to pull.
+ *
+ * This bound is not a detail. The emulation loop paces itself on the ring level
+ * (src/main.c: it runs ahead only while the ring holds less than
+ * SPU_RING_TARGET_SAMPLES), so the ring is the machine's clock. Draining it into
+ * the stretcher faster than the device plays would make the whole emulated
+ * machine run fast — CPU, video and audio together — which is exactly what a
+ * first version of this did at 1.25x. The stretcher therefore takes only what it
+ * needs to serve this callback and leaves the rest of the queue in the ring
+ * where the pacer can see it. */
+#define STRETCH_HOLD_MARGIN    640
+
+/* Queue depth the tempo controller aims for, counting everything between the
+ * mixer and the device: what the pacer parks in the ring, plus the margin above,
+ * plus SPU_STRETCH_WORKING that can never be played because it is the block and
+ * search window the stretcher needs in hand before it can emit anything. */
+#define STRETCH_TARGET_FRAMES  (SPU_STRETCH_WORKING + STRETCH_HOLD_MARGIN + \
+                                SPU_RING_TARGET_SAMPLES)
+/* Fraction of target the queue may wander before the tempo moves. Inside it the
+ * stretcher is bit-exact passthrough, so ordinary clock wander costs nothing. */
+#define STRETCH_DEAD_BAND      0.20
+
+/* Staging for one callback's worth of ring reads. Audio-thread only, like the
+ * stretcher itself, so a static is safe and keeps it off the callback's stack. */
+static int16_t s_stretch_stage[SPU_STRETCH_IN_CAP * 2];
+
+static int stretch_enabled(void) {
+    static int cached = -1;
+    if (cached < 0) cached = getenv("ZS1_SPU_NO_STRETCH") ? 0 : 1;
+    return cached;
+}
+
 void spu_fill_audio(Spu* spu, int16_t* stream, int num_stereo_samples) {
-    int filled = spu_get_samples(spu, stream, num_stereo_samples);
+    int filled;
+
+    if (!stretch_enabled()) {
+        filled = spu_get_samples(spu, stream, num_stereo_samples);
+    } else {
+        /* Top the stretcher up to its bound, no further — see STRETCH_HOLD_MARGIN.
+         * Frames beyond that stay in the ring, which is what the emulation loop
+         * paces against. */
+        int want    = SPU_STRETCH_WORKING + STRETCH_HOLD_MARGIN;
+        int deficit = want - spu_stretch_queued(&spu->stretch);
+        int room    = spu_stretch_input_room(&spu->stretch);
+        if (deficit > room) deficit = room;
+        if (deficit > 0) {
+            int got = spu_get_samples(spu, s_stretch_stage, deficit);
+            if (got > 0) spu_stretch_push(&spu->stretch, s_stretch_stage, got);
+        }
+
+        int depth = spu_ring_used(spu) + spu_stretch_queued(&spu->stretch);
+
+        /* Tempo is input frames consumed per output frame emitted. Above 1 the
+         * queue drains faster than it fills, below 1 slower; the output rate
+         * never changes, so the correction is inaudible as pitch. */
+        double dev   = ((double)depth - STRETCH_TARGET_FRAMES) / STRETCH_TARGET_FRAMES;
+        double tempo = 1.0;
+        if (dev > STRETCH_DEAD_BAND || dev < -STRETCH_DEAD_BAND)
+            tempo = 1.0 + dev;
+        if (tempo < SPU_STRETCH_TEMPO_MIN) tempo = SPU_STRETCH_TEMPO_MIN;
+        if (tempo > SPU_STRETCH_TEMPO_MAX) tempo = SPU_STRETCH_TEMPO_MAX;
+
+        bool active = (tempo != 1.0);
+        if (active && !spu->stretch_active) spu->stretch_periods++;
+        spu->stretch_active = active;
+        spu->stretch_tempo  = tempo;
+        spu_stretch_set_tempo(&spu->stretch, tempo);
+
+        filled = spu_stretch_pull(&spu->stretch, stream, num_stereo_samples);
+    }
 
     /* Fill remaining with silence if buffer underrun */
     if (filled < num_stereo_samples) {

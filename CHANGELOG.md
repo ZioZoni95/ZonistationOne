@@ -7,6 +7,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The CD-ROM region check never ran.** The drive reported HC05 firmware `94/09/19 vC0` — a PU-7 from
+  September 1994 — and `DOCS/cdromdrive.md:1170` states that vC0 cannot answer `Test 19h,22h` at all,
+  so the BIOS never asked the machine what region it was. The answer was hardcoded to `"for U/C"`
+  (North America) and nothing read it. A PAL disc booted on a PAL BIOS not because it passed the check
+  but because the check was skipped, and the emulator was describing a hardware combination that never
+  existed: a 1994 Japanese launch drive inside a 1997 European console. The drive now reports
+  `95/05/16 vC1`, the oldest version that supports the region string, and the region itself is read out
+  of the loaded image's own `System ROM Version <v> <date> <R>` banner — SCPH-7502 gives `E`,
+  SCPH1001 gives `A` — so the two cannot disagree. `Cdrom.console_region` carries it and `Test 19h,22h`
+  answers from it. Distinct from `disc_region`, which already existed and means the disc's own licence
+  string; a mismatch between the two *is* the check.
+- **`ReadTOC` delivered its second response about five times too early**, sharing `CDROM_INIT_DELAY`
+  (121 ms). It has its own constant now, 180/4 sector times, matching pcsx-redux's `CdlReadToc`.
+- **A cold disc read blocked the emulation thread.** `cdrom_async_reader_wait` is replaced by a
+  non-blocking poll that returns `PENDING` and re-schedules the drive event. While the emulation thread
+  is stopped no VBlank fires and the audio ring drains, so a slow read showed up as both a dropped
+  frame and an audible gap — one defect wearing two symptoms.
+- **Every BIOS TTY line was logged twice.** The `A0` printf hook emitted the formatted text and the
+  BIOS then wrote the same text out one character at a time through `putchar`, which is hooked as
+  well. The character path is the one that cannot miss anything, so the printf hook now only decodes
+  (for `ZS1_TTY_TRACE`) and emits nothing. Counted against a reference emulator running the same BIOS,
+  every line now appears exactly as often as it does there — including `KERNEL SETUP!` twice, which is
+  genuine.
+- **The VRAM viewer showed black exactly where the picture was.** It was fed from `gpu.vram.data`, the
+  CPU-side model, which only ever receives uploads, fills and DMA — never the rasteriser. The decode is
+  now a shader pass on the GPU thread reading the unified VRAM texture, covering the same four modes
+  plus greyscale and the mask view. It also drops a 2 MB staging upload per frame that was being paid
+  for an image that could not show what was asked of it.
+- **The display scaled by the active range instead of the TV raster**, so every GP1(07) change resized
+  the whole picture. `DOCS/graphicsprocessingunitgpu.md:705` fixes the frame those scanline numbers sit
+  in and `:717-719` gives what a set actually shows around it. Screen extent and texture rows are now
+  kept separate, because 480i puts 480 rows into the same 240 scanlines.
+
+### Added
+- **WSOLA time-stretch on the audio output** (`src/spu/spu_stretch.c`). The producer generates on the
+  emulated clock and the device drains on the host clock; the ring level wanders, and the wander ends
+  either in silence or in discarded samples, both heard as a cut. Reading the ring at tempo T while
+  still emitting 44100 frames a second lets consumption absorb the difference with no pitch change.
+  At tempo exactly 1.0 the search is skipped and the output is bit-exact passthrough, so the dead band
+  costs and colours nothing. `emu.stretch()` reports tempo, activity and queue depth;
+  `ZS1_SPU_NO_STRETCH=1` bypasses it.
+- **`bios_detect_region()`** — the console region, read from the BIOS image's version banner.
+- **`ZS1_TTY_TRACE=1`** — names the BIOS hook behind every captured TTY line.
+- **Three probes**: `clock_compare.lua` (CPU, video and audio clocks as ratios against nominal),
+  `recenter_watch.lua` (one line per change of the displayed area, with the audio state of that same
+  vblank, plus the sector rate inside each CD-audio mute), `reverb_cut_watch.lua` (every change of
+  SPUCNT, the reverb volumes and the per-voice enables).
+
+### Measured
+- The machine's three clocks hold nominal over 128 seconds: CPU 1.0002, video 0.9997, audio 1.0002.
+  The CD drive streams 150 sectors a second against a reference emulator's 150.00. This retires the
+  "+10/15% drift" the vitals bar was reporting — the readout was wrong, not the machine.
+- A 212-second session including a completed level: one underrun event in total, no ring drops, the
+  time-stretch never leaving its dead band.
+- The audio cut heard at scene changes is the game clearing SPUCNT bit 0 — twice in that session, for
+  3.08 s and 2.72 s. The ring never starved. Why the gap is that long is not established.
+- Boot reaches the CD drive about 2.3 seconds earlier than a reference emulator on the same BIOS
+  image, and the gap opens before any CD-ROM command is issued. The cause is that BIOS ROM execution
+  is charged nothing: memory timing is applied to RAM loads only. `DOCS/memorycontrol.md:33` plus the
+  access-time formula at `:140` gives 29 cycles per instruction word; the hook exists in
+  `cpu_icache.c`, correctly limited to I-cache misses, and is disabled pending the isolation test it
+  documents.
+
 ### Changed
 - **Every last DuckStation reference is gone from `src/` and `include/`**: the comments that named
   DuckStation for behaviour or constants (timing models, dispatch tables, hardware constants,

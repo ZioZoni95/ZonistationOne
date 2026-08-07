@@ -12,6 +12,8 @@
 #include <stdbool.h>
 #include <SDL2/SDL.h>
 
+#include "spu_stretch.h"
+
 struct Interconnect;
 
 /* --- SPU Constants --- */
@@ -316,6 +318,13 @@ typedef struct Spu {
      * DSP problem. Counted so "is the emulator keeping up" stops being a guess. */
     uint32_t underrun_events;   /* callbacks that ran short */
     uint32_t underrun_samples;  /* stereo frames of silence inserted */
+
+    /* Consumer-side time-stretch. Owned by the audio thread: the callback is the
+     * only code that touches it, so it needs no lock of its own. */
+    SpuStretch stretch;
+    double     stretch_tempo;   /* last tempo asked for, for the probes */
+    bool       stretch_active;  /* outside the dead band right now */
+    uint32_t   stretch_periods; /* times the controller left the dead band */
 
     /* Debug/logging */
     uint32_t total_samples_generated;

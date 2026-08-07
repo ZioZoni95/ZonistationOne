@@ -74,9 +74,20 @@ struct Interconnect;
 #define CDROM_SPEED_UP_DELAY      20321280  /* 1x -> 2x, 0.6 s */
 #define CDROM_SPEED_DOWN_DELAY    23708160  /* 2x -> 1x, 0.7 s */
 
+/* ReadTOC re-reads the whole lead-in, which takes far longer than an Init.
+ * It was sharing CDROM_INIT_DELAY (121 ms) and delivering its INT2 about five
+ * times too early — early enough that the BIOS had not armed its wait yet, so
+ * the completion was lost and boot sat forever on a response already sent.
+ * 180/4 sector times matches pcsx-redux's CdlReadToc (src/core/cdrom.cc:954). */
+#define CDROM_READTOC_DELAY      (CDROM_SECTOR_TIME * 180u / 4u)  /* ~0.6 s */
+
 /* Aliases for readability */
 #define CDROM_READ_DELAY_1X      CDROM_SECTOR_TIME
 #define CDROM_READ_DELAY_2X      CDROM_SECTOR_TIME_2X
+/* How soon the drive re-checks when the reader has not produced the sector
+ * yet. Short against a sector time (6.67 ms at 2x) so a late disc costs
+ * latency on the CD data alone, and never stalls the emulation thread. */
+#define CDROM_READ_RETRY_DELAY   (CDROM_SECTOR_TIME / 64u)   /* ~0.21 ms */
 
 #define CDROM_MIN_INT_DELAY       1000
 
@@ -234,6 +245,12 @@ typedef struct Cdrom {
     char       disc_region;   /* 'A'/'E'/'I' from the disc's real licence string
                                   (cdrom_disc_detect_region), 0 if none loaded yet.
                                   GetID's SCEx response byte reflects this. */
+    char       console_region;/* 'A'/'E'/'I'/'J', copied from the loaded BIOS.
+                                  This is the drive's own region, reported to the
+                                  BIOS by Test 19h,22h, and it decides which SCEx
+                                  discs the machine will accept. Distinct from
+                                  disc_region: a mismatch between the two is the
+                                  region check, and on hardware it stops boot. */
 
     /* --- Position --- */
     uint32_t current_lba;

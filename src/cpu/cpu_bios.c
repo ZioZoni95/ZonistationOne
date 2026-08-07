@@ -148,20 +148,30 @@ static const char* get_bios_c_function_name(uint32_t func_num) {
 
 // Adds one character to the interconnect's TTY line buffer.
 // Flushes to stderr as a plain line on newline.
+// This is the syscall side-channel, not the DUART; interconnect_tty_char drops
+// it once the DUART is live so the same line is not logged from both.
 static void tty_add_char(Interconnect* inter, char ch) {
-    if (!inter) return;
-    uint8_t b = (uint8_t)ch;
-    if (ch == '\n' || ch == '\r') {
-        if (inter->tty_line_len > 0) {
-            inter->tty_line_buf[inter->tty_line_len] = '\0';
-            log_print_tty(inter->tty_line_buf);
-        }
-        inter->tty_line_len = 0;
-    } else if (b >= 0x20 && b < 0x7F) {
-        // Printable ASCII only — ignore control chars
-        if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
-            inter->tty_line_buf[inter->tty_line_len++] = ch;
+    interconnect_tty_char(inter, ch, false);
+}
+
+/* ZS1_TTY_TRACE=1 names the hook behind every captured line.
+ *
+ * Some lines reach the log twice and some do not, and two guesses at which pair
+ * of hooks overlaps were both wrong. Rather than guess a third time, each hook
+ * says what it saw, so the duplicate pair is read off instead of inferred. */
+static void tty_trace(const char* hook, const char* text, uint32_t len) {
+    static int on = -1;
+    if (on < 0) on = getenv("ZS1_TTY_TRACE") ? 1 : 0;
+    if (!on) return;
+    char buf[160];
+    uint32_t n = len < sizeof(buf) - 1 ? len : (uint32_t)sizeof(buf) - 1;
+    uint32_t o = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        char c = text[i];
+        buf[o++] = (c >= 0x20 && c < 0x7F) ? c : '.';
     }
+    buf[o] = '\0';
+    LOG_BIOS_DEBUG("[TTYSRC] %-6s len=%u \"%s\"", hook, (unsigned)len, buf);
 }
 
 // Capture write(fd, buf, len) — stdout (fd=1) and stderr (fd=2) only
@@ -171,9 +181,11 @@ static void capture_bios_write(Cpu* cpu) {
     uint32_t len = cpu->regs[6];  // $a2
 
     if ((fd == 1 || fd == 2) && cpu->inter && len > 0 && len < 0x10000) {
-        for (uint32_t i = 0; i < len; i++)
-            tty_add_char(cpu->inter,
-                         (char)interconnect_load8(cpu->inter, buf + i));
+        for (uint32_t i = 0; i < len; i++) {
+            char ch = (char)interconnect_load8(cpu->inter, buf + i);
+            tty_trace("write", &ch, 1);
+            tty_add_char(cpu->inter, ch);
+        }
     }
 }
 
@@ -309,8 +321,16 @@ static void capture_bios_printf(Cpu* cpu) {
     if (oi >= sizeof(out)) oi = sizeof(out) - 1;
     out[oi] = '\0';
 
-    for (uint32_t k = 0; k < oi; k++)
-        tty_add_char(cpu->inter, out[k]);
+    // Remember it so the write() the BIOS makes with these same bytes is not
+    // logged again — see s_printf_echo.
+    /* Traced, deliberately not emitted.
+     *
+     * The BIOS's own printf writes the formatted text out one character at a
+     * time through putchar, which is hooked too, so emitting here as well put
+     * every formatted line in the log twice. The character path is the one that
+     * cannot miss anything — it is what the BIOS actually does — so this hook
+     * keeps only the decoded form, for ZS1_TTY_TRACE. */
+    tty_trace("printf", out, oi);
 }
 
 // Capture putc(c, fd) / putchar(c)
@@ -321,6 +341,7 @@ static void capture_bios_putc(Cpu* cpu) {
 
     // putchar (A0:0x3C, B0:0x3D) has no fd; putc (A0:0x09, B0:0x3B) uses fd
     int is_putchar = (fn == 0x3C || fn == 0x3D);
+    { char cc = (char)c; tty_trace("putc", &cc, 1); }
     if (is_putchar || fd == 1 || fd == 2)
         tty_add_char(cpu->inter, (char)c);
 }
@@ -330,6 +351,9 @@ static void capture_bios_puts(Cpu* cpu) {
     uint32_t str = cpu->regs[4];  // $a0 = string pointer
 
     if (str && cpu->inter) {
+        { char t[128]; uint32_t k=0;
+          for (; k < sizeof(t)-1; k++) { uint8_t b=interconnect_load8(cpu->inter, str+k); if(!b) break; t[k]=(char)b; }
+          tty_trace("puts", t, k); }
         for (uint32_t i = 0; i < 512; i++) {
             uint8_t b = interconnect_load8(cpu->inter, str + i);
             if (b == 0) break;

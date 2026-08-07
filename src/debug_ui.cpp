@@ -1162,11 +1162,52 @@ static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
             }
             float pad_x = (avail.x - disp_w) * 0.5f;
             float pad_y = (avail.y - disp_h) * 0.5f;
-            ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + pad_x,
-                                       ImGui::GetCursorPosY() + pad_y));
 
-            ImGui::Image((void*)(intptr_t)texture_id, ImVec2(disp_w, disp_h),
-                         ImVec2(u0, v0), ImVec2(u1, v1));
+            /* The scale is a property of the TV, not of the current range.
+             *
+             * GP1(07) gives Y1/Y2 as scanline numbers relative to VSYNC, around a
+             * middle scanline that DOCS/graphicsprocessingunitgpu.md:705 fixes at
+             * 88h (NTSC) / A3h (PAL); :717-719 gives what a set actually shows
+             * around it — 224 of the 240 NTSC lines, and 256 for PAL, the rest
+             * being overscan or border. Filling the window with whatever Y2-Y1
+             * happens to be instead made the scale follow the range, so every
+             * change resized the whole picture: this game walks 240 -> 254 -> 236
+             * -> 239 -> 240 lines during boot and each step looked like the image
+             * jumping. Mapping the visible window to the window instead keeps one
+             * scanline the same size always; a narrower range then shows a border
+             * and a moved range moves, which is what the hardware does — and is
+             * what makes GP1(07) screen shake (:720-722) come out as a shake. */
+            const bool pal        = (inter->gpu.vmode == Pal);
+            const int  visible_h  = pal ? 256  : 224;
+            const int  raster_mid = pal ? 0xA3 : 0x88;
+            const int  visible_top = raster_mid - visible_h / 2;
+
+            const int line_start = (int)inter->gpu.display_line_start;
+            /* How tall the picture is *on screen* is the GP1(07) scanline range;
+             * how many texture rows carry it is vh. The two are not the same
+             * number — 480i puts 480 rows into the same 240 scanlines — so the
+             * placement is done in scanlines and the texture is sampled by the
+             * matching fraction. Using vh for both drew a 480-row frame at twice
+             * the height and ran it off the bottom of the window. */
+            int range = (int)inter->gpu.display_line_end - line_start;
+            if (range <= 0) range = (int)vh > 0 ? (int)vh : 240;
+
+            /* Lines above the visible window are lost to overscan, as on a set. */
+            int skip = visible_top - line_start;
+            if (skip < 0) skip = 0;
+            if (skip > range) skip = range;
+
+            const float line_h  = disp_h / (float)visible_h;
+            const float top_off = (float)(line_start + skip - visible_top) * line_h;
+            const float img_h   = (float)(range - skip) * line_h;
+
+            if (img_h > 0.0f) {
+                v0 = (float)vh * ((float)skip / (float)range) / 512.0f;
+                ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + pad_x,
+                                           ImGui::GetCursorPosY() + pad_y + top_off));
+                ImGui::Image((void*)(intptr_t)texture_id, ImVec2(disp_w, img_h),
+                             ImVec2(u0, v0), ImVec2(u1, v1));
+            }
         } else if (texture_id) {
             // Fallback: show entire FBO Y-flipped
             ImGui::Image((void*)(intptr_t)texture_id, avail, ImVec2(0, 1), ImVec2(1, 0));

@@ -80,7 +80,8 @@ EMU_CDROM_SRCS = \
 # --- SPU ---
 EMU_SPU_SRCS = \
     src/spu/spu.c src/spu/spu_voice.c src/spu/spu_adsr.c \
-    src/spu/spu_mixing.c src/spu/spu_dma.c src/spu/spu_irq.c
+    src/spu/spu_mixing.c src/spu/spu_dma.c src/spu/spu_irq.c \
+    src/spu/spu_stretch.c
 
 # --- Utils ---
 EMU_UTIL_SRCS = \

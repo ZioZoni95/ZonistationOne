@@ -38,12 +38,22 @@ typedef struct {
 typedef struct {
     // A buffer large enough to hold the entire BIOS content.
     uint8_t data[BIOS_SIZE];
+    // Console region, from the image's own version string: 'A' America,
+    // 'E' Europe, 'I'/'J' Japan. This is a property of the console, not of the
+    // disc, and the CD-ROM controller reports it to the BIOS through
+    // Test 19h,22h — so it has to agree with the ROM that is running or the
+    // machine describes itself inconsistently and boot stops at the region gate.
+    char region;
 } Bios;
 
 // Loads the BIOS ROM content from a file specified by 'path' into the Bios struct.
 // Returns true on success, false on failure (e.g., file not found, wrong size).
 // Based on Guide Section 2.7 Loading the BIOS [cite: 117]
 bool bios_load(Bios* bios, const char* path);
+
+// Fills bios->region from the image's version banner. Called by bios_load;
+// exposed so a test can point it at an image without loading one.
+void bios_detect_region(Bios* bios);
 
 // Reads a 32-bit value from the loaded BIOS data at a specific 'offset'.
 // Handles little-endian conversion required by the MIPS architecture.

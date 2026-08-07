@@ -151,8 +151,15 @@ typedef struct Interconnect {
     // --------------------------------
 
     // --- BIOS TTY line buffer (EXP2 offset 0x23 capture) ---
+    // Two sources feed this: the DUART byte port on EXP2, and the A0/B0 syscall
+    // side-channel in cpu_bios.c. The BIOS routes its own printf through the
+    // DUART, so once that port is live both sources carry the same stream and
+    // every line was being printed twice. tty_duart_seen latches on the first
+    // DUART byte and mutes the syscall side from then on; before it latches the
+    // syscall side is the only thing that sees the early kernel banner.
     char tty_line_buf[256];
     int  tty_line_len;
+    bool tty_duart_seen;
 
     // --- BIOS TTY input buffer (for kernel getc/putc TTY) ---
     char tty_input_buf[256];
@@ -317,6 +324,16 @@ void interconnect_tty_input_add(Interconnect* inter, char ch);
  * @return The next character from the buffer, or -1 if empty
  */
 int interconnect_tty_input_get(Interconnect* inter);
+
+/**
+ * @brief Feed one captured BIOS TTY character, from whichever source saw it.
+ * @param inter Pointer to the Interconnect instance.
+ * @param ch Character; the line is flushed to the log on CR or LF.
+ * @param from_duart True for the EXP2 byte port, false for the A0/B0 syscall
+ *        side-channel. Once the DUART has been seen the syscall side is
+ *        ignored, because both then carry the same stream.
+ */
+void interconnect_tty_char(Interconnect* inter, char ch, bool from_duart);
 
 // Initialize HW dispatch tables (call once from interconnect_init).
 void bus_hw_tables_init(void);
