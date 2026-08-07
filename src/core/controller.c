@@ -10,10 +10,33 @@
 #include <SDL2/SDL.h>
 #include <string.h>
 
+static Controller* g_active_controller = NULL;
+
 void controller_init(Controller* ctrl) {
     memset(ctrl, 0, sizeof(Controller));
     ctrl->connected = true;       // Controller enabled by default
-    LOG_SYSTEM_INFO("[SYSTEM] Controller initialized (keyboard input enabled)");
+    ctrl->key_map[0]  = SDL_SCANCODE_TAB;        // SELECT
+    ctrl->key_map[1]  = 0;                       // L3
+    ctrl->key_map[2]  = 0;                       // R3
+    ctrl->key_map[3]  = SDL_SCANCODE_SPACE;      // START
+    ctrl->key_map[4]  = SDL_SCANCODE_W;          // UP
+    ctrl->key_map[5]  = SDL_SCANCODE_D;          // RIGHT
+    ctrl->key_map[6]  = SDL_SCANCODE_S;          // DOWN
+    ctrl->key_map[7]  = SDL_SCANCODE_A;          // LEFT
+    ctrl->key_map[8]  = SDL_SCANCODE_LSHIFT;     // L2
+    ctrl->key_map[9]  = SDL_SCANCODE_LCTRL;      // R2
+    ctrl->key_map[10] = SDL_SCANCODE_Q;          // L1
+    ctrl->key_map[11] = SDL_SCANCODE_R;          // R1
+    ctrl->key_map[12] = SDL_SCANCODE_E;          // TRIANGLE
+    ctrl->key_map[13] = SDL_SCANCODE_C;          // CIRCLE
+    ctrl->key_map[14] = SDL_SCANCODE_Z;          // CROSS
+    ctrl->key_map[15] = SDL_SCANCODE_X;          // SQUARE
+    g_active_controller = ctrl;
+    LOG_SYSTEM_INFO("[SYSTEM] Controller initialized (custom key mapping ready)");
+}
+
+Controller* controller_get_active(void) {
+    return g_active_controller;
 }
 
 /**
@@ -168,37 +191,19 @@ uint16_t controller_update_from_keyboard(Controller* ctrl) {
         return 0xFFFF;  // All released if disconnected
     }
 
-    // Start with all buttons released
     uint16_t buttons = 0xFFFF;
-
-    // Get keyboard state
     const uint8_t* keys = SDL_GetKeyboardState(NULL);
 
-    // Direction buttons (WASD)
-    if (keys[SDL_SCANCODE_W]) buttons &= ~(1 << 4);  // UP
-    if (keys[SDL_SCANCODE_D]) buttons &= ~(1 << 5);  // RIGHT
-    if (keys[SDL_SCANCODE_S]) buttons &= ~(1 << 6);  // DOWN
-    if (keys[SDL_SCANCODE_A]) buttons &= ~(1 << 7);  // LEFT
-
-    // Action buttons (E/C/Z/X)
-    if (keys[SDL_SCANCODE_E]) buttons &= ~(1 << 12); // △ TRIANGLE
-    if (keys[SDL_SCANCODE_C]) buttons &= ~(1 << 13); // ○ CIRCLE
-    if (keys[SDL_SCANCODE_Z]) buttons &= ~(1 << 14); // × CROSS
-    if (keys[SDL_SCANCODE_X]) buttons &= ~(1 << 15); // □ SQUARE
-
-    // Shoulder buttons (Q/R)
-    if (keys[SDL_SCANCODE_Q]) buttons &= ~(1 << 10); // L1
-    if (keys[SDL_SCANCODE_R]) buttons &= ~(1 << 11); // R1
-
-    // Trigger buttons (SHIFT/CTRL)
-    if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT])
-        buttons &= ~(1 << 8);  // L2
-    if (keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL])
-        buttons &= ~(1 << 9);  // R2
-
-    // Menu buttons
-    if (keys[SDL_SCANCODE_SPACE]) buttons &= ~(1 << 3);  // START
-    if (keys[SDL_SCANCODE_BACKSPACE]) buttons &= ~(1 << 0);  // SELECT
+    for (int i = 0; i < 16; i++) {
+        int scancode = ctrl->key_map[i];
+        if (scancode > 0 && scancode < SDL_NUM_SCANCODES && keys[scancode]) {
+            buttons &= ~(1u << i);
+        }
+    }
+    // Secondary scancode fallbacks for triggers & select
+    if (ctrl->key_map[8] == SDL_SCANCODE_LSHIFT && keys[SDL_SCANCODE_RSHIFT]) buttons &= ~(1u << 8);
+    if (ctrl->key_map[9] == SDL_SCANCODE_LCTRL && keys[SDL_SCANCODE_RCTRL])   buttons &= ~(1u << 9);
+    if (ctrl->key_map[0] == SDL_SCANCODE_TAB && keys[SDL_SCANCODE_BACKSPACE]) buttons &= ~(1u << 0);
 
     // Log button state changes
     static uint16_t last_logged_state = 0xFFFF;

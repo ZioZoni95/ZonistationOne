@@ -26,10 +26,14 @@ typedef struct {
                                  // the caller toggles SIO analog mode and may leave it as-is.
     bool gc_touchpad_prev;       // touchpad state of the previous frame (edge detection)
     bool rumble_active;          // true while SDL rumble is firing (stop-on-zero edge)
+    int key_map[16];             // scancode mapping for 16 PSX buttons
 } Controller;
 
 // Initialize controller
 void controller_init(Controller* ctrl);
+
+// Get pointer to currently active controller instance
+Controller* controller_get_active(void);
 
 // Consume SDL_CONTROLLERDEVICEADDED / SDL_CONTROLLERDEVICEREMOVED from the event
 // drain: open/close the SDL_GameController*, log connect/disconnect. No-op for
