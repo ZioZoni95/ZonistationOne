@@ -438,18 +438,6 @@ void timers_start(Timers* timers) {
     }
 }
 
-// --- Frame/line timing functions ---
-uint32_t timers_calculate_frame_cycles(void) {
-    // NTSC: 33868800 / 60, PAL: 33868800 / 50
-    // TODO: Use region flag if available
-    return (uint32_t)(PSX_CPU_HZ / 60.0);
-}
-
-uint32_t timers_calculate_line_cycles(void) {
-    // NTSC: 33868800 / (60 * 263)
-    return (uint32_t)(PSX_CPU_HZ / (60.0 * 263.0));
-}
-
 // --- Lightgun/Scanline IRQ10 X coordinate conversion (PSX-Spex/nocash) ---
 static inline float timer0_to_x_coord(uint16_t timer0, bool is_ntsc) {
     // Subtract 140 as per docs, then apply region-specific factor
