@@ -58,6 +58,7 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize BIOS TTY line buffer
     inter->tty_line_len = 0;
     inter->tty_line_buf[0] = '\0';
+    inter->tty_duart_seen = false;
 
     // Initialize BIOS TTY input buffer (for kernel getc support)
     inter->tty_input_read_idx = 0;
@@ -87,6 +88,31 @@ void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu) {
  * @brief Add a character to the TTY input buffer
  * Called by main.c when reading keyboard input to be available for BIOS getc
  */
+void interconnect_tty_char(Interconnect* inter, char ch, bool from_duart) {
+    if (!inter) return;
+
+    /* The BIOS puts its own printf output on the DUART, so from the moment that
+     * port carries a byte the syscall side-channel is a second copy of the same
+     * text. Muting it there keeps the early banner — printed before the DUART is
+     * up, and visible only to the syscall hook — without printing everything
+     * after it twice. */
+    if (from_duart) inter->tty_duart_seen = true;
+    else if (inter->tty_duart_seen) return;
+
+    uint8_t b = (uint8_t)ch;
+    if (ch == '\n' || ch == '\r') {
+        if (inter->tty_line_len > 0) {
+            inter->tty_line_buf[inter->tty_line_len] = '\0';
+            log_print_tty(inter->tty_line_buf);
+        }
+        inter->tty_line_len = 0;
+    } else if (b >= 0x20 && b < 0x7F) {
+        /* Printable ASCII only — control characters would corrupt the log. */
+        if (inter->tty_line_len < (int)(sizeof(inter->tty_line_buf) - 1))
+            inter->tty_line_buf[inter->tty_line_len++] = ch;
+    }
+}
+
 void interconnect_tty_input_add(Interconnect* inter, char ch) {
     if (!inter) return;
     // Circular buffer: if full (read_idx == write_idx after increment), skip
