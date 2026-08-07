@@ -10,12 +10,14 @@ PS1 emulator written in C. SDL3 + OpenGL 3.3 (GLEW). Early development.
 make                    # build
 make clean && make      # clean build
 make test               # run cpu_minimal_test
-./ZoniStation_One roms/SCPH1001.BIN                                           # BIOS menu
-./ZoniStation_One "roms/SCPH-7502 (3).BIN" --game="games/Ace Combat 2 (Europe).cue"
+./ZoniStation_One roms/bios-ntsc.bin                          # BIOS menu
+./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"   # a disc
 ```
 
-The game path must be passed as `--game=<cue>`; a bare positional path is rejected. Run PAL discs
-with the PAL BIOS (`SCPH-7502`) — region mismatch is detected and rejected as on hardware.
+BIOS images and disc images are supplied by whoever runs this and are named generically throughout —
+no filename here refers to a real dump. The game path must be passed as `--game=<path to the .bin>`;
+a bare positional path is taken as the BIOS. Run PAL discs with a PAL BIOS — region mismatch is
+detected and rejected as on hardware.
 
 Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as well as the ImGui
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,

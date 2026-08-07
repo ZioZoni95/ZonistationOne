@@ -73,7 +73,11 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
             return false;
         }
     }
-    if (!out->bios_path) out->bios_path = "roms/SCPH1001.BIN";
+    /* Generic fallback only. No BIOS image ships with this repository and none
+     * may: the path is expected on the command line, and this exists so an
+     * argument-less run fails at bios_load() with a path to point at rather
+     * than a null dereference. */
+    if (!out->bios_path) out->bios_path = "roms/bios.bin";
     return true;
 }
 

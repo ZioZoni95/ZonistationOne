@@ -49,8 +49,8 @@ build for gdb.
 ## Run
 
 ```sh
-./ZoniStation_One roms/SCPH-7502.BIN                                              # BIOS menu
-./ZoniStation_One roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"     # a disc
+./ZoniStation_One roms/bios-pal.bin                          # BIOS menu
+./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"  # a disc
 ```
 
 You supply the BIOS and the discs; neither is in this repository.
