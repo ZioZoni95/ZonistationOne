@@ -62,6 +62,14 @@ Hack.zip
 # simias/psx-guide ships no LICENSE, so every right is reserved to its author.
 guide.tex
 
+# The nocash PSX specification (the psx-spx fork). Cited by file and line all
+# over this codebase, and kept locally for that reason — but not redistributed:
+# psx-spx.github.io's own README states that "no copyright or license have been
+# properly acquired to republish and alter this document". Clone it yourself:
+#   git clone https://github.com/psx-spx/psx-spx.github.io
+#   ln -s psx-spx.github.io/docs DOCS
+DOCS/
+
 # Per-machine runtime state, not source. These were tracked for a long time, so
 # a .gitignore entry alone did nothing — they had to be removed from the index.
 imgui.ini

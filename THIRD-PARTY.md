@@ -60,17 +60,31 @@ specification, cited per line below so any claim can be checked against the sour
 
 ## Documentation this code is written against
 
-`DOCS/` is a copy of **psx-spx** (Martin "nocash" Korth and contributors). It carries no software
-licence of its own, and the upstream project states that parts of it were reconstructed from Sony
-material. This project treats it as a specification: the register layouts, cycle counts and
-pseudocode in it are facts about the console, and implementing them is not copying software. Where a
-file here cites a `DOCS/` line, that citation is the provenance of the behaviour, not a licence
-grant.
+`DOCS/…` citations throughout this codebase name **psx-spx**, Martin "nocash" Korth's PlayStation
+specification as maintained by the psx-spx fork:
+
+    https://psx-spx.consoledev.net/  ·  https://github.com/psx-spx/psx-spx.github.io
+
+**Those files are not in this repository, and are not redistributed with it.** The upstream project
+states plainly that "no copyright or license have been properly acquired to republish and alter this
+document", and that the text is not a clean-room work. Nothing that unlicensed may travel inside a
+GPL-3.0 tree, so the copy this project is written against is kept locally and ignored by git:
+
+```sh
+git clone https://github.com/psx-spx/psx-spx.github.io
+ln -s psx-spx.github.io/docs DOCS
+```
+
+The citations remain exact against that clone — same filenames, and line numbers as of the commit
+each was written against. What this project takes from the document is the register layouts, cycle
+counts and pseudocode: facts about a 1994 console. Implementing a documented fact is not copying
+software, and a `DOCS/` citation records the provenance of a behaviour, not a licence grant.
 
 Some of the earliest subsystems were written while following Lionel Flandrin's *PlayStation
-Emulation Guide* (`simias/psx-guide`), which publishes no licence. What was taken from it is the
-described behaviour and the order to build things in, not its code listings — they are Rust, and the
-project is C. It is recorded here because "we read it" should be visible rather than inferred.
+Emulation Guide* (`simias/psx-guide`), which publishes no licence and is likewise **not
+redistributed here**. What was taken from it is the described behaviour and the order to build
+things in, not its code listings — they are Rust, and the project is C. It is recorded because "we
+read it" should be visible rather than inferred.
 
 ---
 

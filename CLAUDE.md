@@ -286,11 +286,26 @@ notes (untracked; commit them if they should travel).
    watchdog) and editable mapping, plus verifying rumble against the real DS4.
 4. The three GPU items that are really one job (cross-thread GL readback).
 
-**Repository question, still open**: `guide.tex` (Lionel Flandrin's guide, no upstream LICENSE) and
-the DuckStation-derived code that was rewritten are out of HEAD but remain in history. Recreating the
-repository from a clean tree was discussed and not decided. A `git bundle` preserves all 165+ commits
-in one file if the old repo is ever deleted — losing the history is separable from stopping
-distribution.
+**Redistribution, as of 2026-08-07**: `guide.tex`, `DOCS/`, `imgui.ini` and the two `.mcd` memory
+cards were removed from the index (the working copies stay — `.gitignore` covers them all). `DOCS/`
+was the important one: it is the psx-spx fork, whose own README states that "no copyright or license
+have been properly acquired to republish and alter this document". Cite it exactly as before; the
+paths resolve against a local clone that every checkout has to make (`README.md` §References gives
+the two commands).
+
+**Still open**: `guide.tex`, `DOCS/` and the DuckStation-derived code that was later rewritten remain
+in the *history*, and a public repository ships its history. Either release from a fresh repository
+with a single initial commit, or `git filter-repo` those blobs out and force-push. Not decided. A
+`git bundle` preserves all 165+ commits in one file either way — losing the history is separable
+from stopping distribution.
+
+**Audited 2026-08-07** (`git log` for the commit): every tracked source in `src/` and `include/` was
+scanned against `duckstation_ref/` (1243 files) and `pcsx-redux/` (828 files) two ways — 12-token
+shingles over comment-stripped code, keeping only windows with ≥5 real identifiers, and verbatim
+comment prose. Result: no meaningful overlap with either. The only literal match is the XA zigzag
+interpolation tables in `cdrom_audio.c`, which are the constants printed at
+`DOCS/cdromformat.md:908-912`, and the only shared prose is the MIT boilerplate in `rxi_log.c`, which
+has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
 
