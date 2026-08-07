@@ -571,11 +571,11 @@ int main(int argc, char* argv[]) {
         renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
         if (s_prof) t2 = SDL_GetPerformanceCounter();
 
-        /* Snapshot VRAM into viewer texture before submitting. Converting the
-         * whole 1024x512 buffer to RGBA8 costs 2 MB of staging pool per frame,
-         * so only pay it while the viewer window is actually open. */
-        if (debug_ui_vram_viewer_open())
-            renderer_update_vram_viewer(&inter.gpu.renderer, (const uint8_t*)inter.gpu.vram.data);
+        /* The VRAM viewer is filled by a shader pass on the GPU thread now, from
+         * the same texture the rasteriser draws into. It used to be converted
+         * here from gpu.vram.data and uploaded — 2 MB of staging per frame for an
+         * image that could not show anything the game drew, because that buffer
+         * only ever receives uploads, fills and DMA. */
         if (s_prof) t3 = SDL_GetPerformanceCounter();
 
         /* Submit frame to GPU thread: swap buffers, wake renderer */
