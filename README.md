@@ -211,9 +211,20 @@ Memory map, per-subsystem state and the open work queue: `GAP_ANALYSIS_REFACTOR_
 
 ## References
 
-Hardware behaviour comes from the documentation in `DOCS/` (the nocash PSX specification), cited by
-file and line where it decides a value in the code. `pcsx-redux/` is consulted as a GPL-2.0+ reference
-and credited where used.
+What this emulator was actually written against:
+
+- **psx-spx**, Martin "nocash" Korth's PlayStation specification, [psx-spx.consoledev.net](https://psx-spx.consoledev.net/) —
+  the source of nearly every value in the code, cited by file and line as `DOCS/…`.
+- **[PCSX-Redux](https://github.com/grumpycoders/pcsx-redux)** (GPL-2.0+) — consulted where the
+  specification is ambiguous, and the origin of parts of the SPU; credited in the file headers.
+- **[DuckStation](https://github.com/stenzek/duckstation)** — consulted only for *what the hardware
+  does*. Its licence forbids derivative works, so none of its code is here.
+- **Lionel Flandrin's PlayStation Emulation Guide** ([simias/psx-guide](https://github.com/simias/psx-guide)) —
+  followed while the first subsystems were being built.
+
+None of those documents are redistributed here; the `DOCS/…` citations resolve against a clone you
+make yourself (`git clone https://github.com/psx-spx/psx-spx.github.io && ln -s psx-spx.github.io/docs DOCS`).
+`THIRD-PARTY.md` is the full account, including the MIT components that *are* vendored.
 
 ## License
 

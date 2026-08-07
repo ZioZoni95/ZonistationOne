@@ -1,6 +1,14 @@
 Look up PSX hardware documentation in the DOCS/ folder of this project.
 
-The DOCS/ folder contains No$PSX-style hardware reference docs. Key files:
+DOCS/ is a local, git-ignored clone of psx-spx (the nocash specification) — it is not part of the
+repository, because it carries no licence that would let it be redistributed. If it is missing:
+
+```sh
+git clone https://github.com/psx-spx/psx-spx.github.io
+ln -s psx-spx.github.io/docs DOCS
+```
+
+Key files:
 
 | Topic | File |
 |-------|------|
