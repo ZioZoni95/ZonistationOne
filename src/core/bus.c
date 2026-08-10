@@ -898,7 +898,9 @@ static bool dma_mdec_run_slice(Interconnect* inter, uint32_t* words_moved) {
         while (words_done < MDEC_SLICE_WORDS && remaining > 0 && mdec_output_has_data(&inter->mdec)) {
             uint32_t cur = addr & 0x00FFFFFC;
             if (cur >= RAM_SIZE) {
-                LOG_DMA_ERROR("[DMA] MDEC out: addr 0x%08x out of bounds", cur);
+                LOG_DMA_ERROR("[DMA] MDEC out: addr 0x%08x out of bounds (base 0x%08x rem %u step %d done %u)",
+                              cur, inter->dma.channels[1].base_addr, remaining,
+                              dma->mdec_out_step, words_done);
                 remaining = 0;
                 break;
             }

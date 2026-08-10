@@ -106,6 +106,8 @@ uint32_t dma_read(Dma* dma, uint32_t offset);
 bool dma_write(Dma* dma, uint32_t offset, uint32_t value);
 bool dma_channel_is_active(DmaChannel* ch);
 void dma_channel_done(DmaChannel* ch);
+/* Drop a sliced transfer still in flight on this channel (CHCR start cleared) */
+void dma_cancel_slice(Dma* dma, uint32_t channel_index);
 
 uint32_t channel_get_control(DmaChannel* ch);
 void channel_set_control(DmaChannel* ch, uint32_t value);
