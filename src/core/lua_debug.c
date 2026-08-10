@@ -25,7 +25,7 @@
 #include "savestate.h"
 #include "cdrom_audio.h"
 #include "log.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <string.h>
 #include <stdio.h>

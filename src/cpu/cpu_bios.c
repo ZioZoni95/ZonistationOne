@@ -12,6 +12,7 @@
 #include "timers.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // =============================================================================
 // BIOS Syscall Side-Channel Capture (LLE)

@@ -1,6 +1,6 @@
 # Vulkan 1.3 Architecture, Hardware Exploitation & Kubernetes Cluster Deployment
 
-**Project:** ZoniStation One — PSX Emulator (C99 / SDL2 / OpenGL 3.3 / Vulkan 1.3)  
+**Project:** ZoniStation One — PSX Emulator (C99 / SDL3 / OpenGL 3.3 / Vulkan 1.3)  
 **Date:** 2026-08-01  
 **Target Hardware:** Intel Core i9 (24C/32T) + NVIDIA GeForce RTX 4060 & Kubernetes Clusters (K3s / k3d / EKS)  
 **Companion Documents:** [`HARDWARE_UTILIZATION_ANALYSIS_2026-08-01.md`](file:///home/antoninoc/Projects/GitHub/ZonistationOne/docs/HARDWARE_UTILIZATION_ANALYSIS_2026-08-01.md), [`GPU_GAP_ANALYSIS_2026-07-15.md`](file:///home/antoninoc/Projects/GitHub/ZonistationOne/docs/GPU_GAP_ANALYSIS_2026-07-15.md).
@@ -70,7 +70,7 @@ HEADLESS VULKAN 1.3 KUBERNETES PIPELINE:
 
 | Feature / Metric | OpenGL 3.3 Backend (Current) | Vulkan 1.3 Engine (Target) | Cloud Headless Impact |
 |---|---|---|---|
-| **Display Dependency** | Requires X11 / Wayland / SDL2 Window | Supports `VK_KHR_headless_surface` | Operates in headless K8s pods without Xvfb |
+| **Display Dependency** | Requires X11 / Wayland / SDL3 Window | Supports `VK_KHR_headless_surface` | Operates in headless K8s pods without Xvfb |
 | **Driver Overhead** | High single-thread OpenGL driver tax | Minimal overhead, multi-threaded command recording | Reclaims CPU headroom for JIT / SPU / MDEC |
 | **Internal Resolution** | 1x Native PSX (1024×512 VRAM) | Configurable 1x to 8x (4K / 8K rendering) | Full RTX 4060 GPU utilization (~70-95%) |
 | **Semi-Transparency** | Multi-pass blend emulation | Dual-source hardware blending (`src1Color`) | Single-pass PSX blend mode accuracy |

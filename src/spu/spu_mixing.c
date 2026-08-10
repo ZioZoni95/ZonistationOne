@@ -12,7 +12,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 /* Forward declarations from other modules */
 extern void spu_reverb_init(Spu* spu);

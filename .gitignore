@@ -1,5 +1,5 @@
 # Build output
-myps1_emu
+ZoniStation_One
 cpu_test
 *.o
 *.d
@@ -16,8 +16,6 @@ logs/
 roms/
 *.BIN
 *.bin
-roms/SCPH1001.BIN
-roms/SCPH-7502*.BIN
 
 # Game disc images (do not distribute)
 games/*.bin

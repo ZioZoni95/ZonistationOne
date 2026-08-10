@@ -57,6 +57,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   kept separate, because 480i puts 480 rows into the same 240 scanlines.
 
 ### Added
+- **The DS4's light bar shows the emulated pad's LED.** The three pad modes each have a documented
+  colour (`DOCS/controllersandmemorycards.md:369-372` — 5A41h digital off, 5A73h analog red, 5A53h
+  stick green), and SDL3 can drive a DS4's light bar, so which mode a game actually selected is now
+  visible on the pad rather than only in the log. Written only when the colour changes: a light-bar
+  write is a HID report, and one per frame competes with the pad's input reports over Bluetooth. The
+  capability is queried once when the pad opens, so a pad without a light bar is never written to.
+  Needs read access to the pad's `/dev/hidraw*` node, which Linux gives to root alone by default —
+  without the udev rule in the README, SDL falls back to the kernel evdev path, where buttons, sticks
+  and rumble all work and only the LED is missing.
 - **Analog-stick "flight mode" (ID 5A53h, LED green)** alongside the analog pad (5A73h) and digital
   (5A41h). `DOCS/controllersandmemorycards.md:483-489` gives the difference — the stick ID, and L3/R3
   reported as permanently released — and `:496` names the titles that want it: MechWarrior 2, Colony
@@ -99,6 +108,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   documents.
 
 ### Changed
+- **The host layer moved from SDL2 to SDL3** (3.2.24, built from source — Ubuntu 24.04 and its
+  derivatives package no `libsdl3-dev`; the Makefile now takes both cflags and libs from
+  `pkg-config sdl3`, which is what carries the `/usr/local` rpath). Most of it is renames, but three
+  places changed shape:
+  - **Audio.** SDL3 has no fill-this-buffer device callback. The device is opened as an
+    `SDL_AudioStream` and the callback is told how many bytes are still wanted rather than handed a
+    buffer, so it now pushes with `SDL_PutAudioStreamData`. The source and the contract are unchanged
+    — the SPU's own ring, drained by `spu_fill_audio`, and `spu_ring_used()` is still what the main
+    loop paces against. `SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES=512` replaces the old
+    `SDL_AudioSpec.samples`, and the savestate guard locks the stream instead of the device.
+  - **Gamepads.** `SDL_GameController*` became `SDL_Gamepad*`, and the face buttons are now named by
+    position (`SOUTH`/`EAST`/`WEST`/`NORTH`) rather than by an Xbox pad's letters — the PSX mapping is
+    positional anyway, so it reads more honestly than `BUTTON_A` did.
+  - **Windowing.** `SDL_CreateWindow` lost its position arguments (the window is centred explicitly
+    afterwards) and `SDL_WINDOW_FULLSCREEN_DESKTOP` collapsed into a bool.
+  ImGui's SDL3 backend is vendored from upstream commit `ed9d1e74`, which is exactly the 1.92.8 the
+  rest of `third_party/imgui/` came from — verified by blob hash, not by version string.
+- **`getenv`/`strtol` are now included properly in `bus.c` and `cpu_bios.c`.** They compiled before
+  only because SDL2's `SDL.h` dragged in `<stdlib.h>` transitively through a chain of project
+  headers; SDL3 does not, and both files broke immediately. They should always have included it.
+- **The binary is `ZoniStation_One`**, not `myps1_emu`.
+- **A second, dead audio device is gone from `cdrom_audio.c`.** `cdrom_audio_sdl_open/close` opened
+  their own device with a callback that pulled from the SPU ring exactly as `main.c`'s did. Nothing
+  ever called them — `main.c` has owned the one device since the SPU path was built — so porting them
+  to SDL3's stream API would have been work spent on code with no caller. The CD audio FIFO itself is
+  untouched and still feeds the SPU.
 - **Every last DuckStation reference is gone from `src/` and `include/`**: the comments that named
   DuckStation for behaviour or constants (timing models, dispatch tables, hardware constants,
   "DuckStation-style" architecture) are replaced with the specification they restate — the DOT/line

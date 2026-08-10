@@ -112,7 +112,7 @@ PAD/memory-card.
 Two bugs found here are worth remembering because both produced "the machine is alive but one
 subsystem is deaf" symptoms: the GPU line had no raise site at all until `18e0732`, and the DMA line
 could be left logically high forever by a DICR-only acknowledge, swallowing every later completion
-(`7923c52`).
+(`095ce01`).
 
 **Open**: none tracked.
 
@@ -126,7 +126,7 @@ could be left logically high forever by a DICR-only acknowledge, swallowing ever
 scheduled events, since the node chain is built before the kick and is not rewritten underneath us.
 Block/`REQUEST` transfers read their source at kick time — deferring the read is wrong whenever the
 guest refills its staging buffer immediately after kicking, which is exactly what the FMV player does
-(`7bf783e`). Completion interrupts flow through one function, `dma_update_irq()`, which recomputes
+(`00606af`). Completion interrupts flow through one function, `dma_update_irq()`, which recomputes
 DICR's master flag and acts only on the transition; DICR writes call it too, so a game that enables
 interrupts after writing CHCR still gets its completion.
 
@@ -214,7 +214,7 @@ VRAM is **one** RGBA8 texture that is simultaneously the rasterization target, t
 destination and the scanout source. PSX halfwords are stored 5:5:5:1 expanded to 8 bits per channel,
 which round-trips exactly, and **alpha carries the PSX mask bit** — a drawn pixel writes 0 there
 normally, 1 when GP0(E6).0 forces it or when a textured pixel's source texel has bit 15 set
-(`124e675`). Semi-transparency blends colour only and never the alpha channel. A scanout pass
+(`1a39256`). Semi-transparency blends colour only and never the alpha channel. A scanout pass
 extracts the CRTC window and unpacks it for the active depth: direct fetch at 15bpp, two-texel
 recombination with a per-pixel byte shift at 24bpp, so FMV frames display correctly.
 
@@ -386,10 +386,10 @@ on another thread, so a save has to read it back and a load has to re-upload it)
 | Stack-overflow crash fix (multi-MB locals in `main`) | 2026-07-16 |
 | GTE colour-FIFO CODE byte → 3D boot logo renders (`cff5ab7`) | 2026-07-23 |
 | DMA sub-word register writes (`7172960`); GPU IRQ line wired (`18e0732`) | 2026-07-23 |
-| Unified VRAM texture; 24bpp scanout; Y-flip removal (`08de00b`, `86b4564`) | 2026-07-24/25 |
-| Timing unified: derived-counter timers, `system.c` frame driver (`df37550`) | 2026-07-25 |
-| MDEC scale-matrix transpose; DMA IRQ3 line (`7923c52`); block transfers read at kick (`7bf783e`) | 2026-07-26 |
-| FMV reaches the display: stale `is_viewer` flag (`43bbb0e`); real mask bit from the rasterizer (`124e675`) | 2026-07-27 |
+| Unified VRAM texture; 24bpp scanout; Y-flip removal (`00be230`, `4f9a517`) | 2026-07-24/25 |
+| Timing unified: derived-counter timers, `system.c` frame driver (`4c184d9`) | 2026-07-25 |
+| MDEC scale-matrix transpose; DMA IRQ3 line (`095ce01`); block transfers read at kick (`00606af`) | 2026-07-26 |
+| FMV reaches the display: stale `is_viewer` flag (`721a72c`); real mask bit from the rasterizer (`1a39256`) | 2026-07-27 |
 | SPU sample generation moved onto the emulated clock; wall-clock audio thread removed | 2026-07-28 |
 
 ### Open, in the order they should be picked up

@@ -79,6 +79,7 @@ typedef struct {
     void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
     uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
     bool           disp_depth24;     /* snapshot of GPUSTAT.21 for the scanout pass */
+    bool           disp_blank;       /* snapshot of GPUSTAT.23 - display off */
     /* The viewer decode is driven from the UI thread; snapshot it with the
      * frame rather than letting the GPU thread read renderer->vram_view live. */
     VramViewParams view;
@@ -127,15 +128,15 @@ static GpuFrame  s_frame[2];
  * emitted between batches. */
 static bool s_texture_barrier = false;
 
-static SDL_atomic_t s_readback_request;   /* CPU sets 1; GPU clears when done */
-static SDL_atomic_t s_readback_seq;       /* incremented after each completed readback */
+static SDL_AtomicInt s_readback_request;   /* CPU sets 1; GPU clears when done */
+static SDL_AtomicInt s_readback_seq;       /* incremented after each completed readback */
 static uint16_t     s_readback_vram[1024 * 512];   /* packed 1555, mask bit in 15 */
 static uint8_t      s_readback_rgba[1024 * 512 * 4];
 
 /* GPU thread. Unpacks vram_tex (RGBA8, 5:5:5:1 expanded as (v<<3)|(v>>2),
  * alpha carrying the PSX mask bit) back into PSX halfwords. */
 static void renderer_service_vram_readback(Renderer* renderer) {
-    if (!SDL_AtomicGet(&s_readback_request)) return;
+    if (!SDL_GetAtomicInt(&s_readback_request)) return;
 
     glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, s_readback_rgba);
@@ -149,17 +150,17 @@ static void renderer_service_vram_readback(Renderer* renderer) {
                                       | (p[3] >= 128 ? 0x8000u : 0u));
     }
 
-    SDL_AtomicSet(&s_readback_request, 0);
-    SDL_AtomicAdd(&s_readback_seq, 1);
+    SDL_SetAtomicInt(&s_readback_request, 0);
+    SDL_AddAtomicInt(&s_readback_seq, 1);
 }
 
 void renderer_request_vram_readback(Renderer* renderer) {
     if (!renderer || !renderer->gpu_thread) return;
-    SDL_AtomicSet(&s_readback_request, 1);
+    SDL_SetAtomicInt(&s_readback_request, 1);
 }
 
 const uint16_t* renderer_get_vram_readback(uint32_t* seq_out) {
-    if (seq_out) *seq_out = (uint32_t)SDL_AtomicGet(&s_readback_seq);
+    if (seq_out) *seq_out = (uint32_t)SDL_GetAtomicInt(&s_readback_seq);
     return s_readback_vram;
 }
 
@@ -177,8 +178,8 @@ const uint16_t* renderer_get_vram_readback(uint32_t* seq_out) {
  * the ops are not replayed when the full frame is submitted — replaying a
  * semi-transparent draw would blend it twice. */
 static uint32_t     s_exec_from[2];       /* first unexecuted op, per slot */
-static SDL_cond*    s_sync_rb_done;
-static SDL_atomic_t s_sync_rb_pending;    /* CPU sets 1; GPU clears when done */
+static SDL_Condition*    s_sync_rb_done;
+static SDL_AtomicInt s_sync_rb_pending;    /* CPU sets 1; GPU clears when done */
 static int          s_sync_rb_slot;
 static uint16_t     s_sync_rb_x, s_sync_rb_y, s_sync_rb_w, s_sync_rb_h;
 static uint16_t*    s_sync_rb_dst;        /* full 1024x512 CPU VRAM, written in place */
@@ -2023,7 +2024,7 @@ static int gpu_thread_main(void* userdata) {
     Renderer*   renderer = arg->renderer;
     SDL_Window* window   = arg->window;
 
-    if (SDL_GL_MakeCurrent(window, arg->gl_context) != 0) {
+    if (!SDL_GL_MakeCurrent(window, arg->gl_context)) {
         LOG_RENDERER_ERROR("[GPU-THREAD] SDL_GL_MakeCurrent failed: %s", SDL_GetError());
         return -1;
     }
@@ -2032,22 +2033,22 @@ static int gpu_thread_main(void* userdata) {
     /* ImGui OpenGL backend needs to be initialized on this thread */
     extern void imgui_opengl_new_frame(void);
 
-    while (!SDL_AtomicGet(&renderer->gpu_stop)) {
+    while (!SDL_GetAtomicInt(&renderer->gpu_stop)) {
         SDL_LockMutex(renderer->gpu_mutex);
-        while (renderer->frames_pending == 0 && !SDL_AtomicGet(&s_sync_rb_pending)
-               && !SDL_AtomicGet(&renderer->gpu_stop))
-            SDL_CondWait(renderer->frame_ready, renderer->gpu_mutex);
-        if (SDL_AtomicGet(&renderer->gpu_stop)) {
+        while (renderer->frames_pending == 0 && !SDL_GetAtomicInt(&s_sync_rb_pending)
+               && !SDL_GetAtomicInt(&renderer->gpu_stop))
+            SDL_WaitCondition(renderer->frame_ready, renderer->gpu_mutex);
+        if (SDL_GetAtomicInt(&renderer->gpu_stop)) {
             SDL_UnlockMutex(renderer->gpu_mutex);
             break;
         }
-        if (SDL_AtomicGet(&s_sync_rb_pending)) {
+        if (SDL_GetAtomicInt(&s_sync_rb_pending)) {
             int wi = s_sync_rb_slot;
             SDL_UnlockMutex(renderer->gpu_mutex);
             renderer_service_sync_readback(renderer, wi);
             SDL_LockMutex(renderer->gpu_mutex);
-            SDL_AtomicSet(&s_sync_rb_pending, 0);
-            SDL_CondSignal(s_sync_rb_done);
+            SDL_SetAtomicInt(&s_sync_rb_pending, 0);
+            SDL_SignalCondition(s_sync_rb_done);
             SDL_UnlockMutex(renderer->gpu_mutex);
             continue;
         }
@@ -2083,18 +2084,28 @@ static int gpu_thread_main(void* userdata) {
             glViewport(0, 0, dw, dh);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_BLEND);
-            glUseProgram(renderer->scanout_program);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
-            glUniform1i(renderer->scanout_vram_loc, 0);
-            glUniform2i(renderer->scanout_off_loc,  (GLint)s_frame[ri].disp_x, (GLint)s_frame[ri].disp_y);
-            glUniform2i(renderer->scanout_size_loc, (GLint)dw, (GLint)dh);
-            glUniform1i(renderer->scanout_d24_loc,  s_frame[ri].disp_depth24 ? 1 : 0);
-            glBindVertexArray(renderer->dummy_vao);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
-            glBindVertexArray(0);
-            glUseProgram(0);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            /* GP1(03).0 set: the video output is off, and DOCS/
+             * graphicsprocessingunitgpu.md:647 says that shows "a black
+             * picture". Games set it across a scene change while they rebuild
+             * the framebuffer and reload CLUTs; scanning VRAM out anyway put
+             * whatever the display window happened to cover on screen. */
+            if (s_frame[ri].disp_blank) {
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            } else {
+                glUseProgram(renderer->scanout_program);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+                glUniform1i(renderer->scanout_vram_loc, 0);
+                glUniform2i(renderer->scanout_off_loc,  (GLint)s_frame[ri].disp_x, (GLint)s_frame[ri].disp_y);
+                glUniform2i(renderer->scanout_size_loc, (GLint)dw, (GLint)dh);
+                glUniform1i(renderer->scanout_d24_loc,  s_frame[ri].disp_depth24 ? 1 : 0);
+                glBindVertexArray(renderer->dummy_vao);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindVertexArray(0);
+                glUseProgram(0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
         }
 
         /* VRAM viewer: decode the whole unified VRAM for the debug window. Runs
@@ -2191,7 +2202,7 @@ static int gpu_thread_main(void* userdata) {
         /* Signal CPU that frame is done — set pending=0 here (after render+reset) */
         SDL_LockMutex(renderer->gpu_mutex);
         renderer->frames_pending = 0;
-        SDL_CondSignal(renderer->frame_done);
+        SDL_SignalCondition(renderer->frame_done);
         SDL_UnlockMutex(renderer->gpu_mutex);
     }
 
@@ -2206,12 +2217,12 @@ static int gpu_thread_main(void* userdata) {
 
 void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLContext ctx) {
     renderer->gpu_mutex   = SDL_CreateMutex();
-    renderer->frame_ready = SDL_CreateCond();
-    renderer->frame_done  = SDL_CreateCond();
+    renderer->frame_ready = SDL_CreateCondition();
+    renderer->frame_done  = SDL_CreateCondition();
     renderer->sdl_window  = window;
     renderer->gl_context  = ctx;
     renderer->frames_pending = 0;
-    SDL_AtomicSet(&renderer->gpu_stop, 0);
+    SDL_SetAtomicInt(&renderer->gpu_stop, 0);
 
     /* Reset both slots */
     for (int i = 0; i < 2; i++) {
@@ -2224,8 +2235,8 @@ void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLCon
         s_exec_from[i]      = 0;
     }
     renderer->write_idx = 0;
-    s_sync_rb_done = SDL_CreateCond();
-    SDL_AtomicSet(&s_sync_rb_pending, 0);
+    s_sync_rb_done = SDL_CreateCondition();
+    SDL_SetAtomicInt(&s_sync_rb_pending, 0);
 
     s_gpu_thread_arg.renderer   = renderer;
     s_gpu_thread_arg.window     = window;
@@ -2240,16 +2251,16 @@ void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLCon
 
 void renderer_stop_gpu_thread(Renderer* renderer) {
     if (!renderer->gpu_thread) return;
-    SDL_AtomicSet(&renderer->gpu_stop, 1);
+    SDL_SetAtomicInt(&renderer->gpu_stop, 1);
     SDL_LockMutex(renderer->gpu_mutex);
-    SDL_CondSignal(renderer->frame_ready);
+    SDL_SignalCondition(renderer->frame_ready);
     SDL_UnlockMutex(renderer->gpu_mutex);
     SDL_WaitThread(renderer->gpu_thread, NULL);
     renderer->gpu_thread = NULL;
     SDL_DestroyMutex(renderer->gpu_mutex);
-    SDL_DestroyCond(renderer->frame_ready);
-    SDL_DestroyCond(renderer->frame_done);
-    if (s_sync_rb_done) { SDL_DestroyCond(s_sync_rb_done); s_sync_rb_done = NULL; }
+    SDL_DestroyCondition(renderer->frame_ready);
+    SDL_DestroyCondition(renderer->frame_done);
+    if (s_sync_rb_done) { SDL_DestroyCondition(s_sync_rb_done); s_sync_rb_done = NULL; }
     renderer->gpu_mutex   = NULL;
     renderer->frame_ready = NULL;
     renderer->frame_done  = NULL;
@@ -2271,6 +2282,10 @@ void renderer_set_display_depth24(Renderer* renderer, bool depth24) {
     renderer->display_depth24 = depth24;
 }
 
+void renderer_set_display_blank(Renderer* renderer, bool blank) {
+    renderer->display_blank = blank;
+}
+
 void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     if (!renderer->gpu_thread) return;
 
@@ -2280,7 +2295,7 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     SDL_LockMutex(renderer->gpu_mutex);
     /* Block if GPU is still rendering the previous frame */
     while (renderer->frames_pending > 0)
-        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+        SDL_WaitCondition(renderer->frame_done, renderer->gpu_mutex);
 
     GpuFrame* f = &s_frame[renderer->write_idx];
     f->imgui_draw_data = imgui_draw_data;
@@ -2289,10 +2304,11 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     f->disp_w = renderer->display_w;
     f->disp_h = renderer->display_h;
     f->disp_depth24 = renderer->display_depth24;
+    f->disp_blank   = renderer->display_blank;
     f->view = renderer->vram_view;
     renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
     renderer->frames_pending = 1;
-    SDL_CondSignal(renderer->frame_ready);
+    SDL_SignalCondition(renderer->frame_ready);
     SDL_UnlockMutex(renderer->gpu_mutex);
 }
 
@@ -2307,15 +2323,15 @@ bool renderer_read_vram_rect(Renderer* renderer, uint16_t* vram,
 
     SDL_LockMutex(renderer->gpu_mutex);
     while (renderer->frames_pending > 0)
-        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+        SDL_WaitCondition(renderer->frame_done, renderer->gpu_mutex);
 
     s_sync_rb_slot = renderer->write_idx;
     s_sync_rb_x = x; s_sync_rb_y = y; s_sync_rb_w = w; s_sync_rb_h = h;
     s_sync_rb_dst = vram;
-    SDL_AtomicSet(&s_sync_rb_pending, 1);
-    SDL_CondSignal(renderer->frame_ready);
-    while (SDL_AtomicGet(&s_sync_rb_pending))
-        SDL_CondWait(s_sync_rb_done, renderer->gpu_mutex);
+    SDL_SetAtomicInt(&s_sync_rb_pending, 1);
+    SDL_SignalCondition(renderer->frame_ready);
+    while (SDL_GetAtomicInt(&s_sync_rb_pending))
+        SDL_WaitCondition(s_sync_rb_done, renderer->gpu_mutex);
     SDL_UnlockMutex(renderer->gpu_mutex);
     return true;
 }
@@ -2324,6 +2340,6 @@ void renderer_wait_frame_done(Renderer* renderer) {
     if (!renderer->gpu_thread) return;
     SDL_LockMutex(renderer->gpu_mutex);
     while (renderer->frames_pending > 0)
-        SDL_CondWait(renderer->frame_done, renderer->gpu_mutex);
+        SDL_WaitCondition(renderer->frame_done, renderer->gpu_mutex);
     SDL_UnlockMutex(renderer->gpu_mutex);
 }

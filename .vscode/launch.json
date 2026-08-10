@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "GDB Launch (myps1_emu)",
+      "name": "GDB Launch (ZoniStation_One)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/myps1_emu",
+      "program": "${workspaceFolder}/ZoniStation_One",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

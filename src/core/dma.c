@@ -29,6 +29,21 @@ uint32_t channel_get_control(DmaChannel* ch) {
     return r;
 }
 
+/* Drop whatever sliced transfer channel_index still has in flight. The slice
+ * state (address, remaining words, step) lives here in Dma rather than in the
+ * channel registers, so anything that stops a channel outside of its own
+ * completion path has to clear it explicitly. */
+void dma_cancel_slice(Dma* dma, uint32_t channel_index) {
+    switch (channel_index) {
+        case 0: dma->mdec_in_active  = false; break;
+        case 1: dma->mdec_out_active = false; break;
+        case 2: dma->gpu_ll_active   = false;
+                dma->gpu_req_active  = false; break;
+        default: return;
+    }
+    LOG_DMA_DEBUG("[DMA] ch%u sliced transfer cancelled by CHCR write", channel_index);
+}
+
 // Helper function to set channel control register value
 // REMOVED 'static'
 void channel_set_control(DmaChannel* ch, uint32_t value) {
@@ -212,6 +227,18 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
             case 0x8: // CHCR
                 channel_set_control(ch, value);
                 channel_became_active = dma_channel_is_active(ch);
+                /* Start/busy bit cleared: software aborted the transfer. Our
+                 * sliced channels keep their remaining word count in Dma, not
+                 * in the channel registers, so clearing CHCR has to cancel that
+                 * state too — otherwise the slice keeps running off the event
+                 * scheduler after the guest has moved on. libmdec kicks DMA1
+                 * with an oversized BCR and clears CHCR when the frame is out;
+                 * the zombie slice then wrote MDEC output across the rest of
+                 * RAM (0x126000..0x200000 in Monsters & Co.), smearing the
+                 * game's code and display list, and every later ch1 kick was
+                 * dropped as "already in flight" so DecDCToutSync never
+                 * completed ("time out in decoding !"). */
+                if (!channel_became_active) dma_cancel_slice(dma, channel_index);
                 if (channel_became_active) {
                     static const char* const sync_names[] = {"MANUAL","REQUEST","LINKED_LIST","?"};
                     LOG_DMA_DEBUG("[DMA] Channel %u activated: sync=%s blockSize=%u blockCount=%u addr=0x%08x",
