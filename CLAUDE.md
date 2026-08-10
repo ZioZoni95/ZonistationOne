@@ -185,6 +185,13 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 - BIOS boot to menu (US and PAL), full 3D boot logo
 - `Ace Combat 2 (Europe)`: boots, plays its FMV intro, reaches the textured menu and 3D engine
+- `Monsters & Co. (Italy)`: boots, plays its FMV intros, reaches the title screen and 3D engine
+  (2026-08-10, after the DMA fix below)
+- DMA: a CHCR write that clears the start bit cancels an in-flight sliced transfer. Sliced channels
+  keep their remaining count in `Dma`, not in the registers, so anything that stops a channel outside
+  its own completion path has to call `dma_cancel_slice()`
+- GP1(03) display-off blanks the screen to black (`DOCS/graphicsprocessingunitgpu.md:647`) instead of
+  scanning the display window out of VRAM
 - GPU: polygons, rects, lines, textured/CLUT, semi-transparency, scissor, unified VRAM texture,
   15bpp and 24bpp display
 - MDEC: full decode pipeline, verified against real FMV playback
@@ -229,12 +236,22 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   the one that had not been tried when that was reported. Needs an iGPU run to confirm.
 - GPU: mask-bit *test* not applied to rasterized primitives; GP0(C0)/GP0(80) read the CPU-side VRAM;
   texture sampling reads a separate mirror; CRTC ticks once per frame.
+- **Display window is computed from the wrong register.** Hardware derives the width from GP1(06),
+  `(((X2-X1)/cycles_per_pix)+2) AND NOT 3` (`DOCS/graphicsprocessingunitgpu.md:687-690`); we take it
+  from the GP1(08) resolution index and ignore GP1(06) entirely, so every PAL game with non-default
+  centering is displayed at a width it never asked for, and screen-shake via GP1(06)/(07) does
+  nothing. Height ignores the interlace doubling, GP1(05) X is masked to even halfwords, 368 mode
+  decodes as 256. Full list and the fix order in `docs/GPU_DISPLAY_STUDY_2026-08-10.md`.
+- **Display state is snapshotted at the end of the field**, at frame submit, and applied to the whole
+  field; hardware latches per line. A game that changes depth or window part-way through a field gets
+  one wrong field from us — visible as the stretched 15bpp-read-as-24bpp frame after an FMV.
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
 
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
-over this file for status.
+over this file for status. `docs/GPU_DISPLAY_STUDY_2026-08-10.md` covers everything between VRAM and
+the screen (display window, scanout, overscan, latch order) and is authoritative for that path.
 
 ---
 
@@ -293,14 +310,22 @@ pad**, and there is **no UI for controller state or button mapping** — the map
 `controller.c`. `docs/CONTROLLER_DS4_SUPPORT.md` and `docs/CONTROLLER_MAPPING_UI.md` are the design
 notes (untracked; commit them if they should travel).
 
-**Next up, in order**:
-1. **SPU pops during speech** — needs a v3 savestate taken inside a speech scene so runs start from
+**Next up, in order** (the display items were added 2026-08-10 and come first — they are small and
+each removes a visible defect; `docs/GPU_DISPLAY_STUDY_2026-08-10.md` §4 carries the detail):
+1. **Display width from GP1(06)** with the documented divider table (10/8/5/4/7). Four lines in
+   `gpu_update_display_mapping()`.
+2. **Latch the display state at field start**, not at frame submit.
+3. **Count GP1(03) writes per field** — one probe run; decides whether the long black screens across
+   a load are the game's or ours.
+4. **Overscan crop option** in the scanout: the 8 rows a TV crops (`DOCS:713-716`) are where games
+   park stale VRAM, which is what the strip along the top of an FMV is.
+5. **SPU pops during speech** — needs a v3 savestate taken inside a speech scene so runs start from
    the defect instead of booting to it. Then `spu_clip_probe.lua` with and without
    `ZS1_SPU_NO_REVERB=1`.
-2. **Confirm the iGPU artifact fix** — one run with `ZS1_GPU=intel` against one with `ZS1_GPU=nvidia`.
-3. **Controller UI** — a panel showing live pad state (mode 41h/73h/F3h, buttons, sticks, motors,
+6. **Confirm the iGPU artifact fix** — one run with `ZS1_GPU=intel` against one with `ZS1_GPU=nvidia`.
+7. **Controller UI** — a panel showing live pad state (mode 41h/73h/F3h, buttons, sticks, motors,
    watchdog) and editable mapping, plus verifying rumble against the real DS4.
-4. The three GPU items that are really one job (cross-thread GL readback).
+8. The three GPU items that are really one job (cross-thread GL readback).
 
 **Redistribution, as of 2026-08-07**: `guide.tex`, `DOCS/`, `imgui.ini` and the two `.mcd` memory
 cards were removed from the index (the working copies stay — `.gitignore` covers them all). `DOCS/`
@@ -325,6 +350,15 @@ has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
 
+- **One runaway DMA presents as four unrelated defects.** A sliced transfer that keeps running after
+  the guest aborted it wrote MDEC output over ~880 KB of guest RAM, and the report that came back was
+  "the boot logo breaks, then the screen shows VRAM, then the audio cuts, and the DMA logs out of
+  bounds". Every one of those was the smear: the logo's data, the display list and the GP1 values, and
+  the SPU voice tables all lived inside the overwritten range (the SPU log tells it plainly —
+  `volL=0x0D0C adsr=8C7A/DFED` before, `volL=0x0000 adsr=0000/0000` after). When several subsystems
+  fail at the same instant, look for one write path that is scribbling on RAM before debugging any of
+  them individually. The `out of bounds` line is the *end* of the smear, not its start, which is why
+  the visual damage appears earlier in the log than the error.
 - A DS4's light bar stays dark unless the user can open `/dev/hidraw*`. Default is `root:root 0600`,
   so SDL's HIDAPI PS4 driver cannot claim the pad and falls back to the kernel evdev path — buttons,
   sticks and force-feedback rumble all still work, which is why it looks like nothing is wrong, but
