@@ -79,6 +79,7 @@ typedef struct {
     void*          imgui_draw_data;  /* ImDrawData* — valid until next NewFrame */
     uint16_t       disp_x, disp_y, disp_w, disp_h;  /* snapshot of CRTC display region */
     bool           disp_depth24;     /* snapshot of GPUSTAT.21 for the scanout pass */
+    bool           disp_blank;       /* snapshot of GPUSTAT.23 - display off */
     /* The viewer decode is driven from the UI thread; snapshot it with the
      * frame rather than letting the GPU thread read renderer->vram_view live. */
     VramViewParams view;
@@ -2083,18 +2084,28 @@ static int gpu_thread_main(void* userdata) {
             glViewport(0, 0, dw, dh);
             glDisable(GL_SCISSOR_TEST);
             glDisable(GL_BLEND);
-            glUseProgram(renderer->scanout_program);
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
-            glUniform1i(renderer->scanout_vram_loc, 0);
-            glUniform2i(renderer->scanout_off_loc,  (GLint)s_frame[ri].disp_x, (GLint)s_frame[ri].disp_y);
-            glUniform2i(renderer->scanout_size_loc, (GLint)dw, (GLint)dh);
-            glUniform1i(renderer->scanout_d24_loc,  s_frame[ri].disp_depth24 ? 1 : 0);
-            glBindVertexArray(renderer->dummy_vao);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
-            glBindVertexArray(0);
-            glUseProgram(0);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            /* GP1(03).0 set: the video output is off, and DOCS/
+             * graphicsprocessingunitgpu.md:647 says that shows "a black
+             * picture". Games set it across a scene change while they rebuild
+             * the framebuffer and reload CLUTs; scanning VRAM out anyway put
+             * whatever the display window happened to cover on screen. */
+            if (s_frame[ri].disp_blank) {
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            } else {
+                glUseProgram(renderer->scanout_program);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, renderer->vram_tex);
+                glUniform1i(renderer->scanout_vram_loc, 0);
+                glUniform2i(renderer->scanout_off_loc,  (GLint)s_frame[ri].disp_x, (GLint)s_frame[ri].disp_y);
+                glUniform2i(renderer->scanout_size_loc, (GLint)dw, (GLint)dh);
+                glUniform1i(renderer->scanout_d24_loc,  s_frame[ri].disp_depth24 ? 1 : 0);
+                glBindVertexArray(renderer->dummy_vao);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+                glBindVertexArray(0);
+                glUseProgram(0);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
         }
 
         /* VRAM viewer: decode the whole unified VRAM for the debug window. Runs
@@ -2271,6 +2282,10 @@ void renderer_set_display_depth24(Renderer* renderer, bool depth24) {
     renderer->display_depth24 = depth24;
 }
 
+void renderer_set_display_blank(Renderer* renderer, bool blank) {
+    renderer->display_blank = blank;
+}
+
 void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     if (!renderer->gpu_thread) return;
 
@@ -2289,6 +2304,7 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     f->disp_w = renderer->display_w;
     f->disp_h = renderer->display_h;
     f->disp_depth24 = renderer->display_depth24;
+    f->disp_blank   = renderer->display_blank;
     f->view = renderer->vram_view;
     renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
     renderer->frames_pending = 1;

@@ -62,6 +62,9 @@ void gpu_update_display_mapping(Gpu* gpu) {
         gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
         gpu->crtc.display_width,  gpu->crtc.display_height);
     renderer_set_display_depth24(&gpu->renderer, gpu->display_depth == D24Bits);
+    /* Also the path that re-syncs the blank flag after a reset or a savestate
+     * load, neither of which goes through GP1(03). */
+    renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +188,9 @@ static void gp1_acknowledge_irq(Gpu* gpu, uint32_t value) {
 
 static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     gpu->display_disabled = (value & 1) != 0;
+    /* Off means a black picture on hardware (DOCS/graphicsprocessingunitgpu.md:647),
+     * not "keep showing what the display window covers". */
+    renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
     LOG_GPU_DEBUG("[GPU] GPU: Display %s (GP1 0x03)", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
@@ -510,6 +516,7 @@ static void gpu_reset_state(Gpu* gpu) {
         gpu->drawing_area_right, gpu->drawing_area_bottom);
     // Set default display region (320x240 at VRAM origin) for correct blit before GP1(05-08)
     renderer_set_display_region(&gpu->renderer, 0, 0, 320, 240);
+    renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
 }
 
 void gpu_init_full(Gpu* gpu, Interconnect* inter) {

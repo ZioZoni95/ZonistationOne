@@ -151,6 +151,7 @@ typedef struct {
     /* Display region — cropped from CRTC state, passed to GPU thread blit */
     uint16_t display_x, display_y, display_w, display_h;
     bool     display_depth24;   /* GPUSTAT.21 — display area is packed 24bpp */
+    bool     display_blank;     /* GPUSTAT.23 — display off: hardware shows black */
 
     /* GPU render thread (Phase 2 threading refactor) */
     SDL_Thread*  gpu_thread;
@@ -417,6 +418,10 @@ void renderer_set_mask_test(Renderer* renderer, bool enabled);
  */
 void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void renderer_set_display_depth24(Renderer* renderer, bool depth24);
+/* GP1(03).0: display off. DOCS/graphicsprocessingunitgpu.md:647 — "The \"Off\"
+ * settings displays a black picture". Games blank the screen across a scene
+ * change while they rebuild VRAM; without this the raw VRAM is on screen. */
+void renderer_set_display_blank(Renderer* renderer, bool blank);
 
 /* Staging-pool telemetry for the Lua console (bytes used in the current write
  * slot, all-time single-frame peak, queued updates, rects dropped for space). */
