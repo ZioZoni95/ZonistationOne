@@ -377,6 +377,14 @@ void cdrom_execute_command(Cdrom *cdrom) {
         if (cdrom->last_header_valid && cdrom->motor_on) {
             for (int i = 0; i < 8; i++)
                 cdrom_push_response(cdrom, cdrom->last_header[i]);
+            /* The answer itself, because a wrong-but-valid location sends the
+             * game back to Setloc/SeekL instead of stopping it dead: msf is
+             * BCD as it comes off the disc, then mode, file, channel, submode,
+             * coding info. */
+            LOG_CDROM_DEBUG("[CDROM] GetlocL -> %02x:%02x:%02x mode=%02x file=%02x ch=%02x sm=%02x ci=%02x",
+                            cdrom->last_header[0], cdrom->last_header[1], cdrom->last_header[2],
+                            cdrom->last_header[3], cdrom->last_header[4], cdrom->last_header[5],
+                            cdrom->last_header[6], cdrom->last_header[7]);
         } else {
             cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x80);
             break;
@@ -727,16 +735,6 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             return;
         }
 
-        /* Latch what GetlocL answers with, before the audio/data split below:
-         * the newest sector the drive has processed, whatever it turns out to be
-         * (DOCS/cdromdrive.md:871-880). Answering out of the data ring alone made
-         * GetlocL fail through every XA-audio stretch, because those sectors
-         * never enter the ring — and Monsters & Co. loops on that failure for
-         * good, re-issuing Setloc/SeekL/GetlocL/ReadS twice a field while it
-         * waits for a location it never gets. That is the "new game hangs". */
-        memcpy(cdrom->last_header, raw + 12, 8);
-        cdrom->last_header_valid = true;
-
         /* Write into ring buffer */
         uint8_t widx = cdrom->current_write_buffer;
         SectorBuffer *sb = &cdrom->sector_buffers[widx];
@@ -825,6 +823,23 @@ void cdrom_execute_drive(Cdrom *cdrom) {
                 cdrom_schedule_drive_event(cdrom, delay);
             }
         } else {
+            /* What GetlocL answers with, latched here rather than read back out
+             * of the ring below: the ring entry is cleared once the guest has
+             * DMA'd the sector out, and GetlocL is asked *after* that, so
+             * answering from the ring failed on every sector the game had
+             * already consumed — Monsters & Co. then loops for good, re-issuing
+             * Setloc/SeekL/GetlocL/ReadS twice a field waiting for a location it
+             * never gets ("new game hangs").
+             *
+             * Only data sectors latch. A reference run over an XA section
+             * interleaved 1 data : 3 audio answers GetlocL with the data
+             * cadence — MSF stepping by exactly 4 — so the ADPCM sectors that
+             * pass to the audio decoder never become the reported location.
+             * Latching those as well takes the game's demuxer off the video
+             * stream and its speech never plays. */
+            memcpy(cdrom->last_header, raw + 12, 8);
+            cdrom->last_header_valid = true;
+
             /* Data sector: sector size from mode bits 4-5 (nocash PSX-SPX) */
             if (cdrom->mode & 0x20) {       /* bit5: 2340 bytes from sync header */
                 sb->data_start = 12;

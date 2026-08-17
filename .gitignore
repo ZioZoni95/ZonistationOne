@@ -86,3 +86,6 @@ Schermata*.png
 
 # Stray third-party image, removed 2026-08-01
 maxresdefault.jpg
+
+# Official psx-spx clone, same redistribution constraint as DOCS/
+psx-spx-docs/
