@@ -538,6 +538,13 @@ static uint32_t ram_load_stall(void) {
 static inline void bus_charge_cpu_load(Interconnect* inter, uint32_t phys) {
     if (phys < 0x00800000)                   /* main RAM, mirrored */
         inter->cpu_mem_stall_cycles += ram_load_stall();
+    /* BIOS ROM *data* reads stay free. Tried 2026-08-17 (one extra comparison
+     * here, charging inter->bios_access_cycles): it did not reproduce the old
+     * "killed controller input" claim — the pad kept polling 32 times a field —
+     * but it moved every boot milestone ~15% later without closing the phase it
+     * was aimed at, overshooting the first BIOS phase to 143 fields against a
+     * reference run's 110. Instruction fetches from ROM are charged, in
+     * cpu_icache.c; that is what the reference run agrees with. */
 }
 
 static inline void bus_charge_cpu_store(Interconnect* inter, uint32_t phys) {

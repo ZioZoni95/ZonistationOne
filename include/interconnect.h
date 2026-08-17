@@ -148,6 +148,15 @@ typedef struct Interconnect {
     uint32_t evq_next_cycle;                     // Cycle of the next scheduled event
     uint32_t cpu_cycle_counter;                  // Global CPU cycle counter (updated by CPU/main loop)
     bool     frame_complete;                     // Set by the VBlank event; ends system_run_frame()
+
+    /* Monotonic emulated time, for the log stamp (LogClock in log.h).
+     * cpu_cycle_counter is 32-bit and wraps every ~127 s, so it cannot be the
+     * axis on its own; VBlank folds each field's elapsed cycles into
+     * emu_cycle_base, which is what makes a two-minute run comparable against
+     * another emulator's timestamps. */
+    uint64_t emu_cycle_base;                     // Cycles completed before the current field
+    uint32_t field_cycle_mark;                   // cpu_cycle_counter at the current field's start
+    uint32_t field_count;                        // CRTC fields (VBlanks) since reset
     // --------------------------------
 
     // --- BIOS TTY line buffer (EXP2 offset 0x23 capture) ---

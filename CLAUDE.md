@@ -139,6 +139,11 @@ Default runtime level: **INFO** (`src/utils/log.c`). All ImGui log windows open 
 
 Macro pattern: `LOG_<CATEGORY>_<LEVEL>(fmt, ...)` e.g. `LOG_GPU_DEBUG("gp0=0x%08x", v)`
 
+Every line carries the machine's clock, not the host's: `[f1397   t  27.4809]` is the CRTC field
+count and emulated seconds (`LogClock` in `log.h`, fed by the Interconnect). Wall seconds are
+useless for comparing against another emulator — a whole boot phase lands inside one second — and
+the field number is the axis a DuckStation run can be put on too (count its `Now in v-blank`).
+
 **Log level policy**:
 - ERROR: hardware faults, invalid state
 - WARN: recoverable anomalies, dropped commands
@@ -213,13 +218,30 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
 - SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
-- **Savestates**: full machine, format **v5**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
+- **Savestates**: full machine, format **v6**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
   from Lua. Older states are refused: the SIOI section (SIO0 protocol state) arrived in v3, v4 moved
-  Cdrom fields, v5 added the pad's stick mode inside SIOI.
+  Cdrom fields, v5 added the pad's stick mode inside SIOI, v6 added the drive's response deadlines
+  inside the raw CDRH range.
 - CPU memory timing: RAM data **loads** cost 3 cycles (1 documented from RAM_SIZE bit 7, 2
   calibrated); stores are free because the write buffer absorbs them. CPI lands ~1.6, tracked and
   printed by `ZS1_FRAME_PROFILE=1`. This is what stopped the BIOS printing `VSync: timeout` on
   every call.
+- **BIOS ROM wait states are charged** (`cpu_icache.c`, ~24 cycles/word from MEMCTRL) since
+  2026-08-17. They had been disabled for a long time because they hung boot; the hang was two
+  CDROM defects, not a CPU one, and both are fixed. Boot milestones now land within ~4% of a
+  DuckStation Devel-build run of the same disc, against 1.8x-7x too fast before, and the machine
+  still holds 50 fields/s.
+- **CDROM response deadlines are real.** Two rules, both learned the hard way (2026-08-17):
+  - A pending INT blocks delivery, and when the guest acks, the drive owes the time that is *left*,
+    not a fresh minimum. Anything that defers a CDROM event re-arms from
+    `cmd_deadline`/`second_deadline`/`drive_deadline` via `cdrom_delay_left()`, never from
+    `CDROM_MIN_INT_DELAY`. Sector delivery is paced from the previous sector, so INT1 lands every
+    6.7 ms at 2x (`DOCS/cdromdrive.md:1913` gives 0x36cd2).
+  - **A re-issued command must not restart work already owed.** `Init` takes ~740 ms — longer than
+    the ~415 ms after which the BIOS re-issues it — so the retries are expected and the drive
+    answers the first request at its own deadline. Rescheduling on each retry pushed the deadline
+    forward forever: boot sat in an endless `Init` loop with the screen frozen on the PlayStation
+    logo, which looked exactly like a CPU-timing hang and was blamed on one for months.
 
 ## Known Broken / Absent
 
@@ -384,9 +406,20 @@ has to be there. Re-run before a release rather than trusting this line.
 - Never quote a frame figure from a single run. A "17.5ms per frame" measurement taken while a build
   was running was reproduced at ~7ms minutes later on the identical binary, and nearly led to blaming
   a 2.7x regression on gcc-14. Repeat, and take a median.
-- Do not charge the CPU memory cost to BIOS ROM or the I/O window without running the LBA-23
-  isolation test that `cpu_icache.c` describes. Charging ROM *data* loads with the MEMCTRL word time
-  killed controller input outright, because the BIOS pad routines read their tables out of ROM.
+- **A guest that runs too fast hides broken peripheral timing, and fixing the speed "breaks" the
+  machine.** BIOS ROM instruction fetches went uncharged for months because charging them hung boot;
+  the hang was two CDROM defects (a deferred response re-armed at a 30 µs minimum, and a re-issued
+  `Init` restarting work already owed) that only a slow BIOS could expose. The lesson is the order of
+  suspicion: when adding a *correct* cost breaks something, the cost is usually right and the thing
+  it slowed down is wrong. ROM *data* loads are still uncharged, and the old claim that charging them
+  killed controller input did not reproduce (the pad kept polling 32 times a field) — what it does do
+  is overshoot, see `bus_charge_cpu_load()`.
+- **The measurement that settles emulated-timing arguments** is boot milestones in *emulated fields*,
+  not wall clock: our TTY lines carry the log's `[f… t…]` stamp, and a DuckStation run gets the same
+  axis by counting its `Now in v-blank` lines. Ace Combat 2 lands within ~2% end to end this way.
+  The AppImage is useless for this — a release build compiles `DEBUG_LOG`/`TRACE_LOG` out, so its
+  DMA/GPU/SPU channels are empty at any log level. Build the submodule with
+  `-DCMAKE_BUILD_TYPE=Devel` (that is what defines `_DEVEL`) and it emits ~2.3M lines a minute.
 - Anything on the load/store path is the hottest code in the emulator. A chain of region tests added
   to `interconnect_load32` cost ~10% of host frame time by itself; it is now one comparison.
 - `include/timers.h` is CRLF, like `include/renderer.h`. Edit both by line, never by rewriting the

@@ -26,8 +26,21 @@
  * @param bios Pointer to the loaded Bios struct.
  * @param ram Pointer to the initialized Ram struct.
  */
+/* Feeds the logger the machine's own clock instead of the host wall clock —
+ * see LogClock in log.h for why every line needs it. */
+static void interconnect_log_clock(void* udata, LogClock* out) {
+    const Interconnect* inter = (const Interconnect*)udata;
+    out->cycle = inter->emu_cycle_base +
+                 (uint64_t)(inter->cpu_cycle_counter - inter->field_cycle_mark);
+    out->field = inter->field_count;
+}
+
 void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     LOG_INTERCONNECT_DEBUG("[SYSTEM] Interconnect initialized");
+    inter->emu_cycle_base   = 0;
+    inter->field_cycle_mark = 0;
+    inter->field_count      = 0;
+    log_set_clock_source(interconnect_log_clock, inter);
     inter->bios = bios;
     inter->ram = ram;
     inter->cpu = NULL; // Will be set later via interconnect_set_cpu()

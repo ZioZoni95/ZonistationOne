@@ -287,12 +287,27 @@ void cdrom_execute_command(Cdrom *cdrom) {
     case CDC_INIT: {
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
+        /* The drive takes ~740 ms over an Init (see CDROM_INIT_DELAY), which is
+         * longer than the ~415 ms after which the BIOS re-issues the command.
+         * A retry must not restart the work: rescheduling on each one pushed the
+         * deadline forward for as long as the BIOS kept asking, so the reply
+         * never came and boot sat in an endless Init loop. Answer the first
+         * request at its own deadline; the BIOS accepts that reply for the
+         * retry it is waiting on. */
+        bool init_already_owed = cdrom->second_event_pending &&
+                                 cdrom->second_response_cmd == CDC_INIT &&
+                                 cdrom->inter &&
+                                 (int32_t)(cdrom->second_deadline -
+                                           cdrom->inter->cpu_cycle_counter) > 0;
         cdrom->second_response_cmd = CDC_INIT;
-        /* Init drops the drive back to single speed (see the second response),
-         * so it owes the spin-down before it can answer. */
-        uint32_t delay = CDROM_INIT_DELAY;
-        if (cdrom->double_speed) delay += CDROM_SPEED_DOWN_DELAY;
-        cdrom_schedule_second_response_event(cdrom, delay);
+        if (!init_already_owed) {
+            uint32_t delay = CDROM_INIT_DELAY;
+            /* Back to single speed, and the head re-homes to the start. */
+            if (cdrom->double_speed) delay += CDROM_SPEED_DOWN_DELAY;
+            if (cdrom->head_lba != 0)
+                delay += cdrom_disc_get_seek_ticks(cdrom->head_lba, 0);
+            cdrom_schedule_second_response_event(cdrom, delay);
+        }
         break;
     }
 
@@ -823,7 +838,13 @@ void cdrom_execute_drive(Cdrom *cdrom) {
 
             LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1", cdrom->current_lba);
 
-            /* INT1: data ready — INT ACK handler will schedule next drive event */
+            /* INT1: data ready. The ACK handler re-arms the drive event, but the
+             * deadline is set here, when this sector was delivered: the head
+             * reaches the next one a sector period later whatever the guest does
+             * with the interrupt. */
+            if (cdrom->inter)
+                cdrom->drive_deadline = cdrom->inter->cpu_cycle_counter +
+                    (cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X);
             fifo_clear(&cdrom->response_fifo);
             cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
             cdrom->interrupt_flag = CDROM_INT_DATA_READY;

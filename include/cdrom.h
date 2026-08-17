@@ -35,7 +35,15 @@ struct Interconnect;
 #define CDROM_ACK_DELAY          25000   /* command → INT3 first response */
 #define CDROM_FAST_ACK_DELAY      5000
 #define CDROM_ID_READ_DELAY      20480   /* GetID second response (pcsx-redux) */
-#define CDROM_INIT_DELAY       4100000   /* Init/Reset second response */
+/* Init's second response is base + the drive's work: it drops back to single
+ * speed and re-homes the head, and DOCS/cdromdrive.md:1894-1896 says the reply
+ * depends on that seek (and spin-up if the motor was off). Measured on a
+ * DuckStation Devel run of the same disc: ~740 ms both times Init is issued
+ * during boot, which is base + a speed change + the seek. The BIOS re-issues
+ * Init after ~415 ms of waiting, so this delay is longer than the retry
+ * interval by design — the drive must answer the first request at its own
+ * deadline and ignore the retries (cdrom_commands.c, CDC_INIT). */
+#define CDROM_INIT_DELAY       4100000   /* base, before speed change + seek */
 #define CDROM_RESET_DELAY      4100000
 
 /* Seek delays */
@@ -230,6 +238,20 @@ typedef struct Cdrom {
     uint8_t      pending_param_count;
     bool         cmd_event_pending;     /* guard: command event slot active */
     bool         second_event_pending;  /* guard: second_response event slot active */
+    /* Cycle each of those two is actually due at. A pending interrupt blocks
+     * delivery, and the controller does not restart its clock when the guest
+     * finally acknowledges — it delivers what was already due. Without these,
+     * the deferral path re-armed at CDROM_MIN_INT_DELAY and threw the real
+     * deadline away, so every seek, spin-up and ReadTOC completed ~30 us after
+     * its command instead of tens or hundreds of ms. */
+    uint32_t     cmd_deadline;          /* cpu_cycle_counter the ack is due at */
+    uint32_t     second_deadline;       /* cpu_cycle_counter the INT2/INT5 is due at */
+    /* Same idea for the drive: the head reaches the next sector on disc time.
+     * The INT1 acknowledge used to re-arm the drive event at one sector period
+     * from the ack, which also overwrote a longer pending deadline — a ReadN
+     * that had just charged 606 ms of spin-up delivered its first sector 6.6 ms
+     * later, because the guest acknowledged the command's INT3 in between. */
+    uint32_t     drive_deadline;        /* cpu_cycle_counter the next sector is due at */
 
     /* Second response data buffer (for async responses) */
     uint8_t second_response_data[16];

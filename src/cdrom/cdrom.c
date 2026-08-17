@@ -69,16 +69,52 @@ void cdrom_send_error(Cdrom *cdrom, uint8_t err, uint8_t reason) {
  * are called by event_scheduler.c's handler table when those events fire.
  * ========================================================================= */
 
+/* Cycles left until `deadline`, floored so a due-or-late event still goes
+ * through the event queue rather than being dispatched inline. */
+static uint32_t cdrom_delay_left(const Cdrom *cdrom, uint32_t deadline) {
+    if (!cdrom->inter) return CDROM_MIN_INT_DELAY;
+    int32_t left = (int32_t)(deadline - cdrom->inter->cpu_cycle_counter);
+    return (left > (int32_t)CDROM_MIN_INT_DELAY) ? (uint32_t)left : CDROM_MIN_INT_DELAY;
+}
+
 void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
     if (cdrom->cmd_event_pending) return;
     cdrom->cmd_event_pending = true;
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->cmd_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_COMMAND, cycles);
+    }
+}
+
+/* Re-arm an event that was due but could not be delivered because an earlier
+ * interrupt was still unacknowledged. Keeps the original deadline: what is
+ * owed is the time that is left, not a fresh minimum. */
+static void cdrom_rearm_command_event(Cdrom *cdrom) {
+    cdrom->cmd_event_pending = true;
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_COMMAND,
+                        cdrom_delay_left(cdrom, cdrom->cmd_deadline));
+}
+
+static void cdrom_rearm_second_response(Cdrom *cdrom) {
+    cdrom->second_event_pending = true;
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE,
+                        cdrom_delay_left(cdrom, cdrom->second_deadline));
 }
 
 void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->drive_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_DRIVE, cycles);
+    }
+}
+
+/* Re-arm the drive on what is left of its own deadline — see drive_deadline. */
+static void cdrom_rearm_drive_event(Cdrom *cdrom) {
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_DRIVE,
+                        cdrom_delay_left(cdrom, cdrom->drive_deadline));
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
@@ -87,15 +123,17 @@ void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
      * on a boot, twelve Init commands produced three second responses and a
      * burst of ten produced one. */
     cdrom->second_event_pending = true;
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->second_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE, cycles);
+    }
 }
 
 void cdrom_command_event_tick(struct Interconnect *inter) {
     Cdrom *cdrom = &inter->cdrom;
     cdrom->cmd_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
+        cdrom_rearm_command_event(cdrom);
         return;
     }
     if (cdrom->pending_command == CDC_NONE) return;
@@ -120,7 +158,7 @@ void cdrom_second_response_event_tick(struct Interconnect *inter) {
     Cdrom *cdrom = &inter->cdrom;
     cdrom->second_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
+        cdrom_rearm_second_response(cdrom);
         return;
     }
     cdrom_execute_second_response(cdrom);
@@ -155,6 +193,8 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->second_response_cmd = CDC_NONE;
     cdrom->pending_param_count = 0;
     cdrom->second_response_size = 0;
+    cdrom->cmd_deadline        = 0;
+    cdrom->second_deadline     = 0;
     cdrom->drive_state         = DRIVE_IDLE;
     cdrom->disc_present        = disc_present;
     cdrom->motor_on            = disc_present;
@@ -344,18 +384,20 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             LOG_CDROM_DEBUG("[CDROM] INT ACK 0x%02X remaining=%d", ack, cdrom->interrupt_flag);
 
             if (cdrom->interrupt_flag == 0) {
-                /* Second response pending */
+                /* Second response pending. Re-arm on what is left of its own
+                 * deadline: the guest acknowledging an INT3 does not make the
+                 * head arrive sooner. */
                 if (cdrom->second_response_cmd != CDC_NONE)
-                    cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
+                    cdrom_rearm_second_response(cdrom);
 
-                /* Reading: schedule next sector delivery */
+                /* Reading: the next sector is due on disc time, which the
+                 * delivery of the last one already set. */
                 if (cdrom->drive_state == DRIVE_READING)
-                    cdrom_schedule_drive_event(cdrom,
-                        cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X);
+                    cdrom_rearm_drive_event(cdrom);
 
                 /* Unblock a command that arrived while INT was pending */
                 if (cdrom->pending_command != CDC_NONE)
-                    cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
+                    cdrom_rearm_command_event(cdrom);
             }
             break;
         }

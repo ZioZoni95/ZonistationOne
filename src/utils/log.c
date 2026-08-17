@@ -27,6 +27,25 @@ typedef struct { LogSinkFn fn; void* udata; } SinkEntry;
 static SinkEntry sinks[MAX_LOG_SINKS];
 static int sink_count = 0;
 
+/* --- Emulated clock (see LogClock in log.h) ---
+ * Unset until the machine registers itself, so the lines emitted during host
+ * init (SDL, GL, BIOS load) simply carry no stamp rather than a fake zero. */
+static LogClockFn clock_fn = NULL;
+static void*      clock_udata = NULL;
+
+/* CPU clock, for turning cycles into seconds — the axis every other emulator's
+ * log is already on. Same constant as PSX_SYSCLK_HZ, kept local because the
+ * logger must not depend on any emulated component's header. */
+#define LOG_CPU_HZ 33868800.0
+
+/* A formatted message (480) plus the clock stamp. */
+#define LOG_LINE_MAX 600
+
+void log_set_clock_source(LogClockFn fn, void* udata) {
+    clock_fn = fn;
+    clock_udata = udata;
+}
+
 // --- Category Name Strings (fixed-width for alignment) ---
 static const char* category_names[LOG_CAT_COUNT] = {
     "SYSTEM", "CPU", "IRQ", "DMA", "GPU", "CDROM",
@@ -123,7 +142,9 @@ void log_set_stderr_quiet(bool quiet) {
  * Bounded and never refilled: once a sink has registered, lines go straight
  * through and the backlog is spent. */
 #define LOG_EARLY_MAX 256
-typedef struct { int category; int level; char msg[480]; } EarlyLine;
+/* Wide enough for a stamped line (LOG_LINE_MAX), not just the raw message —
+ * the backlog stores what dispatch_line produced, stamp included. */
+typedef struct { int category; int level; char msg[LOG_LINE_MAX]; } EarlyLine;
 static EarlyLine early_lines[LOG_EARLY_MAX];
 static int  early_count   = 0;
 static bool early_dropped = false;
@@ -180,10 +201,22 @@ static char        dup_last_msg[480] = {0};
 static uint32_t    dup_repeat_count  = 0;
 
 static void dispatch_line(LogCategory category, LogLevel level, const char* msg) {
+    /* Stamp here rather than in log_print: this is the one point every line
+     * passes through (including the duplicate-collapse note), and the stamp
+     * must not take part in the duplicate comparison — two identical messages
+     * one field apart are not duplicates worth collapsing silently. */
+    char stamped[LOG_LINE_MAX];
+    if (clock_fn) {
+        LogClock c;
+        clock_fn(clock_udata, &c);
+        snprintf(stamped, sizeof(stamped), "[f%-6u t%9.4f] %s",
+                 c.field, (double)c.cycle / LOG_CPU_HZ, msg);
+        msg = stamped;
+    }
     if (sink_count == 0) early_record((int)category, (int)level, msg);
     for (int i = 0; i < sink_count; i++)
         sinks[i].fn((int)category, (int)level, msg, sinks[i].udata);
-    char full[560];
+    char full[720];
     snprintf(full, sizeof(full), "[%-12s] %s", category_names[category], msg);
     rxi_log_log(to_rxi_level(level), __FILE__, __LINE__, "%s", full);
 }

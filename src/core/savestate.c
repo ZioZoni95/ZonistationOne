@@ -25,8 +25,11 @@
  *    shifted and appear to work while the drive state was nonsense.
  * 5: the SIO0 pad gained stick_mode (LED=green flight mode), so every field
  *    after it in the SIOI blob moved. Same hazard as 4: SIOI is a raw byte
- *    range of SioInternal, and a v4 state would restore shifted. */
-#define ZS1_STATE_VERSION 5u
+ *    range of SioInternal, and a v4 state would restore shifted.
+ * 6: Cdrom gained cmd_deadline/second_deadline (the drive keeps the due cycle
+ *    of a response an unacknowledged interrupt is holding back), which moves
+ *    every field after them inside the raw CDRH range. */
+#define ZS1_STATE_VERSION 6u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
