@@ -191,7 +191,15 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - BIOS boot to menu (US and PAL), full 3D boot logo
 - `Ace Combat 2 (Europe)`: boots, plays its FMV intro, reaches the textured menu and 3D engine
 - `Monsters & Co. (Italy)`: boots, plays its FMV intros, reaches the title screen and 3D engine
-  (2026-08-10, after the DMA fix below)
+  (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
+  fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
+  Co. work" further down.
+- **GetlocL answers from a latch, not from the data sector ring** (`cdrom_commands.c`). The ring
+  entry is cleared once the guest has DMA'd the sector out, and GetlocL is asked after that, so
+  answering from the ring failed on every consumed sector and the game looped on the failure. Only
+  **data** sectors latch: a reference run over a section interleaved 1 data : 3 audio answers with
+  the data cadence (MSF stepping by exactly 4), so latching the ADPCM sectors as well takes the
+  game's demuxer off the video stream and its speech never plays — that was measured, both ways.
 - DMA: a CHCR write that clears the start bit cancels an in-flight sliced transfer. Sliced channels
   keep their remaining count in `Dma`, not in the registers, so anything that stops a channel outside
   its own completion path has to call `dma_cancel_slice()`
@@ -274,6 +282,12 @@ See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
 over this file for status. `docs/GPU_DISPLAY_STUDY_2026-08-10.md` covers everything between VRAM and
 the screen (display window, scanout, overscan, latch order) and is authoritative for that path.
+`docs/CDROM_AUDIT_2026-08-17.md` is the drive's audit against the **official** psx-spx clone in
+`psx-spx-docs/` (newer than `DOCS/`, gitignored the same way) and is authoritative for the CDROM.
+Its rule, and the standing rule for any audit here: no entry may claim "correct" without citing
+both a documentation line and a code line; anything not compared is marked UNVERIFIED. Done so far:
+all of `cdromdrive.md`, `cdromformat.md` to line 1000, and `cdrom_audio.c` line by line. Still to
+audit: `cdrom.c`, `cdrom_commands.c`, `cdrom_disc.c`, `cdrom.h`, plus three doc files.
 
 ---
 
@@ -332,8 +346,30 @@ pad**, and there is **no UI for controller state or button mapping** — the map
 `controller.c`. `docs/CONTROLLER_DS4_SUPPORT.md` and `docs/CONTROLLER_MAPPING_UI.md` are the design
 notes (untracked; commit them if they should travel).
 
+**State of the Monsters & Co. work, 2026-08-17.** Starting a new game no longer hangs (the GetlocL
+latch), but a 120 s run against a DuckStation Devel run of the same disc, both on the emulated-field
+axis, leaves five measured differences. Register writes, VRAM upload rectangles, MDEC macroblock
+counts and DMA volumes all match within the 2.7% field ratio, so the guest behaves the same and the
+divergence is in what we do with it:
+1. **CD command churn**: per field we issue 13x their `GetlocL`, 21x `Setloc`, 27x `SeekL`, 47x
+   `ReadS` (they use 9 `ReadS` in a whole session, we use 614). The game is retrying something.
+2. **The Disney Interactive FMV is replaced by 2.8 s of black**: we read 325 sectors from LBA 291021
+   with the display off and **MDEC idle**, then the game jumps to LBA 293693 and only then re-enables.
+   The reference re-enables after ~50 sectors and keeps decoding through the load.
+3. **VRAM on screen** is the missing overscan crop: uploads land at y=8, the display window starts at
+   y=0, and DuckStation runs `CropMode = Overscan`. Item 4 below.
+4. **Sector rate during a load**: ours 130/s against their 152/s (2x nominal is 150/s).
+5. **`CLUT out of VRAM bounds`** 4662 times per 250 fields during gameplay, on 19520 textured quads —
+   a GPU defect, independent of the disc.
+Sector delivery itself is correct: contiguous, with 1 XA audio sector in 8 routed to the decoder,
+matching their 442 data / 63 audio split. The reported "-30% drift and underruns" is **not measured**
+— every run had debug logging on, which invalidates any speed figure (see the trap below). One clean
+`ZS1_FRAME_PROFILE=1` run, no stderr logging, no Lua probe, decides host versus guest first.
+
 **Next up, in order** (the display items were added 2026-08-10 and come first — they are small and
 each removes a visible defect; `docs/GPU_DISPLAY_STUDY_2026-08-10.md` §4 carries the detail):
+0. **Finish `docs/CDROM_AUDIT_2026-08-17.md`** — `cdrom_commands.c` is where the six unimplemented
+   documented rules listed in its Part 4 would land, and the churn above is the symptom to explain.
 1. **Display width from GP1(06)** with the documented divider table (10/8/5/4/7). Four lines in
    `gpu_update_display_mapping()`.
 2. **Latch the display state at field start**, not at frame submit.
@@ -398,7 +434,12 @@ has to be there. Re-run before a release rather than trusting this line.
   though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
-  time" that was later withdrawn.
+  time" that was later withdrawn. It also applies to *diagnosing* slowness, not just quoting it: a
+  reported "-30% drift with underruns" on 2026-08-17 could not be attributed at all, because every
+  run in evidence had `ZS1_LOG_LEVEL=debug` writing ~1.4M lines per 100 s. And note that a guest
+  stuck in a retry loop burns emulated cycles while the host idles, which looks identical on screen
+  to a host that cannot keep up, but needs the opposite fix. One `ZS1_FRAME_PROFILE=1` run with no
+  logging and no probe, first.
 - The BIOS must match the disc's region. A PAL disc with the US BIOS is rejected exactly as on
   hardware, and the symptom — sitting at the BIOS menu — looks like a boot regression.
 - `--game=` needs the `.bin`, not the `.cue`, for these discs. A `.cue` is accepted and then reports
