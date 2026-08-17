@@ -371,14 +371,13 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x10 GetlocL --- */
     case CDC_GETLOCL: {
-        /* Return header+subheader from last read sector buffer */
-        SectorBuffer *sb = &cdrom->sector_buffers[cdrom->current_read_buffer];
-        if (sb->valid && sb->lba < cdrom->disc.total_sectors) {
-            /* bytes 12-19: header (MM:SS:FF:mode) + subheader (file,ch,submode,coding) */
+        /* Header (MM:SS:FF:mode) + subheader (file,ch,submode,coding) of the
+         * newest sector processed — see Cdrom.last_header. The only documented
+         * failure is a drive that is not spun up (DOCS/cdromdrive.md:396). */
+        if (cdrom->last_header_valid && cdrom->motor_on) {
             for (int i = 0; i < 8; i++)
-                cdrom_push_response(cdrom, sb->raw[12 + i]);
+                cdrom_push_response(cdrom, cdrom->last_header[i]);
         } else {
-            /* not reading or no valid sector */
             cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x80);
             break;
         }
@@ -727,6 +726,16 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom->drive_state = DRIVE_IDLE;
             return;
         }
+
+        /* Latch what GetlocL answers with, before the audio/data split below:
+         * the newest sector the drive has processed, whatever it turns out to be
+         * (DOCS/cdromdrive.md:871-880). Answering out of the data ring alone made
+         * GetlocL fail through every XA-audio stretch, because those sectors
+         * never enter the ring — and Monsters & Co. loops on that failure for
+         * good, re-issuing Setloc/SeekL/GetlocL/ReadS twice a field while it
+         * waits for a location it never gets. That is the "new game hangs". */
+        memcpy(cdrom->last_header, raw + 12, 8);
+        cdrom->last_header_valid = true;
 
         /* Write into ring buffer */
         uint8_t widx = cdrom->current_write_buffer;

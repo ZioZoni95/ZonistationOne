@@ -313,6 +313,12 @@ typedef struct Cdrom {
     SectorBuffer sector_buffers[CDROM_SECTOR_BUFFERS];
     uint8_t current_read_buffer;
     uint8_t current_write_buffer;
+    /* Header + subheader of the newest sector the drive has processed, which is
+     * what GetlocL answers with (DOCS/cdromdrive.md:871-880 — INT1 hands over
+     * the oldest buffered sector, GetlocL reports the newest). Latched for every
+     * sector including XA audio, which never enters the data ring above. */
+    uint8_t last_header[8];
+    bool    last_header_valid;
     bool    data_buffer_armed;     /* request register bit 7 */
 
     /* --- Disc & async reader --- */

@@ -28,8 +28,10 @@
  *    range of SioInternal, and a v4 state would restore shifted.
  * 6: Cdrom gained cmd_deadline/second_deadline (the drive keeps the due cycle
  *    of a response an unacknowledged interrupt is holding back), which moves
- *    every field after them inside the raw CDRH range. */
-#define ZS1_STATE_VERSION 6u
+ *    every field after them inside the raw CDRH range.
+ * 7: Cdrom gained last_header/last_header_valid (what GetlocL answers with),
+ *    again inside CDRH. */
+#define ZS1_STATE_VERSION 7u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
