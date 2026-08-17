@@ -20,6 +20,7 @@
 #include "interconnect.h"
 #include "timers.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -33,24 +34,88 @@
 // Helper: update renderer screen scale and drawing offset
 // Uses the CRTC-derived display area (set by GP1(05/06/07/08)).
 // ---------------------------------------------------------------------------
-void gpu_update_display_mapping(Gpu* gpu) {
-    // Determine display dimensions from GP1 register state.
-    // Width: use display_width_hint computed by gp1_display_mode from resolution index.
-    uint16_t disp_w = gpu->display_width_hint ? gpu->display_width_hint : 320;
-
-    // Height: 480i uses full 480-line single buffer; 240p uses GP1(07) line range.
-    uint16_t disp_h = 240;
-    if (gpu->interlaced && gpu->vres == Y480Lines) {
-        disp_h = 480;
-    } else if (gpu->display_line_end > gpu->display_line_start) {
-        uint16_t h = gpu->display_line_end - gpu->display_line_start;
-        if (h > 0 && h <= VRAM_HEIGHT)
-            disp_h = h;
+/* Horizontal cycles per pixel for the active resolution: 10/8/5/4 for
+ * 256/320/512/640 and 7 for 368, where GPUSTAT bit6 (hr2) wins over bits 0-1
+ * (DOCS/graphicsprocessingunitgpu.md:735-742). Same divider the dotclock uses,
+ * so both read it from here. */
+static uint32_t gpu_cycles_per_pixel(const Gpu* gpu) {
+    if (gpu->hres_raw.hr2) return 7;
+    switch (gpu->hres_raw.hr1) {
+        case 0:  return 10;   /* 256 */
+        case 1:  return 8;    /* 320 */
+        case 2:  return 5;    /* 512 */
+        default: return 4;    /* 640 */
     }
+}
+
+/* Overscan crop: a TV hides roughly 8 lines at the top and bottom of the
+ * picture, and games park stale VRAM there — which is the strip along the top
+ * of an FMV (docs/GPU_DISPLAY_STUDY_2026-08-10.md §2.1). DuckStation runs its
+ * reference with CropMode=Overscan, and comparisons against it only line up
+ * with the crop on. ZS1_OVERSCAN=0 turns it off. */
+/* GP1(03) writes since the last field boundary, reported by gpu_crtc_tick().
+ * The long black screens across a load are either the game blanking the display
+ * or us mishandling the blank, and this count is what tells the two apart
+ * (docs/GPU_DISPLAY_STUDY_2026-08-10.md §2.3). Instrumentation only — a
+ * file-static rather than a Gpu field, so it stays out of the savestate. */
+static uint32_t s_gp1_03_writes_this_field = 0;
+
+#define GPU_OVERSCAN_LINES 8u
+static bool gpu_overscan_crop(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* v = getenv("ZS1_OVERSCAN");
+        cached = (v && (v[0] == '0' || v[0] == 'n' || v[0] == 'N')) ? 0 : 1;
+    }
+    return cached != 0;
+}
+
+void gpu_update_display_mapping(Gpu* gpu) {
+    /* Width comes from the GP1(06) horizontal range, not from the resolution
+     * index: (((X2-X1)/cycles_per_pix)+2) AND NOT 3
+     * (DOCS/graphicsprocessingunitgpu.md:687-690). Taking it from GP1(08)
+     * instead displayed every PAL game with non-default centering at a width it
+     * never asked for, and made GP1(06) screen-shake effects do nothing. The
+     * resolution index survives only as the fallback for the state before a
+     * game has written a range. */
+    const uint32_t cyc_per_pix     = gpu_cycles_per_pixel(gpu);
+    const uint32_t scanline_cycles = (gpu->vmode == Pal) ? 3406u : 3413u;
+    uint32_t x1 = gpu->display_horiz_start;
+    uint32_t x2 = gpu->display_horiz_end;
+    if (x2 > scanline_cycles) x2 = scanline_cycles;   /* range ends clamp to the line */
+    uint32_t w = 0;
+    if (x2 > x1) w = (((x2 - x1) / cyc_per_pix) + 2u) & ~3u;
+    if (w == 0) w = gpu->display_width_hint ? gpu->display_width_hint : 320u;
+    if (w > VRAM_WIDTH) w = VRAM_WIDTH;
+    uint16_t disp_w = (uint16_t)w;
+
+    /* Height is Y2-Y1 with no rounding (:707-709), clamped to the frame, and
+     * doubled when interlace is on. */
+    const uint32_t total_lines = (gpu->vmode == Pal) ? 314u : 263u;
+    uint32_t y1 = gpu->display_line_start;
+    uint32_t y2 = gpu->display_line_end;
+    if (y2 > total_lines) y2 = total_lines;
+    uint32_t h = (y2 > y1) ? (y2 - y1) : 240u;
+    /* Doubled on interlace only — pcsx-redux does the same (display.cc:95-130).
+     * Doubling on vres==480 as well made a 240-line window scan out 480 lines
+     * for any title that sets the 480 bit without interlacing, which is twice
+     * the scanout work for no picture. */
+    if (gpu->interlaced) h *= 2u;
+    if (h > VRAM_HEIGHT) h = VRAM_HEIGHT;
+
+    uint16_t vram_y = gpu->display_vram_y_start;
+    if (gpu_overscan_crop()) {
+        uint32_t crop = GPU_OVERSCAN_LINES * (gpu->interlaced ? 2u : 1u);
+        if (h > 2u * crop) {
+            h -= 2u * crop;
+            vram_y = (uint16_t)((vram_y + crop) & (VRAM_HEIGHT - 1));
+        }
+    }
+    uint16_t disp_h = (uint16_t)h;
 
     // Store computed display area into CRTC state for the VBlank blit path.
     gpu->crtc.display_vram_x = gpu->display_vram_x_start;
-    gpu->crtc.display_vram_y = gpu->display_vram_y_start;
+    gpu->crtc.display_vram_y = vram_y;
     gpu->crtc.display_width  = disp_w;
     gpu->crtc.display_height = disp_h;
 
@@ -99,16 +164,9 @@ static double gpu_crtc_hz(const Gpu* gpu) {
  * horizontal-resolution field ({10,8,5,4,7} → 256/320/512/640/368,
  * DOCS/graphicsprocessingunitgpu.md:1325-1335). */
 double gpu_dotclock_hz(const Gpu* gpu) {
-    uint32_t hres = (uint32_t)gpu->hres_raw.hr1 | ((uint32_t)gpu->hres_raw.hr2 << 2);
-    uint32_t div;
-    switch (hres) {
-        case 0: div = 10; break;   /* 256 */
-        case 1: div = 8;  break;   /* 320 */
-        case 2: div = 5;  break;   /* 512 */
-        case 3: div = 4;  break;   /* 640 */
-        default: div = 7; break;   /* 368 (hr2 set) */
-    }
-    return gpu_crtc_hz(gpu) / (double)div;
+    /* Same divider the display window uses — one decoder for both, so 368 mode
+     * cannot decode one way here and another way there. */
+    return gpu_crtc_hz(gpu) / (double)gpu_cycles_per_pixel(gpu);
 }
 
 /* Timer1 hblank rate = scanline rate = CRTC / ticks-per-line
@@ -118,6 +176,13 @@ double gpu_hblank_hz(const Gpu* gpu) {
 }
 
 void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed) {
+    if (s_gp1_03_writes_this_field) {
+        LOG_GPU_DEBUG("[GPU] GP1(03) writes this field: %u (display %s)",
+                      s_gp1_03_writes_this_field,
+                      gpu->display_disabled ? "off" : "on");
+        s_gp1_03_writes_this_field = 0;
+    }
+
     // Update vertical total from current video mode
     gpu->crtc.vertical_total = (gpu->vmode == Pal) ? 314 : 263;
 
@@ -191,6 +256,7 @@ static void gp1_display_enable(Gpu* gpu, uint32_t value) {
     /* Off means a black picture on hardware (DOCS/graphicsprocessingunitgpu.md:647),
      * not "keep showing what the display window covers". */
     renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
+    s_gp1_03_writes_this_field++;
     LOG_GPU_DEBUG("[GPU] GPU: Display %s (GP1 0x03)", gpu->display_disabled ? "Disabled" : "Enabled");
 }
 
@@ -205,7 +271,10 @@ static void gp1_dma_direction(Gpu* gpu, uint32_t value) {
 }
 
 static void gp1_display_vram_start(Gpu* gpu, uint32_t value) {
-    gpu->display_vram_x_start = (uint16_t)(value & 0x3FE);
+    /* X is a halfword address in bits 0-9, full 0..1023 range
+     * (DOCS/graphicsprocessingunitgpu.md:670-676). Masking it to 0x3FE dropped
+     * every odd start, which is a one-pixel horizontal shift some games use. */
+    gpu->display_vram_x_start = (uint16_t)(value & 0x3FF);
     gpu->display_vram_y_start = (uint16_t)((value >> 10) & 0x1FF);
     LOG_GPU_DEBUG("[GPU] Display address start <- 0x%08x", value & 0x000FFFFF);
     gpu_update_display_mapping(gpu);
@@ -235,14 +304,16 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
     if ((value >> 7) & 1)
         LOG_GPU_WARN("[GPU] GP1(0x08): Reverseflag bit set (unsupported)");
 
-    uint16_t width = 256;
-    switch (gpu->hres_raw.hr1 | (gpu->hres_raw.hr2 << 2)) {
-        case 0: width = 256; break;
-        case 1: width = 320; break;
-        case 2: width = 512; break;
-        case 3: width = 640; break;
-        case 4: width = 368; break;
-        default: width = 256; break;
+    /* Bit6 (hr2) means 368 regardless of bits 0-1; the old
+     * `hr1 | (hr2 << 2)` switch fell through to 256 whenever both were set. */
+    uint16_t width;
+    if (gpu->hres_raw.hr2) {
+        width = 368;
+    } else switch (gpu->hres_raw.hr1) {
+        case 0:  width = 256; break;
+        case 1:  width = 320; break;
+        case 2:  width = 512; break;
+        default: width = 640; break;
     }
     uint16_t height = (gpu->interlaced || gpu->vres == Y480Lines) ? 480 : 240;
     gpu->display_width_hint  = width;

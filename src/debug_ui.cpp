@@ -428,20 +428,33 @@ static const char* level_name(int level) {
     }
 }
 
-static void export_component_log(const LogComponent& comp) {
+/* Snapshot the visible ring buffer to its OWN file.
+ *
+ * This used to write `logs/<Name>.log` — the exact path debug_ui_init() keeps
+ * open for the whole session and streams every line into. One name, two
+ * independent FILE objects: the snapshot opened it with "w" and truncated it
+ * while the streaming handle carried on writing at its old offset, so the file
+ * ended up as a block of NULs followed by interleaved text, and the snapshot
+ * itself was overwritten by the next streamed line. The streamed file is the
+ * log; the snapshot is a separate artefact and now says so in its name.
+ *
+ * The handle is flushed first, so the two files line up at the moment of the
+ * snapshot instead of the streamed one trailing by up to 64 lines. */
+static void export_component_log(LogComponent& comp) {
     mkdir("logs", 0755);
-    char path[128];
-    snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+    char path[160];
+    snprintf(path, sizeof(path), "logs/%s.snapshot.log", comp.name);
     FILE* f = fopen(path, "w");
     if (!f) return;
     std::lock_guard<std::mutex> lock(g_log_mutex);
+    if (comp.file) { fflush(comp.file); comp.writes_since_flush = 0; }
     for (const auto& e : comp.buffer)
         fprintf(f, "[%s] %s\n", level_name(e.level), e.message.c_str());
     fclose(f);
 }
 
 static void export_all_logs() {
-    for (const auto& pair : g_log_components)
+    for (auto& pair : g_log_components)
         export_component_log(pair.second);
 }
 

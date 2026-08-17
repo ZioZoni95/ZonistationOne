@@ -202,6 +202,7 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->shell_open          = false;
     cdrom->read_after_seek     = false;
     cdrom->play_after_seek     = false;
+    cdrom->seek_phase          = false;
     cdrom->current_lba         = 0;
     cdrom->target_lba          = 0;
     cdrom->setloc_lba          = 0;
@@ -219,6 +220,7 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->auto_pause          = false;
     cdrom->cdda_enable         = false;
     cdrom->muted               = false;
+    cdrom->xa_mute             = false;
     cdrom->data_buffer_armed   = false;
     cdrom->current_read_buffer  = 0;
     cdrom->current_write_buffer = 0;
@@ -330,12 +332,19 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             cdrom->pending_param_count   = cdrom->param_fifo.count;
             for (int i = 0; i < cdrom->pending_param_count; i++)
                 cdrom->pending_params[i] = fifo_peek(&cdrom->param_fifo, (uint8_t)i);
-            cdrom_schedule_command_event(cdrom, CDROM_ACK_DELAY);
+            /* How long until the acknowledge, by command and drive state
+             * (cdromdrive.md:1877-1894): Init and ReadTOC do a slow
+             * initialisation before answering, and a stopped drive answers
+             * sooner than a spinning one because the mainloop is doing less. */
+            uint32_t ack = CDROM_ACK_DELAY;
+            if (value == CDC_INIT || value == CDC_READTOC) ack = CDROM_ACK_DELAY_INIT;
+            else if (!cdrom->motor_on)                     ack = CDROM_ACK_DELAY_STOPPED;
+            cdrom_schedule_command_event(cdrom, ack);
             break;
         }
-        case 1: break; /* sound map data */
-        case 2: break; /* sound map coding */
-        case 3: break; /* R→R SPU volume */
+        case 1: break; /* WRDATA — sound map data (not implemented) */
+        case 2: break; /* CI — sound map coding info (not implemented) */
+        case 3: cdrom->vol_rr_t = value; break;  /* ATV2: R→R (cdromdrive.md:229) */
         }
         break;
 
@@ -343,8 +352,8 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
         switch (cdrom->index) {
         case 0: fifo_push(&cdrom->param_fifo, value); break;
         case 1: cdrom->interrupt_enable = value & 0x1F; break;
-        case 2: cdrom->vol_ll_t = value; break; /* L←CDL temp */
-        case 3: cdrom->vol_rl_t = value; break; /* R←CDL temp */
+        case 2: cdrom->vol_ll_t = value; break; /* ATV0: L→L (cdromdrive.md:227) */
+        case 3: cdrom->vol_lr_t = value; break; /* ATV3: R→L, i.e. L←CDR (:230) */
         }
         break;
 
@@ -402,10 +411,14 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             }
             break;
         }
-        case 2: cdrom->vol_lr_t = value; break; /* L←CDR temp */
+        case 2: cdrom->vol_rl_t = value; break; /* ATV1: L→R, i.e. R←CDL (:228) */
         case 3:
-            cdrom->vol_rr_t = value; /* R←CDR temp */
-            if (value & 0x20) {       /* bit5 = commit all temp → working */
+            /* ADPCTL, not a volume register (cdromdrive.md:249-255): bit0
+             * ADPMUTE, bit5 CHNGATV applies the staged ATV0-3 values. This port
+             * used to be stored into the R→R volume, so every CHNGATV write
+             * (value 20h) also set that gain to 20h — a quarter volume. */
+            cdrom->xa_mute = (value & 0x01) != 0;
+            if (value & 0x20) {       /* CHNGATV: commit staged → working */
                 cdrom->vol_ll = cdrom->vol_ll_t;
                 cdrom->vol_lr = cdrom->vol_lr_t;
                 cdrom->vol_rl = cdrom->vol_rl_t;
@@ -435,8 +448,31 @@ bool cdrom_has_pending_interrupt(Cdrom *cdrom) {
  * Audio Frame (called by SPU/SDL)
  * ========================================================================= */
 
+static inline int16_t cdrom_sat16(int32_t v) {
+    return (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v));
+}
+
 void cdrom_get_audio_frame(Cdrom *cdrom, int16_t *left, int16_t *right) {
-    cdrom_audio_get_frame(&cdrom->audio_fifo, left, right);
+    int16_t l = 0, r = 0;
+    cdrom_audio_get_frame(&cdrom->audio_fifo, &l, &r);
+
+    /* Muting forces the output volume to zero — the controller keeps processing
+     * audio sectors internally (cdromdrive.md:1018-1022). It used to be applied
+     * by not pushing samples at all, which starved the FIFO instead of feeding
+     * it silence and left the resampler's history frozen across the mute. */
+    if (cdrom->muted || cdrom->xa_mute) { *left = 0; *right = 0; return; }
+
+    /* ATV0-ATV3 volume matrix (cdromdrive.md:227-247): 80h is normal, FFh is
+     * double, and the hardware saturates properly up to double volume — which
+     * is what clamping the 16-bit sum gives. Nothing read these four registers
+     * before, so Spyro's mono option and Resident Evil 2's CD fades (:243-247)
+     * had no effect whatsoever. */
+    int32_t out_l = ((int32_t)l * (int32_t)cdrom->vol_ll +
+                     (int32_t)r * (int32_t)cdrom->vol_lr) >> 7;
+    int32_t out_r = ((int32_t)l * (int32_t)cdrom->vol_rl +
+                     (int32_t)r * (int32_t)cdrom->vol_rr) >> 7;
+    *left  = cdrom_sat16(out_l);
+    *right = cdrom_sat16(out_r);
 }
 
 /* =========================================================================

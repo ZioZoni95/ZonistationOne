@@ -2286,6 +2286,22 @@ void renderer_set_display_blank(Renderer* renderer, bool blank) {
     renderer->display_blank = blank;
 }
 
+/* Display state as of the START of the field now being submitted.
+ *
+ * The frame used to be built from renderer->display_* directly — whatever the
+ * last GP1 write had left there at submit time, i.e. at the END of the field —
+ * and that state was then applied to the whole field. A game that changes the
+ * window or the colour depth part-way through a field got one visibly wrong
+ * field out of us: the stretched 15bpp-read-as-24bpp frame right after an FMV
+ * (docs/GPU_DISPLAY_STUDY_2026-08-10.md §2.2). Hardware latches per line; per
+ * field is the coarse version of the same idea and fixes the visible case.
+ *
+ * File-static rather than Renderer fields so the struct — and with it the
+ * savestate layout — does not move for a display latch. */
+static uint16_t s_latch_x = 0, s_latch_y = 0, s_latch_w = 0, s_latch_h = 0;
+static bool     s_latch_depth24 = false, s_latch_blank = false;
+static bool     s_latch_valid = false;
+
 void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     if (!renderer->gpu_thread) return;
 
@@ -2297,15 +2313,35 @@ void renderer_submit_frame(Renderer* renderer, void* imgui_draw_data) {
     while (renderer->frames_pending > 0)
         SDL_WaitCondition(renderer->frame_done, renderer->gpu_mutex);
 
+    /* First frame after start-up or a savestate load: nothing has been latched
+     * yet, so the live state is the field's start state. */
+    if (!s_latch_valid) {
+        s_latch_x = renderer->display_x;
+        s_latch_y = renderer->display_y;
+        s_latch_w = renderer->display_w;
+        s_latch_h = renderer->display_h;
+        s_latch_depth24 = renderer->display_depth24;
+        s_latch_blank   = renderer->display_blank;
+        s_latch_valid   = true;
+    }
+
     GpuFrame* f = &s_frame[renderer->write_idx];
     f->imgui_draw_data = imgui_draw_data;
-    f->disp_x = renderer->display_x;
-    f->disp_y = renderer->display_y;
-    f->disp_w = renderer->display_w;
-    f->disp_h = renderer->display_h;
-    f->disp_depth24 = renderer->display_depth24;
-    f->disp_blank   = renderer->display_blank;
-    f->view = renderer->vram_view;
+    f->disp_x = s_latch_x;
+    f->disp_y = s_latch_y;
+    f->disp_w = s_latch_w;
+    f->disp_h = s_latch_h;
+    f->disp_depth24 = s_latch_depth24;
+    f->disp_blank   = s_latch_blank;
+    f->view = renderer->vram_view;   /* debug VRAM view: live, not part of the field */
+
+    /* Latch what the field starting now will be displayed with. */
+    s_latch_x = renderer->display_x;
+    s_latch_y = renderer->display_y;
+    s_latch_w = renderer->display_w;
+    s_latch_h = renderer->display_h;
+    s_latch_depth24 = renderer->display_depth24;
+    s_latch_blank   = renderer->display_blank;
     renderer->write_idx    = 1 - renderer->write_idx;  /* swap */
     renderer->frames_pending = 1;
     SDL_SignalCondition(renderer->frame_ready);

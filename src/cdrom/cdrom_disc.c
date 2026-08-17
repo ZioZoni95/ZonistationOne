@@ -83,6 +83,11 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
     /* Per-track raw INDEX 01 MSF (within the current BIN file) */
     uint32_t idx01_lba[100] = {0};  /* file-relative LBA for each track */
     uint32_t idx00_lba[100] = {0};  /* pregap */
+    /* PREGAP durations are NOT stored in the BIN
+     * (cdromfileformats.md:14929-14933): every track after one is shifted by it
+     * on the disc while its data stays where it is in the file. Ignoring these
+     * lines put every following track at the wrong disc address. */
+    uint32_t pregap_extra[100] = {0};
     FILE    *track_file[100] = {0};
 
     while (fgets(line, sizeof(line), cue)) {
@@ -129,6 +134,11 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
             disc->tracks[cur_track].is_audio = (strncmp(ttype, "AUDIO", 5) == 0);
             track_file[cur_track] = cur_file;
 
+        } else if (strncmp(p, "PREGAP", 6) == 0) {
+            char msf[16] = {0};
+            sscanf(p + 6, " %15s", msf);
+            if (cur_track) pregap_extra[cur_track] = parse_msf_lba(msf);
+
         } else if (strncmp(p, "INDEX", 5) == 0) {
             unsigned idx_num = 0;
             char msf[16] = {0};
@@ -148,19 +158,25 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
 
     /* --- Compute start_lba and file_offset_bytes --- */
     if (!multi_file) {
-        /* Single BIN: INDEX 01 MSF is the file-relative sector number */
+        /* Single BIN: INDEX 01 MSF is the file-relative sector number, and a
+         * PREGAP shifts this track and every later one along the disc without
+         * occupying any bytes in the file — so the disc address carries the
+         * accumulated shift while file_offset_bytes stays as written. */
+        uint32_t shift = 0;
         for (int i = disc->first_track; i <= disc->last_track; i++) {
+            shift += pregap_extra[i];
             disc->tracks[i].file              = track_file[i] ? track_file[i]
                                                                : track_file[disc->first_track];
-            disc->tracks[i].start_lba         = idx01_lba[i];
-            disc->tracks[i].pregap_lba        = idx00_lba[i];
+            disc->tracks[i].start_lba         = idx01_lba[i] + shift;
+            disc->tracks[i].pregap_lba        = idx00_lba[i] ? idx00_lba[i] + shift
+                                                             : (pregap_extra[i] ? idx01_lba[i] + shift - pregap_extra[i] : 0);
             disc->tracks[i].file_offset_bytes = idx01_lba[i] * CDROM_RAW_SECTOR;
         }
-        /* total_sectors from the shared BIN file */
+        /* total_sectors from the shared BIN file, plus the gaps that are not in it */
         FILE *f = disc->tracks[disc->first_track].file;
         if (f) {
             fseek(f, 0, SEEK_END);
-            disc->total_sectors = (uint32_t)(ftell(f) / CDROM_RAW_SECTOR);
+            disc->total_sectors = (uint32_t)(ftell(f) / CDROM_RAW_SECTOR) + shift;
             fseek(f, 0, SEEK_SET);
         }
     } else {
@@ -218,7 +234,22 @@ bool cdrom_disc_read_sector(CdromDisc *disc, uint32_t lba, uint8_t *out_2352) {
     CdromTrack *t = &disc->tracks[tnum];
     if (!t->file) return false;
 
+    /* Sectors inside a PREGAP are silence and are not in the BIN at all
+     * (cdromfileformats.md:14929-14933). Reading them through this track's
+     * mapping would hand back the beginning of the next track's data. */
+    if (lba < t->start_lba) {
+        memset(out_2352, 0, CDROM_RAW_SECTOR);
+        return true;
+    }
     uint32_t rel_sector = lba - t->start_lba;
+    if (tnum < disc->last_track) {
+        uint32_t this_off = t->file_offset_bytes / CDROM_RAW_SECTOR;
+        uint32_t next_off = disc->tracks[tnum + 1].file_offset_bytes / CDROM_RAW_SECTOR;
+        if (next_off > this_off && rel_sector >= (next_off - this_off)) {
+            memset(out_2352, 0, CDROM_RAW_SECTOR);
+            return true;
+        }
+    }
     long offset = (long)t->file_offset_bytes + (long)rel_sector * CDROM_RAW_SECTOR;
 
     if (fseek(t->file, offset, SEEK_SET) != 0) return false;
@@ -255,6 +286,27 @@ char cdrom_disc_detect_region(CdromDisc *disc) {
 SubQ cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba) {
     SubQ q = {0};
 
+    /* Absolute MSF is the same in every case (add the 150-frame lead-in). */
+    uint32_t abs_lba = lba + 150;
+    q.abs_mm_bcd = cdrom_to_bcd((uint8_t)((abs_lba / 75) / 60));
+    q.abs_ss_bcd = cdrom_to_bcd((uint8_t)((abs_lba / 75) % 60));
+    q.abs_ff_bcd = cdrom_to_bcd((uint8_t)(abs_lba % 75));
+
+    /* Lead-out: track AAh, index fixed 01h, relative MSF counting up from
+     * 00:00:00 (cdromformat.md:229-236). We used to report the last track and a
+     * relative address that kept climbing, so nothing could tell the end of the
+     * disc from the middle of the last track. */
+    if (disc->total_sectors && lba >= disc->total_sectors) {
+        q.control_adr = 0x41;              /* data-style ADR=1 lead-out */
+        q.track_bcd   = 0xAA;
+        q.index_bcd   = 0x01;
+        uint32_t rel = lba - disc->total_sectors;
+        q.rel_mm_bcd = cdrom_to_bcd((uint8_t)((rel / 75) / 60));
+        q.rel_ss_bcd = cdrom_to_bcd((uint8_t)((rel / 75) % 60));
+        q.rel_ff_bcd = cdrom_to_bcd((uint8_t)(rel % 75));
+        return q;
+    }
+
     /* Find track */
     int tnum = disc->last_track ? disc->last_track : 1;
     for (int i = disc->first_track; i <= disc->last_track; i++) {
@@ -263,32 +315,35 @@ SubQ cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba) {
             break;
         }
     }
+    /* A pregap belongs to the track that FOLLOWS it: subchannel Q there reports
+     * the next track with index 00h and a relative address counting DOWN to its
+     * start (cdromformat.md:219-226). Autopause and CD players both read this. */
+    bool in_pregap = false;
+    if (tnum < disc->last_track) {
+        CdromTrack *nx = &disc->tracks[tnum + 1];
+        if (nx->pregap_lba && lba >= nx->pregap_lba && lba < nx->start_lba) {
+            tnum = tnum + 1;
+            in_pregap = true;
+        }
+    }
 
     CdromTrack *t = &disc->tracks[tnum];
 
     /* control: 0x01=2-channel audio, 0x04=data. ADR=1 (current position) */
     q.control_adr = t->is_audio ? 0x01 : 0x41;  /* ADR=1 in nibble 0 */
 
-    /* Absolute MSF (add 150-frame lead-in) */
-    uint32_t abs_lba = lba + 150;
-    uint8_t abs_mm = (uint8_t)((abs_lba / 75) / 60);
-    uint8_t abs_ss = (uint8_t)((abs_lba / 75) % 60);
-    uint8_t abs_ff = (uint8_t)(abs_lba % 75);
-    q.abs_mm_bcd = cdrom_to_bcd(abs_mm);
-    q.abs_ss_bcd = cdrom_to_bcd(abs_ss);
-    q.abs_ff_bcd = cdrom_to_bcd(abs_ff);
-
-    /* Relative MSF (relative to track start) */
-    uint32_t rel_lba  = lba - t->start_lba;
-    uint8_t rel_mm = (uint8_t)((rel_lba / 75) / 60);
-    uint8_t rel_ss = (uint8_t)((rel_lba / 75) % 60);
-    uint8_t rel_ff = (uint8_t)(rel_lba % 75);
-    q.rel_mm_bcd = cdrom_to_bcd(rel_mm);
-    q.rel_ss_bcd = cdrom_to_bcd(rel_ss);
-    q.rel_ff_bcd = cdrom_to_bcd(rel_ff);
+    /* Relative MSF: counts up from the track start, and down through a pregap.
+     * The old unconditional `lba - start_lba` underflowed to nonsense there. */
+    uint32_t rel_lba;
+    if (in_pregap)             rel_lba = t->start_lba - lba;
+    else if (lba >= t->start_lba) rel_lba = lba - t->start_lba;
+    else                       rel_lba = 0;
+    q.rel_mm_bcd = cdrom_to_bcd((uint8_t)((rel_lba / 75) / 60));
+    q.rel_ss_bcd = cdrom_to_bcd((uint8_t)((rel_lba / 75) % 60));
+    q.rel_ff_bcd = cdrom_to_bcd((uint8_t)(rel_lba % 75));
 
     q.track_bcd = cdrom_to_bcd((uint8_t)tnum);
-    q.index_bcd = 0x01;  /* always INDEX 01 (simplification) */
+    q.index_bcd = in_pregap ? 0x00 : 0x01;   /* 00h = pause/pregap (:222) */
 
     return q;
 }

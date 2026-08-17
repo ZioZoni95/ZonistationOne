@@ -58,11 +58,13 @@ int32_t gte_read_data_register(Gte* gte, uint32_t reg) {
     }
 }
 
+/* LZCR: leading-zero count of LZCS when positive, leading-one count when
+ * negative, result range 1..32 (geometrytransformationenginegte.md:261-262).
+ * Both all-zeroes and all-ones have to be special-cased: __builtin_clz(0) is
+ * undefined, and LZCS=FFFFFFFFh reached it through the ~s path. */
 static inline uint32_t count_leading_bits(uint32_t val) {
-    if (val == 0) return 32;
-    int32_t s = (int32_t)val;
-    return (s >= 0) ? (uint32_t)__builtin_clz((uint32_t)s)
-                    : (uint32_t)__builtin_clz((uint32_t)~s);
+    uint32_t bits = ((int32_t)val >= 0) ? val : ~val;
+    return (bits == 0) ? 32u : (uint32_t)__builtin_clz(bits);
 }
 
 void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
@@ -81,6 +83,10 @@ void gte_write_data_register(Gte* gte, uint32_t reg, int32_t value) {
             gte->data[reg] = value;
             break;
         }
+        case 29:
+            /* ORGB is a read-only mirror of IRGB, computed from IR1-3
+             * (geometrytransformationenginegte.md:245-257). */
+            break;
         case 30:
             gte->data[reg] = value;
             gte->data[GTE_REG_LZCR] = (int32_t)count_leading_bits((uint32_t)value);

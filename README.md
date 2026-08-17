@@ -116,6 +116,8 @@ swaps which physical button drives which bit if you prefer × to confirm everywh
 | `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU |
 | `ZS1_AUDIO_DUMP=path` | Record what is handed to the sound device, as raw interleaved 16-bit stereo |
 | `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging an artefact |
+| `ZS1_OVERSCAN=0` | Show the 8 display lines a TV crops at the top and bottom instead of cropping them |
+| `ZS1_DMA_GPU_PACE=legacy` | Pace GPU DMA with the old flat quantum instead of the documented 1 clk/word |
 | `ZS1_SPU_NO_STRETCH=1` | Bypass the output time-stretch, same purpose |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |
@@ -140,13 +142,13 @@ is a normal failure, and it is a real source of rendering differences.
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
-| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten |
+| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten; GetlocL/Pause refuse with 80h during a seek, Setloc validates BCD, and the ATV volume matrix reaches the mix |
 | SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v6 |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v8 |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 

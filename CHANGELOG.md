@@ -7,7 +7,92 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- **Two subsystem audits against the official psx-spx clone**, both built on the rule that no entry
+  may claim "correct" without citing a documentation line *and* a code line, with everything else
+  marked `UNVERIFIED`. `docs/CDROM_AUDIT_2026-08-17.md` now covers all five CDROM doc files and every
+  file in `src/cdrom/` plus the drive's paths in `bus.c`/`bus_irq.c`.
+  `docs/DMA_IRQ_GTE_MDEC_AUDIT_2026-08-17.md` does the same for DMA, interrupts, the GTE (including
+  the pipeline-timings page), MDEC and the hardware-numbers catalogue.
+- `ZS1_OVERSCAN=0` disables the new overscan crop; `ZS1_DMA_GPU_PACE=legacy` restores the old flat
+  GPU-DMA quantum. Both exist so a suspected regression can be A/B'd in one run without a rebuild.
+
 ### Fixed
+- **The FMV that was being skipped now plays.** Reported from a run of the new build: the scene that
+  used to be replaced by black is shown.
+- **The CD audio volume matrix did nothing at all.** ATV0-ATV3 were stored and never read by any
+  mixer, so a game's mono/stereo option or CD fade had no effect. On top of that ATV2's port write was
+  dropped, ATV1 and ATV3 were swapped, and 1F801803h bank 3 — which is ADPCTL, not a volume register
+  (`cdromdrive.md:249-255`) — was stored into the R→R gain, so every CHNGATV write also set that gain
+  to 20h. The matrix is now applied at the output stage with saturation up to double volume, ADPMUTE
+  is honoured, and muting forces the output to zero instead of starving the audio FIFO — which also
+  stops the XA resampler's history from freezing across a mute.
+- **The drive answered commands it should have refused, which is what the CD command churn was.**
+  `GetlocL` and `Pause` now fail with error 80h during a seek phase — the explicit `SeekL`/`SeekP`
+  kind and the implicit one at the start of `ReadN`/`ReadS`/`Play` (`cdromdrive.md:586-588`,
+  `:896-901`) — `GetlocL` also fails on audio tracks, `Setloc` validates packed BCD with ss < 60h and
+  ff < 75h (`:627-628`), and a re-issued `Init` while one is still owed is dropped with **no**
+  response at all rather than acknowledged with an INT3 the drive never sends (`:538-540`).
+- **CDROM register reads at 16 and 32 bits hit the wrong registers.** The drive is an 8-bit device
+  with BIU auto-increment off, so a wider access repeats the same register: a word read of 1F801800h
+  returns HSTS four times (`:315-320`) and a halfword read of RDDATA returns two consecutive data
+  bytes (`:118-129`). Reading `addr+1..+3` instead pulled in RESULT and HINTSTS and popped the
+  response FIFO as a side effect.
+- **Partial writes to the DMA and interrupt registers used RAM semantics.** On-die MMIO ignores the
+  byte enables: the CPU drives the source word shifted by the byte offset and the decoder latches all
+  32 bits, with the previous contents contributing nothing (`partialwordwrites.md:85-119`). The old
+  code merged the written lane into the current value.
+- **DMA interrupt bookkeeping.** DICR's master flag no longer factors in the per-channel enables — a
+  flag that is set contributes regardless (`dmachannels.md:139-142`) — a completion no longer clears
+  I_STAT.3 behind the CPU's back, and the bus-error flag (DICR.15) is finally raised when a transfer
+  leaves RAM (`:126`, `:186-192`). The DMA address bound also moved from 2 MB to 8 MB, so transfers
+  to the legitimate RAM mirrors are no longer dropped.
+- **GPU DMA ran about fifteen times slower than hardware**: a flat 1000 cycles per 64 words against a
+  documented 1 clk/word plus a DRAM row load per 16 (`dmachannels.md:194-220`). It now uses the same
+  cost model the MDEC path already had.
+- **The display window was computed from the wrong register.** Width now comes from GP1(06) with the
+  documented divider table (`graphicsprocessingunitgpu.md:687-690`) instead of the GP1(08) resolution
+  index, height is Y2-Y1 doubled on interlace, GP1(05)'s X is no longer masked to even halfwords, and
+  368-pixel mode decodes. Display state is latched at field start rather than sampled at frame submit,
+  so a mid-field GP1 write no longer applies retroactively to the whole field. An overscan crop of 8
+  lines top and bottom is on by default, which is where games park the stale VRAM that showed as a
+  strip along the top of an FMV.
+- **`CLUT out of VRAM bounds` was the validator's bug, not the game's.** It modelled an 8-bit CLUT as
+  a 16x16 block; a CLUT is a single strip of 16 or 256 entries on one line, which is what the sampler
+  already reads. Every palette parked near the bottom of VRAM was reported as out of bounds — 4662
+  times per 250 fields in Monsters & Co.
+- **Subchannel Q had no lead-out, no pregap and an underflow.** It now reports track AAh with a
+  relative address counting up in the lead-out (`cdromformat.md:229-236`), index 00h with a relative
+  address counting *down* through a pregap (`:219-226`), and `PREGAP` lines in the CUE shift every
+  later track along the disc while their data stays put in the BIN
+  (`cdromfileformats.md:14929-14933`) — gap sectors read back as silence instead of the next track's
+  first bytes.
+- **The Play report packet had the wrong shape and rate**: nine bytes with both time bases on every
+  sector, where hardware sends eight and alternates absolute and in-track time on the documented
+  asect values (`cdromdrive.md:1077-1094`).
+- **GTE**: `MVMVA` was the one opcode that did not reset FLAG at its start
+  (`geometrytransformationenginegte.md:302-303`), so it inherited the previous command's saturation
+  bits; `LZCR` was undefined behaviour for `LZCS = FFFFFFFFh` where the answer is 32 (`:261-262`);
+  the mx=3 garbage matrix used RT21 where the documentation says RT22 (`:489-491`); and ORGB is
+  read-only.
+- **CDROM commands that were quietly wrong**: `GetTD`'s track parameter is packed BCD, so every track
+  from 10 upwards resolved to the wrong LBA, and out-of-range values now answer error 10h
+  (`:926-930`); `Reset` sends INT3 only, with no completion interrupt (`:542-551`); `Sync` and the
+  unused opcodes 17h/18h answer INT5(11h,40h) instead of a status; `Pause`'s first response keeps
+  bit5 set as it should (`:583-585`).
+- **Measured response timings** replace round numbers: first response 0xc4e1 running / 0x5cf4 stopped
+  / 0x13cce for Init and ReadTOC, `Stop` 0xd38aca at 1x and 0x18a6076 at 2x, `GetID` 0x4a00
+  (`:1877-1905`).
+- **The per-category log files had two writers.** "Snapshot" opened `logs/<Name>.log` with `"w"` while
+  the session-long handle was still streaming into it, so the file became a block of NULs followed by
+  interleaved text and the snapshot was overwritten moments later. Snapshots now go to
+  `logs/<Name>.snapshot.log` and flush the streamed file first.
+
+### Changed
+- Savestate format is **v8**: `Cdrom` gained `seek_phase` and `xa_mute`, both inside the raw CDRH
+  range, so older states are refused rather than restored shifted.
+
+### Fixed (earlier)
 - **The drive answered out of time, and the CPU took the blame.** BIOS ROM instruction fetches had
   gone uncharged for months — ~24 MEMCTRL wait-state cycles per word that the emulator itself
   computes — because charging them hung boot on the PlayStation logo. The cost was right; the drive

@@ -285,9 +285,17 @@ the screen (display window, scanout, overscan, latch order) and is authoritative
 `docs/CDROM_AUDIT_2026-08-17.md` is the drive's audit against the **official** psx-spx clone in
 `psx-spx-docs/` (newer than `DOCS/`, gitignored the same way) and is authoritative for the CDROM.
 Its rule, and the standing rule for any audit here: no entry may claim "correct" without citing
-both a documentation line and a code line; anything not compared is marked UNVERIFIED. Done so far:
-all of `cdromdrive.md`, `cdromformat.md` to line 1000, and `cdrom_audio.c` line by line. Still to
-audit: `cdrom.c`, `cdrom_commands.c`, `cdrom_disc.c`, `cdrom.h`, plus three doc files.
+both a documentation line and a code line; anything not compared is marked UNVERIFIED. **Complete
+since 2026-08-17**: all five CDROM doc files read end to end, and every file in `src/cdrom/` plus
+`include/cdrom*.h` and the CDROM paths in `bus.c`/`bus_irq.c` compared line by line. Part 7 lists
+sixteen findings in impact order — the dead ATV volume matrix, the 16/32-bit register decode, the
+missing GetlocL/Pause seek-phase refusals and Setloc BCD check are the first four. Part 8 lists what
+the documentation cannot settle.
+`docs/DMA_IRQ_GTE_MDEC_AUDIT_2026-08-17.md` does the same for **DMA, interrupts, the GTE (including
+`gtepipelinetimings.md`), MDEC and `hardwarenumbers.md`** — same rule, same format. Its Part 3 ranks
+sixteen findings: sub-word writes to the DMA/IRQ registers use the wrong model, DICR's master flag
+wrongly factors in the per-channel enables, DMA completion clears I_STAT.3 behind the CPU, the DMA
+bus-error flag is never raised, MVMVA never resets FLAG, and GTE LZCR is UB for LZCS=FFFFFFFFh.
 
 ---
 
@@ -366,24 +374,79 @@ matching their 442 data / 63 audio split. The reported "-30% drift and underruns
 — every run had debug logging on, which invalidates any speed figure (see the trap below). One clean
 `ZS1_FRAME_PROFILE=1` run, no stderr logging, no Lua probe, decides host versus guest first.
 
-**Next up, in order** (the display items were added 2026-08-10 and come first — they are small and
-each removes a visible defect; `docs/GPU_DISPLAY_STUDY_2026-08-10.md` §4 carries the detail):
-0. **Finish `docs/CDROM_AUDIT_2026-08-17.md`** — `cdrom_commands.c` is where the six unimplemented
-   documented rules listed in its Part 4 would land, and the churn above is the symptom to explain.
-1. **Display width from GP1(06)** with the documented divider table (10/8/5/4/7). Four lines in
-   `gpu_update_display_mapping()`.
-2. **Latch the display state at field start**, not at frame submit.
-3. **Count GP1(03) writes per field** — one probe run; decides whether the long black screens across
-   a load are the game's or ours.
-4. **Overscan crop option** in the scanout: the 8 rows a TV crops (`DOCS:713-716`) are where games
-   park stale VRAM, which is what the strip along the top of an FMV is.
-5. **SPU pops during speech** — needs a v3 savestate taken inside a speech scene so runs start from
-   the defect instead of booting to it. Then `spu_clip_probe.lua` with and without
-   `ZS1_SPU_NO_REVERB=1`.
-6. **Confirm the iGPU artifact fix** — one run with `ZS1_GPU=intel` against one with `ZS1_GPU=nvidia`.
-7. **Controller UI** — a panel showing live pad state (mode 41h/73h/F3h, buttons, sticks, motors,
-   watchdog) and editable mapping, plus verifying rumble against the real DS4.
-8. The three GPU items that are really one job (cross-thread GL readback).
+**Next up, in order** (merged 2026-08-17 from both audits' findings and the display study; the two
+audit documents stay authoritative for the detail, this is only the sequence). Batches, not single
+items: everything inside a batch touches the same code and is verified by the same run.
+
+**A. Free correctness — one-liners, no behaviour risk** (do first: they remove noise from every
+measurement after them)
+1. GTE: MVMVA must reset FLAG (`gte_ops.c:135`), LZCR is UB for LZCS=FFFFFFFFh (`gte.c:61-66`),
+   MVMVA garbage matrix uses RT21 where the doc says RT22 (`gte_ops.c:151-152`), ORGB is read-only
+   (`gte.c:90-92`).
+2. CDROM: GetTD's parameter is BCD (`cdrom_commands.c:436-441`); Sync/17h/18h answer INT5(11h,40h)
+   (`:183-186`, `:462-471`); Reset sends no INT2 (`:553`, `:652-655`).
+   *Verify:* one clean boot to the BIOS menu plus one disc boot; Reset is the only one that can
+   regress boot.
+
+**B. The CD command churn** — the measured Monsters & Co. defect #1
+3. GetlocL must fail 80h during the seek phase and on audio tracks (`cdrom_commands.c:377`);
+   Pause must fail 80h during seek phases (`:269-284`); Setloc must validate BCD (`:196-203`);
+   a re-issued Init must produce no response at all (`:288-289`).
+   *Verify:* the 120 s Monsters & Co. run against the DuckStation Devel run, on the emulated-field
+   axis, counting GetlocL/Setloc/SeekL/ReadS per field. Today: 13x/21x/27x/47x theirs.
+
+**C. CD audio path** — the whole ATV matrix is dead code today
+4. Fix the port mapping (ATV2 dropped, ATV1/ATV3 swapped, 1F801803h bank 3 is ADPCTL not a volume
+   register), honour ADPMUTE, and **apply the matrix in the mix** with saturation to double volume
+   (`cdrom.c:338`, `:346-347`, `:405-416`). Mute must keep feeding silence, not starve the FIFO
+   (`cdrom_audio.c:329`).
+5. Take a savestate inside a speech scene (prerequisite for the SPU pops work), then run
+   `spu_clip_probe.lua` with and without `ZS1_SPU_NO_REVERB=1`.
+
+**D. Bus-level correctness that silently corrupts state**
+6. CDROM 16-bit and 32-bit register decode (`bus.c:332-343`): a halfword RDDATA read must return two
+   data bytes, a word read of 1F801800h must return HSTS four times. Today both pop FIFOs as a side
+   effect.
+7. Sub-word writes to the DMA and interrupt registers latch the shifted source word in full
+   (`bus.c:277-292`, `:231-232`).
+8. DICR: master flag must ignore the per-channel enables (`dma.c:105-107`); completion must not clear
+   I_STAT.3 (`:118-121`); the bus-error flag must be raised on out-of-range transfers (nobody writes
+   it — and a runaway DMA has already cost one session).
+   *Verify:* boot plus one FMV; 7 and 8 are the two items in this list most able to break both.
+
+**E. Display** — small, each removes a visible defect (`docs/GPU_DISPLAY_STUDY_2026-08-10.md` §4)
+9. Display width from GP1(06) with the divider table (10/8/5/4/7), in `gpu_update_display_mapping()`.
+10. Latch the display state at field start, not at frame submit.
+11. Count GP1(03) writes per field — one probe run; decides whether the long black screens across a
+    load are the game's or ours.
+12. Overscan crop in the scanout (`DOCS:713-716`).
+13. Confirm the iGPU artifact fix — one run `ZS1_GPU=intel` against one `ZS1_GPU=nvidia`.
+
+**F. Pacing** — changes emulated speed, so it comes after the visible work and needs a clean run
+14. GPU linked-list DMA runs at ~15.6 clk/word against a documented 1 clk/word plus hyper-page
+    (`bus.c:744-745`); the correct model is already in the same file for MDEC (`bus.c:759`).
+15. CDROM response timings: Stop's second response is half the measured 1x value and ignores speed
+    (`cdrom.h:70-71`); the first response is a flat 25000 against a 50401 average and a distinct
+    81102 for Init (`cdrom.h:35`).
+    *Verify:* `ZS1_FRAME_PROFILE=1`, no stderr logging, no Lua probe; boot milestones in emulated
+    fields against the DuckStation run.
+
+**G. Structural, in decreasing payoff**
+16. `CLUT out of VRAM bounds` — 4662 per 250 fields on 19520 textured quads, a GPU defect independent
+    of the disc.
+17. Sector buffer as a real queue (oldest delivered, jump to newest, silent loss).
+18. SubQ: index 00h in pregap, decreasing relative MSF, lead-out track AAh, and PREGAP lines in the
+    CUE (`cdrom_disc.c:132-140`, `:282-291`).
+19. The CDROM command stubs: Report packet shape, MotorOn/Forward/Backward error paths, SetSession,
+    GetQ's INT2 phase, the GetID matrix.
+20. MDEC: command 0/4-7 must not consume parameters (`mdec.c:431-435`); revisit the 9-bit clip
+    applied to the chroma blocks (`mdec.c:188-190`) — suspect it first if FMV colour looks flat.
+21. SWC2 must stall on an in-flight GTE op (`cpu_instructions.c:964-975`); MTC2/CTC2 store delay.
+22. Controller UI — live pad state (mode 41h/73h/F3h, buttons, sticks, motors, watchdog) and editable
+    mapping, plus verifying rumble against the real DS4.
+23. The three GPU items that are really one job (cross-thread GL readback).
+24. Long tail, only if a title demands it: GTE input-latch pipeline, LibCrypt (needs a SubQ CRC
+    model), sound map, DMA priorities and MADR/BCR writeback.
 
 **Redistribution, as of 2026-08-07**: `guide.tex`, `DOCS/`, `imgui.ini` and the two `.mcd` memory
 cards were removed from the index (the working copies stay — `.gitignore` covers them all). `DOCS/`

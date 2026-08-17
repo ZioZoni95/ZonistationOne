@@ -32,9 +32,15 @@ struct Interconnect;
 #define CDROM_SECTOR_TIME        (CDROM_CLK_HZ / 75u)       /* 451584 — 1x */
 #define CDROM_SECTOR_TIME_2X     (CDROM_CLK_HZ / 75u / 2u)  /* 225792 — 2x */
 
-#define CDROM_ACK_DELAY          25000   /* command → INT3 first response */
-#define CDROM_FAST_ACK_DELAY      5000
-#define CDROM_ID_READ_DELAY      20480   /* GetID second response (pcsx-redux) */
+/* First response (INT3), measured on a PAL PSone (cdromdrive.md:1877-1894):
+ * Nop averages 0xc4e1 with the motor running and 0x5cf4 when stopped, while
+ * Init — and ReadTOC, which runs the same initialisation — takes 0x13cce before
+ * it even acknowledges. This used to be a flat 25000 for every command, about
+ * half the running average. */
+#define CDROM_ACK_DELAY          50401   /* 0xc4e1  — average, motor running */
+#define CDROM_ACK_DELAY_STOPPED  23796   /* 0x5cf4  — motor stopped */
+#define CDROM_ACK_DELAY_INIT     81102   /* 0x13cce — Init / ReadTOC */
+#define CDROM_ID_READ_DELAY      18944   /* 0x4a00 — GetID second response (:1899) */
 /* Init's second response is base + the drive's work: it drops back to single
  * speed and re-homes the head, and DOCS/cdromdrive.md:1894-1896 says the reply
  * depends on that seek (and spin-up if the motor was off). Measured on a
@@ -66,9 +72,12 @@ struct Interconnect;
 /* Spinup */
 #define CDROM_SPINUP_DELAY       (CDROM_SECTOR_TIME * 125u / 2u)  /* ~28M cycles */
 
-/* Stop */
-#define CDROM_STOP_IDLE_DELAY    0x800                          /* motor already stopped */
-#define CDROM_STOP_SPIN_DELAY    (CDROM_SECTOR_TIME * 30u / 2u) /* spinning → stop */
+/* Stop — second response, measured (cdromdrive.md:1903-1905). The drive takes
+ * nearly twice as long to stop from double speed as from single, and the two
+ * used to be one speed-independent value at about half the 1x figure. */
+#define CDROM_STOP_IDLE_DELAY    7547        /* 0x1d7b   — already stopped */
+#define CDROM_STOP_1X_DELAY      13863114    /* 0xd38aca — spinning at 1x */
+#define CDROM_STOP_2X_DELAY      25845878    /* 0x18a6076 — spinning at 2x */
 
 /* Pause — speed-dependent. Measured on hardware (DOCS/cdromdrive.md:1888-1889):
  * 2 168 860 cycles at 1x and 1 097 107 at 2x, i.e. a faster drive pauses
@@ -264,6 +273,12 @@ typedef struct Cdrom {
     bool       shell_open;
     bool       read_after_seek;
     bool       play_after_seek;
+    /* True from the moment a seek starts until the head has arrived — both the
+     * explicit SeekL/SeekP kind and the implicit one at the start of
+     * ReadN/ReadS/Play. GetlocL and Pause both refuse with error 80h during it
+     * (cdromdrive.md:586-588, :896-901); the guest is expected to retry, which
+     * is what the CD command churn measured against DuckStation looks like. */
+    bool       seek_phase;
     char       disc_region;   /* 'A'/'E'/'I' from the disc's real licence string
                                   (cdrom_disc_detect_region), 0 if none loaded yet.
                                   GetID's SCEx response byte reflects this. */
@@ -304,6 +319,11 @@ typedef struct Cdrom {
     bool auto_pause;
     bool cdda_enable;
     bool muted;
+    /* ADPCTL bit0 (cdromdrive.md:249-255). Mutes XA-ADPCM specifically, where
+     * the Mute command mutes both CD-DA and XA. Both are applied at the output
+     * stage, because the audio FIFO carries one mixed stream and does not tag
+     * which sector a frame came from. */
+    bool xa_mute;
 
     /* --- FIFOs --- */
     CdromFifo param_fifo;
