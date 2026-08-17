@@ -140,19 +140,24 @@ is a normal failure, and it is a real source of rendering differences.
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
-| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing |
+| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten |
 | SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v5 |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v6 |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 
 The machine's three clocks hold nominal: measured over 128 seconds, the CPU runs at 1.0002 of
 33.8688 MHz, video at 0.9997 of 50 fields a second, audio at 1.0002 of 44100 samples a second, and the
 CD drive streams at the same 150 sectors a second a reference emulator does.
+
+Boot timing is checked the same way, in emulated fields rather than wall clock — every log line
+carries the CRTC field count, and a reference emulator's run is put on that axis by counting its
+v-blanks. `Ace Combat 2` reaches each of its BIOS TTY milestones within ~2% of the reference, end to
+end, and the machine holds 50 fields a second while doing it.
 
 Rendering is OpenGL 3.3 only — no Vulkan, no software renderer.
 
@@ -176,9 +181,11 @@ Accepted for now. Each is understood well enough to say what it is and what it i
 - **No multitap, no DualShock 2 pressure sensing.**
 - **The CRTC advances once per frame**, not per scanline, which leaves Timer0's hblank gate unwired.
   Texpage bit 11 (Y base 2) is not applied.
-- **The BIOS ROM costs nothing to execute.** Memory timing is charged to RAM loads only, so code
-  running out of ROM — which is all of the boot sequence — runs faster than hardware. This is why our
-  boot reaches the drive about two seconds before a reference emulator does.
+- **BIOS ROM *data* reads still cost nothing.** Instruction fetches out of ROM now pay their MEMCTRL
+  wait states, which is what closed the two-second gap this entry used to describe, but the tables the
+  BIOS keeps in ROM are read for free. What is left of the gap is small and points the other way in
+  places: the phase after `Execute !` runs about half the reference's length. Charging those reads was
+  tried and overshoots — it moves every milestone ~15% later.
 - **`make test` does not build**; `tests/` is referenced by the Makefile but is not in the tree.
 
 ---

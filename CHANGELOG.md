@@ -8,6 +8,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The drive answered out of time, and the CPU took the blame.** BIOS ROM instruction fetches had
+  gone uncharged for months — ~24 MEMCTRL wait-state cycles per word that the emulator itself
+  computes — because charging them hung boot on the PlayStation logo. The cost was right; the drive
+  was wrong, in two ways that only a BIOS running at its real speed could expose.
+  - Acknowledging a CDROM interrupt re-armed any deferred response at `CDROM_MIN_INT_DELAY`, which
+    threw away the deadline the command had set. The guest acknowledges an INT3 within microseconds,
+    so every seek, spin-up and read start answered ~30 µs after its command: one `SeekL` computed
+    27.719 ms of seek time and delivered its INT2 in the same tick, and `ReadN` charged 606 ms of
+    spin-up then handed over the first sector 6.6 ms later. Commands, second responses and sector
+    delivery now each carry the cycle they are due at and re-arm on what is *left* of it, so a
+    sector arrives every 6.7 ms at 2x as `DOCS/cdromdrive.md:1913` requires.
+  - `Init` takes ~740 ms, which is longer than the ~415 ms after which the BIOS gives up and
+    re-issues it — so those retries are part of a normal boot. Rescheduling the response on each
+    retry pushed the deadline forward for as long as the BIOS kept asking, and it never arrived:
+    82 `Init` commands, no reply, screen frozen on the logo. The drive now answers the first request
+    at its own deadline and lets the retries fall on it.
+- **The BIOS boot sound was cut ~1.9 s short.** Not an SPU fault: the boot phase between the intro
+  and the game's SPU handoff ran too fast, so the guest muted the SPU while the sound still had
+  seconds to play. With ROM fetches and the drive's deadlines both honoured, the window between the
+  BIOS raising main volume and the game zeroing it is 688 fields against a reference run's 708.
+
 - **Games saw a digital pad even with an analog controller plugged in.** The emulated pad powered up
   in digital mode, as hardware does, and the only way out was a DS4 touchpad click — so the sticks
   reached the game solely through the left-stick-to-D-pad fold in `controller.c`, which is why they
@@ -57,6 +78,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   kept separate, because 480i puts 480 rows into the same 240 scanlines.
 
 ### Added
+- **Every log line carries the machine's clock**, `[f<field> t<seconds>]` — the CRTC field count and
+  emulated seconds, from `LogClock` in `log.h` fed by the Interconnect. Host wall seconds cannot
+  measure emulated timing: a whole boot phase (EXE load, game init) lands inside the same second,
+  which is why "who is faster, and where" had been unanswerable. The field number is also the axis a
+  reference emulator's run can be put on, by counting its own v-blank lines, which is how the CDROM
+  and ROM-timing entries above were checked.
 - **The DS4's light bar shows the emulated pad's LED.** The three pad modes each have a documented
   colour (`DOCS/controllersandmemorycards.md:369-372` — 5A41h digital off, 5A73h analog red, 5A53h
   stick green), and SDL3 can drive a DS4's light bar, so which mode a game actually selected is now
