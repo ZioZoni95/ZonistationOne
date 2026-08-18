@@ -48,18 +48,61 @@ static inline bool CheckPendingInterrupt(Cpu* cpu) {
     return false;
 }
 
+/* Advance the load-delay pipeline by one instruction.
+ *
+ * Called once the instruction has run, which is the whole point: "the target
+ * register isn't updated until the next opcode has completed"
+ * (psx-spx-docs/docs/cpuspecifications.md:172-174). The load issued by the
+ * previous instruction lands here, and the one this instruction issued (if any)
+ * takes its place, to land after the next one.
+ *
+ * Writing cpu->regs directly rather than through cpu_set_reg: that function
+ * cancels a delayed load aimed at the register it writes, which is right for an
+ * instruction's own write and wrong for the load's own retirement. A load
+ * targeting R0 is a discard, and delay_load_reg is REG_ZERO when nothing is in
+ * flight, so the same test covers both. */
+static inline void cpu_retire_load_delay(Cpu* cpu) {
+    if (cpu->delay_load_reg != REG_ZERO) {
+        cpu->regs[cpu->delay_load_reg] = cpu->delay_load_value;
+    }
+    cpu->delay_load_reg   = cpu->load_reg_idx;
+    cpu->delay_load_value = cpu->load_value;
+    cpu->load_reg_idx     = REG_ZERO;
+}
+
+/* Land an in-flight load on the way into an exception handler.
+ *
+ * "unless an IRQ occurs between the load and next opcode, in that case the load
+ * would complete during IRQ handling, and so, the next opcode would receive the
+ * NEW value" (:175-177). The handler is that next opcode, so the delay is spent
+ * by the time it runs. Both slots are drained: the instruction that was about to
+ * execute never does, so nothing is left to retire it later. */
+void cpu_flush_load_delay(Cpu* cpu) {
+    if (cpu->delay_load_reg != REG_ZERO) {
+        cpu->regs[cpu->delay_load_reg] = cpu->delay_load_value;
+        cpu->delay_load_reg = REG_ZERO;
+    }
+    if (cpu->load_reg_idx != REG_ZERO) {
+        cpu->regs[cpu->load_reg_idx] = cpu->load_value;
+        cpu->load_reg_idx = REG_ZERO;
+    }
+}
+
 // Main execution cycle - called for each instruction
 void cpu_run_next_instruction(Cpu* cpu) {
     // exception_pending is per-instruction state; clear it before running this step.
     cpu->exception_pending = false;
 
-    // --- 1. Handle Load Delay from previous instruction ---
-    // Must commit before the interrupt check so the register file is consistent
-    // at exception entry (EPC points to the interrupted instruction, regs already updated).
-    if (cpu->load_reg_idx != REG_ZERO) {
-        cpu_set_reg(cpu, cpu->load_reg_idx, cpu->load_value);
-        cpu->load_reg_idx = REG_ZERO;
-    }
+    /* --- 1. (was: commit the pending load here, before executing) ---
+     *
+     * Moved to cpu_retire_load_delay(), after the instruction executes. Landing
+     * it here made the loaded value visible to the very next opcode, which is
+     * precisely what the R3000A does not do: "The loaded data is NOT available
+     * to the next opcode, ie. the target register isn't updated until the next
+     * opcode has completed" (psx-spx-docs/docs/cpuspecifications.md:172-174).
+     * The delay slot was therefore not modelled at all, and the LWL/LWR code
+     * that merges with a load still in flight could never fire, because this
+     * cleared the slot before any following instruction could see it. */
 
     // Establish current-instruction context before any potential interrupt exception.
     // This matches R3000A behavior where IRQ is taken between instructions, and BD/EPC
@@ -97,14 +140,17 @@ void cpu_run_next_instruction(Cpu* cpu) {
     cpu->pc = cpu->next_pc;
     cpu->next_pc = cpu->pc + 4;
     
-    // --- 5. Commit Register State ---
-    memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs));
-    cpu->regs[REG_ZERO] = 0;
+    /* --- 5. (was: commit the second register file into the first) ---
+     *
+     * Gone. Writes land in cpu->regs directly now, so there is nothing to
+     * commit; see the comment on Cpu::regs in cpu.h for why that is
+     * behaviour-preserving. What used to be here was
+     * `memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs))` — 128 bytes per
+     * instruction, and the largest single constant on this path. */
 
-    // --- Breakpoint check (before executing the instruction, after the prior
-    // instruction's register commit above so cpu->regs reflects fully-settled
-    // state — checking any earlier misses this commit and shows a debugger
-    // callback stale-by-one-instruction register values for whatever the
+    // --- Breakpoint check (before executing the instruction, so cpu->regs
+    // reflects fully-settled state — a debugger callback that runs any earlier
+    // shows register values stale by one instruction for whatever the
     // immediately preceding instruction just wrote). ---
     if (!cpu->inter->debugger.step_skip_bp) {
         debugger_check_breakpoint(&cpu->inter->debugger, cpu);
@@ -132,6 +178,10 @@ void cpu_run_next_instruction(Cpu* cpu) {
             handle_c0_syscall(cpu);
         /* LLE: real BIOS code executes normally unless HLE'd. */
         if (hle) {
+            /* This stands in for a whole BIOS call, so it counts as a completed
+             * opcode for the load pipeline too — skipping the rotation would
+             * hold an in-flight load one instruction longer than hardware. */
+            cpu_retire_load_delay(cpu);
             cpu->pc = cpu->regs[31];  // $ra: return to caller, as if the call fully executed
             cpu->next_pc = cpu->pc + 4;
             cpu->branch_taken = true;
@@ -142,11 +192,18 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // --- 6. Decode and Execute ---
     decode_and_execute(cpu, instruction);
     if (cpu->exception_pending) {
+        /* cpu_exception() already drained the pipeline: the load completes
+         * during handling (cpuspecifications.md:175-177), and this instruction
+         * never completed, so there is nothing to rotate. */
         return;
     }
-    
+
     // --- 7. Finalize ---
-    cpu->out_regs[REG_ZERO] = 0;
+    /* The instruction has completed, so the previous one's load lands now and
+     * this one's takes its place. Anything this instruction wrote to the same
+     * register already cancelled the pending load inside cpu_set_reg. */
+    cpu_retire_load_delay(cpu);
+    cpu->regs[REG_ZERO] = 0;   /* cheap belt-and-braces; cpu_set_reg drops R0 writes */
 
     // --- 8. Advance Cycle Counters ---
     // Base cost is one cycle, plus whatever this instruction's data access(es)

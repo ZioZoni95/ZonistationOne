@@ -7,6 +7,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Performance
+Host cost per PAL field, measured with `ZS1_FRAME_PROFILE` and nothing else, median of three 30 s
+runs of the same scenario. The emulated machine is unchanged throughout: CPI stays at 1.618 with
+identical percentiles, which is the check that a host optimisation has not moved a guest property.
+
+| | `emu` | `total` |
+|---|---|---|
+| before | 3.710 ms | 3.850 ms |
+| after | **2.910 ms** | **3.040 ms** |
+
+- **Link-time optimisation**, auto-enabled when the C and C++ compilers share a major version and
+  skipped with an explanation when they do not — a default that fails to link is not a default.
+  Worth −7.7% on its own, and it removes `debugger_check_breakpoint`,
+  `debugger_check_read_watchpoint`, `mask_region` and `cpu_reg` from the profile entirely by inlining
+  them across translation units. Those three debugger hooks were 2.92% of all samples doing nothing
+  at all, since neither a breakpoint nor a watchpoint was set.
+- **The interpreter's second register file is gone.** Every write went to `out_regs` and every
+  instruction ran `memcpy(regs, out_regs, 128)` to commit it — the largest single constant on the hot
+  path at ~20M instructions a second. Removing it was checked rather than assumed: every handler in
+  `cpu_instructions.c` reads its sources before writing its destination, and the only reads that look
+  later are arguments of the write itself, which C evaluates first.
+- `make compile_commands` writes a `compile_commands.json` from the same source lists the build uses.
+  Without it a language server guesses the include path and reports dozens of bogus
+  "identifier uint32_t is undefined" errors in `include/cpu.h`, a header that
+  `gcc -fsyntax-only` accepts on its own.
+
 ### Added
 - **Two subsystem audits against the official psx-spx clone**, both built on the rule that no entry
   may claim "correct" without citing a documentation line *and* a code line, with everything else
@@ -33,6 +59,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **The R3000A load delay was not emulated.** The pending load was committed at the top of the next
+  instruction, before it executed, so the delay-slot opcode already saw the loaded value —
+  "The loaded data is NOT available to the next opcode, ie. the target register isn't updated until
+  the next opcode has **completed**" (`cpuspecifications.md:172-174`). The LWL/LWR code that merges
+  with a load still in flight was unreachable for the same reason. Now a two-stage slot retires the
+  load *after* the next instruction runs, with the two consequences the same paragraph states: a
+  write to the same register by that instruction is the later write and wins, and an exception lands
+  the load on the way in, because "the load would complete during IRQ handling, and so, the next
+  opcode would receive the NEW value" (`:175-177`). Boot milestones are unchanged to the field
+  (`Execute !` at f874, `CD_init` at f1043), which is expected: compiler-generated code never reads
+  the delay-slot register, so this protects against code that does rather than altering code that
+  does not.
 - **The FMV that was being skipped now plays.** Reported from a run of the new build: the scene that
   used to be replaced by black is shown.
 - **The picture shook every field.** A per-field display latch was added on the reasoning that
@@ -139,8 +177,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `logs/<Name>.snapshot.log` and flush the streamed file first.
 
 ### Changed
-- Savestate format is **v8**: `Cdrom` gained `seek_phase` and `xa_mute`, both inside the raw CDRH
-  range, so older states are refused rather than restored shifted.
+- Savestate format is **v9**: v8 added `Cdrom.seek_phase` and `Cdrom.xa_mute` inside the raw CDRH
+  range; v9 removed `Cpu.out_regs[32]` and added the second load-delay slot. `T_CPU` is the raw
+  struct, so both move every field after the GPRs. Older states are refused rather than restored
+  shifted.
 
 ### Measured, not resolved
 - **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &

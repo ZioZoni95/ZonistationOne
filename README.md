@@ -136,7 +136,7 @@ is a normal failure, and it is a real source of rendering differences.
 
 | Component | Status | Notes |
 |---|---|---|
-| CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch/load delay, MULT/DIV and GTE stalls |
+| CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch delay, a real load delay (the delay-slot opcode reads the old value; a same-register write beats the load; an exception lands it), MULT/DIV and GTE stalls |
 | I-Cache | Working | 256 lines × 4 words, tag + per-word valid bits |
 | RAM / BIOS ROM | Working | 2 MB + 1 KB scratchpad; SCPH-1001 and SCPH-7502 |
 | IRQ controller | Working | Edge-triggered I_STAT/I_MASK, every source wired |
@@ -149,7 +149,7 @@ is a normal failure, and it is a real source of rendering differences.
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v8 |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v9 |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 

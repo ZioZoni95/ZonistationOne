@@ -86,6 +86,13 @@ static uint32_t get_exception_vector(Cpu* cpu) {
 
 void cpu_exception(Cpu* cpu, ExceptionCause cause) {
     cpu->exception_pending = true;
+    /* An in-flight load completes across the handler entry: "unless an IRQ
+     * occurs between the load and next opcode, in that case the load would
+     * complete during IRQ handling, and so, the next opcode would receive the
+     * NEW value" (psx-spx-docs/docs/cpuspecifications.md:175-177). EPC points
+     * at the delay-slot instruction, which will be re-executed on return — and
+     * by then the delay is spent, so it must see the loaded value. */
+    cpu_flush_load_delay(cpu);
     log_exception_details(cpu, cause);
     update_status_register(cpu);
     update_cause_and_epc(cpu, cause);

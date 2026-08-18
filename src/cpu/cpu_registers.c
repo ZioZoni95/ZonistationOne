@@ -22,19 +22,27 @@ uint32_t cpu_reg(Cpu* cpu, RegisterIndex index) {
 }
 
 /**
- * @brief Writes a value to a GPR in the output set (cpu->out_regs).
+ * @brief Writes a value to a GPR. R0 stays hardwired to zero.
  */
 void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value) {
     if (index >= 32) {
         LOG_CPU_ERROR("[CPU] GPR write index out of bounds: %u", index);
         return;
     }
-    // Write to output register file, *except* for R0
+    /* R0 is hardwired: dropping the write is the whole of it. The old code
+     * wrote into a second register file and then re-zeroed its slot 0 on every
+     * call, which the branch above already makes unnecessary. */
     if (index != REG_ZERO) {
-        cpu->out_regs[index] = value;
+        cpu->regs[index] = value;
+        /* A load in flight for this same register loses the race. Its data "isn't
+         * updated until the next opcode has completed"
+         * (psx-spx-docs/docs/cpuspecifications.md:172-174) — this write belongs to
+         * that next opcode, so it is the later one and stands. Without the cancel
+         * the load would land afterwards and quietly undo it. */
+        if (index == cpu->delay_load_reg) {
+            cpu->delay_load_reg = REG_ZERO;
+        }
     }
-    // Ensure R0 in the output set remains 0, regardless of attempted write.
-    cpu->out_regs[REG_ZERO] = 0;
 }
 
 
