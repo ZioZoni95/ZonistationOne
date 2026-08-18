@@ -515,6 +515,114 @@ static int l_emu_vram_compare(lua_State* L) {
     return 0;   /* nothing yet — call again on a later frame */
 }
 
+/* emu.vram_map(tile_w, tile_h) -> map, cols, rows, source
+ *
+ * Classifies the whole 1024x512 VRAM as a grid of tiles and returns the grid as
+ * one string, row-major, no separators. One character per tile:
+ *
+ *   '.'  every halfword is 0000h — nothing has ever been written here
+ *   '-'  uniform non-zero: a fill, a cleared framebuffer, a flat background
+ *   ':'  mostly one value with a little variation
+ *   '#'  varied: a real picture, a texture page, a decoded frame
+ *
+ * A per-tile summary rather than pixels because the point is *where* content
+ * lives, not what it looks like: 1024x512 is 524288 halfwords, and pulling that
+ * through one Lua call per pixel cannot run at field rate.
+ *
+ * Source: the GPU readback when a fresh one has arrived, so rasterised
+ * primitives are included — the CPU-side mirror only ever receives uploads,
+ * fills and DMA, and a scene drawn from polygons is invisible in it. The
+ * readback is asynchronous, so this requests one and answers from the CPU
+ * mirror until it lands; the returned source says which was used, and a caller
+ * comparing the two must check it. */
+static int l_emu_vram_map(lua_State* L) {
+    lua_Integer tw = luaL_optinteger(L, 1, 16);
+    lua_Integer th = luaL_optinteger(L, 2, 16);
+    if (tw < 1 || tw > 1024 || th < 1 || th > 512) {
+        return luaL_error(L, "tile size out of range");
+    }
+    const uint32_t cols = (uint32_t)((1024 + tw - 1) / tw);
+    const uint32_t rows = (uint32_t)((512  + th - 1) / th);
+    if (cols * rows > 8192u) return luaL_error(L, "grid too fine (max 8192 tiles)");
+
+    static uint32_t s_last_seq = 0;
+    uint32_t seq = 0;
+    const uint16_t* gpu_vram = renderer_get_vram_readback(&seq);
+    const uint16_t* src;
+    const char* src_name;
+    if (gpu_vram && seq != s_last_seq) {
+        s_last_seq = seq;
+        src = gpu_vram; src_name = "gpu";
+    } else {
+        src = (const uint16_t*)g_inter->gpu.vram.data; src_name = "cpu";
+    }
+    renderer_request_vram_readback(&g_inter->gpu.renderer);
+
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    for (uint32_t ty = 0; ty < rows; ty++) {
+        for (uint32_t tx = 0; tx < cols; tx++) {
+            const uint32_t x0 = tx * (uint32_t)tw, y0 = ty * (uint32_t)th;
+            const uint32_t x1 = (x0 + tw > 1024u) ? 1024u : x0 + (uint32_t)tw;
+            const uint32_t y1 = (y0 + th > 512u)  ? 512u  : y0 + (uint32_t)th;
+            uint16_t first = src[(size_t)y0 * 1024u + x0];
+            uint32_t n = 0, nonzero = 0, differing = 0;
+            for (uint32_t y = y0; y < y1; y++) {
+                const uint16_t* row = src + (size_t)y * 1024u;
+                for (uint32_t x = x0; x < x1; x++) {
+                    uint16_t v = row[x];
+                    n++;
+                    if (v) nonzero++;
+                    if (v != first) differing++;
+                }
+            }
+            char c;
+            if (nonzero == 0)            c = '.';
+            else if (differing == 0)     c = '-';
+            else if (differing * 16 < n) c = ':';
+            else                         c = '#';
+            luaL_addchar(&b, c);
+        }
+    }
+    luaL_pushresult(&b);
+    lua_pushinteger(L, (lua_Integer)cols);
+    lua_pushinteger(L, (lua_Integer)rows);
+    lua_pushstring(L, src_name);
+    return 4;
+}
+
+/* emu.vram_row_stats(y, x0, w) -> nonzero, distinct_ish, first
+ *
+ * One VRAM row, summarised: how many of the w halfwords starting at x0 are
+ * non-zero, how many differ from the first, and what the first one is. Written
+ * for the question "are the 8 lines above the picture black, or stale?", which
+ * a tile map answers too coarsely — 8 lines inside a 16-line tile are averaged
+ * away with the picture below them. */
+static int l_emu_vram_row_stats(lua_State* L) {
+    lua_Integer y  = luaL_checkinteger(L, 1);
+    lua_Integer x0 = luaL_optinteger(L, 2, 0);
+    lua_Integer w  = luaL_optinteger(L, 3, 1024);
+    if (y < 0 || y >= 512 || x0 < 0 || x0 >= 1024) { lua_pushnil(L); return 1; }
+    if (x0 + w > 1024) w = 1024 - x0;
+
+    uint32_t seq = 0;
+    const uint16_t* gpu_vram = renderer_get_vram_readback(&seq);
+    const uint16_t* src = gpu_vram ? gpu_vram : (const uint16_t*)g_inter->gpu.vram.data;
+    const uint16_t* row = src + (size_t)y * 1024u;
+
+    uint16_t first = row[x0];
+    uint32_t nonzero = 0, differing = 0;
+    for (lua_Integer i = 0; i < w; i++) {
+        uint16_t v = row[x0 + i];
+        if (v) nonzero++;
+        if (v != first) differing++;
+    }
+    lua_pushinteger(L, (lua_Integer)nonzero);
+    lua_pushinteger(L, (lua_Integer)differing);
+    lua_pushinteger(L, (lua_Integer)first);
+    return 3;
+}
+
 static int l_emu_cd_audio(lua_State* L) {
     Cdrom* cd = &g_inter->cdrom;
     lua_pushinteger(L, (lua_Integer)cd->audio_fifo.count);
@@ -678,6 +786,8 @@ static const luaL_Reg s_emu_funcs[] = {
     {"mdec_in_count",     l_emu_mdec_in_count},
     {"mdec_dma",          l_emu_mdec_dma},
     {"vram16",            l_emu_vram16},
+    {"vram_map",          l_emu_vram_map},
+    {"vram_row_stats",    l_emu_vram_row_stats},
     {"timer",             l_emu_timer},
     {"mdec_info",         l_emu_mdec_info},
     {"mdec_scale",        l_emu_mdec_scale},

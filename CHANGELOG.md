@@ -15,11 +15,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/DMA_IRQ_GTE_MDEC_AUDIT_2026-08-17.md` does the same for DMA, interrupts, the GTE (including
   the pipeline-timings page), MDEC and the hardware-numbers catalogue.
 - `ZS1_OVERSCAN=0` disables the new overscan crop; `ZS1_DMA_GPU_PACE=legacy` restores the old flat
-  GPU-DMA quantum. Both exist so a suspected regression can be A/B'd in one run without a rebuild.
+  GPU-DMA quantum; `ZS1_DISPLAY_LATCH=1` restores the field-start display latch. All three exist so a
+  suspected regression can be A/B'd in one run without a rebuild.
+- **`docs/GPU_CPU_VRAM_PATH_STUDY_2026-08-18.md`** — the CPU → GPU → VRAM → screen path written out
+  from the official psx-spx clone, with pcsx-redux as a second implementation and a verdict table
+  against our code. Written because the display defects were being chased by running the game and
+  looking at it; the rules settle most of them on paper. It records where redux and the documentation
+  disagree, and why the documentation wins.
+- **`emu.vram_map(tile_w, tile_h)` and `emu.vram_row_stats(y, x, w)`** on the Lua surface. The first
+  classifies the whole 1024x512 VRAM as a tile grid and returns it as a string — where content lives,
+  in one call instead of 524288; the second summarises a single VRAM row, for questions a tile
+  averages away. Both read the GPU readback when one has landed, so rasterised primitives are
+  included and not just uploads.
+- **`scripts/display_map_probe.lua`** (the display mapping, change-only) and
+  **`scripts/vram_display_survey.lua`** (the whole of VRAM plus the display window, over a 120-second
+  run). Both log at INFO and change-only, so they are readable during play — a DEBUG run writes
+  ~1.4M lines and cannot be.
 
 ### Fixed
 - **The FMV that was being skipped now plays.** Reported from a run of the new build: the scene that
   used to be replaced by black is shown.
+- **The picture shook every field.** A per-field display latch was added on the reasoning that
+  hardware latches the display registers at the start of the field. The reasoning left out *when* we
+  submit: `system_run_frame()` returns the moment VBlank sets `frame_complete` and the frame is
+  submitted immediately after, so submit already sits on the field boundary and the live state there
+  *is* the field's start state. Latching on top of it handed each frame a value one whole field old —
+  on any double-buffered title, and that is every FMV, the value named the buffer being drawn into
+  rather than the finished one, so every field presented a half-written image. The latch is off;
+  `ZS1_DISPLAY_LATCH=1` brings it back for A/B runs.
+- **The display height was doubled for every interlaced title, including the 240-line ones.** The
+  VRAM rectangle is twice the window only in 480-lines mode, which is interlace *and* vres=480:
+  GP1(05h) states the size with no interlace term at all (`graphicsprocessingunitgpu.md:703-704`),
+  GP1(08h).2 is "0=240, 1=480, **when Bit5=1**" (`:772`), and GPUSTAT.31 settles the direction —
+  "In 480-lines mode, bit31 changes per frame. And in 240-lines mode, the bit changes per scanline"
+  (`:919-920`). Doubling on the interlace bit alone (which is what pcsx-redux does,
+  `display.cc:111-113`, and what we had copied) scanned out twice the window on a 240-line title: the
+  picture filled the top half of the screen and the rest was whatever else was in VRAM. That is what
+  "the VRAM shows up instead of a black screen" looked like.
+- **A GPU reset left interlace on.** `GP1(00h)` resets GP1(08h) to 0 and the documented post-reset
+  GPUSTAT is `14802000h` (`:645`, `:648`), in which bit 22 is clear — we set `interlaced = true`. So
+  both resets, the cold one and the one at the BIOS-to-disc handover, put the machine into interlace
+  with vres=240 until the game wrote GP1(08h): precisely the combination that doubled the height. A
+  survey run counts two such fields before the fix and none after.
+- **GPUSTAT bits 16-18 were rotated.** Bit 16 is Horizontal Resolution 2 and bits 17-18 are
+  Horizontal Resolution 1 (`:902-904`); the code packed `(hr2 << 2) | hr1` and scattered that word's
+  bits 0/1/2 to 16/17/18, so hr1's low bit landed in the 368 flag and 320 and 640 both read back as
+  368. Any game reading GPUSTAT for its own resolution got a wrong answer. Found by cross-checking
+  the Lua probe, which derives the width from GPUSTAT, against the width the GPU computes from the
+  same registers — 364 against 320 for the same field.
+- **GPUSTAT.13 is now forced to 1 when interlace is off**, which the documentation states twice
+  (`:897`, `:953`). Without it the field tag stayed wherever 480i had left it.
+- **The overscan crop was applied to PAL.** Overscan is an NTSC property — "Many NTSC games display
+  240 lines, but on most analog television sets, only 224 lines are visible (8 lines of overscan on
+  top and 8 lines of overscan on bottom). Many PAL games display only 256 lines (underscan with black
+  borders)" (`:762-765`). A PAL field is already underscanned, so cropping it removed picture the TV
+  would have shown: it cost the bottom line of the SCEE screen. The crop is NTSC-only now.
 - **The CD audio volume matrix did nothing at all.** ATV0-ATV3 were stored and never read by any
   mixer, so a game's mono/stereo option or CD fade had no effect. On top of that ATV2's port write was
   dropped, ATV1 and ATV3 were swapped, and 1F801803h bank 3 — which is ADPCTL, not a volume register
@@ -91,6 +141,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - Savestate format is **v8**: `Cdrom` gained `seek_phase` and `xa_mute`, both inside the raw CDRH
   range, so older states are refused rather than restored shifted.
+
+### Measured, not resolved
+- **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &
+  Co.: the game uploads its frames to `(x,8)` and `(x,264)` while its two display windows sit at
+  `y=0` and `y=256` — a constant offset of 8 in both buffers, so the top eight lines on screen are
+  whatever was in VRAM and the bottom eight of the picture fall outside the window. The GP1(05h)
+  decode is correct against `:695-698` and the game really does write 0 and 256, so the offset is not
+  a decode error; which side is wrong is still open. The overscan crop used to hide it, which is why
+  it became visible when the crop was restricted to NTSC. This is the strip of macroblock noise above
+  the Pixar logo.
+- Width is confirmed correct on the way in: the windows the game programs (`x1=624, x2=3184` and
+  `x1=635, x2=3195`) are exactly the PAL 320 and PAL 512 fullscreen ranges in the official table
+  (`:733-746`), and the formula reproduces 320 and 512 from them.
 
 ### Fixed (earlier)
 - **The drive answered out of time, and the CPU took the blame.** BIOS ROM instruction fetches had

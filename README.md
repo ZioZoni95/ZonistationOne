@@ -116,8 +116,9 @@ swaps which physical button drives which bit if you prefer × to confirm everywh
 | `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU |
 | `ZS1_AUDIO_DUMP=path` | Record what is handed to the sound device, as raw interleaved 16-bit stereo |
 | `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging an artefact |
-| `ZS1_OVERSCAN=0` | Show the 8 display lines a TV crops at the top and bottom instead of cropping them |
+| `ZS1_OVERSCAN=0` | Show the 8 display lines an NTSC TV crops at the top and bottom instead of cropping them (PAL is never cropped — it is underscanned already) |
 | `ZS1_DMA_GPU_PACE=legacy` | Pace GPU DMA with the old flat quantum instead of the documented 1 clk/word |
+| `ZS1_DISPLAY_LATCH=1` | Build each frame from the display state latched at the previous field boundary — an A/B switch, off because it delays the picture a whole field |
 | `ZS1_SPU_NO_STRETCH=1` | Bypass the output time-stretch, same purpose |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |

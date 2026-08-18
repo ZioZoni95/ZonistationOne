@@ -60,14 +60,24 @@ static uint32_t gpu_cycles_per_pixel(const Gpu* gpu) {
  * file-static rather than a Gpu field, so it stays out of the savestate. */
 static uint32_t s_gp1_03_writes_this_field = 0;
 
+/* Overscan is an NTSC property, not a display-wide one: "Many NTSC games
+ * display 240 lines, but on most analog television sets, only 224 lines are
+ * visible (8 lines of overscan on top and 8 lines of overscan on bottom). Many
+ * PAL games display only 256 lines (underscan with black borders)"
+ * (DOCS/graphicsprocessingunitgpu.md:716-719).
+ *
+ * Cropping a PAL field therefore throws away picture the game drew and the TV
+ * would have shown — the underscan borders are already in the 256 lines. It
+ * cost the bottom line of the SCEE screen ("www.playstation.com") before this
+ * was restricted to NTSC. */
 #define GPU_OVERSCAN_LINES 8u
-static bool gpu_overscan_crop(void) {
+static bool gpu_overscan_crop(const Gpu* gpu) {
     static int cached = -1;
     if (cached < 0) {
         const char* v = getenv("ZS1_OVERSCAN");
         cached = (v && (v[0] == '0' || v[0] == 'n' || v[0] == 'N')) ? 0 : 1;
     }
-    return cached != 0;
+    return cached != 0 && gpu->vmode == Ntsc;
 }
 
 void gpu_update_display_mapping(Gpu* gpu) {
@@ -96,16 +106,33 @@ void gpu_update_display_mapping(Gpu* gpu) {
     uint32_t y2 = gpu->display_line_end;
     if (y2 > total_lines) y2 = total_lines;
     uint32_t h = (y2 > y1) ? (y2 - y1) : 240u;
-    /* Doubled on interlace only — pcsx-redux does the same (display.cc:95-130).
-     * Doubling on vres==480 as well made a 240-line window scan out 480 lines
-     * for any title that sets the 480 bit without interlacing, which is twice
-     * the scanout work for no picture. */
-    if (gpu->interlaced) h *= 2u;
+    /* The VRAM rectangle is twice the window only in 480-lines mode, which is
+     * 480 lines *and* interlace — not interlace on its own.
+     *
+     * GP1(05h) states the size flatly, with no interlace term at all:
+     * "size=((X2-X1)/cycles_per_pix), (Y2-Y1)"
+     * (psx-spx-docs/docs/graphicsprocessingunitgpu.md:703-704). What makes a
+     * 480-line framebuffer is GP1(08h).2, and that bit is documented as
+     * "Vertical Resolution (0=240, 1=480, when Bit5=1)" (:772) — it needs
+     * interlace to mean anything, but interlace does not imply it. GPUSTAT.31
+     * settles the direction: "In 480-lines mode, bit31 changes per frame. And
+     * in 240-lines mode, the bit changes per scanline" (:919-920). Per frame
+     * means each field takes a different half of a 480-line buffer; per
+     * scanline means both fields walk the same (Y2-Y1) lines.
+     *
+     * pcsx-redux doubles on the interlace bit alone (display.cc:111-113). That
+     * is what we copied, and on a 240-line title with interlace on it scans out
+     * twice the window: the picture fills the top half of the screen and the
+     * rest is whatever else happens to be in VRAM — textures, an old frame —
+     * which is what "the VRAM shows up instead of a black screen" looked like
+     * in Monsters & Co. */
+    if (gpu->interlaced && gpu->vres == Y480Lines) h *= 2u;
     if (h > VRAM_HEIGHT) h = VRAM_HEIGHT;
 
     uint16_t vram_y = gpu->display_vram_y_start;
-    if (gpu_overscan_crop()) {
-        uint32_t crop = GPU_OVERSCAN_LINES * (gpu->interlaced ? 2u : 1u);
+    if (gpu_overscan_crop(gpu)) {
+        uint32_t crop = GPU_OVERSCAN_LINES *
+                        ((gpu->interlaced && gpu->vres == Y480Lines) ? 2u : 1u);
         if (h > 2u * crop) {
             h -= 2u * crop;
             vram_y = (uint16_t)((vram_y + crop) & (VRAM_HEIGHT - 1));
@@ -130,6 +157,34 @@ void gpu_update_display_mapping(Gpu* gpu) {
     /* Also the path that re-syncs the blank flag after a reset or a savestate
      * load, neither of which goes through GP1(03). */
     renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
+
+    /* Probe: the whole VRAM-to-screen mapping on one line, inputs and outputs
+     * together, emitted only when the result changes — this function is called
+     * from four GP1 handlers and would otherwise repeat itself several times a
+     * field. Geometry only: nothing here is a timing measurement.
+     *
+     * Reading it: `win` is what the game asked for via GP1(06)/(07) in CRTC
+     * cycles and scanlines, `out` is the VRAM rectangle we scan out. If out.h is
+     * twice the height of the picture actually on screen, the interlace doubling
+     * below is firing on a 240-line mode; if out.y is 0 while the frames land at
+     * y=8, the window and the upload disagree. */
+    {
+        static uint32_t prev = 0xFFFFFFFFu, prev2 = 0xFFFFFFFFu;
+        uint32_t now  = ((uint32_t)gpu->crtc.display_vram_x << 16) | gpu->crtc.display_vram_y;
+        uint32_t now2 = ((uint32_t)disp_w << 16) | disp_h;
+        if (now != prev || now2 != prev2) {
+            prev = now; prev2 = now2;
+            LOG_GPU_INFO("[GPU] display map: win x1=%u x2=%u y1=%u y2=%u cyc=%u | "
+                         "out x=%u y=%u w=%u h=%u | %s vres=%s %s %s",
+                         x1, x2, y1, y2, cyc_per_pix,
+                         gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+                         disp_w, disp_h,
+                         gpu->interlaced ? "interlaced" : "progressive",
+                         (gpu->vres == Y480Lines) ? "480" : "240",
+                         (gpu->display_depth == D24Bits) ? "24bpp" : "15bpp",
+                         gpu->display_disabled ? "BLANK" : "on");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +370,8 @@ static void gp1_display_mode(Gpu* gpu, uint32_t value) {
         case 2:  width = 512; break;
         default: width = 640; break;
     }
-    uint16_t height = (gpu->interlaced || gpu->vres == Y480Lines) ? 480 : 240;
+    /* Same rule as the display mapping: 480 lines needs both bits (:772). */
+    uint16_t height = (gpu->interlaced && gpu->vres == Y480Lines) ? 480 : 240;
     gpu->display_width_hint  = width;
     gpu->display_height_hint = height;
     gpu_update_display_mapping(gpu);
@@ -417,12 +473,25 @@ uint32_t gpu_read_status(Gpu* gpu) {
     r |= (uint32_t)gpu->draw_to_display << 10;
     r |= (uint32_t)gpu->force_set_mask_bit << 11;
     r |= (uint32_t)gpu->preserve_masked_pixels << 12;
-    r |= (uint32_t)gpu->field << 13;
+    /* "Interlace Field (or, always 1 when GP1(08h).5=0)" (:897), and the GPU
+     * version table repeats it for v2: "GPUSTAT.13 when interlace=off — always
+     * 1" (:953). Without the override the tag stays wherever 480i left it, so a
+     * game that switches interlace off reads 0 there for the rest of the run. */
+    r |= (uint32_t)(gpu->interlaced ? gpu->field : 1u) << 13;
     r |= (uint32_t)gpu->texture_disable << 15;
-    uint32_t hres = ((uint32_t)gpu->hres_raw.hr2 << 2) | (uint32_t)gpu->hres_raw.hr1;
-    r |= ((hres >> 0) & 1) << 16;
-    r |= ((hres >> 1) & 1) << 17;
-    r |= ((hres >> 2) & 1) << 18;
+    /* GPUSTAT.16 is Horizontal Resolution 2 (GP1(08h).6) and GPUSTAT.17-18 are
+     * Horizontal Resolution 1 (GP1(08h).0-1)
+     * (psx-spx-docs/docs/graphicsprocessingunitgpu.md:902-904).
+     *
+     * This used to pack `(hr2 << 2) | hr1` and then scatter that word's bits 0,
+     * 1, 2 to GPUSTAT 16, 17, 18 — which puts hr1's low bit in the 368 flag and
+     * hr2 in the top bit of the resolution index. Every resolution read back by
+     * a game was wrong, and it read as 368 for 320 and 640 alike. Found by
+     * cross-checking scripts/display_map_probe.lua, which derives the width
+     * from GPUSTAT, against the width gpu_update_display_mapping() computes from
+     * the same registers: 364 against 320 for the same field. */
+    r |= (uint32_t)(gpu->hres_raw.hr2 & 1) << 16;
+    r |= (uint32_t)(gpu->hres_raw.hr1 & 3) << 17;
     r |= ((uint32_t)(gpu->vres == Y480Lines ? 1 : 0)) << 19;
     r |= ((uint32_t)gpu->vmode) << 20;
     r |= ((uint32_t)gpu->display_depth) << 21;
@@ -553,7 +622,16 @@ static void gpu_reset_state(Gpu* gpu) {
     gpu->display_vram_x_start = 0; gpu->display_vram_y_start = 0;
     gpu->hres_raw.hr1 = 0; gpu->hres_raw.hr2 = 0;
     gpu->vres = Y240Lines; gpu->vmode = Ntsc;
-    gpu->interlaced = true; gpu->display_depth = D15Bits;
+    /* Reset means GP1(08h)=0, so interlace is OFF — the documented post-reset
+     * GPUSTAT is 14802000h (psx-spx-docs/docs/graphicsprocessingunitgpu.md:648)
+     * and bit 22 is clear in it. Bit 13 *is* set there, which is gpu->field
+     * (Top = 1), not this.
+     *
+     * Starting interlaced meant every reset — the cold one and the one the BIOS
+     * issues when it hands over to the disc — put the machine in interlace with
+     * vres=240 until the game wrote GP1(08h), which is exactly the combination
+     * that used to double the display height. */
+    gpu->interlaced = false; gpu->display_depth = D15Bits;
     gpu->display_horiz_start = 0x200; gpu->display_horiz_end = 0xC00;
     gpu->display_line_start = 0x10; gpu->display_line_end = 0x100;
     gpu->field = Top;
