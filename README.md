@@ -4,9 +4,9 @@ A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 rendere
 debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
 boots them.
 
-SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc plays through —
-boot, FMV, menus, missions, memory-card saves — and is stable there; two others boot, one of them
-from a compressed image. That is three games on one machine, not a compatibility claim.
+SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. Two commercial discs play through —
+boot, FMV, menus, missions, memory-card saves — one of them straight from a compressed image, and a
+third boots and runs its engine. That is three games on one machine, not a compatibility claim.
 
 ---
 
@@ -177,7 +177,7 @@ is the whole sample.
 |---|---|---|---|
 | Ace Combat 2 (Europe) | `SCES-00699` | `.bin` | **Full gameplay.** Boot, FMV intro, textured menus, missions, memory-card saves — played through and stable |
 | Disney·Pixar Monsters & Co. — L'Isola dello Spavento (Italy) | `SCES-03765` | `.bin` | Boots, plays both FMV intros, reaches the title screen, starts a new game and runs its 3D engine. Silent during gameplay — the one open bug below |
-| Crash Bandicoot 3 — Warped (Europe) | `SCES-01420` | `.bin.ecm` | Boots to the main menu. Gameplay not tested. The first disc run from a compressed image |
+| Crash Bandicoot 3 — Warped (Europe) | `SCES-01420` | `.bin.ecm` | **Full gameplay**, and the first disc run start to finish from a compressed image |
 
 All three are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
 emulated-field axis: `Execute !` at f804, f874 and f843 respectively, with no disc errors.

@@ -195,8 +195,9 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
   fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
   Co. work" further down.
-- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: boots to the main menu
-  (2026-08-19, after the LWL/LWR fix below). Gameplay not tested.
+- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
+  (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
+  image, so the ECM path is exercised under real seek and streaming load, not just at boot.
 - **ECM images decode on the fly** (`src/cdrom/cdrom_ecm.c`, `src/cdrom/ecm_edc.c`). Never suspect
   the decoder from game behaviour: the container appends the EDC (CRC32, poly 0xD8018001) of the
   *entire* decoded output as its last four bytes, so decoding the whole image and running that CRC
