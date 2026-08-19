@@ -306,6 +306,10 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
 
+`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: what exists (nothing automated),
+the four layers proposed, and the order. Read it before adding a test, and before claiming a
+subsystem is verified.
+
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
 over this file for status. `docs/GPU_DISPLAY_STUDY_2026-08-10.md` covers everything between VRAM and
@@ -527,8 +531,12 @@ has to be there. Re-run before a release rather than trusting this line.
   like it had no effect, which invalidated most of a session — including three "measurements" taken
   against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
   check the binary's mtime before checking the change.
-- `make test` is broken and was already broken before this: `tests/` does not exist in the tree,
-  though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
+- `make test` is broken and was already broken before this: `tests/` is an empty directory, though
+  this file and the Makefile both reference `tests/cpu_minimal_test.c`. **There is no automated test
+  of any kind in this repository** — every accuracy claim here was established by running a game and
+  reading a log. That is the single largest structural gap, and `docs/TESTING_PLAN_2026-08-20.md`
+  is the plan for closing it, written the day after the LWL/LWR bug showed what it costs: months
+  live, most of a day to find, and sixteen assertions to have caught.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
   time" that was later withdrawn. It also applies to *diagnosing* slowness, not just quoting it: a
