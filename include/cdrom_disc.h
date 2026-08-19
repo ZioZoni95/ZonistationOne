@@ -13,6 +13,9 @@
 #include <stdio.h>
 #include <pthread.h>
 
+/* Forward declaration — full definition in cdrom_ecm.h */
+typedef struct EcmDecoder EcmDecoder;
+
 #define PSX_SYSCLK_HZ         33868800U
 #define CDROM_RAW_SECTOR      2352
 #define CDROM_SEEK_MIN_DELAY  30000
@@ -24,6 +27,7 @@ typedef struct {
     uint32_t pregap_lba;        /* PSX LBA of INDEX 00, 0 if absent */
     FILE    *file;               /* open BIN file handle (may be shared) */
     uint32_t file_offset_bytes; /* byte offset in file for sector start_lba */
+    EcmDecoder *ecm;            /* non-NULL if this track is an ECM image */
 } CdromTrack;
 
 typedef struct {
