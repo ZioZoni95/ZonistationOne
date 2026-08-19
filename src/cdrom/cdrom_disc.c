@@ -11,6 +11,7 @@
  */
 
 #include "cdrom_disc.h"
+#include "cdrom_ecm.h"
 #include "cdrom.h"
 #include "log.h"
 #include <string.h>
@@ -28,11 +29,20 @@ static uint32_t parse_msf_lba(const char *msf_str) {
 }
 
 static void close_all_track_files(CdromDisc *disc) {
-    FILE *prev = NULL;
+    FILE       *prev_file = NULL;
+    EcmDecoder *prev_ecm  = NULL;
     for (int i = 1; i <= disc->last_track; i++) {
-        if (disc->tracks[i].file && disc->tracks[i].file != prev) {
+        /* One decoder serves every track that came from the same FILE, exactly
+         * as the handle below does, so it needs the same guard: freeing it per
+         * track double-frees from the second track of a multi-track CUE on. */
+        if (disc->tracks[i].ecm && disc->tracks[i].ecm != prev_ecm) {
+            prev_ecm = disc->tracks[i].ecm;
+            ecm_decoder_free(disc->tracks[i].ecm);
+        }
+        disc->tracks[i].ecm = NULL;
+        if (disc->tracks[i].file && disc->tracks[i].file != prev_file) {
             fclose(disc->tracks[i].file);
-            prev = disc->tracks[i].file;
+            prev_file = disc->tracks[i].file;
         }
         disc->tracks[i].file = NULL;
     }
@@ -49,11 +59,31 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
         strncpy(dir, cue_path, dlen < sizeof(dir)-1 ? dlen : sizeof(dir)-1);
     }
 
-    /* Accept a bare .bin path for quick testing */
+    /* Accept a bare .bin or .bin.ecm path for quick testing */
     size_t plen = strlen(cue_path);
-    if (plen >= 4 && strcmp(cue_path + plen - 4, ".bin") == 0) {
+    bool is_bin    = (plen >= 4 && strcmp(cue_path + plen - 4, ".bin") == 0);
+    bool is_bin_ecm = (plen >= 8 && strcmp(cue_path + plen - 8, ".bin.ecm") == 0);
+    if (is_bin || is_bin_ecm) {
         FILE *bin = fopen(cue_path, "rb");
         if (!bin) { LOG_CDROM_ERROR("[CDROM] Cannot open BIN: %s", cue_path); return false; }
+
+        /* Check for ECM header */
+        if (ecm_detect(bin)) {
+            EcmDecoder *ecm = ecm_decoder_open(bin);
+            if (!ecm) { fclose(bin); return false; }
+            disc->first_track = 1;
+            disc->last_track  = 1;
+            disc->total_sectors = ecm->total_sectors;
+            disc->tracks[1].number            = 1;
+            disc->tracks[1].is_audio          = false;
+            disc->tracks[1].start_lba         = 0;
+            disc->tracks[1].file              = bin;
+            disc->tracks[1].file_offset_bytes = 0;
+            disc->tracks[1].ecm               = ecm;
+            LOG_CDROM_INFO("[CDROM] Loaded ECM: %s (%u sectors)", cue_path, disc->total_sectors);
+            return true;
+        }
+
         fseek(bin, 0, SEEK_END);
         long fsz = ftell(bin);
         fseek(bin, 0, SEEK_SET);
@@ -76,6 +106,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
     /* --- Parse CUE --- */
     char    line[512];
     FILE   *cur_file    = NULL;
+    EcmDecoder *cur_ecm = NULL;
     uint8_t cur_track   = 0;
     bool    multi_file  = false;
     uint32_t prev_file_end_lba = 0; /* cumulative LBA for multi-file discs */
@@ -89,6 +120,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
      * lines put every following track at the wrong disc address. */
     uint32_t pregap_extra[100] = {0};
     FILE    *track_file[100] = {0};
+    EcmDecoder *track_ecm[100] = {0};
 
     while (fgets(line, sizeof(line), cue)) {
         /* strip leading whitespace */
@@ -117,7 +149,11 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
                 fclose(cue);
                 return false;
             }
-            LOG_CDROM_DEBUG("[CDROM] File: %s", full_path);
+            cur_ecm = NULL;
+            if (ecm_detect(cur_file))
+                cur_ecm = ecm_decoder_open(cur_file);
+            LOG_CDROM_DEBUG("[CDROM] File: %s%s", full_path,
+                            cur_ecm ? " [ECM]" : "");
 
         } else if (strncmp(p, "TRACK", 5) == 0) {
             unsigned tnum = 0;
@@ -133,6 +169,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
             disc->tracks[cur_track].number   = cur_track;
             disc->tracks[cur_track].is_audio = (strncmp(ttype, "AUDIO", 5) == 0);
             track_file[cur_track] = cur_file;
+            track_ecm[cur_track]  = cur_ecm;
 
         } else if (strncmp(p, "PREGAP", 6) == 0) {
             char msf[16] = {0};
@@ -171,25 +208,34 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
             disc->tracks[i].pregap_lba        = idx00_lba[i] ? idx00_lba[i] + shift
                                                              : (pregap_extra[i] ? idx01_lba[i] + shift - pregap_extra[i] : 0);
             disc->tracks[i].file_offset_bytes = idx01_lba[i] * CDROM_RAW_SECTOR;
+            disc->tracks[i].ecm               = track_ecm[i];
         }
-        /* total_sectors from the shared BIN file, plus the gaps that are not in it */
-        FILE *f = disc->tracks[disc->first_track].file;
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            disc->total_sectors = (uint32_t)(ftell(f) / CDROM_RAW_SECTOR) + shift;
-            fseek(f, 0, SEEK_SET);
+        /* total_sectors: ECM tracks carry their own count; otherwise
+         * derive from the shared BIN file plus the accumulated gaps. */
+        if (disc->tracks[disc->first_track].ecm) {
+            disc->total_sectors = disc->tracks[disc->first_track].ecm->total_sectors + shift;
+        } else {
+            FILE *f = disc->tracks[disc->first_track].file;
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                disc->total_sectors = (uint32_t)(ftell(f) / CDROM_RAW_SECTOR) + shift;
+                fseek(f, 0, SEEK_SET);
+            }
         }
     } else {
         /* Multi-file: each track starts where the previous ended */
         uint32_t accum_lba = 0;
         for (int i = disc->first_track; i <= disc->last_track; i++) {
             disc->tracks[i].file              = track_file[i];
+            disc->tracks[i].ecm               = track_ecm[i];
             disc->tracks[i].start_lba         = accum_lba;
             disc->tracks[i].pregap_lba        = (idx00_lba[i] > 0)
                                                 ? accum_lba - (idx01_lba[i] - idx00_lba[i])
                                                 : 0;
             disc->tracks[i].file_offset_bytes = 0;
-            if (track_file[i]) {
+            if (track_ecm[i]) {
+                accum_lba += track_ecm[i]->total_sectors;
+            } else if (track_file[i]) {
                 fseek(track_file[i], 0, SEEK_END);
                 uint32_t sectors = (uint32_t)(ftell(track_file[i]) / CDROM_RAW_SECTOR);
                 fseek(track_file[i], 0, SEEK_SET);
@@ -242,6 +288,10 @@ bool cdrom_disc_read_sector(CdromDisc *disc, uint32_t lba, uint8_t *out_2352) {
         return true;
     }
     uint32_t rel_sector = lba - t->start_lba;
+
+    /* ECM track: delegate to the decoder */
+    if (t->ecm)
+        return ecm_read_sector(t->ecm, rel_sector, lba, out_2352);
     if (tnum < disc->last_track) {
         uint32_t this_off = t->file_offset_bytes / CDROM_RAW_SECTOR;
         uint32_t next_off = disc->tracks[tnum + 1].file_offset_bytes / CDROM_RAW_SECTOR;

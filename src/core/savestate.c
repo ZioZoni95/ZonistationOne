@@ -32,8 +32,11 @@
  * 7: Cdrom gained last_header/last_header_valid (what GetlocL answers with),
  *    again inside CDRH.
  * 8: Cdrom gained seek_phase (the drive refuses GetlocL/Pause while the head is
- *    moving) and xa_mute (ADPCTL's ADPMUTE bit), both inside CDRH. */
-#define ZS1_STATE_VERSION 8u
+ *    moving) and xa_mute (ADPCTL's ADPMUTE bit), both inside CDRH.
+ * 9: Cpu lost out_regs[32] — the second register file the interpreter used to
+ *    memcpy into regs on every instruction. T_CPU is the raw struct, so every
+ *    field after the GPRs moved by 128 bytes. */
+#define ZS1_STATE_VERSION 9u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 

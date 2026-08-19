@@ -393,23 +393,70 @@ static void timers_catch_up_one(Timers* timers, int i) {
     if (rate == 0) rate = 1;
     t->rate = rate;
 
-    uint32_t now = timers->inter->cpu_cycle_counter;
-    for (;;) {
-        uint32_t elapsed = (now - t->cycle_start) / rate;   /* ticks since last base */
-        uint32_t period  = timer_period_ticks(t);
-        if (elapsed < period) { t->counter = (uint16_t)elapsed; break; }
+    const uint32_t now     = timers->inter->cpu_cycle_counter;
+    const uint32_t elapsed = (now - t->cycle_start) / rate;   /* ticks since last base */
+    uint32_t period        = timer_period_ticks(t);
+    if (period == 0) period = 1;          /* cannot happen today; a div-by-zero if it ever could */
 
-        /* Boundary crossed. */
-        bool hit_target   = (t->reset_on_target && t->target != 0);
-        bool hit_overflow = !hit_target;
-        if (hit_target)   t->reached_target_flag = true;
-        if (hit_overflow) t->reached_ffff_flag   = true;
-        if ((hit_target && t->irq_on_target) || (hit_overflow && t->irq_on_ffff))
-            timer_fire_irq(timers, t, i, hit_target, hit_overflow);
+    if (elapsed < period) { t->counter = (uint16_t)elapsed; return; }
 
-        t->cycle_start += period * rate;   /* rebase to the boundary (counter->0) */
-        t->counter = 0;
+    /* How many boundaries were crossed, in one division.
+     *
+     * This used to be a `for(;;)` that stepped one period at a time, which is
+     * O(elapsed/period) — unbounded. A timer with a small target that is read
+     * after a long gap, or re-enabled after one, walks hundreds of thousands of
+     * iterations; the event scheduler normally keeps elapsed under one period,
+     * so the cost never showed up in a profile and the hazard stayed hidden.
+     * Every effect of those iterations collapses, because no guest code runs
+     * between them:
+     *   - the reached_* flags are sticky, so setting them once is the same;
+     *   - a pulse IRQ sets mode bit 10 and is then suppressed by the
+     *     already-pending guard in timer_fire_irq, so one request is the same;
+     *   - a toggle IRQ flips bit 10 per crossing, so only the parity survives,
+     *     and only the first 0->1 among them can reach the interrupt controller;
+     *   - one-shot (irq_repeat == 0) disarms itself on the first fire, so later
+     *     crossings do nothing at all.
+     * The rebase is then one multiply. */
+    const uint32_t crossings = elapsed / period;
+
+    const bool hit_target   = (t->reset_on_target && t->target != 0);
+    const bool hit_overflow = !hit_target;
+    if (hit_target)   t->reached_target_flag = true;
+    if (hit_overflow) t->reached_ffff_flag   = true;
+
+    if ((hit_target && t->irq_on_target) || (hit_overflow && t->irq_on_ffff)) {
+        /* First crossing goes through the unchanged path, so pulse/toggle
+         * handling, the already-pending guard, the log line and the one-shot
+         * disarm all behave exactly as they did. */
+        timer_fire_irq(timers, t, i, hit_target, hit_overflow);
+
+        /* Crossings 2..N. One-shot has disarmed itself above, so re-testing the
+         * arm bits is what decides whether there are any. */
+        const bool still_armed = (hit_target && t->irq_on_target) ||
+                                 (hit_overflow && t->irq_on_ffff);
+        const uint32_t rest = crossings - 1u;
+        if (still_armed && rest) {
+            if (t->irq_pulse) {
+                /* Toggle mode: bit 10 flips once per crossing. Only the parity
+                 * of the remainder is observable, plus whether any of those
+                 * flips was a 0->1 — the transition that can raise the line. */
+                const bool bit_set = (t->mode & (1u << 10)) != 0;
+                const bool rises   = bit_set ? (rest >= 2u) : (rest >= 1u);
+                if (rest & 1u) t->mode ^= (1u << 10);
+                if (rises && timers->inter &&
+                    (timers->inter->irq_status & (1u << t->irq)) == 0) {
+                    interconnect_request_irq(timers->inter, t->irq, "Timer IRQ (toggle)");
+                }
+            } else {
+                t->mode |= (1u << 10);   /* pulse mode: idempotent */
+            }
+        }
     }
+
+    /* Rebase to the last boundary crossed. crossings*period <= elapsed and
+     * elapsed*rate <= now - cycle_start, so this cannot overflow. */
+    t->cycle_start += crossings * period * rate;
+    t->counter = (uint16_t)(elapsed - crossings * period);
 }
 
 /* Arm EVQ_TIMER{i} to fire at this timer's next target/overflow. Skipped while
