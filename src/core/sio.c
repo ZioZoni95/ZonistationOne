@@ -251,23 +251,31 @@ void sio_init(Sio* sio) {
     sio_internal.controller_transfer_step = 0;
     // A real analog pad powers up in digital mode with its LED off
     // (DOCS/controllersandmemorycards.md:436) and the user presses the Analog
-    // button. This emulator instead powers up in analog mode: nobody wants to
-    // press a key on every boot, and games that only speak digital read the same
-    // swlo/swhi bytes either way — they just ignore adc0-3. ZS1_PAD_MODE=digital
-    // restores the hardware default; =stick selects the LED=green flight mode.
+    // button. Powering up in analog instead — on the theory that a digital-only
+    // game reads the same swlo/swhi bytes and just ignores adc0-3 — is not free:
+    // the BIOS shell's pad driver does not cope with ID 73h. It never finishes
+    // its init, and the main menu is drawn without its selection cursor (a
+    // reference run of the same PAL BIOS answers the pad with 41h 5Ah and the
+    // cursor is there). So the hardware default it is. ZS1_PAD_MODE=analog
+    // restores the old behaviour, =stick selects the LED=green flight mode, and
+    // F12 still cycles at runtime.
     // The config/lock/watchdog fields are zeroed by the memset above.
-    sio_internal.analog_mode = true;
+    sio_internal.analog_mode = false;
     sio_internal.stick_mode  = false;
     {
         const char* env = getenv("ZS1_PAD_MODE");
         if (env) {
-            if (strcmp(env, "digital") == 0) {
-                sio_internal.analog_mode = false;
+            if (strcmp(env, "analog") == 0) {
+                sio_internal.analog_mode = true;
             } else if (strcmp(env, "stick") == 0) {
-                sio_internal.stick_mode = true;
-            } else if (strcmp(env, "analog") != 0) {
+                /* Stick mode is a flavour of analog, so it needs both flags —
+                 * it used to set only stick_mode and rely on analog_mode already
+                 * defaulting to true. */
+                sio_internal.analog_mode = true;
+                sio_internal.stick_mode  = true;
+            } else if (strcmp(env, "digital") != 0) {
                 LOG_SYSTEM_WARN("[SYSTEM] ZS1_PAD_MODE=%s not understood "
-                                "(digital|analog|stick); using analog", env);
+                                "(digital|analog|stick); using digital", env);
             }
         }
     }

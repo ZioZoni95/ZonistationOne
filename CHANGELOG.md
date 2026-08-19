@@ -34,6 +34,24 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **ECM disc images** (`.bin.ecm`), decoded on the fly. A lookup table built at load time maps each
+  decoded sector to its position in the compressed stream, so random access costs one `fseek`; the
+  sector's own MSF is reconstructed from the absolute LBA, since the format strips it. Written from
+  the format specification — no code from any third-party ECM tool.
+  Correctness is not taken on trust: the container appends the EDC (CRC32, polynomial `0xD8018001`)
+  of the *entire* decoded output as its last four bytes, so decoding a whole image and running that
+  CRC over the result proves the reconstruction byte-identical to the original `.bin`. On
+  `Crash Bandicoot 3 - Warped (E)` — 146,562 sectors, 344,713,824 bytes — it matches at `6264BE2A`,
+  in 1.8 s.
+  `ecm_edc_init()` was missing its one call site, which left the EDC and ECC lookup tables zeroed and
+  every regenerated error code zero with them. Latent for a title that never inspects them, but the
+  image was not bit-exact until it was fixed, and the whole-file check only passes with the fix in.
+- **`docs/ecm_libcrypt_discovery.md`** rewritten from scratch. Its earlier version concluded that the
+  Crash 3 disc error was Sony's LibCrypt protection and that `.sbi` support was needed. That was
+  wrong, and the document now records how it was disproved — the game issues no `GetlocP`, `SeekP`,
+  `GetQ` or `ReadTOC` in a 34 s run, its boot executable contains no immediate load of any of those
+  command numbers, and the garbage MSF `df:e7:d7` occurs exactly once in the whole 345 MB image, in a
+  sector the game never reads. It was a CPU bug; see LWL/LWR under Fixed.
 - **Two subsystem audits against the official psx-spx clone**, both built on the rule that no entry
   may claim "correct" without citing a documentation line *and* a code line, with everything else
   marked `UNVERIFIED`. `docs/CDROM_AUDIT_2026-08-17.md` now covers all five CDROM doc files and every
@@ -59,6 +77,44 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **LWL/LWR merged against the wrong pipeline slot**, corrupting every unaligned 32-bit load whose
+  pair needed a real merge. The two functions read `cpu->load_reg_idx` — the slot for the load *this*
+  instruction issues, which `cpu_retire_load_delay()` has just cleared — instead of
+  `cpu->delay_load_reg`, the load the previous instruction issued (`include/cpu.h:131-132`). So the
+  second half of every pair merged into the stale register. psx-spx is explicit that the pair must
+  work: *"There's no delay required between lwl and lwr, so you can use them directly"*
+  (`cpuspecifications.md:247-252`), with an example that is exactly an `lwl`/`lwr` pair on one
+  register.
+  The bug hid because it is data-dependent, not code-dependent: an `(lwl+3, lwr+0)` pair writes the
+  whole register twice and looks correct, and only a partial pair such as `(lwl+1, lwr+2)` exposes it.
+  `Crash Bandicoot 3 - Warped (E)` walks the ISO path table, whose records alternate alignment, and
+  read half its directory extents as `bfc00018` instead of `00000018`. Those are not the `-1` sentinel
+  the walk skips, so the game passed one to `CdIntToPos`, got a non-BCD MSF out of a negative LBA, and
+  looped on `DiskError: com=CdlSetloc,code=(03:10)` forever. It now boots.
+  This is the tail of the load-delay rework below: that change is what moved the pending load into the
+  second slot, and these two functions were not moved with it.
+- **The pad booted in analog mode, which hardware does not do.** A real analog pad powers up digital
+  with its LED off (`DOCS/controllersandmemorycards.md:436`); booting analog was a convenience, on the
+  argument that a digital-only game reads the same button bytes and ignores `adc0-3`. True of games,
+  false of the BIOS shell: its pad driver does not cope with ID `73h`, never finishes its init, and
+  the no-disc main menu is drawn **without its selection cursor**. A reference run of the same PAL
+  BIOS answers the pad `41h 5Ah` and the cursor is there. The boot mode is digital again;
+  `ZS1_PAD_MODE=analog|stick`, the Analog button (F12 or the DS4 touchpad) and a game's own `44h`
+  config command all still switch, exactly as on hardware.
+  `ZS1_PAD_MODE=stick` had a latent bug of its own — it set only `stick_mode` and relied on
+  `analog_mode` already defaulting to true, so it would have selected digital once the default moved.
+- **The no-disc BIOS shell never finished its init.** Status bit 4 is a latch —
+  *"Once shell open (0=Closed, 1=Is/was Open)"* (`cdromdrive.md:826`) — and with no disc the shell has
+  necessarily been open, so a reference run answers every `Getstat` with `10h`. `cdrom_reset()` forced
+  it to `false`, telling the BIOS the tray was shut with a disc in it: it went on to `GetID`, took
+  `INT5(08h,40h)` and looped `Getstat`/`Getstat`/`GetID` for the rest of the session. A no-disc boot
+  now issues `Getstat` and `Test` only, with no `INT5` at all, matching the reference run command for
+  command.
+- **`make` did not build.** `compile_commands` is defined before `all`, and make takes the first real
+  target as the default goal, so a bare `make` regenerated `compile_commands.json` and left the binary
+  at whatever an earlier explicit `make all` had produced. Every source edit appeared to have no
+  effect because it was never compiled in — this invalidated most of a debugging session before it was
+  noticed. `.DEFAULT_GOAL := all` restores what `README` and `CLAUDE.md` have always claimed.
 - **The R3000A load delay was not emulated.** The pending load was committed at the top of the next
   instruction, before it executed, so the delay-slot opcode already saw the loaded value —
   "The loaded data is NOT available to the next opcode, ie. the target register isn't updated until

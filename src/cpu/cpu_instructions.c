@@ -812,8 +812,20 @@ return;
     uint32_t rs = instr_s(instruction);
     uint32_t addr = cpu_reg(cpu, rs) + offset;
 
-    // Merge with pending load value if target register matches
-    uint32_t current_rt_value = (cpu->load_reg_idx == rt) ? cpu->load_value : cpu->regs[rt];
+    /* Merge with the load still in the delay slot when it targets the same
+     * register: "There's no delay required between lwl and lwr, so you can use
+     * them directly" (psx-spx-docs/docs/cpuspecifications.md:247-252, whose
+     * example is exactly an lwl/lwr pair on one register).
+     *
+     * The pending load lives in delay_load_reg/_value — the load the PREVIOUS
+     * instruction issued (cpu.h:131-132). load_reg_idx is this instruction's
+     * own slot and cpu_retire_load_delay() has just cleared it, so testing it
+     * never matched and the second half of every pair merged into the stale
+     * register instead. Only pairs that need a real merge were affected: an
+     * (lwl+3, lwr+0) pair writes the whole register twice and survived, while
+     * (lwl+1, lwr+2) kept the old top 16 bits. */
+    uint32_t current_rt_value = (rt != REG_ZERO && cpu->delay_load_reg == rt)
+                              ? cpu->delay_load_value : cpu->regs[rt];
 
     uint32_t aligned_addr = addr & ~3;
     uint32_t aligned_word = interconnect_load32(cpu->inter, aligned_addr);
@@ -842,8 +854,20 @@ return;
     uint32_t rs = instr_s(instruction);
     uint32_t addr = cpu_reg(cpu, rs) + offset;
 
-    // Merge with pending load value if target register matches
-    uint32_t current_rt_value = (cpu->load_reg_idx == rt) ? cpu->load_value : cpu->regs[rt];
+    /* Merge with the load still in the delay slot when it targets the same
+     * register: "There's no delay required between lwl and lwr, so you can use
+     * them directly" (psx-spx-docs/docs/cpuspecifications.md:247-252, whose
+     * example is exactly an lwl/lwr pair on one register).
+     *
+     * The pending load lives in delay_load_reg/_value — the load the PREVIOUS
+     * instruction issued (cpu.h:131-132). load_reg_idx is this instruction's
+     * own slot and cpu_retire_load_delay() has just cleared it, so testing it
+     * never matched and the second half of every pair merged into the stale
+     * register instead. Only pairs that need a real merge were affected: an
+     * (lwl+3, lwr+0) pair writes the whole register twice and survived, while
+     * (lwl+1, lwr+2) kept the old top 16 bits. */
+    uint32_t current_rt_value = (rt != REG_ZERO && cpu->delay_load_reg == rt)
+                              ? cpu->delay_load_value : cpu->regs[rt];
 
     uint32_t aligned_addr = addr & ~3;
     uint32_t aligned_word = interconnect_load32(cpu->inter, aligned_addr);

@@ -4,9 +4,9 @@ A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 rendere
 debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
 boots them.
 
-SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc has been played
-past the halfway point — boot, FMV, menus, missions, saves — and it is stable there. That is one game
-on one machine, not a compatibility claim.
+SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc plays through —
+boot, FMV, menus, missions, memory-card saves — and is stable there; two others boot, one of them
+from a compressed image. That is three games on one machine, not a compatibility claim.
 
 ---
 
@@ -64,6 +64,7 @@ Three things trip people up, in order of how often:
 
 1. **Pass the `.bin`, not the `.cue`.** `--game=<path>.cue` is accepted and then reports
    *"Disc load failed — BIOS-only mode"*, which reads like a disc problem but is a path problem.
+   A `.bin.ecm` is taken directly and decoded on the fly — no need to unpack it first.
 2. **The BIOS must match the disc's region**, exactly as on hardware. A PAL disc with a US BIOS is
    rejected and you are left sitting at the BIOS menu, which looks like a boot regression.
 3. **The game path needs `--game=`.** A bare positional path is taken as the BIOS path.
@@ -74,10 +75,8 @@ A DualShock 4 over USB or Bluetooth is picked up automatically, hot-plug include
 stays live beside it (`WASD` D-pad, `E C Z X` for △○×□, `Q R` shoulders, `Shift Ctrl` triggers,
 `Space` START, `Tab` SELECT).
 
-The emulated pad boots **in analog mode**, which hardware does not do — a real pad starts digital with
-its LED off and waits for its Analog button. Booting analog means the sticks reach the game as analog
-inputs without a keypress first, and digital-only titles read the same button bytes as before.
-**F12**, or a click on the DS4 touchpad, is the Analog button:
+The emulated pad boots **digital with its LED off**, as a real one does, and waits for its Analog
+button. **F12**, or a click on the DS4 touchpad, is that button:
 
 ```
 digital (ID 41h, LED off) → analog pad (73h, LED red) → analog stick (53h, LED green) → digital
@@ -87,6 +86,11 @@ The green stick mode is what a few flight titles expect instead of a DualShock, 
 them. `ZS1_PAD_MODE=digital|analog|stick` sets the boot mode; the Controller window in the debug UI
 shows the current one and cycles it. A game that drives the pad itself through the config commands
 overrides all of this, as on hardware.
+
+Booting analog instead was tried, so that the sticks would reach a game without a keypress first. It
+costs more than it saves: the BIOS shell's own pad driver does not cope with ID `73h`, never finishes
+initialising, and its main menu comes up without a selection cursor. The hardware default is the
+default for a reason.
 
 A DS4's light bar shows those colours, so the mode a game selected is visible on the pad. It needs
 access to the pad's hidraw node, which is root-only by default; without it SDL uses the kernel evdev
@@ -122,7 +126,7 @@ swaps which physical button drives which bit if you prefer × to confirm everywh
 | `ZS1_SPU_NO_STRETCH=1` | Bypass the output time-stretch, same purpose |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |
-| `ZS1_PAD_MODE=digital\|analog\|stick` | Pad mode at boot (default `analog`; `digital` is what hardware does) |
+| `ZS1_PAD_MODE=digital\|analog\|stick` | Pad mode at boot (default `digital`, as on hardware) |
 | `ZS1_PAD_SWAP_XO=1` | Report the pad's bottom button as ○ and its right one as × |
 
 `ZS1_GPU` sets the PRIME offload variables the driver stack already reads, before the GL context is
@@ -143,7 +147,7 @@ is a normal failure, and it is a real source of rendering differences.
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
-| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten; GetlocL/Pause refuse with 80h during a seek, Setloc validates BCD, and the ATV volume matrix reaches the mix |
+| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten; GetlocL/Pause refuse with 80h during a seek, Setloc validates BCD, and the ATV volume matrix reaches the mix. `.bin` and `.bin.ecm` images, the latter decoded on the fly and verified byte-identical against the container's own whole-file EDC |
 | SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
@@ -164,32 +168,39 @@ end, and the machine holds 50 fields a second while doing it.
 
 Rendering is OpenGL 3.3 only — no Vulkan, no software renderer.
 
+### Tested games
+
+Every disc that has been run here, and how far it got. Three titles is not a compatibility list; it
+is the whole sample.
+
+| Game | Serial | Image | How far |
+|---|---|---|---|
+| Ace Combat 2 (Europe) | `SCES-00699` | `.bin` | **Full gameplay.** Boot, FMV intro, textured menus, missions, memory-card saves — played through and stable |
+| Disney·Pixar Monsters & Co. — L'Isola dello Spavento (Italy) | `SCES-03765` | `.bin` | Boots, plays both FMV intros, reaches the title screen, starts a new game and runs its 3D engine. Silent during gameplay — the one open bug below |
+| Crash Bandicoot 3 — Warped (Europe) | `SCES-01420` | `.bin.ecm` | Boots to the main menu. Gameplay not tested. The first disc run from a compressed image |
+
+All three are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
+emulated-field axis: `Execute !` at f804, f874 and f843 respectively, with no disc errors.
+
 ---
 
 ## Known bugs
 
-Accepted for now. Each is understood well enough to say what it is and what it is not.
+One, currently:
 
-- **The picture shifts at some transitions.** Games move the GP1(07) vertical display range — this one
-  walks 240 → 254 → 236 → 239 → 240 scanlines while booting — and the presentation does not yet place
-  those on a fixed raster the way a TV does. Not a rendering fault: the image is correct, its framing
-  is not.
-- **Audio cuts for a few seconds at scene changes.** Twice in a 212-second session, at 3.08 s and
-  2.72 s. Both are the game itself clearing SPUCNT bit 0 and taking CD audio out of the mix; the ring
-  never starved. What is not established is why the gap is that long, which depends on what the drive
-  is doing meanwhile — `scripts/recenter_watch.lua` reports the sector rate inside the window.
-- **Occasional small audio underruns** during play. One event in that same 212-second session.
-- **Rumble is unverified.** Implemented on both the one-motor and the `4Dh`-mapped methods, never
-  confirmed against a real pad.
-- **No multitap, no DualShock 2 pressure sensing.**
-- **The CRTC advances once per frame**, not per scanline, which leaves Timer0's hblank gate unwired.
-  Texpage bit 11 (Y base 2) is not applied.
-- **BIOS ROM *data* reads still cost nothing.** Instruction fetches out of ROM now pay their MEMCTRL
-  wait states, which is what closed the two-second gap this entry used to describe, but the tables the
-  BIOS keeps in ROM are read for free. What is left of the gap is small and points the other way in
-  places: the phase after `Execute !` runs about half the reference's length. Charging those reads was
-  tried and overshoots — it moves every milestone ~15% later.
-- **`make test` does not build**; `tests/` is referenced by the Makefile but is not in the tree.
+- **No audio during gameplay and the in-engine 3D cutscenes of `Monsters & Co. (Italy)`.** The FMV
+  intros play with their sound, so the XA path and the output device are both fine; it is the SPU
+  voice mix that goes quiet once the game is running its own engine.
+  `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks, the rail hits and the XA
+  and ring counters in one run, and `ZS1_SPU_NO_REVERB=1` is the one-run A/B.
+
+### Not implemented
+
+Absences rather than defects: no multitap and no DualShock 2 pressure sensing; the CRTC advances once
+per frame rather than per scanline, which leaves Timer0's hblank gate unwired; texpage bit 11
+(Y base 2) is not applied; and BIOS ROM *data* reads cost nothing, though instruction fetches do pay
+their MEMCTRL wait states. Rumble is written against both the one-motor and the `4Dh`-mapped methods
+and has never been confirmed against a real pad.
 
 ---
 

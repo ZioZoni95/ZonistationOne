@@ -119,7 +119,8 @@ EMU_GTE_SRCS = \
 # --- CDROM ---
 EMU_CDROM_SRCS = \
     src/cdrom/cdrom.c src/cdrom/cdrom_commands.c \
-    src/cdrom/cdrom_disc.c src/cdrom/cdrom_audio.c
+    src/cdrom/cdrom_disc.c src/cdrom/cdrom_audio.c \
+    src/cdrom/cdrom_ecm.c src/cdrom/ecm_edc.c
 
 # --- SPU ---
 EMU_SPU_SRCS = \
@@ -166,6 +167,13 @@ ALL_OBJS = $(sort $(EMU_OBJS) $(TEST_OBJS))
 DEPS = $(ALL_OBJS:.o=.d)
 
 .PHONY: all test clean compile_commands
+
+# `compile_commands` is defined before `all`, and make takes the FIRST real
+# target as the default goal — so a bare `make` regenerated compile_commands.json
+# and never built anything. The binary then stayed at whatever an earlier
+# explicit `make all` had produced, which silently invalidates every run: a
+# source edit appears to have "no effect" because it was never compiled in.
+.DEFAULT_GOAL := all
 
 # compile_commands.json — what a language server needs to parse this tree.
 #

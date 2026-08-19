@@ -23,7 +23,7 @@ Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as w
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
-default analog).
+default digital, as on hardware).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -189,11 +189,35 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 ## Known Working
 
 - BIOS boot to menu (US and PAL), full 3D boot logo
-- `Ace Combat 2 (Europe)`: boots, plays its FMV intro, reaches the textured menu and 3D engine
+- `Ace Combat 2 (Europe)`: **full gameplay** — boot, FMV intro, textured menus, missions and
+  memory-card saves, played through and stable
 - `Monsters & Co. (Italy)`: boots, plays its FMV intros, reaches the title screen and 3D engine
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
   fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
   Co. work" further down.
+- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: boots to the main menu
+  (2026-08-19, after the LWL/LWR fix below). Gameplay not tested.
+- **ECM images decode on the fly** (`src/cdrom/cdrom_ecm.c`, `src/cdrom/ecm_edc.c`). Never suspect
+  the decoder from game behaviour: the container appends the EDC (CRC32, poly 0xD8018001) of the
+  *entire* decoded output as its last four bytes, so decoding the whole image and running that CRC
+  proves it byte-identical to the original `.bin` in one step. Crash 3 matches at `6264BE2A` over
+  146562 sectors in 1.8 s. The follow-up A/B is to decode to a plain `.bin` and re-run: an identical
+  failure field-for-field means ECM is not involved at all. Both were needed to stop a wrong
+  LibCrypt/SBI theory — `docs/ecm_libcrypt_discovery.md` records it.
+- **LWL/LWR must merge against `delay_load_reg`, not `load_reg_idx`** (`cpu_instructions.c:806,836`).
+  `load_reg_idx` is the slot for the load *this* instruction issues and `cpu_retire_load_delay()` has
+  just cleared it, so the test never matched and the second half of every pair merged into the stale
+  register (`include/cpu.h:131-132`; psx-spx `cpuspecifications.md:247-252` — "There's no delay
+  required between lwl and lwr"). It hid for months because it is **data-dependent**: an
+  `(lwl+3, lwr+0)` pair writes the whole register twice and looks right; only a partial pair like
+  `(lwl+1, lwr+2)` shows it. Crash 3's ISO path-table walk alternates the two and read half its
+  directory extents as `bfc00018` instead of `00000018`. Suspect this class of bug — "correct except
+  at one alignment" — whenever a defect depends on the data rather than the code path.
+- **The no-disc status byte reports ShellOpen** (`cdrom.c`, `cdrom_reset`/`cdrom_init`). Bit 4 is a
+  latch, "Once shell open (0=Closed, 1=Is/was Open)" (`psx-spx-docs/docs/cdromdrive.md:826`); with no
+  disc the shell has necessarily been open and a reference run answers every Getstat with 10h.
+  Forcing it to 0 told the BIOS a disc might be there: it issued GetID, took INT5(08h,40h), and
+  looped Getstat/Getstat/GetID for the whole session instead of finishing the shell's init.
 - **GetlocL answers from a latch, not from the data sector ring** (`cdrom_commands.c`). The ring
   entry is cleared once the guest has DMA'd the sector out, and GetlocL is asked after that, so
   answering from the ring failed on every consumed sector and the game looped on the failure. Only
@@ -214,10 +238,13 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - SIO: digital pad, DualShock analog protocol (ID 73h/F3h, adc0-3, config commands), analog-stick
   "flight mode" (ID 53h, L3/R3 disabled), rumble on both the old one-motor and the new 4Dh-mapped
   method, both memory card slots
-- Pad mode: **analog by default**, not digital as on hardware — F12 or the DS4 touchpad click is the
-  Analog button and cycles digital -> analog -> stick; `ZS1_PAD_MODE=digital|analog|stick` sets the
-  boot mode. In analog and stick mode the left stick no longer folds onto the D-pad, so a push
-  arrives once, as adc2/adc3. Stick mode is what a few titles want by name
+- Pad mode: **digital at boot, as on hardware** (2026-08-19; it used to be analog "so nobody has to
+  press a key"). The BIOS shell's own pad driver does not cope with ID 73h: it never finishes its
+  init and the no-disc main menu is drawn without its selection cursor. A reference run of the same
+  PAL BIOS answers the pad 41h 5Ah. F12 or the DS4 touchpad click is the Analog button and cycles
+  digital -> analog -> stick; `ZS1_PAD_MODE=digital|analog|stick` sets the boot mode; a game's own
+  44h config command switches it too. In analog and stick mode the left stick no longer folds onto
+  the D-pad, so a push arrives once, as adc2/adc3. Stick mode is what a few titles want by name
   (DOCS/controllersandmemorycards.md:496: Ace Combat 2, MechWarrior 2, Colony Wars).
 - Controllers: DS4 over USB/Bluetooth via SDL_Gamepad, hot-plug, keyboard live alongside it,
   radial stick deadzone so a resting stick reads 80h. The DS4's light bar mirrors the emulated pad's
@@ -493,6 +520,12 @@ has to be there. Re-run before a release rather than trusting this line.
   the generated `.d` files, so editing anything in `include/` rebuilds exactly what included it. The
   `make clean && make` ritual is no longer needed. `make` is also parallel by default (`-j$(nproc)`);
   an explicit `-j` on the command line still wins.
+- ~~A bare `make` builds nothing.~~ Fixed 2026-08-19: `compile_commands` is defined before `all` and
+  make takes the first real target as the default goal, so `make` regenerated `compile_commands.json`
+  and left the binary at whatever an earlier explicit `make all` produced. Every edit then looked
+  like it had no effect, which invalidated most of a session — including three "measurements" taken
+  against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
+  check the binary's mtime before checking the change.
 - `make test` is broken and was already broken before this: `tests/` does not exist in the tree,
   though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
