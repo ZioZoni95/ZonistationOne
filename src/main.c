@@ -357,9 +357,6 @@ static bool load_exe(const char* path, Cpu* cpu, Interconnect* inter) {
     fclose(f);
 
     uint32_t sp = hdr.initial_sp_base + hdr.initial_sp_offset;
-    cpu->out_regs[28] = hdr.initial_gp;
-    cpu->out_regs[29] = sp;
-    cpu->out_regs[30] = sp;
     cpu->regs[28]     = hdr.initial_gp;
     cpu->regs[29]     = sp;
     cpu->regs[30]     = sp;

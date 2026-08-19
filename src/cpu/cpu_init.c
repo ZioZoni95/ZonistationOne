@@ -26,10 +26,7 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     // R0 (zero) is always 0, others start at 0
     for (int i = 0; i < 32; ++i) {
         cpu->regs[i] = 0;
-        cpu->out_regs[i] = 0;
     }
-    cpu->regs[0] = 0;      // R0 (zero) always 0
-    cpu->out_regs[0] = 0;  // R0 (zero) always 0
 
     // Initialize Load Delay Slot state
     cpu->load_reg_idx = REG_ZERO; // Target R0 initially (no-op)

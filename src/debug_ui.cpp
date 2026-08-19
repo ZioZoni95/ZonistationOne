@@ -15,6 +15,7 @@
 #include <string>
 #include <mutex>
 #include <map>
+#include <deque>
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>
@@ -291,6 +292,29 @@ struct LogEntry {
     std::string message;
 };
 
+/* Lines kept per category. Entries beyond this are dropped oldest-first. */
+#define LOG_RING_CAP 5000u
+
+/* One category's window and its backlog.
+ *
+ * The backlog is a ring, not a vector that gets trimmed. It used to be
+ * `buffer.push_back(...)` followed by `buffer.erase(buffer.begin())` once past
+ * the cap, and erasing at the front of a vector shifts every remaining element
+ * — 4999 std::string moves per line, forever, once the cap is reached. Log
+ * ingestion was therefore O(n) per line rather than O(1), and a DEBUG run emits
+ * ~1.4M lines. That is the likely reason the debug interface could not hold real
+ * time while the emulation core could with the panels closed.
+ *
+ * Entries are addressed by a monotonic sequence number rather than a position,
+ * so the filtered view below can keep referring to them as the ring wraps:
+ * seq/CAP gives the slot, first_seq..next_seq is what is still live.
+ *
+ * `shown` is the filtered view, maintained incrementally. Rebuilding it meant
+ * testing every held line against the level and the text filter on every frame,
+ * for every open window — and all seventeen windows open at startup, so ~85000
+ * string tests per frame that ImGuiListClipper does not save, because it only
+ * skips the drawing. Now only lines that arrived since the last frame are
+ * tested, and the whole list is rebuilt only when the filter or level changes. */
 struct LogComponent {
     const char* name;
     LogCategory category;
@@ -298,31 +322,59 @@ struct LogComponent {
     bool auto_scroll;
     bool monospace;
     int  display_level;          /* min level shown in ImGui (default INFO) */
-    std::vector<LogEntry> buffer;
+    std::vector<LogEntry> ring;  /* LOG_RING_CAP slots, indexed by seq % CAP */
+    uint64_t first_seq;          /* oldest live entry */
+    uint64_t next_seq;           /* sequence the next entry will take */
     ImGuiTextFilter filter;
     FILE* file;                  /* always-open file in logs/<Name>.log */
     uint32_t writes_since_flush;
+    std::deque<uint64_t> shown;  /* seqs passing level+filter, ascending */
+    uint64_t shown_scanned;      /* next_seq as of the last incremental scan */
+    int shown_level;             /* level the view was built for */
+    std::string shown_filter;    /* filter text the view was built for */
 };
 
-static std::map<LogCategory, LogComponent> g_log_components = {
-    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}}
-};
+static inline LogEntry& log_at(LogComponent& c, uint64_t seq) {
+    return c.ring[(size_t)(seq % LOG_RING_CAP)];
+}
+static inline const LogEntry& log_at(const LogComponent& c, uint64_t seq) {
+    return c.ring[(size_t)(seq % LOG_RING_CAP)];
+}
+
+/* Indexed by LogCategory, not keyed by it.
+ *
+ * This was a std::map<LogCategory, LogComponent>, so every log line paid a
+ * red-black tree descent to reach a slot addressed by a dense enum of 0..16.
+ * An array is one index, contiguous, and the sink runs on every line at every
+ * level. Order must follow the enum in log.h; the ordering is asserted at
+ * startup rather than trusted. */
+static std::vector<LogComponent> make_log_components() {
+    static const char* const names[LOG_CAT_COUNT] = {
+        "System", "CPU", "IRQ", "DMA", "GPU", "CDROM", "Timer", "BIOS",
+        "Interconnect", "Renderer", "Event", "GTE", "VRAM", "RAM", "Debug",
+        "MDEC", "SPU"
+    };
+    std::vector<LogComponent> v(LOG_CAT_COUNT);
+    for (int i = 0; i < LOG_CAT_COUNT; i++) {
+        LogComponent& c = v[(size_t)i];
+        c.name          = names[i];
+        c.category      = (LogCategory)i;
+        c.is_open       = true;
+        c.auto_scroll   = true;
+        c.monospace     = true;
+        c.display_level = LOG_LEVEL_DEBUG;
+        c.ring.resize(LOG_RING_CAP);
+        c.first_seq     = 0;
+        c.next_seq      = 0;
+        c.file          = nullptr;
+        c.writes_since_flush = 0;
+        c.shown_scanned = 0;
+        c.shown_level   = -1;        /* forces the first build */
+    }
+    return v;
+}
+
+static std::vector<LogComponent> g_log_components = make_log_components();
 
 static std::mutex g_log_mutex;
 
@@ -331,13 +383,17 @@ static const char* level_name(int level);  /* fwd */
 static void log_sink_callback(int category, int level, const char* msg, void* udata) {
     (void)udata;
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    auto it = g_log_components.find((LogCategory)category);
-    if (it == g_log_components.end()) return;
+    if (category < 0 || category >= LOG_CAT_COUNT) return;
+    LogComponent& comp = g_log_components[(size_t)category];
 
-    LogComponent& comp = it->second;
-    comp.buffer.push_back({level, msg});
-    if (comp.buffer.size() > 5000)
-        comp.buffer.erase(comp.buffer.begin());
+    /* O(1): overwrite the slot the sequence maps to and let the oldest fall off
+     * the back of the window. No element ever moves. */
+    LogEntry& slot = log_at(comp, comp.next_seq);
+    slot.level = level;
+    slot.message = msg;
+    comp.next_seq++;
+    if (comp.next_seq - comp.first_seq > LOG_RING_CAP)
+        comp.first_seq = comp.next_seq - LOG_RING_CAP;
 
     if (comp.file) {
         fprintf(comp.file, "[%s] %s\n", level_name(level), msg);
@@ -428,21 +484,36 @@ static const char* level_name(int level) {
     }
 }
 
-static void export_component_log(const LogComponent& comp) {
+/* Snapshot the visible ring buffer to its OWN file.
+ *
+ * This used to write `logs/<Name>.log` — the exact path debug_ui_init() keeps
+ * open for the whole session and streams every line into. One name, two
+ * independent FILE objects: the snapshot opened it with "w" and truncated it
+ * while the streaming handle carried on writing at its old offset, so the file
+ * ended up as a block of NULs followed by interleaved text, and the snapshot
+ * itself was overwritten by the next streamed line. The streamed file is the
+ * log; the snapshot is a separate artefact and now says so in its name.
+ *
+ * The handle is flushed first, so the two files line up at the moment of the
+ * snapshot instead of the streamed one trailing by up to 64 lines. */
+static void export_component_log(LogComponent& comp) {
     mkdir("logs", 0755);
-    char path[128];
-    snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+    char path[160];
+    snprintf(path, sizeof(path), "logs/%s.snapshot.log", comp.name);
     FILE* f = fopen(path, "w");
     if (!f) return;
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    for (const auto& e : comp.buffer)
+    if (comp.file) { fflush(comp.file); comp.writes_since_flush = 0; }
+    for (uint64_t s = comp.first_seq; s < comp.next_seq; s++) {
+        const LogEntry& e = log_at(comp, s);
         fprintf(f, "[%s] %s\n", level_name(e.level), e.message.c_str());
+    }
     fclose(f);
 }
 
 static void export_all_logs() {
-    for (const auto& pair : g_log_components)
-        export_component_log(pair.second);
+    for (auto& comp : g_log_components)
+        export_component_log(comp);
 }
 
 // Log window
@@ -456,7 +527,9 @@ static void draw_component_log_window(LogComponent& comp) {
 
     if (ImGui::Button("Clear")) {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        comp.buffer.clear();
+        comp.first_seq = comp.next_seq;   /* drop the backlog without touching the ring */
+        comp.shown.clear();
+        comp.shown_scanned = comp.next_seq;
     }
     ImGui::SameLine();
     if (ImGui::Button("Flush")) {
@@ -486,18 +559,40 @@ static void draw_component_log_window(LogComponent& comp) {
 
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        std::vector<int> indices;
-        for (int i = 0; i < (int)comp.buffer.size(); i++) {
-            if (comp.buffer[i].level > comp.display_level) continue;
-            if (!comp.filter.PassFilter(comp.buffer[i].message.c_str())) continue;
-            indices.push_back(i);
+
+        /* Maintain the filtered view instead of rebuilding it.
+         *
+         * The old code tested every held line against the level and the text
+         * filter on every frame and allocated a fresh index vector — for each of
+         * the seventeen windows, all of which are open by default. The clipper
+         * below skips the *drawing* of off-screen lines but not that scan.
+         * Now a change of filter or level rebuilds, and otherwise only the lines
+         * that arrived since the last frame are examined. */
+        const char* ftext = comp.filter.InputBuf;
+        if (comp.shown_level != comp.display_level || comp.shown_filter != ftext) {
+            comp.shown_level  = comp.display_level;
+            comp.shown_filter = ftext;
+            comp.shown.clear();
+            comp.shown_scanned = comp.first_seq;
         }
+        /* Lines that fell out of the ring since last frame. */
+        if (comp.shown_scanned < comp.first_seq) comp.shown_scanned = comp.first_seq;
+        while (!comp.shown.empty() && comp.shown.front() < comp.first_seq)
+            comp.shown.pop_front();
+
+        for (uint64_t s = comp.shown_scanned; s < comp.next_seq; s++) {
+            const LogEntry& e = log_at(comp, s);
+            if (e.level > comp.display_level) continue;
+            if (!comp.filter.PassFilter(e.message.c_str())) continue;
+            comp.shown.push_back(s);
+        }
+        comp.shown_scanned = comp.next_seq;
 
         ImGuiListClipper clipper;
-        clipper.Begin((int)indices.size());
+        clipper.Begin((int)comp.shown.size());
         while (clipper.Step()) {
             for (int n = clipper.DisplayStart; n < clipper.DisplayEnd; n++) {
-                const auto& e = comp.buffer[indices[n]];
+                const auto& e = log_at(comp, comp.shown[(size_t)n]);
                 ImVec4 col = {1,1,1,1};
                 if      (e.level == LOG_LEVEL_ERROR) col = {1.0f, 0.4f, 0.4f, 1.0f};
                 else if (e.level == LOG_LEVEL_WARN)  col = {1.0f, 0.8f, 0.4f, 1.0f};
@@ -1465,8 +1560,8 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
         if (ImGui::RadioButton("Trace",  level == LOG_LEVEL_TRACE))  log_set_level(LOG_LEVEL_TRACE);
         ImGui::Separator();
         micro_label("Logs");
-        if (ImGui::MenuItem("Open all"))  for (auto& p : g_log_components) p.second.is_open = true;
-        if (ImGui::MenuItem("Close all")) for (auto& p : g_log_components) p.second.is_open = false;
+        if (ImGui::MenuItem("Open all"))  for (auto& c : g_log_components) c.is_open = true;
+        if (ImGui::MenuItem("Close all")) for (auto& c : g_log_components) c.is_open = false;
         if (ImGui::MenuItem("Snapshot all to logs/")) export_all_logs();
         ImGui::EndPopup();
     }
@@ -2377,8 +2472,8 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     if (insp2) ImGui::DockBuilderDockWindow(insp2, inspector);
 
     // Logs tabbed along the bottom, every mode.
-    for (auto& pair : g_log_components)
-        ImGui::DockBuilderDockWindow(pair.second.name, bottom);
+    for (auto& comp : g_log_components)
+        ImGui::DockBuilderDockWindow(comp.name, bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -2421,12 +2516,12 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
 
     /* Open per-component log files (one file per category, lives for whole session) */
     mkdir("logs", 0755);
-    for (auto& pair : g_log_components) {
+    for (auto& comp : g_log_components) {
         char path[160];
-        snprintf(path, sizeof(path), "logs/%s.log", pair.second.name);
-        pair.second.file = fopen(path, "w");
-        if (pair.second.file) {
-            setvbuf(pair.second.file, NULL, _IOLBF, 4096);
+        snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+        comp.file = fopen(path, "w");
+        if (comp.file) {
+            setvbuf(comp.file, NULL, _IOLBF, 4096);
         }
     }
 
@@ -2545,8 +2640,8 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     }
 
     // Logs tabbed along the bottom, every mode
-    for (auto& pair : g_log_components)
-        draw_component_log_window(pair.second);
+    for (auto& comp : g_log_components)
+        draw_component_log_window(comp);
 
     // Controller remapping & input tester window
     draw_controller_mapping_window();
@@ -2599,11 +2694,11 @@ extern "C" void imgui_opengl_new_frame(void) {
 extern "C" void debug_ui_shutdown(void) {
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        for (auto& pair : g_log_components) {
-            if (pair.second.file) {
-                fflush(pair.second.file);
-                fclose(pair.second.file);
-                pair.second.file = nullptr;
+        for (auto& comp : g_log_components) {
+            if (comp.file) {
+                fflush(comp.file);
+                fclose(comp.file);
+                comp.file = nullptr;
             }
         }
     }

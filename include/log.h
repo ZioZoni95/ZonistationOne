@@ -78,6 +78,21 @@ void log_print(LogCategory category, LogLevel level, const char* format, ...);
 // identifies the source).
 void log_print_tty(const char* msg);
 
+/* --- Emulated-clock stamp ---
+ * Every dispatched line carries the machine's own clock, not the host wall
+ * clock. Wall seconds cannot line this trace up against another emulator's
+ * run: a whole boot phase (EXE load, game init) lands inside the same second,
+ * which makes "who is faster, and where" unanswerable. The source is owned by
+ * the machine and read once per emitted line, so it costs nothing on lines
+ * the level gate already dropped. */
+typedef struct {
+    uint64_t cycle;   /* monotonic emulated CPU cycles since reset */
+    uint32_t field;   /* CRTC fields (VBlanks) since reset */
+} LogClock;
+
+typedef void (*LogClockFn)(void* udata, LogClock* out);
+void log_set_clock_source(LogClockFn fn, void* udata);
+
 
 // --- Direct Component-Specific Macros (PCSX ReARMed style) ---
 // These call log_print directly to avoid circular definitions

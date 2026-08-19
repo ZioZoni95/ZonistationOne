@@ -49,14 +49,15 @@ void cdrom_audio_fifo_push(AudioFifo *fifo, int16_t left, int16_t right);
 bool cdrom_audio_fifo_pop(AudioFifo *fifo, int16_t *left, int16_t *right);
 bool cdrom_audio_fifo_empty(const AudioFifo *fifo);
 
-/* Decode one XA-ADPCM sector (18 chunks × 128 bytes starting at sector byte 24) */
+/* Decode one XA-ADPCM sector (18 chunks × 128 bytes starting at sector byte 24).
+ * Muting is not a parameter: it belongs to the output stage, see
+ * cdrom_get_audio_frame(). */
 void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo,
                             const uint8_t *xa_data,
-                            bool stereo, bool bits8, bool rate_18900,
-                            bool muted);
+                            bool stereo, bool bits8, bool rate_18900);
 
 /* Process one CDDA raw sector (2352 bytes, audio starts at byte 0) */
-void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector, bool muted);
+void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector);
 
 /* Pop one stereo frame for SPU/SDL output */
 void cdrom_audio_get_frame(AudioFifo *fifo, int16_t *left, int16_t *right);

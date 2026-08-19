@@ -21,21 +21,27 @@
 #define BIOS_ROM_PHYS_START 0x1FC00000u
 #define BIOS_ROM_PHYS_END   0x1FC80000u
 
-// Real per-instruction BIOS ROM wait-state costing (~24-32 extra cycles/word, matching
-// MEMCTRL-configured delay registers — see bus_memctrl_recalculate() in bus.c) is
-// architecturally correct (the MEMCTRL delay registers exist precisely to slow these
-// regions) but is DISABLED here: enabling it causes the CD-ROM command sequence to hang
-// partway through boot (confirmed via isolation testing — with this cost applied, boot
-// never reads past a same-location SeekL to LBA 23; with it disabled, boot proceeds
-// normally deep into game data). The likely cause is a BIOS interrupt-handler / CD
-// second-response IRQ timing race that becomes live once ROM-resident code takes
-// ~25-30x longer per instruction, but the exact mechanism was not fully root-caused this
-// session (an IRQ edge-detector hardening in bus_irq.c's interconnect_trigger_cdrom_irq
-// and a CDROM_SEEK_FAST_DELAY increase were both tried and did not resolve it). Keep
-// disabled until the real interaction is found — do not re-enable without re-running the
-// same isolation test (ZS1_LOG_TRACE boot of Ace Combat 2, check logs/CDROM.log
-// progresses past LBA 23).
-#define ZS1_ENABLE_BIOS_ROM_CYCLE_COST 0
+// Per-instruction BIOS ROM wait-state costing: ~24 extra cycles per word, from the
+// MEMCTRL delay registers the guest itself programs (bus_memctrl_recalculate() in bus.c).
+//
+// ON since 2026-08-17. It was disabled for a long time because enabling it hung boot
+// (the drive never got past its early reads), and the note here blamed an unidentified
+// BIOS-interrupt / CD second-response race. That was the right suspicion in the wrong
+// place: the CPU cost was correct all along and the drive was broken, in two ways that
+// only a slow BIOS could expose (both fixed in cdrom.c / cdrom_commands.c).
+//   1. Acknowledging an interrupt re-armed any deferred response at CDROM_MIN_INT_DELAY,
+//      throwing its real deadline away — every seek, spin-up and read start answered
+//      ~30 us after its command. With ROM-resident code running 25x slower, that reply
+//      landed before the BIOS had finished the routine that issued the command.
+//   2. Init charged an undocumented spin-down, putting its second response 821 ms out,
+//      past the ~415 ms after which the BIOS retries Init — an endless retry loop.
+//
+// The measurement that decides whether this belongs on: boot milestones in emulated
+// fields (the TTY lines carry the log's f-stamp) against a DuckStation Devel-build run
+// of the same disc. Off, this machine reached `Execute !` at field 444 against
+// DuckStation's 819 — 1.8x too fast, and up to 7x on the ROM-only phases. On, it reaches
+// it at 765, and every milestone lands within ~4%.
+#define ZS1_ENABLE_BIOS_ROM_CYCLE_COST 1
 
 static inline void charge_bios_rom_cycles(Cpu* cpu, uint32_t paddr, uint32_t word_count, bool count_cycles) {
 #if ZS1_ENABLE_BIOS_ROM_CYCLE_COST

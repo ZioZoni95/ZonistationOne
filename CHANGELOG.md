@@ -7,7 +7,272 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Performance
+Host cost per PAL field, measured with `ZS1_FRAME_PROFILE` and nothing else, median of three 30 s
+runs of the same scenario. The emulated machine is unchanged throughout: CPI stays at 1.618 with
+identical percentiles, which is the check that a host optimisation has not moved a guest property.
+
+| | `emu` | `total` |
+|---|---|---|
+| before | 3.710 ms | 3.850 ms |
+| after | **2.910 ms** | **3.040 ms** |
+
+- **Link-time optimisation**, auto-enabled when the C and C++ compilers share a major version and
+  skipped with an explanation when they do not — a default that fails to link is not a default.
+  Worth −7.7% on its own, and it removes `debugger_check_breakpoint`,
+  `debugger_check_read_watchpoint`, `mask_region` and `cpu_reg` from the profile entirely by inlining
+  them across translation units. Those three debugger hooks were 2.92% of all samples doing nothing
+  at all, since neither a breakpoint nor a watchpoint was set.
+- **The interpreter's second register file is gone.** Every write went to `out_regs` and every
+  instruction ran `memcpy(regs, out_regs, 128)` to commit it — the largest single constant on the hot
+  path at ~20M instructions a second. Removing it was checked rather than assumed: every handler in
+  `cpu_instructions.c` reads its sources before writing its destination, and the only reads that look
+  later are arguments of the write itself, which C evaluates first.
+- `make compile_commands` writes a `compile_commands.json` from the same source lists the build uses.
+  Without it a language server guesses the include path and reports dozens of bogus
+  "identifier uint32_t is undefined" errors in `include/cpu.h`, a header that
+  `gcc -fsyntax-only` accepts on its own.
+
+### Added
+- **ECM disc images** (`.bin.ecm`), decoded on the fly. A lookup table built at load time maps each
+  decoded sector to its position in the compressed stream, so random access costs one `fseek`; the
+  sector's own MSF is reconstructed from the absolute LBA, since the format strips it. Written from
+  the format specification — no code from any third-party ECM tool.
+  Correctness is not taken on trust: the container appends the EDC (CRC32, polynomial `0xD8018001`)
+  of the *entire* decoded output as its last four bytes, so decoding a whole image and running that
+  CRC over the result proves the reconstruction byte-identical to the original `.bin`. On
+  `Crash Bandicoot 3 - Warped (E)` — 146,562 sectors, 344,713,824 bytes — it matches at `6264BE2A`,
+  in 1.8 s.
+  `ecm_edc_init()` was missing its one call site, which left the EDC and ECC lookup tables zeroed and
+  every regenerated error code zero with them. Latent for a title that never inspects them, but the
+  image was not bit-exact until it was fixed, and the whole-file check only passes with the fix in.
+- **`docs/ecm_libcrypt_discovery.md`** rewritten from scratch. Its earlier version concluded that the
+  Crash 3 disc error was Sony's LibCrypt protection and that `.sbi` support was needed. That was
+  wrong, and the document now records how it was disproved — the game issues no `GetlocP`, `SeekP`,
+  `GetQ` or `ReadTOC` in a 34 s run, its boot executable contains no immediate load of any of those
+  command numbers, and the garbage MSF `df:e7:d7` occurs exactly once in the whole 345 MB image, in a
+  sector the game never reads. It was a CPU bug; see LWL/LWR under Fixed.
+- **Two subsystem audits against the official psx-spx clone**, both built on the rule that no entry
+  may claim "correct" without citing a documentation line *and* a code line, with everything else
+  marked `UNVERIFIED`. `docs/CDROM_AUDIT_2026-08-17.md` now covers all five CDROM doc files and every
+  file in `src/cdrom/` plus the drive's paths in `bus.c`/`bus_irq.c`.
+  `docs/DMA_IRQ_GTE_MDEC_AUDIT_2026-08-17.md` does the same for DMA, interrupts, the GTE (including
+  the pipeline-timings page), MDEC and the hardware-numbers catalogue.
+- `ZS1_OVERSCAN=0` disables the new overscan crop; `ZS1_DMA_GPU_PACE=legacy` restores the old flat
+  GPU-DMA quantum; `ZS1_DISPLAY_LATCH=1` restores the field-start display latch. All three exist so a
+  suspected regression can be A/B'd in one run without a rebuild.
+- **`docs/GPU_CPU_VRAM_PATH_STUDY_2026-08-18.md`** — the CPU → GPU → VRAM → screen path written out
+  from the official psx-spx clone, with pcsx-redux as a second implementation and a verdict table
+  against our code. Written because the display defects were being chased by running the game and
+  looking at it; the rules settle most of them on paper. It records where redux and the documentation
+  disagree, and why the documentation wins.
+- **`emu.vram_map(tile_w, tile_h)` and `emu.vram_row_stats(y, x, w)`** on the Lua surface. The first
+  classifies the whole 1024x512 VRAM as a tile grid and returns it as a string — where content lives,
+  in one call instead of 524288; the second summarises a single VRAM row, for questions a tile
+  averages away. Both read the GPU readback when one has landed, so rasterised primitives are
+  included and not just uploads.
+- **`scripts/display_map_probe.lua`** (the display mapping, change-only) and
+  **`scripts/vram_display_survey.lua`** (the whole of VRAM plus the display window, over a 120-second
+  run). Both log at INFO and change-only, so they are readable during play — a DEBUG run writes
+  ~1.4M lines and cannot be.
+
 ### Fixed
+- **LWL/LWR merged against the wrong pipeline slot**, corrupting every unaligned 32-bit load whose
+  pair needed a real merge. The two functions read `cpu->load_reg_idx` — the slot for the load *this*
+  instruction issues, which `cpu_retire_load_delay()` has just cleared — instead of
+  `cpu->delay_load_reg`, the load the previous instruction issued (`include/cpu.h:131-132`). So the
+  second half of every pair merged into the stale register. psx-spx is explicit that the pair must
+  work: *"There's no delay required between lwl and lwr, so you can use them directly"*
+  (`cpuspecifications.md:247-252`), with an example that is exactly an `lwl`/`lwr` pair on one
+  register.
+  The bug hid because it is data-dependent, not code-dependent: an `(lwl+3, lwr+0)` pair writes the
+  whole register twice and looks correct, and only a partial pair such as `(lwl+1, lwr+2)` exposes it.
+  `Crash Bandicoot 3 - Warped (E)` walks the ISO path table, whose records alternate alignment, and
+  read half its directory extents as `bfc00018` instead of `00000018`. Those are not the `-1` sentinel
+  the walk skips, so the game passed one to `CdIntToPos`, got a non-BCD MSF out of a negative LBA, and
+  looped on `DiskError: com=CdlSetloc,code=(03:10)` forever. It now boots.
+  This is the tail of the load-delay rework below: that change is what moved the pending load into the
+  second slot, and these two functions were not moved with it.
+- **The pad booted in analog mode, which hardware does not do.** A real analog pad powers up digital
+  with its LED off (`DOCS/controllersandmemorycards.md:436`); booting analog was a convenience, on the
+  argument that a digital-only game reads the same button bytes and ignores `adc0-3`. True of games,
+  false of the BIOS shell: its pad driver does not cope with ID `73h`, never finishes its init, and
+  the no-disc main menu is drawn **without its selection cursor**. A reference run of the same PAL
+  BIOS answers the pad `41h 5Ah` and the cursor is there. The boot mode is digital again;
+  `ZS1_PAD_MODE=analog|stick`, the Analog button (F12 or the DS4 touchpad) and a game's own `44h`
+  config command all still switch, exactly as on hardware.
+  `ZS1_PAD_MODE=stick` had a latent bug of its own — it set only `stick_mode` and relied on
+  `analog_mode` already defaulting to true, so it would have selected digital once the default moved.
+- **The no-disc BIOS shell never finished its init.** Status bit 4 is a latch —
+  *"Once shell open (0=Closed, 1=Is/was Open)"* (`cdromdrive.md:826`) — and with no disc the shell has
+  necessarily been open, so a reference run answers every `Getstat` with `10h`. `cdrom_reset()` forced
+  it to `false`, telling the BIOS the tray was shut with a disc in it: it went on to `GetID`, took
+  `INT5(08h,40h)` and looped `Getstat`/`Getstat`/`GetID` for the rest of the session. A no-disc boot
+  now issues `Getstat` and `Test` only, with no `INT5` at all, matching the reference run command for
+  command.
+- **`make` did not build.** `compile_commands` is defined before `all`, and make takes the first real
+  target as the default goal, so a bare `make` regenerated `compile_commands.json` and left the binary
+  at whatever an earlier explicit `make all` had produced. Every source edit appeared to have no
+  effect because it was never compiled in — this invalidated most of a debugging session before it was
+  noticed. `.DEFAULT_GOAL := all` restores what `README` and `CLAUDE.md` have always claimed.
+- **The R3000A load delay was not emulated.** The pending load was committed at the top of the next
+  instruction, before it executed, so the delay-slot opcode already saw the loaded value —
+  "The loaded data is NOT available to the next opcode, ie. the target register isn't updated until
+  the next opcode has **completed**" (`cpuspecifications.md:172-174`). The LWL/LWR code that merges
+  with a load still in flight was unreachable for the same reason. Now a two-stage slot retires the
+  load *after* the next instruction runs, with the two consequences the same paragraph states: a
+  write to the same register by that instruction is the later write and wins, and an exception lands
+  the load on the way in, because "the load would complete during IRQ handling, and so, the next
+  opcode would receive the NEW value" (`:175-177`). Boot milestones are unchanged to the field
+  (`Execute !` at f874, `CD_init` at f1043), which is expected: compiler-generated code never reads
+  the delay-slot register, so this protects against code that does rather than altering code that
+  does not.
+- **The FMV that was being skipped now plays.** Reported from a run of the new build: the scene that
+  used to be replaced by black is shown.
+- **The picture shook every field.** A per-field display latch was added on the reasoning that
+  hardware latches the display registers at the start of the field. The reasoning left out *when* we
+  submit: `system_run_frame()` returns the moment VBlank sets `frame_complete` and the frame is
+  submitted immediately after, so submit already sits on the field boundary and the live state there
+  *is* the field's start state. Latching on top of it handed each frame a value one whole field old —
+  on any double-buffered title, and that is every FMV, the value named the buffer being drawn into
+  rather than the finished one, so every field presented a half-written image. The latch is off;
+  `ZS1_DISPLAY_LATCH=1` brings it back for A/B runs.
+- **The display height was doubled for every interlaced title, including the 240-line ones.** The
+  VRAM rectangle is twice the window only in 480-lines mode, which is interlace *and* vres=480:
+  GP1(05h) states the size with no interlace term at all (`graphicsprocessingunitgpu.md:703-704`),
+  GP1(08h).2 is "0=240, 1=480, **when Bit5=1**" (`:772`), and GPUSTAT.31 settles the direction —
+  "In 480-lines mode, bit31 changes per frame. And in 240-lines mode, the bit changes per scanline"
+  (`:919-920`). Doubling on the interlace bit alone (which is what pcsx-redux does,
+  `display.cc:111-113`, and what we had copied) scanned out twice the window on a 240-line title: the
+  picture filled the top half of the screen and the rest was whatever else was in VRAM. That is what
+  "the VRAM shows up instead of a black screen" looked like.
+- **A GPU reset left interlace on.** `GP1(00h)` resets GP1(08h) to 0 and the documented post-reset
+  GPUSTAT is `14802000h` (`:645`, `:648`), in which bit 22 is clear — we set `interlaced = true`. So
+  both resets, the cold one and the one at the BIOS-to-disc handover, put the machine into interlace
+  with vres=240 until the game wrote GP1(08h): precisely the combination that doubled the height. A
+  survey run counts two such fields before the fix and none after.
+- **GPUSTAT bits 16-18 were rotated.** Bit 16 is Horizontal Resolution 2 and bits 17-18 are
+  Horizontal Resolution 1 (`:902-904`); the code packed `(hr2 << 2) | hr1` and scattered that word's
+  bits 0/1/2 to 16/17/18, so hr1's low bit landed in the 368 flag and 320 and 640 both read back as
+  368. Any game reading GPUSTAT for its own resolution got a wrong answer. Found by cross-checking
+  the Lua probe, which derives the width from GPUSTAT, against the width the GPU computes from the
+  same registers — 364 against 320 for the same field.
+- **GPUSTAT.13 is now forced to 1 when interlace is off**, which the documentation states twice
+  (`:897`, `:953`). Without it the field tag stayed wherever 480i had left it.
+- **The overscan crop was applied to PAL.** Overscan is an NTSC property — "Many NTSC games display
+  240 lines, but on most analog television sets, only 224 lines are visible (8 lines of overscan on
+  top and 8 lines of overscan on bottom). Many PAL games display only 256 lines (underscan with black
+  borders)" (`:762-765`). A PAL field is already underscanned, so cropping it removed picture the TV
+  would have shown: it cost the bottom line of the SCEE screen. The crop is NTSC-only now.
+- **The CD audio volume matrix did nothing at all.** ATV0-ATV3 were stored and never read by any
+  mixer, so a game's mono/stereo option or CD fade had no effect. On top of that ATV2's port write was
+  dropped, ATV1 and ATV3 were swapped, and 1F801803h bank 3 — which is ADPCTL, not a volume register
+  (`cdromdrive.md:249-255`) — was stored into the R→R gain, so every CHNGATV write also set that gain
+  to 20h. The matrix is now applied at the output stage with saturation up to double volume, ADPMUTE
+  is honoured, and muting forces the output to zero instead of starving the audio FIFO — which also
+  stops the XA resampler's history from freezing across a mute.
+- **The drive answered commands it should have refused, which is what the CD command churn was.**
+  `GetlocL` and `Pause` now fail with error 80h during a seek phase — the explicit `SeekL`/`SeekP`
+  kind and the implicit one at the start of `ReadN`/`ReadS`/`Play` (`cdromdrive.md:586-588`,
+  `:896-901`) — `GetlocL` also fails on audio tracks, `Setloc` validates packed BCD with ss < 60h and
+  ff < 75h (`:627-628`), and a re-issued `Init` while one is still owed is dropped with **no**
+  response at all rather than acknowledged with an INT3 the drive never sends (`:538-540`).
+- **CDROM register reads at 16 and 32 bits hit the wrong registers.** The drive is an 8-bit device
+  with BIU auto-increment off, so a wider access repeats the same register: a word read of 1F801800h
+  returns HSTS four times (`:315-320`) and a halfword read of RDDATA returns two consecutive data
+  bytes (`:118-129`). Reading `addr+1..+3` instead pulled in RESULT and HINTSTS and popped the
+  response FIFO as a side effect.
+- **Partial writes to the DMA and interrupt registers used RAM semantics.** On-die MMIO ignores the
+  byte enables: the CPU drives the source word shifted by the byte offset and the decoder latches all
+  32 bits, with the previous contents contributing nothing (`partialwordwrites.md:85-119`). The old
+  code merged the written lane into the current value.
+- **DMA interrupt bookkeeping.** DICR's master flag no longer factors in the per-channel enables — a
+  flag that is set contributes regardless (`dmachannels.md:139-142`) — a completion no longer clears
+  I_STAT.3 behind the CPU's back, and the bus-error flag (DICR.15) is finally raised when a transfer
+  leaves RAM (`:126`, `:186-192`). The DMA address bound also moved from 2 MB to 8 MB, so transfers
+  to the legitimate RAM mirrors are no longer dropped.
+- **GPU DMA ran about fifteen times slower than hardware**: a flat 1000 cycles per 64 words against a
+  documented 1 clk/word plus a DRAM row load per 16 (`dmachannels.md:194-220`). It now uses the same
+  cost model the MDEC path already had.
+- **The display window was computed from the wrong register.** Width now comes from GP1(06) with the
+  documented divider table (`graphicsprocessingunitgpu.md:687-690`) instead of the GP1(08) resolution
+  index, height is Y2-Y1 doubled on interlace, GP1(05)'s X is no longer masked to even halfwords, and
+  368-pixel mode decodes. Display state is latched at field start rather than sampled at frame submit,
+  so a mid-field GP1 write no longer applies retroactively to the whole field. An overscan crop of 8
+  lines top and bottom is on by default, which is where games park the stale VRAM that showed as a
+  strip along the top of an FMV.
+- **`CLUT out of VRAM bounds` was the validator's bug, not the game's.** It modelled an 8-bit CLUT as
+  a 16x16 block; a CLUT is a single strip of 16 or 256 entries on one line, which is what the sampler
+  already reads. Every palette parked near the bottom of VRAM was reported as out of bounds — 4662
+  times per 250 fields in Monsters & Co.
+- **Subchannel Q had no lead-out, no pregap and an underflow.** It now reports track AAh with a
+  relative address counting up in the lead-out (`cdromformat.md:229-236`), index 00h with a relative
+  address counting *down* through a pregap (`:219-226`), and `PREGAP` lines in the CUE shift every
+  later track along the disc while their data stays put in the BIN
+  (`cdromfileformats.md:14929-14933`) — gap sectors read back as silence instead of the next track's
+  first bytes.
+- **The Play report packet had the wrong shape and rate**: nine bytes with both time bases on every
+  sector, where hardware sends eight and alternates absolute and in-track time on the documented
+  asect values (`cdromdrive.md:1077-1094`).
+- **GTE**: `MVMVA` was the one opcode that did not reset FLAG at its start
+  (`geometrytransformationenginegte.md:302-303`), so it inherited the previous command's saturation
+  bits; `LZCR` was undefined behaviour for `LZCS = FFFFFFFFh` where the answer is 32 (`:261-262`);
+  the mx=3 garbage matrix used RT21 where the documentation says RT22 (`:489-491`); and ORGB is
+  read-only.
+- **CDROM commands that were quietly wrong**: `GetTD`'s track parameter is packed BCD, so every track
+  from 10 upwards resolved to the wrong LBA, and out-of-range values now answer error 10h
+  (`:926-930`); `Reset` sends INT3 only, with no completion interrupt (`:542-551`); `Sync` and the
+  unused opcodes 17h/18h answer INT5(11h,40h) instead of a status; `Pause`'s first response keeps
+  bit5 set as it should (`:583-585`).
+- **Measured response timings** replace round numbers: first response 0xc4e1 running / 0x5cf4 stopped
+  / 0x13cce for Init and ReadTOC, `Stop` 0xd38aca at 1x and 0x18a6076 at 2x, `GetID` 0x4a00
+  (`:1877-1905`).
+- **The per-category log files had two writers.** "Snapshot" opened `logs/<Name>.log` with `"w"` while
+  the session-long handle was still streaming into it, so the file became a block of NULs followed by
+  interleaved text and the snapshot was overwritten moments later. Snapshots now go to
+  `logs/<Name>.snapshot.log` and flush the streamed file first.
+
+### Changed
+- Savestate format is **v9**: v8 added `Cdrom.seek_phase` and `Cdrom.xa_mute` inside the raw CDRH
+  range; v9 removed `Cpu.out_regs[32]` and added the second load-delay slot. `T_CPU` is the raw
+  struct, so both move every field after the GPRs. Older states are refused rather than restored
+  shifted.
+
+### Measured, not resolved
+- **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &
+  Co.: the game uploads its frames to `(x,8)` and `(x,264)` while its two display windows sit at
+  `y=0` and `y=256` — a constant offset of 8 in both buffers, so the top eight lines on screen are
+  whatever was in VRAM and the bottom eight of the picture fall outside the window. The GP1(05h)
+  decode is correct against `:695-698` and the game really does write 0 and 256, so the offset is not
+  a decode error; which side is wrong is still open. The overscan crop used to hide it, which is why
+  it became visible when the crop was restricted to NTSC. This is the strip of macroblock noise above
+  the Pixar logo.
+- Width is confirmed correct on the way in: the windows the game programs (`x1=624, x2=3184` and
+  `x1=635, x2=3195`) are exactly the PAL 320 and PAL 512 fullscreen ranges in the official table
+  (`:733-746`), and the formula reproduces 320 and 512 from them.
+
+### Fixed (earlier)
+- **The drive answered out of time, and the CPU took the blame.** BIOS ROM instruction fetches had
+  gone uncharged for months — ~24 MEMCTRL wait-state cycles per word that the emulator itself
+  computes — because charging them hung boot on the PlayStation logo. The cost was right; the drive
+  was wrong, in two ways that only a BIOS running at its real speed could expose.
+  - Acknowledging a CDROM interrupt re-armed any deferred response at `CDROM_MIN_INT_DELAY`, which
+    threw away the deadline the command had set. The guest acknowledges an INT3 within microseconds,
+    so every seek, spin-up and read start answered ~30 µs after its command: one `SeekL` computed
+    27.719 ms of seek time and delivered its INT2 in the same tick, and `ReadN` charged 606 ms of
+    spin-up then handed over the first sector 6.6 ms later. Commands, second responses and sector
+    delivery now each carry the cycle they are due at and re-arm on what is *left* of it, so a
+    sector arrives every 6.7 ms at 2x as `DOCS/cdromdrive.md:1913` requires.
+  - `Init` takes ~740 ms, which is longer than the ~415 ms after which the BIOS gives up and
+    re-issues it — so those retries are part of a normal boot. Rescheduling the response on each
+    retry pushed the deadline forward for as long as the BIOS kept asking, and it never arrived:
+    82 `Init` commands, no reply, screen frozen on the logo. The drive now answers the first request
+    at its own deadline and lets the retries fall on it.
+- **The BIOS boot sound was cut ~1.9 s short.** Not an SPU fault: the boot phase between the intro
+  and the game's SPU handoff ran too fast, so the guest muted the SPU while the sound still had
+  seconds to play. With ROM fetches and the drive's deadlines both honoured, the window between the
+  BIOS raising main volume and the game zeroing it is 688 fields against a reference run's 708.
+
 - **Games saw a digital pad even with an analog controller plugged in.** The emulated pad powered up
   in digital mode, as hardware does, and the only way out was a DS4 touchpad click — so the sticks
   reached the game solely through the left-stick-to-D-pad fold in `controller.c`, which is why they
@@ -57,6 +322,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   kept separate, because 480i puts 480 rows into the same 240 scanlines.
 
 ### Added
+- **Every log line carries the machine's clock**, `[f<field> t<seconds>]` — the CRTC field count and
+  emulated seconds, from `LogClock` in `log.h` fed by the Interconnect. Host wall seconds cannot
+  measure emulated timing: a whole boot phase (EXE load, game init) lands inside the same second,
+  which is why "who is faster, and where" had been unanswerable. The field number is also the axis a
+  reference emulator's run can be put on, by counting its own v-blank lines, which is how the CDROM
+  and ROM-timing entries above were checked.
 - **The DS4's light bar shows the emulated pad's LED.** The three pad modes each have a documented
   colour (`DOCS/controllersandmemorycards.md:369-372` — 5A41h digital off, 5A73h analog red, 5A53h
   stick green), and SDL3 can drive a DS4's light bar, so which mode a game actually selected is now

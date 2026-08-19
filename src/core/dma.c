@@ -102,9 +102,15 @@ void dma_channel_done(DmaChannel* ch) {
  * master flag clears is what makes the next completion a fresh edge. */
 void dma_update_irq(Dma* dma) {
     const bool prev = dma->master_irq_flag;
+    /* DICR.31 = DICR.15 OR (DICR.23 AND any of DICR.24-30)
+     * (dmachannels.md:135-143). The per-channel enables in bits 16-22 decide
+     * whether a completion is allowed to SET a flag — they do not take part in
+     * this calculation, and "once a flag bit is set, it contributes to the
+     * master flag regardless of whether the channel enable is still on". We used
+     * to AND the flags with the enables here, so a game that disabled a channel
+     * before acknowledging lost the interrupt. */
     dma->master_irq_flag = dma->force_irq ||
-        (dma->master_irq_enable &&
-         (dma->channel_irq_flags & dma->channel_irq_enable) != 0);
+        (dma->master_irq_enable && dma->channel_irq_flags != 0);
 
     if (!dma->inter) return;
 
@@ -116,9 +122,24 @@ void dma_update_irq(Dma* dma) {
     if (!prev && dma->master_irq_flag) {
         interconnect_set_irq_line(dma->inter, IRQ_DMA, true);
     } else if (prev && !dma->master_irq_flag) {
+        /* Drop the line so the next completion is a fresh edge — but leave
+         * I_STAT alone. An I_STAT bit is cleared by writing 0 to I_STAT and by
+         * nothing else (interrupts.md:4-5, :26-31); clearing it here threw away
+         * a pending IRQ3 whenever the guest acknowledged DICR first. */
         interconnect_set_irq_line(dma->inter, IRQ_DMA, false);
-        dma->inter->irq_status &= ~(1u << IRQ_DMA);
     }
+}
+
+/* DICR.15, the bus-error flag: raised when a transfer reaches an address
+ * outside RAM, and it forces the master flag (dmachannels.md:126, :186-192).
+ * Games that end a linked list by setting the high bit of the next-address
+ * field rely on this path, and it is also the machine's own alarm for the
+ * runaway-transfer class of bug. */
+void dma_flag_bus_error(Dma* dma) {
+    if (dma->force_irq) return;      /* already latched */
+    dma->force_irq = true;
+    LOG_DMA_WARN("[DMA] Bus error: transfer left RAM — DICR.15 set");
+    dma_update_irq(dma);
 }
 
 // Initializes the DMA state to reset values.
