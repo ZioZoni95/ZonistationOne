@@ -175,6 +175,7 @@ void cdrom_init(Cdrom *cdrom, struct Interconnect *inter) {
     cdrom->current_command  = CDC_NONE;
     cdrom->second_response_cmd = CDC_NONE;
     cdrom->drive_state      = DRIVE_IDLE;
+    cdrom->shell_open       = true;   /* no disc yet; cdrom_load_disc() clears it */
     cdrom->vol_ll = cdrom->vol_rr = 0x80;
     fifo_init(&cdrom->param_fifo);
     fifo_init(&cdrom->response_fifo);
@@ -199,7 +200,14 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->drive_state         = DRIVE_IDLE;
     cdrom->disc_present        = disc_present;
     cdrom->motor_on            = disc_present;
-    cdrom->shell_open          = false;
+    /* Bit4 is a latch: "Once shell open (0=Closed, 1=Is/was Open)"
+     * (psx-spx-docs/docs/cdromdrive.md:826). No disc means the shell has been
+     * open, so it reads back as 1 — a reference run with no disc answers every
+     * Getstat with 10h. Forcing it to 0 told the BIOS the tray was shut with a
+     * disc in it: it went on to GetID, got INT5(08h,40h), and looped Getstat/
+     * Getstat/GetID forever instead of finishing the shell's init, which is
+     * what draws the menu's selection cursor. */
+    cdrom->shell_open          = !disc_present;
     cdrom->read_after_seek     = false;
     cdrom->play_after_seek     = false;
     cdrom->seek_phase          = false;
