@@ -160,8 +160,13 @@ uint32_t eventq_cycles_until_next(const struct Interconnect* sys) {
 #define TIMER0_CYCLES 1000   // Placeholder, tune as needed
 
 static void evq_handle_vblank(struct Interconnect* sys) {
-    static uint32_t vblank_count = 0;
-    vblank_count++;
+    /* Fold the field that just ended into the monotonic cycle total before
+     * anything else logs: cpu_cycle_counter wraps every ~127 s, so the 32-bit
+     * difference is the only safe way to accumulate it. This is what the log
+     * stamp and any cross-emulator timing comparison read. */
+    sys->emu_cycle_base += (uint64_t)(sys->cpu_cycle_counter - sys->field_cycle_mark);
+    sys->field_cycle_mark = sys->cpu_cycle_counter;
+    sys->field_count++;
 
     /* Period follows the GPU's current video mode — see gpu_cycles_per_frame().
      * A fixed NTSC period here ran PAL titles ~20% fast. */
@@ -169,9 +174,9 @@ static void evq_handle_vblank(struct Interconnect* sys) {
 
     gpu_crtc_tick(&sys->gpu, vblank_cycles);
 
-    if (vblank_count <= 5 || vblank_count % 60 == 0)
+    if (sys->field_count <= 5 || sys->field_count % 60 == 0)
         LOG_EVENT_DEBUG("[EVQ] VBlank #%u (cycle=%u, period=%u)",
-                        vblank_count, sys->cpu_cycle_counter, vblank_cycles);
+                        sys->field_count, sys->cpu_cycle_counter, vblank_cycles);
 
     /* Periodic probe point for debug scripts: the one event that keeps firing
      * no matter what the guest is doing, so a script can sample state (PC, DMA,

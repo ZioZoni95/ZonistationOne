@@ -1320,6 +1320,26 @@ static void gp0_image_load(Gpu* gpu) {
     LOG_GPU_DEBUG("[GPU] GP0(0xA0): VRAM UPLOAD START (%u,%u) %ux%u = %u words",
                  gpu->vram_load_x, gpu->vram_load_y,
                  gpu->vram_load_w, gpu->vram_load_h, words);
+
+    /* Where the frames actually land, to compare against the display window
+     * logged by gpu_update_display_mapping(). Change-only and full-frame-sized
+     * only: an FMV re-uses one rectangle for every frame, and a scene is built
+     * from hundreds of small texture uploads that say nothing about the window.
+     * Both lines at INFO so the comparison needs no DEBUG run — a DEBUG run
+     * writes ~1.4M lines and cannot be read. */
+    {
+        static uint32_t prev_rect = 0xFFFFFFFFu;
+        if (gpu->vram_load_w >= 256 && gpu->vram_load_h >= 128) {
+            uint32_t rect = ((uint32_t)gpu->vram_load_x << 22) | ((uint32_t)gpu->vram_load_y << 13) |
+                            ((uint32_t)gpu->vram_load_w << 3)  | (gpu->vram_load_h >> 6);
+            if (rect != prev_rect) {
+                prev_rect = rect;
+                LOG_GPU_INFO("[GPU] frame upload -> (%u,%u) %ux%u",
+                             gpu->vram_load_x, gpu->vram_load_y,
+                             gpu->vram_load_w, gpu->vram_load_h);
+            }
+        }
+    }
     LOG_VRAM_DEBUG("Copy rectangle from CPU to VRAM offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
                    gpu->vram_load_x, gpu->vram_load_y,
                    gpu->vram_load_w, gpu->vram_load_h,

@@ -59,30 +59,24 @@ bool gpu_validate_clut_coords(uint16_t clut_packed, uint8_t depth) {
     uint16_t clut_x = (clut_packed & 0x3F) * 16;        // X: bits 0-5, multiply by 16
     uint16_t clut_y = (clut_packed >> 6) & 0x1FF;       // Y: bits 6-14
 
-    // CLUT is stored in VRAM starting at (clut_x, clut_y)
-    // Size depends on texture depth:
-    // 4-bit: 16 colors = 16 words = 16 pixels wide, 1 pixel high
-    // 8-bit: 256 colors = 256 words = 16 pixels wide, 16 pixels high
+    /* A CLUT is a single horizontal strip of entries at (clut_x, clut_y): 16
+     * halfwords for a 4-bit texture, 256 for an 8-bit one — one line tall in
+     * both cases. The sampler in renderer.c does exactly that
+     * (`clut_pos_x = clut_x + index` at one fixed `clut_y`, renderer.c:379-380).
+     *
+     * This used to model the 8-bit CLUT as a 16x16 block, so every palette
+     * parked near the bottom of VRAM — y=511 is a favourite spot — was reported
+     * as out of bounds. That is where Monsters & Co.'s 4662 warnings per 250
+     * fields came from: a wrong bounds model, not a wrong CLUT. */
+    uint16_t clut_entries;
+    if (depth == 0)      clut_entries = 16;    /* 4-bit */
+    else if (depth == 1) clut_entries = 256;   /* 8-bit */
+    else                 return true;          /* 15-bit direct colour: no CLUT */
 
-    uint16_t clut_width, clut_height;
-    if (depth == 0) {
-        // 4-bit: 16 colors
-        clut_width = 16;
-        clut_height = 1;
-    } else if (depth == 1) {
-        // 8-bit: 256 colors
-        clut_width = 16;
-        clut_height = 16;
-    } else {
-        // 15-bit direct color, no CLUT needed (but validate anyway)
-        return true;
-    }
-
-    // Check bounds: VRAM is 1024x512
-    if (clut_x + clut_width > 1024 || clut_y + clut_height > 512) {
-        LOG_GPU_WARN("[GPU] CLUT out of VRAM bounds: X=%d..%d, Y=%d..%d (VRAM: 1024x512)",
-                     clut_x, clut_x + clut_width - 1,
-                     clut_y, clut_y + clut_height - 1);
+    if (clut_y >= 512 || (uint32_t)clut_x + clut_entries > 1024u) {
+        LOG_GPU_WARN("[GPU] CLUT out of VRAM bounds: X=%u..%u, Y=%u (VRAM: 1024x512)",
+                     (unsigned)clut_x, (unsigned)(clut_x + clut_entries - 1),
+                     (unsigned)clut_y);
         return false;
     }
 

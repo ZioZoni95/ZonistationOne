@@ -6,7 +6,7 @@
  * components of this project that have other authors.
  */
 #include "imgui.h"
-#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdl3.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_internal.h"
 #include "debug_ui.h"
@@ -15,6 +15,7 @@
 #include <string>
 #include <mutex>
 #include <map>
+#include <deque>
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>
@@ -291,6 +292,29 @@ struct LogEntry {
     std::string message;
 };
 
+/* Lines kept per category. Entries beyond this are dropped oldest-first. */
+#define LOG_RING_CAP 5000u
+
+/* One category's window and its backlog.
+ *
+ * The backlog is a ring, not a vector that gets trimmed. It used to be
+ * `buffer.push_back(...)` followed by `buffer.erase(buffer.begin())` once past
+ * the cap, and erasing at the front of a vector shifts every remaining element
+ * — 4999 std::string moves per line, forever, once the cap is reached. Log
+ * ingestion was therefore O(n) per line rather than O(1), and a DEBUG run emits
+ * ~1.4M lines. That is the likely reason the debug interface could not hold real
+ * time while the emulation core could with the panels closed.
+ *
+ * Entries are addressed by a monotonic sequence number rather than a position,
+ * so the filtered view below can keep referring to them as the ring wraps:
+ * seq/CAP gives the slot, first_seq..next_seq is what is still live.
+ *
+ * `shown` is the filtered view, maintained incrementally. Rebuilding it meant
+ * testing every held line against the level and the text filter on every frame,
+ * for every open window — and all seventeen windows open at startup, so ~85000
+ * string tests per frame that ImGuiListClipper does not save, because it only
+ * skips the drawing. Now only lines that arrived since the last frame are
+ * tested, and the whole list is rebuilt only when the filter or level changes. */
 struct LogComponent {
     const char* name;
     LogCategory category;
@@ -298,31 +322,59 @@ struct LogComponent {
     bool auto_scroll;
     bool monospace;
     int  display_level;          /* min level shown in ImGui (default INFO) */
-    std::vector<LogEntry> buffer;
+    std::vector<LogEntry> ring;  /* LOG_RING_CAP slots, indexed by seq % CAP */
+    uint64_t first_seq;          /* oldest live entry */
+    uint64_t next_seq;           /* sequence the next entry will take */
     ImGuiTextFilter filter;
     FILE* file;                  /* always-open file in logs/<Name>.log */
     uint32_t writes_since_flush;
+    std::deque<uint64_t> shown;  /* seqs passing level+filter, ascending */
+    uint64_t shown_scanned;      /* next_seq as of the last incremental scan */
+    int shown_level;             /* level the view was built for */
+    std::string shown_filter;    /* filter text the view was built for */
 };
 
-static std::map<LogCategory, LogComponent> g_log_components = {
-    {LOG_CAT_SYSTEM,       {"System",       LOG_CAT_SYSTEM,       true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_CPU,          {"CPU",          LOG_CAT_CPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_IRQ,          {"IRQ",          LOG_CAT_IRQ,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_DMA,          {"DMA",          LOG_CAT_DMA,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_GPU,          {"GPU",          LOG_CAT_GPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_CDROM,        {"CDROM",        LOG_CAT_CDROM,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_TIMER,        {"Timer",        LOG_CAT_TIMER,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_BIOS,         {"BIOS",         LOG_CAT_BIOS,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_INTERCONNECT, {"Interconnect", LOG_CAT_INTERCONNECT, true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_RENDERER,     {"Renderer",     LOG_CAT_RENDERER,     true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_EVENT,        {"Event",        LOG_CAT_EVENT,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_GTE,          {"GTE",          LOG_CAT_GTE,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_VRAM,         {"VRAM",         LOG_CAT_VRAM,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_RAM,          {"RAM",          LOG_CAT_RAM,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_DEBUG,        {"Debug",        LOG_CAT_DEBUG,        true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_MDEC,         {"MDEC",         LOG_CAT_MDEC,         true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}},
-    {LOG_CAT_SPU,          {"SPU",          LOG_CAT_SPU,          true, true, true, LOG_LEVEL_DEBUG, {}, {}, nullptr, 0}}
-};
+static inline LogEntry& log_at(LogComponent& c, uint64_t seq) {
+    return c.ring[(size_t)(seq % LOG_RING_CAP)];
+}
+static inline const LogEntry& log_at(const LogComponent& c, uint64_t seq) {
+    return c.ring[(size_t)(seq % LOG_RING_CAP)];
+}
+
+/* Indexed by LogCategory, not keyed by it.
+ *
+ * This was a std::map<LogCategory, LogComponent>, so every log line paid a
+ * red-black tree descent to reach a slot addressed by a dense enum of 0..16.
+ * An array is one index, contiguous, and the sink runs on every line at every
+ * level. Order must follow the enum in log.h; the ordering is asserted at
+ * startup rather than trusted. */
+static std::vector<LogComponent> make_log_components() {
+    static const char* const names[LOG_CAT_COUNT] = {
+        "System", "CPU", "IRQ", "DMA", "GPU", "CDROM", "Timer", "BIOS",
+        "Interconnect", "Renderer", "Event", "GTE", "VRAM", "RAM", "Debug",
+        "MDEC", "SPU"
+    };
+    std::vector<LogComponent> v(LOG_CAT_COUNT);
+    for (int i = 0; i < LOG_CAT_COUNT; i++) {
+        LogComponent& c = v[(size_t)i];
+        c.name          = names[i];
+        c.category      = (LogCategory)i;
+        c.is_open       = true;
+        c.auto_scroll   = true;
+        c.monospace     = true;
+        c.display_level = LOG_LEVEL_DEBUG;
+        c.ring.resize(LOG_RING_CAP);
+        c.first_seq     = 0;
+        c.next_seq      = 0;
+        c.file          = nullptr;
+        c.writes_since_flush = 0;
+        c.shown_scanned = 0;
+        c.shown_level   = -1;        /* forces the first build */
+    }
+    return v;
+}
+
+static std::vector<LogComponent> g_log_components = make_log_components();
 
 static std::mutex g_log_mutex;
 
@@ -331,13 +383,17 @@ static const char* level_name(int level);  /* fwd */
 static void log_sink_callback(int category, int level, const char* msg, void* udata) {
     (void)udata;
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    auto it = g_log_components.find((LogCategory)category);
-    if (it == g_log_components.end()) return;
+    if (category < 0 || category >= LOG_CAT_COUNT) return;
+    LogComponent& comp = g_log_components[(size_t)category];
 
-    LogComponent& comp = it->second;
-    comp.buffer.push_back({level, msg});
-    if (comp.buffer.size() > 5000)
-        comp.buffer.erase(comp.buffer.begin());
+    /* O(1): overwrite the slot the sequence maps to and let the oldest fall off
+     * the back of the window. No element ever moves. */
+    LogEntry& slot = log_at(comp, comp.next_seq);
+    slot.level = level;
+    slot.message = msg;
+    comp.next_seq++;
+    if (comp.next_seq - comp.first_seq > LOG_RING_CAP)
+        comp.first_seq = comp.next_seq - LOG_RING_CAP;
 
     if (comp.file) {
         fprintf(comp.file, "[%s] %s\n", level_name(level), msg);
@@ -428,21 +484,36 @@ static const char* level_name(int level) {
     }
 }
 
-static void export_component_log(const LogComponent& comp) {
+/* Snapshot the visible ring buffer to its OWN file.
+ *
+ * This used to write `logs/<Name>.log` — the exact path debug_ui_init() keeps
+ * open for the whole session and streams every line into. One name, two
+ * independent FILE objects: the snapshot opened it with "w" and truncated it
+ * while the streaming handle carried on writing at its old offset, so the file
+ * ended up as a block of NULs followed by interleaved text, and the snapshot
+ * itself was overwritten by the next streamed line. The streamed file is the
+ * log; the snapshot is a separate artefact and now says so in its name.
+ *
+ * The handle is flushed first, so the two files line up at the moment of the
+ * snapshot instead of the streamed one trailing by up to 64 lines. */
+static void export_component_log(LogComponent& comp) {
     mkdir("logs", 0755);
-    char path[128];
-    snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+    char path[160];
+    snprintf(path, sizeof(path), "logs/%s.snapshot.log", comp.name);
     FILE* f = fopen(path, "w");
     if (!f) return;
     std::lock_guard<std::mutex> lock(g_log_mutex);
-    for (const auto& e : comp.buffer)
+    if (comp.file) { fflush(comp.file); comp.writes_since_flush = 0; }
+    for (uint64_t s = comp.first_seq; s < comp.next_seq; s++) {
+        const LogEntry& e = log_at(comp, s);
         fprintf(f, "[%s] %s\n", level_name(e.level), e.message.c_str());
+    }
     fclose(f);
 }
 
 static void export_all_logs() {
-    for (const auto& pair : g_log_components)
-        export_component_log(pair.second);
+    for (auto& comp : g_log_components)
+        export_component_log(comp);
 }
 
 // Log window
@@ -456,7 +527,9 @@ static void draw_component_log_window(LogComponent& comp) {
 
     if (ImGui::Button("Clear")) {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        comp.buffer.clear();
+        comp.first_seq = comp.next_seq;   /* drop the backlog without touching the ring */
+        comp.shown.clear();
+        comp.shown_scanned = comp.next_seq;
     }
     ImGui::SameLine();
     if (ImGui::Button("Flush")) {
@@ -486,18 +559,40 @@ static void draw_component_log_window(LogComponent& comp) {
 
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        std::vector<int> indices;
-        for (int i = 0; i < (int)comp.buffer.size(); i++) {
-            if (comp.buffer[i].level > comp.display_level) continue;
-            if (!comp.filter.PassFilter(comp.buffer[i].message.c_str())) continue;
-            indices.push_back(i);
+
+        /* Maintain the filtered view instead of rebuilding it.
+         *
+         * The old code tested every held line against the level and the text
+         * filter on every frame and allocated a fresh index vector — for each of
+         * the seventeen windows, all of which are open by default. The clipper
+         * below skips the *drawing* of off-screen lines but not that scan.
+         * Now a change of filter or level rebuilds, and otherwise only the lines
+         * that arrived since the last frame are examined. */
+        const char* ftext = comp.filter.InputBuf;
+        if (comp.shown_level != comp.display_level || comp.shown_filter != ftext) {
+            comp.shown_level  = comp.display_level;
+            comp.shown_filter = ftext;
+            comp.shown.clear();
+            comp.shown_scanned = comp.first_seq;
         }
+        /* Lines that fell out of the ring since last frame. */
+        if (comp.shown_scanned < comp.first_seq) comp.shown_scanned = comp.first_seq;
+        while (!comp.shown.empty() && comp.shown.front() < comp.first_seq)
+            comp.shown.pop_front();
+
+        for (uint64_t s = comp.shown_scanned; s < comp.next_seq; s++) {
+            const LogEntry& e = log_at(comp, s);
+            if (e.level > comp.display_level) continue;
+            if (!comp.filter.PassFilter(e.message.c_str())) continue;
+            comp.shown.push_back(s);
+        }
+        comp.shown_scanned = comp.next_seq;
 
         ImGuiListClipper clipper;
-        clipper.Begin((int)indices.size());
+        clipper.Begin((int)comp.shown.size());
         while (clipper.Step()) {
             for (int n = clipper.DisplayStart; n < clipper.DisplayEnd; n++) {
-                const auto& e = comp.buffer[indices[n]];
+                const auto& e = log_at(comp, comp.shown[(size_t)n]);
                 ImVec4 col = {1,1,1,1};
                 if      (e.level == LOG_LEVEL_ERROR) col = {1.0f, 0.4f, 0.4f, 1.0f};
                 else if (e.level == LOG_LEVEL_WARN)  col = {1.0f, 0.8f, 0.4f, 1.0f};
@@ -1465,8 +1560,8 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
         if (ImGui::RadioButton("Trace",  level == LOG_LEVEL_TRACE))  log_set_level(LOG_LEVEL_TRACE);
         ImGui::Separator();
         micro_label("Logs");
-        if (ImGui::MenuItem("Open all"))  for (auto& p : g_log_components) p.second.is_open = true;
-        if (ImGui::MenuItem("Close all")) for (auto& p : g_log_components) p.second.is_open = false;
+        if (ImGui::MenuItem("Open all"))  for (auto& c : g_log_components) c.is_open = true;
+        if (ImGui::MenuItem("Close all")) for (auto& c : g_log_components) c.is_open = false;
         if (ImGui::MenuItem("Snapshot all to logs/")) export_all_logs();
         ImGui::EndPopup();
     }
@@ -1716,7 +1811,7 @@ static void draw_pipeline_view(Interconnect* inter) {
         pipe_node_card("2. SPU Synthesizer", ZS_AUDIO, "ACTIVE", ZS_OK, "24 Voices", "44.1 kHz", "ADSR & Pitch Modulation", "Reverb Processing");
 
         ImGui::TableNextColumn();
-        pipe_node_card("3. Audio Mixer & Out", ZS_OK, "LIVE", ZS_OK, aq, "", "SDL2 / PipeWire Output", "Stereo PCM Stream");
+        pipe_node_card("3. Audio Mixer & Out", ZS_OK, "LIVE", ZS_OK, aq, "", "SDL3 / PipeWire Output", "Stereo PCM Stream");
 
         ImGui::EndTable();
     }
@@ -2014,10 +2109,28 @@ static void draw_controller_mapping_window() {
 
     // Top device banner
     card_header("Active Controller Subsystem", ZS_OK);
-    const char* dev_name = ctrl->gc ? SDL_GameControllerName(ctrl->gc) : "Keyboard Mapping (DualShock PS1 Emulation)";
+    const char* dev_name = ctrl->gc ? SDL_GetGamepadName(ctrl->gc) : "Keyboard Mapping (DualShock PS1 Emulation)";
     ImGui::Text("Device: %s", dev_name);
     ImGui::SameLine(0, 20);
     ImGui::TextColored(ctrl->connected ? ZS_OK : ZS_CRIT, "[%s]", ctrl->connected ? "CONNECTED" : "DISCONNECTED");
+
+    // Emulated pad mode — what the game sees on the wire, not what the host pad is.
+    ImGui::Dummy(ImVec2(0, 4));
+    card_header("Emulated Pad Mode (Analog button)", ZS_DATA);
+    SioPadMode pad_mode = sio_get_pad_mode(nullptr);
+    ImGui::TextColored(pad_mode == SIO_PAD_DIGITAL ? ZS_WARN : ZS_OK, "%s",
+                       sio_pad_mode_name(pad_mode));
+    ImGui::SameLine(0, 16);
+    if (ImGui::Button("Cycle (F12 / touchpad)")) sio_cycle_pad_mode(nullptr);
+    ImGui::TextColored(ZS_MUTED,
+                       "Digital: sticks fold onto the D-pad. Analog/Stick: sticks reach the "
+                       "game as adc0-3. Stick mode is the LED=green flight mode some "
+                       "stick titles want (Ace Combat 2, MechWarrior 2, Colony Wars).");
+    ImGui::Checkbox("Swap X / O", &ctrl->swap_cross_circle);
+    ImGui::SameLine(0, 12);
+    ImGui::TextColored(ZS_MUTED,
+                       "Off = the pad's bottom button is Cross, as on hardware. On = bottom "
+                       "reports Circle, for software that confirms with Circle.");
 
     // Real-time Input Tester
     uint16_t state = controller_update(ctrl); // 0=pressed, 1=released
@@ -2092,7 +2205,7 @@ static void draw_controller_mapping_window() {
             ImGui::TextUnformatted(g_psx_button_info[i].symbol);
             ImGui::TableNextColumn();
             int sc = ctrl->key_map[i];
-            const char* key_name = (sc > 0 && sc < SDL_NUM_SCANCODES) ? SDL_GetScancodeName((SDL_Scancode)sc) : "None";
+            const char* key_name = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "None";
             ImGui::Text("%s (scancode %d)", key_name, sc);
             ImGui::TableNextColumn();
             char btn_id[32];
@@ -2118,16 +2231,16 @@ static void draw_controller_mapping_window() {
             ImGui::TextColored(ZS_FAINT, "(Press ESC to cancel)");
             ImGui::Dummy(ImVec2(0, 8));
 
-            const uint8_t* keys = SDL_GetKeyboardState(NULL);
+            const bool* keys = SDL_GetKeyboardState(NULL);
 
             if (s_waiting_key_up) {
                 bool any_down = false;
-                for (int k = 4; k < SDL_NUM_SCANCODES; k++) {
+                for (int k = 4; k < SDL_SCANCODE_COUNT; k++) {
                     if (keys[k]) { any_down = true; break; }
                 }
                 if (!any_down) s_waiting_key_up = false;
             } else {
-                for (int k = 4; k < SDL_NUM_SCANCODES; k++) {
+                for (int k = 4; k < SDL_SCANCODE_COUNT; k++) {
                     if (keys[k]) {
                         if (k == SDL_SCANCODE_ESCAPE) {
                             s_rebind_index = -1;
@@ -2176,7 +2289,7 @@ static void draw_host_hw_window(Interconnect* inter) {
         kv("Host OS Kernel", "Linux 6.19 x86_64", ZS_FAINT);
         kv("System Memory (RAM)", "15.3 GB total (9.5 GB available)", ZS_WARN);
         kv("Process RSS Allocation", "184 MB allocated", ZS_TEXT);
-        kv("Audio Subsystem Driver", "PipeWire / SDL2 Audio (12.8ms latency)", ZS_AUDIO);
+        kv("Audio Subsystem Driver", "PipeWire / SDL3 Audio (12.8ms latency)", ZS_AUDIO);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 8));
@@ -2211,7 +2324,7 @@ static void draw_inspector_window(Interconnect* inter) {
         kv("Host System", "ASUS ROG Strix G16", ZS_TEXT);
         kv("Host CPU", "Intel i9-14900HX", ZS_OK);
         kv("Host GPU", "RTX 4060 Mobile 8GB", ZS_DATA);
-        kv("Audio Subsystem", "PipeWire / SDL2", ZS_AUDIO);
+        kv("Audio Subsystem", "PipeWire / SDL3", ZS_AUDIO);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 6));
@@ -2359,8 +2472,8 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     if (insp2) ImGui::DockBuilderDockWindow(insp2, inspector);
 
     // Logs tabbed along the bottom, every mode.
-    for (auto& pair : g_log_components)
-        ImGui::DockBuilderDockWindow(pair.second.name, bottom);
+    for (auto& comp : g_log_components)
+        ImGui::DockBuilderDockWindow(comp.name, bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -2398,17 +2511,17 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
 
     apply_zonistation_style();
 
-    ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
+    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init("#version 330");
 
     /* Open per-component log files (one file per category, lives for whole session) */
     mkdir("logs", 0755);
-    for (auto& pair : g_log_components) {
+    for (auto& comp : g_log_components) {
         char path[160];
-        snprintf(path, sizeof(path), "logs/%s.log", pair.second.name);
-        pair.second.file = fopen(path, "w");
-        if (pair.second.file) {
-            setvbuf(pair.second.file, NULL, _IOLBF, 4096);
+        snprintf(path, sizeof(path), "logs/%s.log", comp.name);
+        comp.file = fopen(path, "w");
+        if (comp.file) {
+            setvbuf(comp.file, NULL, _IOLBF, 4096);
         }
     }
 
@@ -2416,7 +2529,7 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
 }
 
 extern "C" void debug_ui_process_event(SDL_Event* event) {
-    ImGui_ImplSDL2_ProcessEvent(event);
+    ImGui_ImplSDL3_ProcessEvent(event);
 }
 
 extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
@@ -2424,7 +2537,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     Interconnect* inter = (Interconnect*)interconnect_ptr;
 
     /* ImGui_ImplOpenGL3_NewFrame() moved to GPU thread — owns GL context */
-    ImGui_ImplSDL2_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
     // Mode drives which windows are live this frame (the rail replaced the
@@ -2527,8 +2640,8 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     }
 
     // Logs tabbed along the bottom, every mode
-    for (auto& pair : g_log_components)
-        draw_component_log_window(pair.second);
+    for (auto& comp : g_log_components)
+        draw_component_log_window(comp);
 
     // Controller remapping & input tester window
     draw_controller_mapping_window();
@@ -2581,15 +2694,15 @@ extern "C" void imgui_opengl_new_frame(void) {
 extern "C" void debug_ui_shutdown(void) {
     {
         std::lock_guard<std::mutex> lock(g_log_mutex);
-        for (auto& pair : g_log_components) {
-            if (pair.second.file) {
-                fflush(pair.second.file);
-                fclose(pair.second.file);
-                pair.second.file = nullptr;
+        for (auto& comp : g_log_components) {
+            if (comp.file) {
+                fflush(comp.file);
+                fclose(comp.file);
+                comp.file = nullptr;
             }
         }
     }
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL2_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 }

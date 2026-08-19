@@ -29,6 +29,21 @@ uint32_t channel_get_control(DmaChannel* ch) {
     return r;
 }
 
+/* Drop whatever sliced transfer channel_index still has in flight. The slice
+ * state (address, remaining words, step) lives here in Dma rather than in the
+ * channel registers, so anything that stops a channel outside of its own
+ * completion path has to clear it explicitly. */
+void dma_cancel_slice(Dma* dma, uint32_t channel_index) {
+    switch (channel_index) {
+        case 0: dma->mdec_in_active  = false; break;
+        case 1: dma->mdec_out_active = false; break;
+        case 2: dma->gpu_ll_active   = false;
+                dma->gpu_req_active  = false; break;
+        default: return;
+    }
+    LOG_DMA_DEBUG("[DMA] ch%u sliced transfer cancelled by CHCR write", channel_index);
+}
+
 // Helper function to set channel control register value
 // REMOVED 'static'
 void channel_set_control(DmaChannel* ch, uint32_t value) {
@@ -87,9 +102,15 @@ void dma_channel_done(DmaChannel* ch) {
  * master flag clears is what makes the next completion a fresh edge. */
 void dma_update_irq(Dma* dma) {
     const bool prev = dma->master_irq_flag;
+    /* DICR.31 = DICR.15 OR (DICR.23 AND any of DICR.24-30)
+     * (dmachannels.md:135-143). The per-channel enables in bits 16-22 decide
+     * whether a completion is allowed to SET a flag — they do not take part in
+     * this calculation, and "once a flag bit is set, it contributes to the
+     * master flag regardless of whether the channel enable is still on". We used
+     * to AND the flags with the enables here, so a game that disabled a channel
+     * before acknowledging lost the interrupt. */
     dma->master_irq_flag = dma->force_irq ||
-        (dma->master_irq_enable &&
-         (dma->channel_irq_flags & dma->channel_irq_enable) != 0);
+        (dma->master_irq_enable && dma->channel_irq_flags != 0);
 
     if (!dma->inter) return;
 
@@ -101,9 +122,24 @@ void dma_update_irq(Dma* dma) {
     if (!prev && dma->master_irq_flag) {
         interconnect_set_irq_line(dma->inter, IRQ_DMA, true);
     } else if (prev && !dma->master_irq_flag) {
+        /* Drop the line so the next completion is a fresh edge — but leave
+         * I_STAT alone. An I_STAT bit is cleared by writing 0 to I_STAT and by
+         * nothing else (interrupts.md:4-5, :26-31); clearing it here threw away
+         * a pending IRQ3 whenever the guest acknowledged DICR first. */
         interconnect_set_irq_line(dma->inter, IRQ_DMA, false);
-        dma->inter->irq_status &= ~(1u << IRQ_DMA);
     }
+}
+
+/* DICR.15, the bus-error flag: raised when a transfer reaches an address
+ * outside RAM, and it forces the master flag (dmachannels.md:126, :186-192).
+ * Games that end a linked list by setting the high bit of the next-address
+ * field rely on this path, and it is also the machine's own alarm for the
+ * runaway-transfer class of bug. */
+void dma_flag_bus_error(Dma* dma) {
+    if (dma->force_irq) return;      /* already latched */
+    dma->force_irq = true;
+    LOG_DMA_WARN("[DMA] Bus error: transfer left RAM — DICR.15 set");
+    dma_update_irq(dma);
 }
 
 // Initializes the DMA state to reset values.
@@ -212,6 +248,18 @@ bool dma_write(Dma* dma, uint32_t offset, uint32_t value) {
             case 0x8: // CHCR
                 channel_set_control(ch, value);
                 channel_became_active = dma_channel_is_active(ch);
+                /* Start/busy bit cleared: software aborted the transfer. Our
+                 * sliced channels keep their remaining word count in Dma, not
+                 * in the channel registers, so clearing CHCR has to cancel that
+                 * state too — otherwise the slice keeps running off the event
+                 * scheduler after the guest has moved on. libmdec kicks DMA1
+                 * with an oversized BCR and clears CHCR when the frame is out;
+                 * the zombie slice then wrote MDEC output across the rest of
+                 * RAM (0x126000..0x200000 in Monsters & Co.), smearing the
+                 * game's code and display list, and every later ch1 kick was
+                 * dropped as "already in flight" so DecDCToutSync never
+                 * completed ("time out in decoding !"). */
+                if (!channel_became_active) dma_cancel_slice(dma, channel_index);
                 if (channel_became_active) {
                     static const char* const sync_names[] = {"MANUAL","REQUEST","LINKED_LIST","?"};
                     LOG_DMA_DEBUG("[DMA] Channel %u activated: sync=%s blockSize=%u blockCount=%u addr=0x%08x",

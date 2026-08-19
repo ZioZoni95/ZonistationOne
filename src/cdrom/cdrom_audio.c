@@ -10,7 +10,6 @@
 #include "spu.h"
 #include "log.h"
 #include <string.h>
-#include <SDL2/SDL.h>
 #include "frame_events.h"
 
 /* =========================================================================
@@ -264,7 +263,7 @@ static void resample_xa_18900(XaAdpcmState *xa, AudioFifo *fifo,
 }
 
 void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_data,
-                            bool stereo, bool bits8, bool rate_18900, bool muted) {
+                            bool stereo, bool bits8, bool rate_18900) {
     /* One 128-byte sound group holds num_blocks blocks of 28 samples: 224 for
      * 4-bit XA, 112 for 8-bit. There is no further multiplier — an extra factor
      * of 8 here made every sector claim 18816 output frames instead of 2352, so
@@ -287,7 +286,10 @@ void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_
     }
     xa->prev1[0] = prev[0][0]; xa->prev2[0] = prev[0][1];
     xa->prev1[1] = prev[1][0]; xa->prev2[1] = prev[1][1];
-    if (muted) return;
+    /* No mute check here any more: muting only forces the *output* volume to
+     * zero (cdromdrive.md:1018-1022), and returning early left the zigzag ring
+     * and the six-step counter frozen, so the filter resumed from stale history
+     * on unmute. The mute is applied in cdrom_get_audio_frame(). */
     uint32_t total_frames = (uint32_t)(18 * frames_per_chunk);
 
     /* ZS1_XA_DUMP=<path>: the decoded stream at its own rate, before the zigzag
@@ -323,68 +325,20 @@ void cdrom_audio_decode_xa(XaAdpcmState *xa, AudioFifo *fifo, const uint8_t *xa_
  * CDDA
  * ========================================================================= */
 
-void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector, bool muted) {
+void cdrom_audio_process_cdda(AudioFifo *fifo, const uint8_t *raw_sector) {
+    /* Always pushed, muted or not: the mute is an output-volume control
+     * (cdromdrive.md:1018-1022), applied in cdrom_get_audio_frame(). Skipping
+     * the push starved the FIFO, which is a different sound from silence. */
     for (int i = 0; i < 588; i++) {
         int16_t l = (int16_t)((uint16_t)raw_sector[i*4+0] | ((uint16_t)raw_sector[i*4+1] << 8));
         int16_t r = (int16_t)((uint16_t)raw_sector[i*4+2] | ((uint16_t)raw_sector[i*4+3] << 8));
-        if (!muted) cdrom_audio_fifo_push(fifo, l, r);
+        cdrom_audio_fifo_push(fifo, l, r);
     }
 }
 
-/* =========================================================================
- * SDL Audio Output
- * ========================================================================= */
-
-static AudioFifo     *s_sdl_fifo = NULL;
-static SDL_AudioDeviceID s_sdl_dev = 0;
-static Spu           *s_spu = NULL;
-
-void cdrom_audio_set_spu(void *spu_ptr) {
-    s_spu = (Spu*)spu_ptr;
-}
-
-static void sdl_audio_callback(void *userdata, uint8_t *stream, int len) {
-    (void)userdata;
-    int16_t *out = (int16_t *)stream;
-    int num_stereo = len / (sizeof(int16_t) * 2);
-
-    if (s_spu) {
-        /* Fill from SPU circular buffer (generated during emulation) */
-        spu_fill_audio(s_spu, out, num_stereo);
-    } else {
-        /* No SPU: just output CD audio */
-        for (int i = 0; i < num_stereo; i++) {
-            int16_t l = 0, r = 0;
-            if (s_sdl_fifo) cdrom_audio_fifo_pop(s_sdl_fifo, &l, &r);
-            out[i*2] = l;
-            out[i*2+1] = r;
-        }
-    }
-}
-
-bool cdrom_audio_sdl_open(AudioFifo *fifo) {
-    s_sdl_fifo = fifo;
-    SDL_AudioSpec want = {0}, have;
-    want.freq     = 44100;
-    want.format   = AUDIO_S16LSB;
-    want.channels = 2;
-    want.samples  = 4096;
-    want.callback = sdl_audio_callback;
-
-    s_sdl_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-    if (s_sdl_dev == 0) {
-        LOG_CDROM_ERROR("[CDROM] SDL_OpenAudioDevice: %s", SDL_GetError());
-        return false;
-    }
-    SDL_PauseAudioDevice(s_sdl_dev, 0);
-    LOG_CDROM_INFO("[CDROM] SDL audio opened: %u Hz, %u ch", have.freq, have.channels);
-    return true;
-}
-
-void cdrom_audio_sdl_close(void) {
-    if (s_sdl_dev) {
-        SDL_CloseAudioDevice(s_sdl_dev);
-        s_sdl_dev = 0;
-    }
-    s_sdl_fifo = NULL;
-}
+/* A second audio device used to be opened here, with its own callback that
+ * pulled from the SPU ring exactly as main.c's does. Nothing ever called it —
+ * main.c has owned the one device since the SPU path was built — and porting a
+ * dead SDL2 pull callback to SDL3's stream API would have been work spent on
+ * code with no caller. Removed with the SDL3 migration; the CD audio FIFO above
+ * is untouched and still feeds the SPU, which is the path that actually runs. */

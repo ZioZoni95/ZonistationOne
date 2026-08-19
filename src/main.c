@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include <signal.h>
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #define GLEW_STATIC
 #include <GL/glew.h>
 
@@ -73,7 +73,11 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
             return false;
         }
     }
-    if (!out->bios_path) out->bios_path = "roms/SCPH1001.BIN";
+    /* Generic fallback only. No BIOS image ships with this repository and none
+     * may: the path is expected on the command line, and this exists so an
+     * argument-less run fails at bios_load() with a path to point at rather
+     * than a null dereference. */
+    if (!out->bios_path) out->bios_path = "roms/bios.bin";
     return true;
 }
 
@@ -123,7 +127,7 @@ static void apply_gpu_preference(void) {
 static bool init_sdl(SdlCtx* out) {
     apply_gpu_preference();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
         return false;
     }
@@ -132,9 +136,14 @@ static bool init_sdl(SdlCtx* out) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     /* Resizable so the window manager offers a maximise button; maximised
      * after the GL context is up (see below). Alt+Enter toggles fullscreen. */
-    out->win = SDL_CreateWindow("ZoniStation One",
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1280, 720, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    /* SDL3 dropped the position arguments from SDL_CreateWindow; a new window
+     * lands wherever the backend puts it, so centre it explicitly to keep the
+     * old placement. (Moot once it is maximised below, but only on a desktop
+     * where maximising works.) */
+    out->win = SDL_CreateWindow("ZoniStation One", 1280, 720,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    if (out->win)
+        SDL_SetWindowPosition(out->win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     if (!out->win) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_CreateWindow: %s", SDL_GetError());
         SDL_Quit();
@@ -151,7 +160,7 @@ static bool init_sdl(SdlCtx* out) {
     GLenum err = glewInit();
     if (err != GLEW_OK) {
         LOG_SYSTEM_ERROR("[SYSTEM] GLEW init: %s", glewGetErrorString(err));
-        SDL_GL_DeleteContext(out->ctx);
+        SDL_GL_DestroyContext(out->ctx);
         SDL_DestroyWindow(out->win);
         SDL_Quit();
         return false;
@@ -197,14 +206,14 @@ static bool init_sdl(SdlCtx* out) {
 }
 
 static void shutdown_sdl(SdlCtx* s) {
-    SDL_GL_DeleteContext(s->ctx);
+    SDL_GL_DestroyContext(s->ctx);
     SDL_DestroyWindow(s->win);
     SDL_Quit();
 }
 
-// --- SDL2 audio ---
+// --- SDL3 audio ---
 static Spu* g_spu_for_audio = NULL;
-static SDL_AudioDeviceID g_audio_dev = 0;
+static SDL_AudioStream* g_audio_stream = NULL;
 
 // --- Exec trace on forced shutdown ---
 static const Cpu* g_cpu_for_trace = NULL;
@@ -215,37 +224,74 @@ static void sighandler_dump_trace(int sig) {
     _exit(1);
 }
 
-static void audio_callback(void* userdata, Uint8* stream, int len) {
+/* SDL3 has no fill-this-buffer device callback: audio goes through an
+ * SDL_AudioStream, and the callback is told how many bytes the device still
+ * wants rather than handed the buffer. The source is unchanged — the SPU's own
+ * ring, drained by spu_fill_audio — and so is the contract the main loop's
+ * pacing depends on: the device pulls, the emulator produces, and
+ * spu_ring_used() is still the clock. Only the delivery mechanism moved.
+ *
+ * The stream converts to whatever the device natively runs, which is what
+ * SDL2's SDL_OpenAudioDevice(..., allowed_changes=0) was doing internally. */
+static void SDLCALL audio_callback(void* userdata, SDL_AudioStream* stream,
+                                   int additional_amount, int total_amount) {
     (void)userdata;
-    int num_samples = len / (2 * sizeof(int16_t)); // stereo int16
-    if (g_spu_for_audio)
-        spu_fill_audio(g_spu_for_audio, (int16_t*)stream, num_samples);
-    else
-        memset(stream, 0, (size_t)len);
+    (void)total_amount;
+
+    enum { CHUNK_FRAMES = 1024 };
+    const int frame_bytes = (int)(2 * sizeof(int16_t));   /* stereo int16 */
+    int16_t buf[CHUNK_FRAMES * 2];
+
+    while (additional_amount >= frame_bytes) {
+        int frames = additional_amount / frame_bytes;
+        if (frames > CHUNK_FRAMES) frames = CHUNK_FRAMES;
+
+        if (g_spu_for_audio)
+            spu_fill_audio(g_spu_for_audio, buf, frames);
+        else
+            memset(buf, 0, (size_t)frames * (size_t)frame_bytes);
+
+        SDL_PutAudioStreamData(stream, buf, frames * frame_bytes);
+        additional_amount -= frames * frame_bytes;
+    }
 }
 
 static void audio_init(Spu* spu) {
     g_spu_for_audio = spu;
-    SDL_AudioSpec want = {0}, got = {0};
-    want.freq     = 44100;
-    want.format   = AUDIO_S16SYS;
-    want.channels = 2;
-    want.samples  = 512;
-    want.callback = audio_callback;
-    g_audio_dev = SDL_OpenAudioDevice(NULL, 0, &want, &got, 0);
-    if (g_audio_dev == 0) {
+
+    /* SDL3 dropped the per-open buffer size; the device quantum comes from this
+     * hint instead. 512 frames is what the SDL2 path asked for, and what
+     * SPU_RING_TARGET_SAMPLES was tuned against — changing it moves the latency
+     * the pacing loop settles at. */
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512");
+
+    SDL_AudioSpec want = { .format = SDL_AUDIO_S16, .channels = 2, .freq = 44100 };
+    g_audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                               &want, audio_callback, NULL);
+    if (!g_audio_stream) {
         LOG_SYSTEM_WARN("[SYSTEM] SDL audio open failed: %s — no sound", SDL_GetError());
         return;
     }
+
+    /* Report the device's own format, not ours: the stream resamples silently,
+     * and a device running at 48 kHz is worth seeing in the log when the audio
+     * sounds wrong. */
+    SDL_AudioSpec got = want;
+    int dev_frames = 0;
+    SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(g_audio_stream);
+    if (dev) SDL_GetAudioDeviceFormat(dev, &got, &dev_frames);
     LOG_SYSTEM_INFO("[SYSTEM] Audio: %d Hz ch=%d fmt=0x%x buf=%d",
-                    got.freq, got.channels, got.format, got.samples);
-    SDL_PauseAudioDevice(g_audio_dev, 0);
+                    got.freq, got.channels, (unsigned)got.format, dev_frames);
+
+    SDL_ResumeAudioStreamDevice(g_audio_stream);
 }
 
 static void audio_shutdown(void) {
-    if (g_audio_dev) {
-        SDL_CloseAudioDevice(g_audio_dev);
-        g_audio_dev = 0;
+    if (g_audio_stream) {
+        /* Destroying a stream opened with SDL_OpenAudioDeviceStream closes the
+         * device it bound. */
+        SDL_DestroyAudioStream(g_audio_stream);
+        g_audio_stream = NULL;
     }
 }
 
@@ -256,9 +302,9 @@ static void audio_shutdown(void) {
  * them would read a window that never existed. */
 static bool load_state_guarded(const char* path, Cpu* cpu, Interconnect* inter) {
     renderer_wait_frame_done(&inter->gpu.renderer);
-    if (g_audio_dev) SDL_LockAudioDevice(g_audio_dev);
+    if (g_audio_stream) SDL_LockAudioStream(g_audio_stream);
     bool ok = savestate_load(path, cpu, inter);
-    if (g_audio_dev) SDL_UnlockAudioDevice(g_audio_dev);
+    if (g_audio_stream) SDL_UnlockAudioStream(g_audio_stream);
     return ok;
 }
 
@@ -311,9 +357,6 @@ static bool load_exe(const char* path, Cpu* cpu, Interconnect* inter) {
     fclose(f);
 
     uint32_t sp = hdr.initial_sp_base + hdr.initial_sp_offset;
-    cpu->out_regs[28] = hdr.initial_gp;
-    cpu->out_regs[29] = sp;
-    cpu->out_regs[30] = sp;
     cpu->regs[28]     = hdr.initial_gp;
     cpu->regs[29]     = sp;
     cpu->regs[30]     = sp;
@@ -326,8 +369,8 @@ static bool load_exe(const char* path, Cpu* cpu, Interconnect* inter) {
 
 // --- TTY keyboard injection ---
 static void inject_tty_keys(Interconnect* inter) {
-    const uint8_t* keys = SDL_GetKeyboardState(NULL);
-    static bool prev[SDL_NUM_SCANCODES];
+    const bool* keys = SDL_GetKeyboardState(NULL);
+    static bool prev[SDL_SCANCODE_COUNT];
 
     static const struct { SDL_Scancode sc; char ch; } map[] = {
         { SDL_SCANCODE_W,      'w'  },
@@ -476,22 +519,30 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&ev)) {
             controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
-            if (ev.type == SDL_QUIT) quit = true;
-            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_ESCAPE) quit = true;
-            /* Alt+Enter toggles borderless desktop fullscreen. */
-            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_RETURN &&
-                     (ev.key.keysym.mod & KMOD_ALT)) {
-                Uint32 fs = SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN_DESKTOP;
-                SDL_SetWindowFullscreen(sdl.win, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            if (ev.type == SDL_EVENT_QUIT) quit = true;
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) quit = true;
+            /* Alt+Enter toggles borderless desktop fullscreen. SDL3 folded
+             * FULLSCREEN_DESKTOP into a bool: a window with no display mode set
+             * — which is ours — goes fullscreen-desktop. */
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_RETURN &&
+                     (ev.key.mod & SDL_KMOD_ALT)) {
+                bool fs = (SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN) != 0;
+                SDL_SetWindowFullscreen(sdl.win, !fs);
             }
             /* F5 saves, F8 loads. Handled here rather than in the debug UI so
              * they work with every panel closed, which is when the emulator is
              * actually fast enough to reach the state worth capturing. */
-            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F5 && !ev.key.repeat) {
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F5 && !ev.key.repeat) {
                 savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
             }
-            else if (ev.type == SDL_KEYDOWN && ev.key.keysym.sym == SDLK_F8 && !ev.key.repeat) {
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F8 && !ev.key.repeat) {
                 load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+            }
+            /* F12 is the Analog button for players without a touchpad pad.
+             * F1..F9 pick the debug UI mode, F10/F11 pause and step; F12 is the
+             * only function key left unclaimed. */
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F12 && !ev.key.repeat) {
+                sio_cycle_pad_mode(&inter.sio);
             }
         }
 
@@ -505,10 +556,26 @@ int main(int argc, char* argv[]) {
                 load_state_guarded(pending, &cpu, &inter);
         }
 
+        /* The pad's Analog button: DS4 touchpad click, or F12 on the keyboard.
+         * Cycles digital -> analog -> stick. Taken before the poll so the mode it
+         * selects is the one this frame's read is folded against. */
+        if (controller_take_analog_toggle(&gamepad))
+            sio_cycle_pad_mode(&inter.sio);
+        SioPadMode pad_mode = sio_get_pad_mode(&inter.sio);
+        gamepad.analog_active = (pad_mode != SIO_PAD_DIGITAL);
+
+        /* Show the emulated pad's mode on the real pad's light bar. The colours
+         * are the hardware's own (DOCS/controllersandmemorycards.md:369-372):
+         * 5A41h digital LED=Off, 5A73h analog LED=Red, 5A53h stick LED=Green.
+         * Which mode the game actually selected was previously only visible in
+         * the log. */
+        switch (pad_mode) {
+            case SIO_PAD_ANALOG: controller_set_led(&gamepad, 0xFF, 0x00, 0x00); break;
+            case SIO_PAD_STICK:  controller_set_led(&gamepad, 0x00, 0xFF, 0x00); break;
+            default:             controller_set_led(&gamepad, 0x00, 0x00, 0x00); break;
+        }
+
         sio_set_button_state(&inter.sio, controller_update(&gamepad));
-        // Touchpad-click edge → pad's Analog button: toggle SIO analog mode.
-        if (gamepad.analog_toggle)
-            sio_set_analog_mode(&inter.sio, !sio_get_analog_mode(&inter.sio));
         // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
         sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
                              gamepad.right_x, gamepad.right_y);
@@ -625,7 +692,7 @@ int main(int argc, char* argv[]) {
          *
          * Without a device there is nothing to synchronise to, so fall back to
          * pacing frames against the emulated refresh rate. */
-        if (g_audio_dev) {
+        if (g_audio_stream) {
             while (!quit && spu_ring_used(&inter.spu) > SPU_RING_TARGET_SAMPLES)
                 SDL_Delay(1);
             next_frame = SDL_GetPerformanceCounter() + frame_ticks;

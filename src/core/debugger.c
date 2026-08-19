@@ -16,6 +16,16 @@
 #include "log.h"
 #include "lua_debug.h"
 
+/* Rebuild one filter from its list. O(entries), and only ever called when a
+ * human adds or removes something. */
+static void dbg_filter_build(uint32_t* filter, const uint32_t* addrs, uint32_t count) {
+    memset(filter, 0, DBG_FILTER_WORDS * sizeof(uint32_t));
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t h = dbg_hash(addrs[i]);
+        filter[h >> 5] |= (1u << (h & 31u));
+    }
+}
+
 /**
  * @brief Initializes the debugger state.
  */
@@ -26,6 +36,9 @@ void debugger_init(Debugger* dbg) {
     dbg->paused = false;
     dbg->step_skip_bp = false;
     for (int i = 0; i < MAX_BREAKPOINTS; i++) dbg->bp_enabled[i] = true;
+    memset(dbg->bp_filter, 0, sizeof(dbg->bp_filter));
+    memset(dbg->rw_filter, 0, sizeof(dbg->rw_filter));
+    memset(dbg->ww_filter, 0, sizeof(dbg->ww_filter));
 }
 
 // ============================================================================
@@ -38,6 +51,7 @@ bool debugger_add_breakpoint(Debugger* dbg, uint32_t addr) {
     uint32_t idx = dbg->breakpoint_count++;
     dbg->breakpoints[idx] = addr;
     dbg->bp_enabled[idx] = true;
+    dbg_filter_build(dbg->bp_filter, dbg->breakpoints, dbg->breakpoint_count);
     return true;
 }
 
@@ -47,6 +61,7 @@ bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
             uint32_t last = --dbg->breakpoint_count;
             dbg->breakpoints[i] = dbg->breakpoints[last];
             dbg->bp_enabled[i]  = dbg->bp_enabled[last];
+            dbg_filter_build(dbg->bp_filter, dbg->breakpoints, dbg->breakpoint_count);
             return true;
         }
     }
@@ -56,6 +71,8 @@ bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
 void debugger_check_breakpoint(Debugger* dbg, struct Cpu* cpu) {
     if (dbg->paused) return;
     uint32_t current_pc = ((Cpu*)cpu)->current_pc;
+    /* Exact "no" in one bit test; only a hash hit pays for the walk below. */
+    if (!dbg_filter_test(dbg->bp_filter, current_pc)) return;
     for (uint32_t i = 0; i < dbg->breakpoint_count; ++i) {
         if (dbg->bp_enabled[i] && dbg->breakpoints[i] == current_pc) {
             char reason[64];
@@ -91,6 +108,7 @@ bool debugger_add_read_watchpoint(Debugger* dbg, uint32_t addr) {
     // Add
     dbg->read_watchpoints[dbg->read_watchpoint_count] = addr;
     dbg->read_watchpoint_count++;
+    dbg_filter_build(dbg->rw_filter, dbg->read_watchpoints, dbg->read_watchpoint_count);
     printf("Debugger: Read watchpoint added at 0x%08x. (%u/%d)\n", addr, dbg->read_watchpoint_count, MAX_WATCHPOINTS);
     return true; // Success
 }
@@ -109,6 +127,7 @@ bool debugger_remove_read_watchpoint(Debugger* dbg, uint32_t addr) {
             // Optional: Zero out the now unused last slot
             // dbg->read_watchpoints[dbg->read_watchpoint_count - 1] = 0;
             dbg->read_watchpoint_count--;
+            dbg_filter_build(dbg->rw_filter, dbg->read_watchpoints, dbg->read_watchpoint_count);
             printf("Debugger: Read watchpoint removed at 0x%08x. (%u/%d)\n", addr, dbg->read_watchpoint_count, MAX_WATCHPOINTS);
             return true; // Success
         }
@@ -139,6 +158,7 @@ bool debugger_add_write_watchpoint(Debugger* dbg, uint32_t addr) {
     // Add
     dbg->write_watchpoints[dbg->write_watchpoint_count] = addr;
     dbg->write_watchpoint_count++;
+    dbg_filter_build(dbg->ww_filter, dbg->write_watchpoints, dbg->write_watchpoint_count);
     printf("Debugger: Write watchpoint added at 0x%08x. (%u/%d)\n", addr, dbg->write_watchpoint_count, MAX_WATCHPOINTS);
     return true; // Success
 }
@@ -157,6 +177,7 @@ bool debugger_remove_write_watchpoint(Debugger* dbg, uint32_t addr) {
             // Optional: Zero out the now unused last slot
             // dbg->write_watchpoints[dbg->write_watchpoint_count - 1] = 0;
             dbg->write_watchpoint_count--;
+            dbg_filter_build(dbg->ww_filter, dbg->write_watchpoints, dbg->write_watchpoint_count);
             printf("Debugger: Write watchpoint removed at 0x%08x. (%u/%d)\n", addr, dbg->write_watchpoint_count, MAX_WATCHPOINTS);
             return true; // Success
         }
@@ -174,6 +195,10 @@ bool debugger_remove_write_watchpoint(Debugger* dbg, uint32_t addr) {
  */
 void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
     if (dbg->paused) return;
+    /* A watched address inside [addr, addr+size) lies in one of at most two
+     * words, so two bit tests decide the miss exactly. */
+    if (!dbg_filter_test(dbg->rw_filter, addr) &&
+        !dbg_filter_test(dbg->rw_filter, addr + size - 1u)) return;
     Cpu* c = (Cpu*)cpu;
     for (uint32_t i = 0; i < dbg->read_watchpoint_count; ++i) {
         uint32_t wp = dbg->read_watchpoints[i];
@@ -195,6 +220,10 @@ void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t add
  */
 void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
     if (dbg->paused) return;
+    /* A watched address inside [addr, addr+size) lies in one of at most two
+     * words, so two bit tests decide the miss exactly. */
+    if (!dbg_filter_test(dbg->ww_filter, addr) &&
+        !dbg_filter_test(dbg->ww_filter, addr + size - 1u)) return;
     Cpu* c = (Cpu*)cpu;
     for (uint32_t i = 0; i < dbg->write_watchpoint_count; ++i) {
         uint32_t wp = dbg->write_watchpoints[i];

@@ -139,17 +139,26 @@ void gte_mvmva(Gte* gte, uint32_t instruction) {
     int vec_idx = (instruction >> 15) & 3;
     int tr_idx  = (instruction >> 13) & 3;
     LOG_GTE_TRACE("[GTE] MVMVA (sf=%d, lm=%d, mat=%d, vec=%d, tr=%d)", shift, lm, mat_idx, vec_idx, tr_idx);
+    /* Every GTE command resets FLAG at its start
+     * (psx-spx-docs geometrytransformationenginegte.md:302-303). MVMVA was the
+     * only opcode here that did not, so it inherited the previous command's
+     * saturation bits and any code polling FLAG after an MVMVA read stale ones. */
+    gte->control[GTE_CTL_FLAG] = 0;
 
     int16_t m[9]; int32_t t[3]; int16_t v[3];
 
     if (mat_idx == 3) {
+        /* Garbage matrix: -R*10h, +R*10h, IR0, RT13 x3, RT22 x3
+         * (geometrytransformationenginegte.md:489-491). The last row used to be
+         * RT21 — the high half of the same register RT13 lives in, which is easy
+         * to reach for and is not what the hardware selects. */
         uint32_t rgbc_val = gte->data[GTE_REG_RGBC];
         int16_t r = (int16_t)((rgbc_val) & 0xFF);
         m[0] = -(r << 4); m[1] = (r << 4); m[2] = (int16_t)gte->data[GTE_REG_IR0];
         int16_t rt13 = (int16_t)gte->control[GTE_CTL_RT13RT21];
         m[3] = rt13; m[4] = rt13; m[5] = rt13;
-        int16_t rt21 = (int16_t)(gte->control[GTE_CTL_RT13RT21] >> 16);
-        m[6] = rt21; m[7] = rt21; m[8] = rt21;
+        int16_t rt22 = (int16_t)gte->control[GTE_CTL_RT22RT23];
+        m[6] = rt22; m[7] = rt22; m[8] = rt22;
     } else {
         int32_t* mb;
         if      (mat_idx == 0) mb = &gte->control[GTE_CTL_RT11RT12];

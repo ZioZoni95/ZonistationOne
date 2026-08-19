@@ -100,12 +100,17 @@ typedef struct {
  * change to the channel IRQ flags or enables — it is the only place that may
  * assert or deassert the DMA interrupt line. */
 void dma_update_irq(Dma* dma);
+/* Latch DICR.15 (bus error) and re-evaluate the master flag. Call from any
+ * transfer path that walks off the end of RAM. */
+void dma_flag_bus_error(Dma* dma);
 
 void dma_init(Dma* dma, struct Interconnect* inter);
 uint32_t dma_read(Dma* dma, uint32_t offset);
 bool dma_write(Dma* dma, uint32_t offset, uint32_t value);
 bool dma_channel_is_active(DmaChannel* ch);
 void dma_channel_done(DmaChannel* ch);
+/* Drop a sliced transfer still in flight on this channel (CHCR start cleared) */
+void dma_cancel_slice(Dma* dma, uint32_t channel_index);
 
 uint32_t channel_get_control(DmaChannel* ch);
 void channel_set_control(DmaChannel* ch, uint32_t value);

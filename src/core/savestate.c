@@ -22,8 +22,21 @@
 /* 3: added SIOI — the SIO0 protocol state
  * 4: Cdrom gained head_lba, so every field after it moved. The CDRH/CDRT
  *    sections are raw byte ranges of the struct, so a v3 state would load
- *    shifted and appear to work while the drive state was nonsense. */
-#define ZS1_STATE_VERSION 4u
+ *    shifted and appear to work while the drive state was nonsense.
+ * 5: the SIO0 pad gained stick_mode (LED=green flight mode), so every field
+ *    after it in the SIOI blob moved. Same hazard as 4: SIOI is a raw byte
+ *    range of SioInternal, and a v4 state would restore shifted.
+ * 6: Cdrom gained cmd_deadline/second_deadline (the drive keeps the due cycle
+ *    of a response an unacknowledged interrupt is holding back), which moves
+ *    every field after them inside the raw CDRH range.
+ * 7: Cdrom gained last_header/last_header_valid (what GetlocL answers with),
+ *    again inside CDRH.
+ * 8: Cdrom gained seek_phase (the drive refuses GetlocL/Pause while the head is
+ *    moving) and xa_mute (ADPCTL's ADPMUTE bit), both inside CDRH.
+ * 9: Cpu lost out_regs[32] — the second register file the interpreter used to
+ *    memcpy into regs on every instruction. T_CPU is the raw struct, so every
+ *    field after the GPRs moved by 128 bytes. */
+#define ZS1_STATE_VERSION 9u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 

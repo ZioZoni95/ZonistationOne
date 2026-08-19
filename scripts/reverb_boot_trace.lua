@@ -7,7 +7,7 @@
 --                                                        rev_en still true
 --
 -- Run:  ZS1_LUA_SCRIPT=scripts/reverb_boot_trace.lua \
---         ./myps1_emu roms/SCPH-7502.BIN
+--         ./ZoniStation_One roms/bios-pal.bin
 -- or paste in the Script (F8) console and Load & Run, then reboot the BIOS.
 
 local frame = 0

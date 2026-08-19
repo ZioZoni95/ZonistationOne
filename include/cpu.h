@@ -100,14 +100,53 @@ typedef struct Cpu {
     uint32_t next_pc;       // Address of the instruction *after* the delay slot (used for branch delay).
     uint32_t current_pc;    // Address of the instruction currently executing (used for exception EPC).
 
-    // --- General Purpose Registers (GPRs) ---
-    uint32_t regs[32];      // Input register values for the current instruction. R0 is hardwired to 0.
-    uint32_t out_regs[32];  // Output register values written by the current instruction.
+    /* --- General Purpose Registers (GPRs) ---
+     *
+     * One file, not two. There used to be a second `out_regs[32]` that every
+     * write went to, with a 128-byte memcpy per instruction to commit it into
+     * this one — the classic two-file way of modelling the load delay. It cost
+     * 1.8% of all samples in a perf profile (3.5% once LTO had inlined the
+     * cheap callees around it), which for ~20M instructions a second is the
+     * single largest constant on the interpreter's hot path.
+     *
+     * Removing it is behaviour-preserving here, and that was checked rather
+     * than assumed: every instruction handler in cpu_instructions.c reads its
+     * source registers before writing its destination — the only reads that
+     * appear "after" a write are arguments of the write itself
+     * (`cpu_set_reg(rt, cpu_reg(rs) op imm)`), which C evaluates first. The
+     * load delay does not depend on the second file either: it has its own
+     * slot, load_reg_idx/load_value below. */
+    uint32_t regs[32];      // R0 is hardwired to 0.
 
-    // --- Load Delay Slot ---
-    // MIPS I has a one-instruction delay after a load before the data is available.
-    RegisterIndex load_reg_idx; // Target register for the pending load.
-    uint32_t load_value;        // Value to be loaded into the target register.
+    /* --- Load Delay Slot ---
+     *
+     * "The loaded data is NOT available to the next opcode, ie. the target
+     * register isn't updated until the next opcode has COMPLETED. So, if the
+     * next opcode tries to read from the load destination register, then it
+     * would (usually) receive the OLD value of that register"
+     * (psx-spx-docs/docs/cpuspecifications.md:172-175).
+     *
+     * Two slots, because that sentence describes a two-stage pipeline:
+     *
+     *   load_reg_idx/load_value   the load THIS instruction just issued
+     *   delay_load_reg/_value     the load the PREVIOUS instruction issued,
+     *                             which lands when this one completes
+     *
+     * cpu_retire_load_delay() in cpu_execution.c rotates them, and it runs
+     * after the instruction has executed — which is what makes the delay-slot
+     * instruction read the old value. "Until the next opcode has completed"
+     * also settles the collision: if that opcode writes the same register, its
+     * write is the later one and wins, so cpu_set_reg cancels a delayed load
+     * aimed at the register it is writing.
+     *
+     * The exception is spelled out too: "unless an IRQ occurs between the load
+     * and next opcode, in that case the load would complete during IRQ
+     * handling" (:175-177) — so cpu_exception() lands the delayed load on the
+     * way in. */
+    RegisterIndex load_reg_idx; // Target register of the load issued this instruction.
+    uint32_t load_value;        // Value it will deliver.
+    RegisterIndex delay_load_reg;   // Target register of the previous instruction's load.
+    uint32_t delay_load_value;      // Value it will deliver when this instruction completes.
 
 
     // --- HI/LO Registers ---
@@ -227,13 +266,21 @@ void handle_c0_syscall(Cpu* cpu);
 uint32_t cpu_reg(Cpu* cpu, RegisterIndex index);
 
 /**
- * @brief Writes a value to a General Purpose Register (GPR) in the output set.
- * Ignores writes to $zero (index 0), ensuring it remains 0.
+ * @brief Writes a value to a General Purpose Register (GPR).
+ * Ignores writes to $zero (index 0), ensuring it remains 0, and cancels a load
+ * still in flight for the same register — that load is the earlier write.
  * @param cpu Pointer to the Cpu state.
  * @param index The index (0-31) of the register to write.
  * @param value The 32-bit value to write.
  */
 void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value);
+
+/**
+ * @brief Lands any in-flight load immediately, for exception entry.
+ * See the load-delay commentary on the Cpu struct and
+ * psx-spx-docs/docs/cpuspecifications.md:175-177.
+ */
+void cpu_flush_load_delay(Cpu* cpu);
 
 // --- Branch/Jump Helper ---
 /**

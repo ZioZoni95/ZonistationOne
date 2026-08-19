@@ -26,6 +26,7 @@
 #include "log.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 
 #define SIO_DBG(...) LOG_SYSTEM_TRACE(__VA_ARGS__)
@@ -82,6 +83,7 @@ typedef enum {
 // Controller response bytes for digital pad
 #define CTRL_RESPONSE_ID       0x41  // Digital controller ID
 #define CTRL_RESPONSE_ID_ANALOG 0x73 // Analog pad ID (normal analog mode, LED=red)
+#define CTRL_RESPONSE_ID_STICK  0x53 // Analog stick ID ("flight mode", LED=green)
 #define CTRL_RESPONSE_ID_CONFIG 0xF3 // Config-mode ID
 #define CTRL_RESPONSE_READY    0x5A  // Controller ready
 #define CTRL_NO_RESPONSE       0xFF  // No device connected
@@ -133,7 +135,10 @@ typedef struct {
     // DualShock analog / config-mode state (DOCS/controllersandmemorycards.md:330-433,
     // :1202-1330). Analog pads boot in digital mode; analog mode is entered either by
     // software (config 43h/44h) or by the host-side analog toggle.
-    bool analog_mode;          // LED red: replies ID 0x73 and appends adc0-3 to reads
+    bool analog_mode;          // analog inputs on: replies ID 0x73/0x53 and appends adc0-3
+    bool stick_mode;           // with analog_mode: "flight mode", ID 0x53, L3/R3 disabled
+                               // (DOCS/controllersandmemorycards.md:483-489). Meaningless on
+                               // its own; analog_mode is what gates the adc bytes.
     bool config_mode;          // replies ID 0xF3, always-9-byte transfers, config commands
     bool transfer_in_config;   // latched at the command byte: the whole in-progress transfer
                                // replies in config style, even if config_mode flips mid-transfer
@@ -244,8 +249,40 @@ void sio_init(Sio* sio) {
     sio_internal.controller_connected = false;
     sio_internal.button_state = 0xFFFF;  // All buttons released
     sio_internal.controller_transfer_step = 0;
-    // Analog pads power up in digital mode (DOCS/controllersandmemorycards.md:436);
-    // the analog/config/lock/watchdog fields are zeroed by the memset above.
+    // A real analog pad powers up in digital mode with its LED off
+    // (DOCS/controllersandmemorycards.md:436) and the user presses the Analog
+    // button. Powering up in analog instead — on the theory that a digital-only
+    // game reads the same swlo/swhi bytes and just ignores adc0-3 — is not free:
+    // the BIOS shell's pad driver does not cope with ID 73h. It never finishes
+    // its init, and the main menu is drawn without its selection cursor (a
+    // reference run of the same PAL BIOS answers the pad with 41h 5Ah and the
+    // cursor is there). So the hardware default it is. ZS1_PAD_MODE=analog
+    // restores the old behaviour, =stick selects the LED=green flight mode, and
+    // F12 still cycles at runtime.
+    // The config/lock/watchdog fields are zeroed by the memset above.
+    sio_internal.analog_mode = false;
+    sio_internal.stick_mode  = false;
+    {
+        const char* env = getenv("ZS1_PAD_MODE");
+        if (env) {
+            if (strcmp(env, "analog") == 0) {
+                sio_internal.analog_mode = true;
+            } else if (strcmp(env, "stick") == 0) {
+                /* Stick mode is a flavour of analog, so it needs both flags —
+                 * it used to set only stick_mode and rely on analog_mode already
+                 * defaulting to true. */
+                sio_internal.analog_mode = true;
+                sio_internal.stick_mode  = true;
+            } else if (strcmp(env, "digital") != 0) {
+                LOG_SYSTEM_WARN("[SYSTEM] ZS1_PAD_MODE=%s not understood "
+                                "(digital|analog|stick); using digital", env);
+            }
+        }
+    }
+    LOG_SYSTEM_INFO("[SYSTEM] Pad mode: %s",
+                    sio_pad_mode_name(sio_internal.analog_mode
+                                          ? (sio_internal.stick_mode ? SIO_PAD_STICK : SIO_PAD_ANALOG)
+                                          : SIO_PAD_DIGITAL));
     // Rumble motors are locked until config 4Dh unlocks them (default: no motor
     // mapped onto any read-command byte).
     for (int i = 0; i < 6; i++) sio_internal.rumble_map[i] = 0xFF;
@@ -522,19 +559,47 @@ static void sio_rumble_lock(void) {
  * watchdog does.
  */
 void sio_set_analog_mode(Sio* sio, bool analog) {
-    (void)sio;
-    if (sio_internal.analog_lock) return;
-    if (sio_internal.analog_mode != analog) {
-        sio_internal.analog_mode = analog;
-        sio_rumble_lock();
-        LOG_SYSTEM_DEBUG("[SIO] Analog mode %s (rumble stopped and locked)",
-                         analog ? "ON" : "OFF");
-    }
+    sio_set_pad_mode(sio, analog ? SIO_PAD_ANALOG : SIO_PAD_DIGITAL);
 }
 
 bool sio_get_analog_mode(Sio* sio) {
     (void)sio;
     return sio_internal.analog_mode;
+}
+
+const char* sio_pad_mode_name(SioPadMode mode) {
+    switch (mode) {
+        case SIO_PAD_ANALOG: return "ANALOG (ID 73h, LED red)";
+        case SIO_PAD_STICK:  return "STICK (ID 53h, LED green)";
+        default:             return "DIGITAL (ID 41h, LED off)";
+    }
+}
+
+SioPadMode sio_get_pad_mode(Sio* sio) {
+    (void)sio;
+    if (!sio_internal.analog_mode) return SIO_PAD_DIGITAL;
+    return sio_internal.stick_mode ? SIO_PAD_STICK : SIO_PAD_ANALOG;
+}
+
+/* Same button press as sio_set_analog_mode() above, over all three modes. The
+ * rumble reset is taken on any change of mode, not only on leaving digital:
+ * a press is a press as far as the pad's own reset is concerned. */
+void sio_set_pad_mode(Sio* sio, SioPadMode mode) {
+    if (sio_internal.analog_lock) return;
+    if (sio_get_pad_mode(sio) == mode) return;
+
+    sio_internal.analog_mode = (mode != SIO_PAD_DIGITAL);
+    sio_internal.stick_mode  = (mode == SIO_PAD_STICK);
+    sio_rumble_lock();
+    LOG_SYSTEM_INFO("[SIO] Pad mode -> %s (rumble stopped and locked)",
+                    sio_pad_mode_name(mode));
+}
+
+void sio_cycle_pad_mode(Sio* sio) {
+    SioPadMode next = (SioPadMode)((sio_get_pad_mode(sio) + 1) % 3);
+    sio_set_pad_mode(sio, next);
+    if (sio_internal.analog_lock)
+        LOG_SYSTEM_INFO("[SIO] Analog button ignored: the game locked the pad mode (44h Key=03h)");
 }
 
 /**
@@ -788,6 +853,17 @@ static void sio_trigger_irq(const char* type) {
 // same transfer (send step 3 = Led/ii/xx, send step 4 = Key), so state is
 // updated here as each byte lands, before the byte that depends on it is sent.
 // Command/response layouts: DOCS/controllersandmemorycards.md:1289-1396.
+// The button word as the pad reports it. Stick ("flight") mode disables the two
+// joystick buttons — "Left/right joy-buttons disabled (as for real analog stick,
+// bits are always 1)" (DOCS/controllersandmemorycards.md:486). The word is
+// active-low, so disabling them means forcing the bits to 1.
+static uint16_t sio_pad_buttons(void) {
+    uint16_t buttons = sio_internal.button_state;
+    if (sio_internal.stick_mode)
+        buttons |= (1u << 1) | (1u << 2);  // L3, R3
+    return buttons;
+}
+
 static uint8_t sio_config_reply(uint8_t tx_byte) {
     SioInternal* s = &sio_internal;
     uint8_t step = s->controller_transfer_step;
@@ -799,8 +875,8 @@ static uint8_t sio_config_reply(uint8_t tx_byte) {
             // along here exactly as they do in normal mode.
             sio_capture_rumble(tx_byte);
             switch (step) {
-                case 3: return (uint8_t)(s->button_state & 0xFF);        // swlo
-                case 4: return (uint8_t)((s->button_state >> 8) & 0xFF); // swhi
+                case 3: return (uint8_t)(sio_pad_buttons() & 0xFF);        // swlo
+                case 4: return (uint8_t)((sio_pad_buttons() >> 8) & 0xFF); // swhi
                 case 5: return s->right_x;                               // adc0
                 case 6: return s->right_y;                               // adc1
                 case 7: return s->left_x;                                // adc2
@@ -819,8 +895,13 @@ static uint8_t sio_config_reply(uint8_t tx_byte) {
             if (step == 3) {
                 s->config_p1 = tx_byte;  // Led: 00=digital/LED off, 01=analog/LED on,
                                          // 02..FF ignored (DOCS/controllersandmemorycards.md:1316-1321)
-                if (tx_byte == 0x00 || tx_byte == 0x01)
+                if (tx_byte == 0x00 || tx_byte == 0x01) {
                     s->analog_mode = (tx_byte == 0x01);
+                    // The software switch is the DualShock's red LED; nothing in the
+                    // config command set selects the Dual Analog's green flight mode,
+                    // so a game driving 44h always lands on the pad, not the stick.
+                    s->stick_mode = false;
+                }
             } else if (step == 4) {
                 s->config_p2 = tx_byte;  // Key: 00..02 unlock, 03 lock, others AND 03
                 s->analog_lock = ((tx_byte & 0x03) == 0x03);
@@ -947,6 +1028,7 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
             LOG_SYSTEM_DEBUG("[SIO_CTRL] Watchdog reset: ~1s without communication");
             sio_internal.config_mode = false;
             sio_internal.analog_mode = false;
+            sio_internal.stick_mode  = false;
             sio_internal.analog_lock = false;
             // The reset "disables and locks rumble motors" — back to the
             // locked default (nothing mapped), motors off.
@@ -990,7 +1072,9 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
                 sio_internal.controller_transfer_step = 2;
                 ack = true;
             } else if (tx_byte == CTRL_CMD_READ_BUTTONS || tx_byte == CTRL_CMD_CONFIG) {
-                *out_byte = sio_internal.analog_mode ? CTRL_RESPONSE_ID_ANALOG : CTRL_RESPONSE_ID;
+                *out_byte = !sio_internal.analog_mode ? CTRL_RESPONSE_ID
+                          : sio_internal.stick_mode   ? CTRL_RESPONSE_ID_STICK
+                                                      : CTRL_RESPONSE_ID_ANALOG;
                 sio_internal.transfer_in_config = false;
                 sio_internal.controller_transfer_step = 2;
                 ack = true;
@@ -1040,12 +1124,12 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
             if (sio_internal.analog_mode) {
                 switch (sio_internal.controller_transfer_step) {
                     case 3:
-                        *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // swlo
+                        *out_byte = (uint8_t)(sio_pad_buttons() & 0xFF);  // swlo
                         sio_internal.controller_transfer_step = 4;
                         ack = true;
                         break;
                     case 4:
-                        *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // swhi
+                        *out_byte = (uint8_t)((sio_pad_buttons() >> 8) & 0xFF);  // swhi
                         sio_internal.controller_transfer_step = 5;
                         ack = true;
                         break;
@@ -1074,13 +1158,13 @@ static bool sio_controller_transfer(uint8_t tx_byte, uint8_t* out_byte) {
             } else {
                 switch (sio_internal.controller_transfer_step) {
                     case 3:
-                        *out_byte = (uint8_t)(sio_internal.button_state & 0xFF);  // swlo
+                        *out_byte = (uint8_t)(sio_pad_buttons() & 0xFF);  // swlo
                         sio_internal.controller_transfer_step = 4;
                         ack = true;
                         break;
                     case 4:
                     default:
-                        *out_byte = (uint8_t)((sio_internal.button_state >> 8) & 0xFF);  // swhi (EOP)
+                        *out_byte = (uint8_t)((sio_pad_buttons() >> 8) & 0xFF);  // swhi (EOP)
                         sio_internal.controller_transfer_step = 0;
                         ack = false;
                         break;

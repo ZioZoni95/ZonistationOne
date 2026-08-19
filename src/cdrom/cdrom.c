@@ -69,16 +69,52 @@ void cdrom_send_error(Cdrom *cdrom, uint8_t err, uint8_t reason) {
  * are called by event_scheduler.c's handler table when those events fire.
  * ========================================================================= */
 
+/* Cycles left until `deadline`, floored so a due-or-late event still goes
+ * through the event queue rather than being dispatched inline. */
+static uint32_t cdrom_delay_left(const Cdrom *cdrom, uint32_t deadline) {
+    if (!cdrom->inter) return CDROM_MIN_INT_DELAY;
+    int32_t left = (int32_t)(deadline - cdrom->inter->cpu_cycle_counter);
+    return (left > (int32_t)CDROM_MIN_INT_DELAY) ? (uint32_t)left : CDROM_MIN_INT_DELAY;
+}
+
 void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles) {
     if (cdrom->cmd_event_pending) return;
     cdrom->cmd_event_pending = true;
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->cmd_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_COMMAND, cycles);
+    }
+}
+
+/* Re-arm an event that was due but could not be delivered because an earlier
+ * interrupt was still unacknowledged. Keeps the original deadline: what is
+ * owed is the time that is left, not a fresh minimum. */
+static void cdrom_rearm_command_event(Cdrom *cdrom) {
+    cdrom->cmd_event_pending = true;
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_COMMAND,
+                        cdrom_delay_left(cdrom, cdrom->cmd_deadline));
+}
+
+static void cdrom_rearm_second_response(Cdrom *cdrom) {
+    cdrom->second_event_pending = true;
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE,
+                        cdrom_delay_left(cdrom, cdrom->second_deadline));
 }
 
 void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles) {
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->drive_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_DRIVE, cycles);
+    }
+}
+
+/* Re-arm the drive on what is left of its own deadline — see drive_deadline. */
+static void cdrom_rearm_drive_event(Cdrom *cdrom) {
+    if (cdrom->inter)
+        eventq_schedule(cdrom->inter, EVQ_CDROM_DRIVE,
+                        cdrom_delay_left(cdrom, cdrom->drive_deadline));
 }
 
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
@@ -87,15 +123,17 @@ void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles) {
      * on a boot, twelve Init commands produced three second responses and a
      * burst of ten produced one. */
     cdrom->second_event_pending = true;
-    if (cdrom->inter)
+    if (cdrom->inter) {
+        cdrom->second_deadline = cdrom->inter->cpu_cycle_counter + cycles;
         eventq_schedule(cdrom->inter, EVQ_CDROM_SECOND_RESPONSE, cycles);
+    }
 }
 
 void cdrom_command_event_tick(struct Interconnect *inter) {
     Cdrom *cdrom = &inter->cdrom;
     cdrom->cmd_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
+        cdrom_rearm_command_event(cdrom);
         return;
     }
     if (cdrom->pending_command == CDC_NONE) return;
@@ -120,7 +158,7 @@ void cdrom_second_response_event_tick(struct Interconnect *inter) {
     Cdrom *cdrom = &inter->cdrom;
     cdrom->second_event_pending = false;
     if (cdrom->interrupt_flag != 0) {
-        cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
+        cdrom_rearm_second_response(cdrom);
         return;
     }
     cdrom_execute_second_response(cdrom);
@@ -137,6 +175,7 @@ void cdrom_init(Cdrom *cdrom, struct Interconnect *inter) {
     cdrom->current_command  = CDC_NONE;
     cdrom->second_response_cmd = CDC_NONE;
     cdrom->drive_state      = DRIVE_IDLE;
+    cdrom->shell_open       = true;   /* no disc yet; cdrom_load_disc() clears it */
     cdrom->vol_ll = cdrom->vol_rr = 0x80;
     fifo_init(&cdrom->param_fifo);
     fifo_init(&cdrom->response_fifo);
@@ -155,12 +194,23 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->second_response_cmd = CDC_NONE;
     cdrom->pending_param_count = 0;
     cdrom->second_response_size = 0;
+    cdrom->cmd_deadline        = 0;
+    cdrom->second_deadline     = 0;
+    cdrom->last_header_valid   = false;
     cdrom->drive_state         = DRIVE_IDLE;
     cdrom->disc_present        = disc_present;
     cdrom->motor_on            = disc_present;
-    cdrom->shell_open          = false;
+    /* Bit4 is a latch: "Once shell open (0=Closed, 1=Is/was Open)"
+     * (psx-spx-docs/docs/cdromdrive.md:826). No disc means the shell has been
+     * open, so it reads back as 1 — a reference run with no disc answers every
+     * Getstat with 10h. Forcing it to 0 told the BIOS the tray was shut with a
+     * disc in it: it went on to GetID, got INT5(08h,40h), and looped Getstat/
+     * Getstat/GetID forever instead of finishing the shell's init, which is
+     * what draws the menu's selection cursor. */
+    cdrom->shell_open          = !disc_present;
     cdrom->read_after_seek     = false;
     cdrom->play_after_seek     = false;
+    cdrom->seek_phase          = false;
     cdrom->current_lba         = 0;
     cdrom->target_lba          = 0;
     cdrom->setloc_lba          = 0;
@@ -178,6 +228,7 @@ void cdrom_reset(Cdrom *cdrom) {
     cdrom->auto_pause          = false;
     cdrom->cdda_enable         = false;
     cdrom->muted               = false;
+    cdrom->xa_mute             = false;
     cdrom->data_buffer_armed   = false;
     cdrom->current_read_buffer  = 0;
     cdrom->current_write_buffer = 0;
@@ -289,12 +340,19 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             cdrom->pending_param_count   = cdrom->param_fifo.count;
             for (int i = 0; i < cdrom->pending_param_count; i++)
                 cdrom->pending_params[i] = fifo_peek(&cdrom->param_fifo, (uint8_t)i);
-            cdrom_schedule_command_event(cdrom, CDROM_ACK_DELAY);
+            /* How long until the acknowledge, by command and drive state
+             * (cdromdrive.md:1877-1894): Init and ReadTOC do a slow
+             * initialisation before answering, and a stopped drive answers
+             * sooner than a spinning one because the mainloop is doing less. */
+            uint32_t ack = CDROM_ACK_DELAY;
+            if (value == CDC_INIT || value == CDC_READTOC) ack = CDROM_ACK_DELAY_INIT;
+            else if (!cdrom->motor_on)                     ack = CDROM_ACK_DELAY_STOPPED;
+            cdrom_schedule_command_event(cdrom, ack);
             break;
         }
-        case 1: break; /* sound map data */
-        case 2: break; /* sound map coding */
-        case 3: break; /* R→R SPU volume */
+        case 1: break; /* WRDATA — sound map data (not implemented) */
+        case 2: break; /* CI — sound map coding info (not implemented) */
+        case 3: cdrom->vol_rr_t = value; break;  /* ATV2: R→R (cdromdrive.md:229) */
         }
         break;
 
@@ -302,8 +360,8 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
         switch (cdrom->index) {
         case 0: fifo_push(&cdrom->param_fifo, value); break;
         case 1: cdrom->interrupt_enable = value & 0x1F; break;
-        case 2: cdrom->vol_ll_t = value; break; /* L←CDL temp */
-        case 3: cdrom->vol_rl_t = value; break; /* R←CDL temp */
+        case 2: cdrom->vol_ll_t = value; break; /* ATV0: L→L (cdromdrive.md:227) */
+        case 3: cdrom->vol_lr_t = value; break; /* ATV3: R→L, i.e. L←CDR (:230) */
         }
         break;
 
@@ -344,25 +402,31 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
             LOG_CDROM_DEBUG("[CDROM] INT ACK 0x%02X remaining=%d", ack, cdrom->interrupt_flag);
 
             if (cdrom->interrupt_flag == 0) {
-                /* Second response pending */
+                /* Second response pending. Re-arm on what is left of its own
+                 * deadline: the guest acknowledging an INT3 does not make the
+                 * head arrive sooner. */
                 if (cdrom->second_response_cmd != CDC_NONE)
-                    cdrom_schedule_second_response_event(cdrom, CDROM_MIN_INT_DELAY);
+                    cdrom_rearm_second_response(cdrom);
 
-                /* Reading: schedule next sector delivery */
+                /* Reading: the next sector is due on disc time, which the
+                 * delivery of the last one already set. */
                 if (cdrom->drive_state == DRIVE_READING)
-                    cdrom_schedule_drive_event(cdrom,
-                        cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X);
+                    cdrom_rearm_drive_event(cdrom);
 
                 /* Unblock a command that arrived while INT was pending */
                 if (cdrom->pending_command != CDC_NONE)
-                    cdrom_schedule_command_event(cdrom, CDROM_MIN_INT_DELAY);
+                    cdrom_rearm_command_event(cdrom);
             }
             break;
         }
-        case 2: cdrom->vol_lr_t = value; break; /* L←CDR temp */
+        case 2: cdrom->vol_rl_t = value; break; /* ATV1: L→R, i.e. R←CDL (:228) */
         case 3:
-            cdrom->vol_rr_t = value; /* R←CDR temp */
-            if (value & 0x20) {       /* bit5 = commit all temp → working */
+            /* ADPCTL, not a volume register (cdromdrive.md:249-255): bit0
+             * ADPMUTE, bit5 CHNGATV applies the staged ATV0-3 values. This port
+             * used to be stored into the R→R volume, so every CHNGATV write
+             * (value 20h) also set that gain to 20h — a quarter volume. */
+            cdrom->xa_mute = (value & 0x01) != 0;
+            if (value & 0x20) {       /* CHNGATV: commit staged → working */
                 cdrom->vol_ll = cdrom->vol_ll_t;
                 cdrom->vol_lr = cdrom->vol_lr_t;
                 cdrom->vol_rl = cdrom->vol_rl_t;
@@ -392,8 +456,31 @@ bool cdrom_has_pending_interrupt(Cdrom *cdrom) {
  * Audio Frame (called by SPU/SDL)
  * ========================================================================= */
 
+static inline int16_t cdrom_sat16(int32_t v) {
+    return (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v));
+}
+
 void cdrom_get_audio_frame(Cdrom *cdrom, int16_t *left, int16_t *right) {
-    cdrom_audio_get_frame(&cdrom->audio_fifo, left, right);
+    int16_t l = 0, r = 0;
+    cdrom_audio_get_frame(&cdrom->audio_fifo, &l, &r);
+
+    /* Muting forces the output volume to zero — the controller keeps processing
+     * audio sectors internally (cdromdrive.md:1018-1022). It used to be applied
+     * by not pushing samples at all, which starved the FIFO instead of feeding
+     * it silence and left the resampler's history frozen across the mute. */
+    if (cdrom->muted || cdrom->xa_mute) { *left = 0; *right = 0; return; }
+
+    /* ATV0-ATV3 volume matrix (cdromdrive.md:227-247): 80h is normal, FFh is
+     * double, and the hardware saturates properly up to double volume — which
+     * is what clamping the 16-bit sum gives. Nothing read these four registers
+     * before, so Spyro's mono option and Resident Evil 2's CD fades (:243-247)
+     * had no effect whatsoever. */
+    int32_t out_l = ((int32_t)l * (int32_t)cdrom->vol_ll +
+                     (int32_t)r * (int32_t)cdrom->vol_lr) >> 7;
+    int32_t out_r = ((int32_t)l * (int32_t)cdrom->vol_rl +
+                     (int32_t)r * (int32_t)cdrom->vol_rr) >> 7;
+    *left  = cdrom_sat16(out_l);
+    *right = cdrom_sat16(out_r);
 }
 
 /* =========================================================================

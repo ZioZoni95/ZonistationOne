@@ -58,6 +58,10 @@ void cdrom_schedule_command_event(Cdrom *cdrom, uint32_t cycles);
 void cdrom_schedule_drive_event(Cdrom *cdrom, uint32_t cycles);
 void cdrom_schedule_second_response_event(Cdrom *cdrom, uint32_t cycles);
 
+/* Packed-BCD validity: both nibbles must be 0..9. Setloc and GetTD both reject
+ * anything else (cdromdrive.md:627-628, :929-930). */
+static inline bool cdrom_is_bcd(uint8_t v) { return (v & 0x0Fu) <= 9u && (v >> 4) <= 9u; }
+
 /* =========================================================================
  * Begin helpers
  * ========================================================================= */
@@ -72,6 +76,11 @@ static void begin_reading(Cdrom *cdrom) {
     }
     LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> READING (LBA %u)",
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
+    /* A read that starts somewhere new, or that starts at all from a stopped
+     * drive, carries an implicit seek; a Read that merely continues an ongoing
+     * one does not (cdromdrive.md:588, :809-814). */
+    if (location_changed || cdrom->drive_state != DRIVE_READING)
+        cdrom->seek_phase = true;
     cdrom->drive_state = DRIVE_READING;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
     /* Location changed: the head has to get there before the first sector. That
@@ -112,6 +121,8 @@ static void begin_playing(Cdrom *cdrom, uint8_t track_param) {
     }
     LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> PLAYING (LBA %u)",
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->current_lba);
+    if (location_changed || cdrom->drive_state != DRIVE_PLAYING)
+        cdrom->seek_phase = true;   /* implicit seek, same rule as begin_reading */
     cdrom->drive_state = DRIVE_PLAYING;
     cdrom->cdda_speed  = 1;
     cdrom_async_reader_queue(&cdrom->async_reader, cdrom->current_lba);
@@ -132,6 +143,7 @@ static void begin_seeking(Cdrom *cdrom, bool read_after, bool play_after) {
     LOG_CDROM_DEBUG("[CDROM] Drive state: %s -> SEEKING (LBA %u -> %u)",
                     cdrom_drive_state_name(cdrom->drive_state), cdrom->head_lba, cdrom->target_lba);
     cdrom->drive_state = DRIVE_SEEKING;
+    cdrom->seek_phase  = true;
     /* Distance from where the head is, not from the next sector queued. */
     uint32_t delay = (cdrom->target_lba == cdrom->head_lba)
         ? CDROM_SEEK_FAST_DELAY
@@ -179,10 +191,11 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     switch (cmd) {
 
-    /* --- 0x00 Sync --- */
+    /* --- 0x00 Sync — not a command. The opcode table lists it as unused, and
+     * the description says outright that it "returns error code 40h = Invalid
+     * Command" (cdromdrive.md:380, :501-504). It used to answer INT3(stat). --- */
     case CDC_SYNC:
-        cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
-        cdrom_send_ack(cdrom);
+        cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_INVALID_COMMAND);
         break;
 
     /* --- 0x01 Getstat --- */
@@ -196,6 +209,18 @@ void cdrom_execute_command(Cdrom *cdrom) {
         uint8_t mm = cdrom_pop_param(cdrom);
         uint8_t ss = cdrom_pop_param(cdrom);
         uint8_t ff = cdrom_pop_param(cdrom);
+        /* All three parameters are packed BCD, with ss < 60h and ff < 75h;
+         * anything else answers INT5(stat,10h) and leaves the target alone
+         * (cdromdrive.md:627-628). Nothing validated them before, so a garbage
+         * Setloc silently seeked somewhere nonsensical instead of being refused,
+         * and the guest never learned its parameters were wrong. */
+        if (!cdrom_is_bcd(mm) || !cdrom_is_bcd(ss) || !cdrom_is_bcd(ff) ||
+            ss >= 0x60 || ff >= 0x75) {
+            LOG_CDROM_WARN("[CDROM] Setloc rejected: %02x:%02x:%02x not valid BCD msf", mm, ss, ff);
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR,
+                             ERROR_INVALID_ARGUMENT);
+            break;
+        }
         uint8_t m  = cdrom_from_bcd(mm);
         uint8_t s  = cdrom_from_bcd(ss);
         uint8_t f  = cdrom_from_bcd(ff);
@@ -255,8 +280,9 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x08 Stop --- */
     case CDC_STOP: {
-        uint32_t stop_delay = (cdrom->motor_on && cdrom->drive_state != DRIVE_IDLE)
-            ? CDROM_STOP_SPIN_DELAY : CDROM_STOP_IDLE_DELAY;
+        uint32_t stop_delay = CDROM_STOP_IDLE_DELAY;
+        if (cdrom->motor_on && cdrom->drive_state != DRIVE_IDLE)
+            stop_delay = cdrom->double_speed ? CDROM_STOP_2X_DELAY : CDROM_STOP_1X_DELAY;
         cdrom->drive_state = DRIVE_STOPPING;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
@@ -267,6 +293,20 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x09 Pause --- */
     case CDC_PAUSE: {
+        /* Pause fails with INT5(stat,80h) during a seek phase — the explicit
+         * SeekL/SeekP kind and the implicit one at the start of
+         * ReadN/ReadS/Play alike (cdromdrive.md:586-588). */
+        if (cdrom->seek_phase) {
+            LOG_CDROM_DEBUG("[CDROM] Pause refused: seek in progress");
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_NOT_READY);
+            break;
+        }
+        /* The first response carries the status as it was — still with bit5 set
+         * if a read was running; only the second response has it cleared
+         * (cdromdrive.md:583-585). The state change therefore happens after the
+         * status byte has been taken, not before it. */
+        cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
+        cdrom_send_ack(cdrom);
         /* pcsx-redux hardware-tested: 7ms if already idle, else 1s/2s by speed */
         uint32_t pause_delay;
         if (cdrom->drive_state == DRIVE_IDLE) {
@@ -276,8 +316,6 @@ void cdrom_execute_command(Cdrom *cdrom) {
             if (cdrom->drive_state == DRIVE_READING || cdrom->drive_state == DRIVE_PLAYING)
                 cdrom->drive_state = DRIVE_PAUSING;
         }
-        cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
-        cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_PAUSE;
         cdrom_schedule_second_response_event(cdrom, pause_delay);
         break;
@@ -285,13 +323,34 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x0A Init --- */
     case CDC_INIT: {
+        /* The drive takes ~740 ms over an Init (see CDROM_INIT_DELAY), which is
+         * longer than the ~415 ms after which the BIOS re-issues the command.
+         * A retry must not restart the work: rescheduling on each one pushed the
+         * deadline forward for as long as the BIOS kept asking, so the reply
+         * never came and boot sat in an endless Init loop.
+         *
+         * And the retry gets *no answer at all*: "If an Init command is already
+         * in progress (its second response is still pending), a new Init command
+         * is silently dropped with no response (neither INT3 nor INT5)"
+         * (cdromdrive.md:538-540). We used to acknowledge it with INT3, which is
+         * an interrupt the drive never sends. */
+        bool init_already_owed = cdrom->second_event_pending &&
+                                 cdrom->second_response_cmd == CDC_INIT &&
+                                 cdrom->inter &&
+                                 (int32_t)(cdrom->second_deadline -
+                                           cdrom->inter->cpu_cycle_counter) > 0;
+        if (init_already_owed) {
+            LOG_CDROM_DEBUG("[CDROM] Init dropped: one is already owed");
+            break;
+        }
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_INIT;
-        /* Init drops the drive back to single speed (see the second response),
-         * so it owes the spin-down before it can answer. */
         uint32_t delay = CDROM_INIT_DELAY;
+        /* Back to single speed, and the head re-homes to the start. */
         if (cdrom->double_speed) delay += CDROM_SPEED_DOWN_DELAY;
+        if (cdrom->head_lba != 0)
+            delay += cdrom_disc_get_seek_ticks(cdrom->head_lba, 0);
         cdrom_schedule_second_response_event(cdrom, delay);
         break;
     }
@@ -356,14 +415,40 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x10 GetlocL --- */
     case CDC_GETLOCL: {
-        /* Return header+subheader from last read sector buffer */
-        SectorBuffer *sb = &cdrom->sector_buffers[cdrom->current_read_buffer];
-        if (sb->valid && sb->lba < cdrom->disc.total_sectors) {
-            /* bytes 12-19: header (MM:SS:FF:mode) + subheader (file,ch,submode,coding) */
+        /* Header (MM:SS:FF:mode) + subheader (file,ch,submode,coding) of the
+         * newest sector processed — see Cdrom.last_header.
+         *
+         * Three documented failures, all error 80h: the drive is not spun up
+         * (:396), the drive is in the seek phase (:896-901 — during a seek only
+         * subchannel position is decoded, so there is no header to report, and
+         * the guest is expected to retry until the seek finishes), and the head
+         * is on an audio track, which has no header at all (:892-895). */
+        if (cdrom->seek_phase) {
+            LOG_CDROM_DEBUG("[CDROM] GetlocL refused: seek in progress");
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_NOT_READY);
+            break;
+        }
+        if (cdrom->disc_present && cdrom->disc.last_track) {
+            uint8_t trk = cdrom_disc_get_track_at_lba(&cdrom->disc, cdrom->head_lba);
+            if (trk >= cdrom->disc.first_track && trk <= cdrom->disc.last_track &&
+                cdrom->disc.tracks[trk].is_audio) {
+                LOG_CDROM_DEBUG("[CDROM] GetlocL refused: track %u is audio", trk);
+                cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_NOT_READY);
+                break;
+            }
+        }
+        if (cdrom->last_header_valid && cdrom->motor_on) {
             for (int i = 0; i < 8; i++)
-                cdrom_push_response(cdrom, sb->raw[12 + i]);
+                cdrom_push_response(cdrom, cdrom->last_header[i]);
+            /* The answer itself, because a wrong-but-valid location sends the
+             * game back to Setloc/SeekL instead of stopping it dead: msf is
+             * BCD as it comes off the disc, then mode, file, channel, submode,
+             * coding info. */
+            LOG_CDROM_DEBUG("[CDROM] GetlocL -> %02x:%02x:%02x mode=%02x file=%02x ch=%02x sm=%02x ci=%02x",
+                            cdrom->last_header[0], cdrom->last_header[1], cdrom->last_header[2],
+                            cdrom->last_header[3], cdrom->last_header[4], cdrom->last_header[5],
+                            cdrom->last_header[6], cdrom->last_header[7]);
         } else {
-            /* not reading or no valid sector */
             cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, 0x80);
             break;
         }
@@ -411,7 +496,21 @@ void cdrom_execute_command(Cdrom *cdrom) {
 
     /* --- 0x14 GetTD --- */
     case CDC_GETTD: {
-        uint8_t tnum = cdrom_pop_param(cdrom);
+        /* The track parameter is packed BCD; non-BCD values and values above the
+         * last track both answer INT5(stat,10h) (cdromdrive.md:926-930). Reading
+         * it as binary put every track from 10 upwards on the wrong LBA. */
+        uint8_t param = cdrom_pop_param(cdrom);
+        if (!cdrom_is_bcd(param)) {
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR,
+                             ERROR_INVALID_ARGUMENT);
+            break;
+        }
+        uint8_t tnum = cdrom_from_bcd(param);
+        if (tnum > cdrom->disc.last_track) {
+            cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR,
+                             ERROR_INVALID_ARGUMENT);
+            break;
+        }
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         uint32_t lba = 0;
         if (tnum == 0) {
@@ -436,16 +535,11 @@ void cdrom_execute_command(Cdrom *cdrom) {
         begin_seeking(cdrom, false, false);
         break;
 
-    /* --- 0x17 SetClock (not emulated) --- */
+    /* --- 0x17/0x18 — unused opcodes, INT5(11h,40h) (cdromdrive.md:403).
+     * There is no SetClock/GetClock on this hardware; the names are ours. --- */
     case CDC_SETCLOCK:
-        cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
-        cdrom_send_ack(cdrom);
-        break;
-
-    /* --- 0x18 GetClock (not emulated) --- */
     case CDC_GETCLOCK:
-        for (int i = 0; i < 8; i++) cdrom_push_response(cdrom, 0x00);
-        cdrom_send_ack(cdrom);
+        cdrom_send_error(cdrom, cdrom_get_stat_byte(cdrom) | STAT_BYTE_ERROR, ERROR_INVALID_COMMAND);
         break;
 
     /* --- 0x19 Test --- */
@@ -521,15 +615,15 @@ void cdrom_execute_command(Cdrom *cdrom) {
         cdrom_schedule_second_response_event(cdrom, CDROM_ID_READ_DELAY);
         break;
 
-    /* --- 0x1C Reset --- */
+    /* --- 0x1C Reset — INT3 only. There is no completion interrupt: software
+     * must wait 1/8 s (400000h cycles) by itself before sending anything else
+     * (cdromdrive.md:542-551). We used to send an INT2 nothing asks for. --- */
     case CDC_RESET:
         cdrom->drive_state = DRIVE_IDLE;
         cdrom->mode        = 0;
         cdrom->motor_on    = cdrom->disc_present;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
-        cdrom->second_response_cmd = CDC_RESET;
-        cdrom_schedule_second_response_event(cdrom, CDROM_RESET_DELAY);
         break;
 
     /* --- 0x1D GetQ --- */
@@ -610,6 +704,7 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     case CDC_INIT:
         cdrom->motor_on    = cdrom->disc_present;
         cdrom->drive_state = DRIVE_IDLE;
+        cdrom->seek_phase  = false;
         /* "Sets mode=20h, activates drive motor, Standby, abort all commands"
          * (DOCS/cdromdrive.md:535-537). Setting the register without deriving
          * the flags from it left double_speed set, so the Setmode 0x80 the
@@ -627,20 +722,17 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
         cdrom_send_complete(cdrom);
         break;
 
-    case CDC_RESET:
-        cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
-        cdrom_send_complete(cdrom);
-        break;
-
     case CDC_STOP:
         cdrom->motor_on    = false;
         cdrom->drive_state = DRIVE_IDLE;
+        cdrom->seek_phase  = false;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_complete(cdrom);
         break;
 
     case CDC_PAUSE:
         cdrom->drive_state = DRIVE_IDLE;
+        cdrom->seek_phase  = false;
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_complete(cdrom);
         break;
@@ -654,6 +746,7 @@ void cdrom_execute_second_response(Cdrom *cdrom) {
     case CDC_SEEKP:
         cdrom->current_lba = cdrom->target_lba;
         cdrom->head_lba    = cdrom->target_lba;   /* the head has arrived */
+        cdrom->seek_phase  = false;               /* …so GetlocL/Pause work again */
         cdrom->drive_state = DRIVE_IDLE;
         /* update SubQ for new position */
         cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
@@ -712,6 +805,11 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom->drive_state = DRIVE_IDLE;
             return;
         }
+
+        /* The head has reached the sector, so the implicit seek that started
+         * this read is over and GetlocL/Pause answer normally again
+         * (cdromdrive.md:896-901, :586-588). */
+        cdrom->seek_phase = false;
 
         /* Write into ring buffer */
         uint8_t widx = cdrom->current_write_buffer;
@@ -789,8 +887,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             }
             /* XA-ADPCM sector: decode to audio FIFO — NO INT1 */
             cdrom_audio_decode_xa(&cdrom->xa_adpcm_state, &cdrom->audio_fifo,
-                                   raw + 24, xa_stereo, xa_8bit, xa_18900,
-                                   cdrom->muted);
+                                   raw + 24, xa_stereo, xa_8bit, xa_18900);
 
             cdrom->head_lba = cdrom->current_lba;   /* the sector just transferred */
             cdrom->current_lba++;
@@ -801,6 +898,23 @@ void cdrom_execute_drive(Cdrom *cdrom) {
                 cdrom_schedule_drive_event(cdrom, delay);
             }
         } else {
+            /* What GetlocL answers with, latched here rather than read back out
+             * of the ring below: the ring entry is cleared once the guest has
+             * DMA'd the sector out, and GetlocL is asked *after* that, so
+             * answering from the ring failed on every sector the game had
+             * already consumed — Monsters & Co. then loops for good, re-issuing
+             * Setloc/SeekL/GetlocL/ReadS twice a field waiting for a location it
+             * never gets ("new game hangs").
+             *
+             * Only data sectors latch. A reference run over an XA section
+             * interleaved 1 data : 3 audio answers GetlocL with the data
+             * cadence — MSF stepping by exactly 4 — so the ADPCM sectors that
+             * pass to the audio decoder never become the reported location.
+             * Latching those as well takes the game's demuxer off the video
+             * stream and its speech never plays. */
+            memcpy(cdrom->last_header, raw + 12, 8);
+            cdrom->last_header_valid = true;
+
             /* Data sector: sector size from mode bits 4-5 (nocash PSX-SPX) */
             if (cdrom->mode & 0x20) {       /* bit5: 2340 bytes from sync header */
                 sb->data_start = 12;
@@ -823,7 +937,13 @@ void cdrom_execute_drive(Cdrom *cdrom) {
 
             LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1", cdrom->current_lba);
 
-            /* INT1: data ready — INT ACK handler will schedule next drive event */
+            /* INT1: data ready. The ACK handler re-arms the drive event, but the
+             * deadline is set here, when this sector was delivered: the head
+             * reaches the next one a sector period later whatever the guest does
+             * with the interrupt. */
+            if (cdrom->inter)
+                cdrom->drive_deadline = cdrom->inter->cpu_cycle_counter +
+                    (cdrom->double_speed ? CDROM_READ_DELAY_2X : CDROM_READ_DELAY_1X);
             fifo_clear(&cdrom->response_fifo);
             cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
             cdrom->interrupt_flag = CDROM_INT_DATA_READY;
@@ -848,8 +968,10 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         if (st == CDROM_SECTOR_FAILED) {
             LOG_CDROM_ERROR("[CDROM] CDDA read failed at LBA %u", cdrom->current_lba);
             cdrom->drive_state = DRIVE_IDLE;
+            cdrom->seek_phase  = false;
             return;
         }
+        cdrom->seek_phase = false;   /* head arrived — same rule as the read path */
 
         /* Check for lead-out (track AA) */
         uint8_t track_num = cdrom_disc_get_track_at_lba(&cdrom->disc, cdrom->current_lba);
@@ -869,7 +991,7 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         }
 
         if (track_is_audio) {
-            cdrom_audio_process_cdda(&cdrom->audio_fifo, raw, cdrom->muted);
+            cdrom_audio_process_cdda(&cdrom->audio_fifo, raw);
         }
 
         /* Auto-pause on track change */
@@ -893,21 +1015,40 @@ void cdrom_execute_drive(Cdrom *cdrom) {
         cdrom->current_subq_lba = cdrom->current_lba;
         cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
 
-        /* Report mode: send INT1 with position every sector (pcsx-redux) */
+        /* Report: INT1(stat, track, index, mm/amm, ss+80h/ass, sect/asect,
+         * peaklo, peakhi) — eight bytes, and NOT on every sector. The packet
+         * carries absolute time on asect 00/20/40/60h and time within the track
+         * (with bit7 of ss set) on 10/30/50/70h (cdromdrive.md:1077-1094).
+         *
+         * This used to send nine bytes with both time bases at once, on every
+         * single sector, which is neither the shape nor the rate a player
+         * expects. The peak bytes are zero: we have no peak meter, and the
+         * hardware's own is reset on each read so nine of every ten frames are
+         * lost anyway (cdrominternalinfoonpsxcdromcontroller.md:1483-1492). */
         if (cdrom->report_enable && cdrom->interrupt_flag == CDROM_INT_NONE) {
             SubQ *sq = &cdrom->last_subq;
-            fifo_clear(&cdrom->response_fifo);
-            cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
-            cdrom_push_response(cdrom, sq->track_bcd);
-            cdrom_push_response(cdrom, sq->index_bcd);
-            cdrom_push_response(cdrom, sq->rel_mm_bcd);
-            cdrom_push_response(cdrom, sq->rel_ss_bcd | 0x80); /* bit7 = audio */
-            cdrom_push_response(cdrom, sq->rel_ff_bcd);
-            cdrom_push_response(cdrom, sq->abs_mm_bcd);
-            cdrom_push_response(cdrom, sq->abs_ss_bcd);
-            cdrom_push_response(cdrom, sq->abs_ff_bcd);
-            cdrom->interrupt_flag = CDROM_INT_DATA_READY;
-            if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+            uint8_t asect = sq->abs_ff_bcd;
+            bool report_abs = (asect == 0x00 || asect == 0x20 || asect == 0x40 || asect == 0x60);
+            bool report_rel = (asect == 0x10 || asect == 0x30 || asect == 0x50 || asect == 0x70);
+            if (report_abs || report_rel) {
+                fifo_clear(&cdrom->response_fifo);
+                cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
+                cdrom_push_response(cdrom, sq->track_bcd);
+                cdrom_push_response(cdrom, sq->index_bcd);
+                if (report_abs) {
+                    cdrom_push_response(cdrom, sq->abs_mm_bcd);
+                    cdrom_push_response(cdrom, sq->abs_ss_bcd);
+                    cdrom_push_response(cdrom, sq->abs_ff_bcd);
+                } else {
+                    cdrom_push_response(cdrom, sq->rel_mm_bcd);
+                    cdrom_push_response(cdrom, (uint8_t)(sq->rel_ss_bcd | 0x80));
+                    cdrom_push_response(cdrom, sq->rel_ff_bcd);
+                }
+                cdrom_push_response(cdrom, 0x00);   /* peak lo */
+                cdrom_push_response(cdrom, 0x00);   /* peak hi */
+                cdrom->interrupt_flag = CDROM_INT_DATA_READY;
+                if (cdrom->inter) interconnect_trigger_cdrom_irq(cdrom->inter);
+            }
         }
 
         cdrom->current_lba += cdrom->cdda_speed;

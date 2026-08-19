@@ -151,8 +151,6 @@ void timers_set_gate(Timers* timers, int timer_index, bool state);
 // --- New Timer/Event Function Prototypes ---
 void timers_update(Timers* timers);  // Main update function for event system
 void timers_schedule_next(Timers* timers);  // Schedule next timer event
-uint32_t timers_calculate_frame_cycles(void);  // Frame timing
-uint32_t timers_calculate_line_cycles(void);   // Line timing
 
 void timers_schedule_next_event(Timers* timers, int timer_index);
 /* Arm EVQ_TIMER{i} at the timer's next target/overflow (derived-counter model). */

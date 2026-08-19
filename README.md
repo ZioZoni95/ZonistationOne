@@ -4,9 +4,9 @@ A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 rendere
 debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
 boots them.
 
-SDL2 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc has been played
-past the halfway point — boot, FMV, menus, missions, saves — and it is stable there. That is one game
-on one machine, not a compatibility claim.
+SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. One commercial disc plays through —
+boot, FMV, menus, missions, memory-card saves — and is stable there; two others boot, one of them
+from a compressed image. That is three games on one machine, not a compatibility claim.
 
 ---
 
@@ -25,9 +25,22 @@ Power on, BIOS shell, disc boot, movie, mission.
 ## Build
 
 ```sh
-sudo apt install build-essential libsdl2-dev libglew-dev libgl1-mesa-dev
+sudo apt install build-essential libglew-dev libgl1-mesa-dev
 make
 ```
+
+SDL3 is not packaged on Ubuntu 24.04 or its derivatives. Build it once:
+
+```sh
+sudo apt install cmake libwayland-dev libxkbcommon-dev libx11-dev libxext-dev libasound2-dev
+git clone --depth 1 --branch release-3.2.24 https://github.com/libsdl-org/SDL.git
+cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+cmake --build SDL/build -j"$(nproc)"
+sudo cmake --install SDL/build && sudo ldconfig
+```
+
+Where SDL3 *is* packaged, `sudo apt install libsdl3-dev` replaces that block. Either way the Makefile
+finds it through `pkg-config sdl3`.
 
 ImGui and Lua are vendored in `third_party/`. `make` is parallel by default and tracks header
 dependencies, so `make clean` is not needed after editing a header. `make DEBUG=1` gives an `-O0 -g`
@@ -36,8 +49,8 @@ build for gdb.
 ## Run
 
 ```sh
-./myps1_emu roms/SCPH-7502.BIN                                              # BIOS menu
-./myps1_emu roms/SCPH-7502.BIN --game="games/Ace Combat 2 (Europe).bin"     # a disc
+./ZoniStation_One roms/bios-pal.bin                          # BIOS menu
+./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"  # a disc
 ```
 
 You supply the BIOS and the discs; neither is in this repository.
@@ -51,9 +64,50 @@ Three things trip people up, in order of how often:
 
 1. **Pass the `.bin`, not the `.cue`.** `--game=<path>.cue` is accepted and then reports
    *"Disc load failed — BIOS-only mode"*, which reads like a disc problem but is a path problem.
+   A `.bin.ecm` is taken directly and decoded on the fly — no need to unpack it first.
 2. **The BIOS must match the disc's region**, exactly as on hardware. A PAL disc with a US BIOS is
    rejected and you are left sitting at the BIOS menu, which looks like a boot regression.
 3. **The game path needs `--game=`.** A bare positional path is taken as the BIOS path.
+
+### Controllers
+
+A DualShock 4 over USB or Bluetooth is picked up automatically, hot-plug included, and the keyboard
+stays live beside it (`WASD` D-pad, `E C Z X` for △○×□, `Q R` shoulders, `Shift Ctrl` triggers,
+`Space` START, `Tab` SELECT).
+
+The emulated pad boots **digital with its LED off**, as a real one does, and waits for its Analog
+button. **F12**, or a click on the DS4 touchpad, is that button:
+
+```
+digital (ID 41h, LED off) → analog pad (73h, LED red) → analog stick (53h, LED green) → digital
+```
+
+The green stick mode is what a few flight titles expect instead of a DualShock, Ace Combat 2 among
+them. `ZS1_PAD_MODE=digital|analog|stick` sets the boot mode; the Controller window in the debug UI
+shows the current one and cycles it. A game that drives the pad itself through the config commands
+overrides all of this, as on hardware.
+
+Booting analog instead was tried, so that the sticks would reach a game without a keypress first. It
+costs more than it saves: the BIOS shell's own pad driver does not cope with ID `73h`, never finishes
+initialising, and its main menu comes up without a selection cursor. The hardware default is the
+default for a reason.
+
+A DS4's light bar shows those colours, so the mode a game selected is visible on the pad. It needs
+access to the pad's hidraw node, which is root-only by default; without it SDL uses the kernel evdev
+path — buttons, sticks and rumble work, the light bar does not.
+
+```sh
+echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="054c", MODE="0660", TAG+="uaccess"' \
+  | sudo tee /etc/udev/rules.d/99-sony-hidraw.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Replug the pad afterwards.
+
+Button bits are the same in every region — the pad's bottom button is × (bit 14) and its right button
+○ (bit 13) worldwide. What varies is the software: the PS1 shell and Japanese-developed titles confirm
+with ○, most Western ones with ×. `ZS1_PAD_SWAP_XO=1`, or the checkbox in the Controller window,
+swaps which physical button drives which bit if you prefer × to confirm everywhere.
 
 ### Environment variables
 
@@ -66,9 +120,14 @@ Three things trip people up, in order of how often:
 | `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU |
 | `ZS1_AUDIO_DUMP=path` | Record what is handed to the sound device, as raw interleaved 16-bit stereo |
 | `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging an artefact |
+| `ZS1_OVERSCAN=0` | Show the 8 display lines an NTSC TV crops at the top and bottom instead of cropping them (PAL is never cropped — it is underscanned already) |
+| `ZS1_DMA_GPU_PACE=legacy` | Pace GPU DMA with the old flat quantum instead of the documented 1 clk/word |
+| `ZS1_DISPLAY_LATCH=1` | Build each frame from the display state latched at the previous field boundary — an A/B switch, off because it delays the picture a whole field |
 | `ZS1_SPU_NO_STRETCH=1` | Bypass the output time-stretch, same purpose |
 | `ZS1_DUMP_FRAME=path` | Dump a rendered frame as raw RGB (`ZS1_DUMP_FRAME_N` selects which) |
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |
+| `ZS1_PAD_MODE=digital\|analog\|stick` | Pad mode at boot (default `digital`, as on hardware) |
+| `ZS1_PAD_SWAP_XO=1` | Report the pad's bottom button as ○ and its right one as × |
 
 `ZS1_GPU` sets the PRIME offload variables the driver stack already reads, before the GL context is
 created; setting them by hand works identically. The run always logs which driver it ended up on and
@@ -81,20 +140,20 @@ is a normal failure, and it is a real source of rendering differences.
 
 | Component | Status | Notes |
 |---|---|---|
-| CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch/load delay, MULT/DIV and GTE stalls |
+| CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch delay, a real load delay (the delay-slot opcode reads the old value; a same-register write beats the load; an exception lands it), MULT/DIV and GTE stalls |
 | I-Cache | Working | 256 lines × 4 words, tag + per-word valid bits |
 | RAM / BIOS ROM | Working | 2 MB + 1 KB scratchpad; SCPH-1001 and SCPH-7502 |
 | IRQ controller | Working | Edge-triggered I_STAT/I_MASK, every source wired |
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
 | DMA | Working | All channels; linked-list and block transfers, completion interrupts |
 | Timers 0/1/2 | Working | Derived counters, all sync modes, video-mode-derived clock rates |
-| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing |
-| SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; analog protocol 41h/73h/F3h, both memory card slots |
+| CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten; GetlocL/Pause refuse with 80h during a seek, Setloc validates BCD, and the ATV volume matrix reaches the mix. `.bin` and `.bin.ecm` images, the latter decoded on the fly and verified byte-identical against the container's own whole-file EDC |
+| SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
 | GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
-| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v4 |
+| Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v9 |
 | PCDrv | Working | Host filesystem side-channel for homebrew |
 | Debugger / UI | Working | Disassembler, breakpoints, watchpoints, exec trace, Lua console |
 
@@ -102,39 +161,52 @@ The machine's three clocks hold nominal: measured over 128 seconds, the CPU runs
 33.8688 MHz, video at 0.9997 of 50 fields a second, audio at 1.0002 of 44100 samples a second, and the
 CD drive streams at the same 150 sectors a second a reference emulator does.
 
+Boot timing is checked the same way, in emulated fields rather than wall clock — every log line
+carries the CRTC field count, and a reference emulator's run is put on that axis by counting its
+v-blanks. `Ace Combat 2` reaches each of its BIOS TTY milestones within ~2% of the reference, end to
+end, and the machine holds 50 fields a second while doing it.
+
 Rendering is OpenGL 3.3 only — no Vulkan, no software renderer.
+
+### Tested games
+
+Every disc that has been run here, and how far it got. Three titles is not a compatibility list; it
+is the whole sample.
+
+| Game | Serial | Image | How far |
+|---|---|---|---|
+| Ace Combat 2 (Europe) | `SCES-00699` | `.bin` | **Full gameplay.** Boot, FMV intro, textured menus, missions, memory-card saves — played through and stable |
+| Disney·Pixar Monsters & Co. — L'Isola dello Spavento (Italy) | `SCES-03765` | `.bin` | Boots, plays both FMV intros, reaches the title screen, starts a new game and runs its 3D engine. Silent during gameplay — the one open bug below |
+| Crash Bandicoot 3 — Warped (Europe) | `SCES-01420` | `.bin.ecm` | Boots to the main menu. Gameplay not tested. The first disc run from a compressed image |
+
+All three are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
+emulated-field axis: `Execute !` at f804, f874 and f843 respectively, with no disc errors.
 
 ---
 
 ## Known bugs
 
-Accepted for now. Each is understood well enough to say what it is and what it is not.
+One, currently:
 
-- **The picture shifts at some transitions.** Games move the GP1(07) vertical display range — this one
-  walks 240 → 254 → 236 → 239 → 240 scanlines while booting — and the presentation does not yet place
-  those on a fixed raster the way a TV does. Not a rendering fault: the image is correct, its framing
-  is not.
-- **Audio cuts for a few seconds at scene changes.** Twice in a 212-second session, at 3.08 s and
-  2.72 s. Both are the game itself clearing SPUCNT bit 0 and taking CD audio out of the mix; the ring
-  never starved. What is not established is why the gap is that long, which depends on what the drive
-  is doing meanwhile — `scripts/recenter_watch.lua` reports the sector rate inside the window.
-- **Occasional small audio underruns** during play. One event in that same 212-second session.
-- **Rumble is unverified.** Implemented on both the one-motor and the `4Dh`-mapped methods, never
-  confirmed against a real pad. There is also no UI for pad state or remapping; the mapping is
-  hard-coded in `src/core/controller.c`.
-- **No multitap, no DualShock 2 pressure sensing.**
-- **The CRTC advances once per frame**, not per scanline, which leaves Timer0's hblank gate unwired.
-  Texpage bit 11 (Y base 2) is not applied.
-- **The BIOS ROM costs nothing to execute.** Memory timing is charged to RAM loads only, so code
-  running out of ROM — which is all of the boot sequence — runs faster than hardware. This is why our
-  boot reaches the drive about two seconds before a reference emulator does.
-- **`make test` does not build**; `tests/` is referenced by the Makefile but is not in the tree.
+- **No audio during gameplay and the in-engine 3D cutscenes of `Monsters & Co. (Italy)`.** The FMV
+  intros play with their sound, so the XA path and the output device are both fine; it is the SPU
+  voice mix that goes quiet once the game is running its own engine.
+  `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks, the rail hits and the XA
+  and ring counters in one run, and `ZS1_SPU_NO_REVERB=1` is the one-run A/B.
+
+### Not implemented
+
+Absences rather than defects: no multitap and no DualShock 2 pressure sensing; the CRTC advances once
+per frame rather than per scanline, which leaves Timer0's hblank gate unwired; texpage bit 11
+(Y base 2) is not applied; and BIOS ROM *data* reads cost nothing, though instruction fetches do pay
+their MEMCTRL wait states. Rumble is written against both the one-motor and the `4Dh`-mapped methods
+and has never been confirmed against a real pad.
 
 ---
 
 ## Debug UI
 
-The SDL2 window is an ImGui workspace; nothing goes to the terminal. A **machine bar** carries BIOS,
+The SDL3 window is an ImGui workspace; nothing goes to the terminal. A **machine bar** carries BIOS,
 disc, live PC and the vitals (frame ms, audio-queue depth, drift). A **mode rail** on F1–F8 replaces
 what used to be a grid of floating panels:
 
@@ -178,16 +250,27 @@ Design notes worth knowing before changing anything:
 - **The event scheduler is the single timing authority.** Nothing else may schedule work.
 - **No `malloc` in hot paths.** Structs are embedded, not heap-allocated.
 
-Memory map, per-subsystem state and the open work queue: `GAP_ANALYSIS_REFACTOR_2026-07-13.md`,
-`GPU_GAP_ANALYSIS_2026-07-15.md`, `docs/study/README.md`, and `docs/ui/` for the interface direction.
+Memory map, per-subsystem state and the open work queue: `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md`,
+`docs/GPU_GAP_ANALYSIS_2026-07-15.md`, `docs/study/README.md`, and `docs/ui/` for the interface direction.
 
 ---
 
 ## References
 
-Hardware behaviour comes from the documentation in `DOCS/` (the nocash PSX specification), cited by
-file and line where it decides a value in the code. `pcsx-redux/` is consulted as a GPL-2.0+ reference
-and credited where used.
+What this emulator was actually written against:
+
+- **psx-spx**, Martin "nocash" Korth's PlayStation specification, [psx-spx.consoledev.net](https://psx-spx.consoledev.net/) —
+  the source of nearly every value in the code, cited by file and line as `DOCS/…`.
+- **[PCSX-Redux](https://github.com/grumpycoders/pcsx-redux)** (GPL-2.0+) — consulted where the
+  specification is ambiguous, and the origin of parts of the SPU; credited in the file headers.
+- **[DuckStation](https://github.com/stenzek/duckstation)** — consulted only for *what the hardware
+  does*. Its licence forbids derivative works, so none of its code is here.
+- **Lionel Flandrin's PlayStation Emulation Guide** ([simias/psx-guide](https://github.com/simias/psx-guide)) —
+  followed while the first subsystems were being built.
+
+None of those documents are redistributed here; the `DOCS/…` citations resolve against a clone you
+make yourself (`git clone https://github.com/psx-spx/psx-spx.github.io && ln -s psx-spx.github.io/docs DOCS`).
+`THIRD-PARTY.md` is the full account, including the MIT components that *are* vendored.
 
 ## License
 

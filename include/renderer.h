@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 // --- OpenGL Includes ---
 // Make sure you have GLEW (or GLAD) headers included correctly in your project setup
@@ -151,13 +151,14 @@ typedef struct {
     /* Display region — cropped from CRTC state, passed to GPU thread blit */
     uint16_t display_x, display_y, display_w, display_h;
     bool     display_depth24;   /* GPUSTAT.21 — display area is packed 24bpp */
+    bool     display_blank;     /* GPUSTAT.23 — display off: hardware shows black */
 
     /* GPU render thread (Phase 2 threading refactor) */
     SDL_Thread*  gpu_thread;
-    SDL_mutex*   gpu_mutex;
-    SDL_cond*    frame_ready;   /* GPU wakes when CPU submits a frame */
-    SDL_cond*    frame_done;    /* CPU waits if GPU is behind */
-    SDL_atomic_t gpu_stop;
+    SDL_Mutex*   gpu_mutex;
+    SDL_Condition*    frame_ready;   /* GPU wakes when CPU submits a frame */
+    SDL_Condition*    frame_done;    /* CPU waits if GPU is behind */
+    SDL_AtomicInt gpu_stop;
     int          write_idx;     /* CPU writes to slot [write_idx]; GPU reads [1-write_idx] */
     int          frames_pending;
     SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
@@ -417,6 +418,10 @@ void renderer_set_mask_test(Renderer* renderer, bool enabled);
  */
 void renderer_set_display_region(Renderer* renderer, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void renderer_set_display_depth24(Renderer* renderer, bool depth24);
+/* GP1(03).0: display off. DOCS/graphicsprocessingunitgpu.md:647 — "The \"Off\"
+ * settings displays a black picture". Games blank the screen across a scene
+ * change while they rebuild VRAM; without this the raw VRAM is on screen. */
+void renderer_set_display_blank(Renderer* renderer, bool blank);
 
 /* Staging-pool telemetry for the Lua console (bytes used in the current write
  * slot, all-time single-frame peak, queued updates, rects dropped for space). */
