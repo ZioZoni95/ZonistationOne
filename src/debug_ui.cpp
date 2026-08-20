@@ -350,11 +350,49 @@ typedef void (*ZsIconFn)(ImDrawList*, ImVec2, float, ImU32, float);
 
 static char   g_bios_name[64] = "n/a";
 static char   g_disc_name[96] = "n/a";
-static double g_vit_frame_ms  = 0.0;
+static double g_vit_frame_ms  = 0.0;   /* raw, this loop iteration */
+static double g_vit_frame_ema = 0.0;   /* smoothed, what the panels show */
 static double g_vit_budget_ms = 0.0;
 static int    g_vit_aq        = 0;
 static int    g_vit_aq_target = 2048;
 static double g_vit_drift     = 0.0;
+
+/* Fields the machine actually presented per real second.
+ *
+ * The rate was being read as 1000 / frame_ms of a single loop iteration, and
+ * that number is not a frame rate: with an audio device open the pacing loop
+ * waits in SDL_Delay(1) steps until the SPU ring drains, so one iteration lands
+ * at 16 ms and the next at 24 ms around the same 20 ms mean. The instantaneous
+ * reciprocal then swings between 42 and 62 while the machine is keeping perfect
+ * PAL time — which is what "60 fps on a PAL BIOS" was.
+ *
+ * Counting VBlanks over half a second answers the question that was actually
+ * being asked: how many fields reached the screen in the last real second. */
+static double field_rate_hz(Interconnect* inter) {
+    static uint32_t prev_fields = 0;
+    static double   prev_t      = 0.0;
+    static double   rate        = 0.0;
+    static bool     init        = false;
+    if (!inter) return 0.0;
+
+    double t = ImGui::GetTime();
+    uint32_t f = inter->field_count;
+    if (!init) { prev_fields = f; prev_t = t; init = true; return 0.0; }
+    double dt = t - prev_t;
+    if (dt >= 0.5) {
+        rate = (double)(uint32_t)(f - prev_fields) / dt;
+        prev_fields = f;
+        prev_t = t;
+    }
+    return rate;
+}
+
+/* The machine's own nominal refresh, from the CRTC's current video mode. */
+static double nominal_hz(Interconnect* inter) {
+    if (!inter) return 0.0;
+    uint32_t cpf = gpu_cycles_per_frame(&inter->gpu);
+    return cpf ? (double)PSX_SYSCLK_HZ / (double)cpf : 0.0;
+}
 
 extern "C" void debug_ui_set_machine_info(const char* bios_name, const char* disc_name) {
     snprintf(g_bios_name, sizeof(g_bios_name), "%s", bios_name ? bios_name : "n/a");
@@ -364,6 +402,9 @@ extern "C" void debug_ui_set_machine_info(const char* bios_name, const char* dis
 extern "C" void debug_ui_set_vitals(double frame_ms, double budget_ms,
                                     int audio_queue, int audio_target, double drift_pct) {
     g_vit_frame_ms  = frame_ms;
+    /* Smoothed for display: the pacing wait quantises a single iteration to the
+     * millisecond, so the raw value is unreadable even when the mean is right. */
+    g_vit_frame_ema = (g_vit_frame_ema <= 0.0) ? frame_ms : g_vit_frame_ema * 0.9 + frame_ms * 0.1;
     g_vit_budget_ms = budget_ms;
     g_vit_aq        = audio_queue;
     g_vit_aq_target = audio_target > 0 ? audio_target : 2048;
@@ -1737,21 +1778,28 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     }
 
     // Vitals, right-aligned
-    float vitals_w = 4 * 96.0f;
+    float vitals_w = 5 * 96.0f * g_ui_scale;
     float avail = ImGui::GetContentRegionAvail().x;
     if (avail > vitals_w) ImGui::SameLine(0, avail - vitals_w);
     else ImGui::SameLine();
 
-    // Speed: budget / measured wall time. Reads low with panels open — that is
-    // the whole point of the vital, not a benchmark figure.
-    double speed = (g_vit_frame_ms > 0.001) ? (g_vit_budget_ms / g_vit_frame_ms) * 100.0 : 0.0;
+    // Speed: fields presented per real second against the mode's nominal rate.
+    // Not 1000/frame_ms — see field_rate_hz(); one iteration's reciprocal swings
+    // by ±20% around a mean the machine is hitting exactly.
+    double hz_now  = field_rate_hz(inter);
+    double hz_nom  = nominal_hz(inter);
+    double speed   = (hz_nom > 0.1) ? (hz_now / hz_nom) * 100.0 : 0.0;
     char sbuf[16]; snprintf(sbuf, sizeof(sbuf), "%.0f%%", speed);
     ImVec4 scol = speed >= 98.0 ? ZS_OK : (speed >= 90.0 ? ZS_WARN : ZS_CRIT);
     vital("Speed", sbuf, scol, (float)(speed / 100.0), scol);
 
     ImGui::SameLine();
-    char fbuf[24]; snprintf(fbuf, sizeof(fbuf), "%.1f ms", g_vit_frame_ms);
-    float ffrac = g_vit_budget_ms > 0.001 ? (float)(g_vit_frame_ms / g_vit_budget_ms) : 0.0f;
+    char rbuf[24]; snprintf(rbuf, sizeof(rbuf), "%.1f / %.1f", hz_now, hz_nom);
+    vital("Fields/s", rbuf, ZS_DATA, (float)(hz_nom > 0.1 ? hz_now / hz_nom : 0.0), ZS_DATA);
+
+    ImGui::SameLine();
+    char fbuf[24]; snprintf(fbuf, sizeof(fbuf), "%.1f ms", g_vit_frame_ema);
+    float ffrac = g_vit_budget_ms > 0.001 ? (float)(g_vit_frame_ema / g_vit_budget_ms) : 0.0f;
     ImVec4 fcol = ffrac <= 1.0f ? ZS_OK : ZS_WARN;
     vital("Frame", fbuf, ZS_TEXT, ffrac, fcol);
 
@@ -3496,8 +3544,11 @@ static void gp_draw_hud(Interconnect* inter, float alpha) {
         uint32_t cpf = gpu_cycles_per_frame(&inter->gpu);
         if (cpf) hz = (double)PSX_SYSCLK_HZ / (double)cpf;
     }
-    double speed = (g_vit_frame_ms > 0.001) ? (g_vit_budget_ms / g_vit_frame_ms) * 100.0 : 0.0;
-    double fps   = (g_vit_frame_ms > 0.001) ? 1000.0 / g_vit_frame_ms : 0.0;
+    /* Fields per real second, counted over half a second — not the reciprocal of
+     * one loop iteration, which reads 60+ on a PAL machine that is keeping
+     * exact 49.75 Hz time because the pacing wait quantises to the millisecond. */
+    double fps   = field_rate_hz(inter);
+    double speed = (hz > 0.1) ? (fps / hz) * 100.0 : 0.0;
 
     SioPadMode pad = inter ? sio_get_pad_mode(&inter->sio) : SIO_PAD_DIGITAL;
     ImVec4 led = (pad == SIO_PAD_ANALOG) ? ZS_CRIT : (pad == SIO_PAD_STICK) ? ZS_OK : ZS_FAINT;
@@ -3508,7 +3559,7 @@ static void gp_draw_hud(Interconnect* inter, float alpha) {
     char l1[48], l2[48], l3[48], l4[48];
     snprintf(l1, sizeof(l1), "%.1f fps", fps);
     snprintf(l2, sizeof(l2), "%.0f%%", speed);
-    snprintf(l3, sizeof(l3), "%.1f ms", g_vit_frame_ms);
+    snprintf(l3, sizeof(l3), "%.1f ms", g_vit_frame_ema);
     snprintf(l4, sizeof(l4), "%s %.2f Hz", pal ? "PAL" : "NTSC", hz);
 
     ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();

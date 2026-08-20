@@ -110,6 +110,36 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **Loading a savestate erased the memory cards.** `MemoryCard` sits inside `Sio` and `T_SIO` is a
+  raw read of the struct, so a state restored its own card images over the live ones. Nothing looked
+  wrong at that moment — but the card driver writes frame 63 as a write test during *every* boot,
+  which marks the card dirty and rewrites the whole 128 KB file, so a state captured with empty cards
+  destroyed a card full of saves one boot later. Savestate format is **v10**: the cards are held
+  across the `T_SIO` read and put back, because a memory card is host storage like the disc image and
+  nothing on hardware rewinds the card in your hand when the machine is restored.
+- **Memory card writes are atomic, and the first write of a session takes a backup.** The save wrote
+  straight over the `.mcd`, so a crash mid-write left a truncated card. It now writes a temp file and
+  renames it, and copies the file to `<path>.bak` before the first overwrite — the card as the
+  session found it.
+- **Get ID (53h) answered two bytes out of step.** The card state machine ran every command through
+  the address byte-pair, but Get ID takes none: after ID2 the card owes 5Ch, 5Dh, 04h, 00h, 00h, 80h
+  (`psx-spx-docs/docs/controllersandmemorycards.md:2386-2397`). The host read 00h and the echoed
+  address where the two acknowledge bytes belong — a card that fails to identify itself, which is
+  indistinguishable from an empty slot.
+- **An invalid card command kept the bus.** "Transfer aborts immediately after the faulty command
+  byte" (`:2409-2415`); the card went on acknowledging instead, so the host waited on a device that
+  would not let go.
+- **An out-of-range sector read now answers FFFFh and aborts**, as an original Sony card does
+  (`:2371-2375`), instead of returning FFh-filled data as though the sector existed.
+- **The controller answered on port 2 as well.** The ports are wired in parallel and narrowed by the
+  address byte (`:50-57`), so one pad appeared in both — and the BIOS probes both ports.
+- **The frame-rate readout was not a frame rate.** It was `1000 / frame_ms` of a single loop
+  iteration; with an audio device open the pacing loop waits in `SDL_Delay(1)` steps, so consecutive
+  iterations land at 16 ms and 24 ms around the same 20 ms mean and the reciprocal swings between 42
+  and 62 while the machine keeps exact PAL time. That is what "60+ fps on a PAL BIOS" was. Both
+  shells now count VBlanks over half a second, show it against the mode's nominal rate, and derive
+  Speed from the same measurement; the millisecond readout is smoothed.
+
 - **The debug panels were showing invented data.** The Host HW panel carried a hard-coded laptop
   model, CPU, GPU, driver version, kernel, RAM figure and four thread-load bars with constants in
   them; the inspector repeated four of them. A panel that says "RTX 4060" on a machine running on the
