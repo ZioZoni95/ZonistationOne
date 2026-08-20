@@ -34,6 +34,39 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **A gameplay shell.** The window now has two shells and switches between them at any time — the
+  backquote key, Shift+F1, the *Gameplay* button on the machine bar, or the quick menu — with the
+  machine running across the switch. The gameplay shell shows the emulated screen and nothing else:
+  a HUD (fps, speed, host frame ms, region and refresh, the pad's LED) that fades after ~3 s idle and
+  returns on any input, and `Esc` for a quick menu with session counters, four save-state slots, pad
+  mode, a machine summary and quit. It owns no machine state: `Esc` reaches it through
+  `debug_ui_escape_pressed()` and the menu parks requests that `main.c` carries out, the same way a
+  Lua script's `emu.load_state()` does. `ZS1_UI=debug` opens straight into the workspace.
+- **The pad is drawn.** The Controller window shows a DualShock — grips, cross, symbol buttons, four
+  shoulders, both sticks with their live deflection, and the Analog LED in its documented colour —
+  lit from the same 16-bit word the SIO sends the game. Clicking a control rebinds it; the scancode
+  table is still there, folded away.
+- **Pinned watches are real.** The four tiles were constants. They are now Lua expressions evaluated
+  through the new `lua_debug_eval_expr()` — the whole `emu.*` surface — every sixth frame and only
+  while the panel is visible, with the error text shown in the tile instead of a console line per
+  refresh. Click a tile to edit, right-click to remove, up to eight.
+- **`src/core/host_info.c`** reads the host from `/proc`, `/sys`, `uname` and the live GL and SDL
+  device strings: machine, CPU model and core count, kernel, memory, the GL renderer and driver,
+  whether a `ZS1_GPU` request was honoured, the audio device's own format and buffer, and per-thread
+  CPU from `/proc/self/task`. The threads are named (`GPU`, `cdrom-read`) so the list is readable.
+- **Interface scale.** A UI face, a display face and a real monospace face are loaded at a factor
+  taken from `SDL_GetWindowDisplayScale()` (or the window's pixel height), with
+  `ImGuiStyle::ScaleAllSizes` to match; `ZS1_UI_SCALE` overrides it. 15 px on a 1440p panel was a
+  squint, and the "monospace" log windows were pushing the proportional face — `Fonts[0]` is the UI
+  font, so the toggle did nothing.
+- **The Frame view holds a frame** (a copy, so recording carries on), plots events on a millisecond
+  axis, shows each row's payload beside its count, draws the display flip across every row as the
+  anchor the rest is read against, and draws the budget line only when the frame overran it. Hovering
+  a tick reports its time, cycle and payload.
+- `mdec_stat_macroblocks()` — macroblocks pushed out since boot, kept as a file-static rather than a
+  field in `Mdec`, because the savestate writes that struct as one sized span and would refuse every
+  existing v6 state for the sake of a counter the UI reads.
+
 - **ECM disc images** (`.bin.ecm`), decoded on the fly. A lookup table built at load time maps each
   decoded sector to its position in the compressed stream, so random access costs one `fseek`; the
   sector's own MSF is reconstructed from the absolute LBA, since the format strips it. Written from
@@ -77,6 +110,22 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **The debug panels were showing invented data.** The Host HW panel carried a hard-coded laptop
+  model, CPU, GPU, driver version, kernel, RAM figure and four thread-load bars with constants in
+  them; the inspector repeated four of them. A panel that says "RTX 4060" on a machine running on the
+  iGPU is worse than no panel, since that line is the first thing checked before a rendering
+  difference is blamed on the emulator. Everything there is now read from the kernel and the live
+  context.
+- **The Pipeline view's status words were literals** — "OK", "READY", "RUNNING", "24 Voices 44.1 kHz"
+  — so the view answered the same thing whether the drive was seeking, idle or absent, which is the
+  one question it exists to answer. Each node now reports the drive state, the MDEC decode state, the
+  DMA channel's sync mode and MADR, GPUSTAT, the display state, the count of keyed-on voices and the
+  ring depth, with per-frame figures from the frame event ring.
+- The gameplay quick menu drew its backdrop on the foreground draw list, which is painted over every
+  window — so the veil landed on top of the menu and the whole panel came out in shadow.
+- `micro_label()` letter-spaced every header into a 64-byte buffer, which truncated any header longer
+  than about thirty characters. Spacing is now applied only while the label stays a label.
+
 - **LWL/LWR merged against the wrong pipeline slot**, corrupting every unaligned 32-bit load whose
   pair needed a real merge. The two functions read `cpu->load_reg_idx` — the slot for the load *this*
   instruction issues, which `cpu_retire_load_delay()` has just cleared — instead of
@@ -237,6 +286,18 @@ identical percentiles, which is the check that a host optimisation has not moved
   range; v9 removed `Cpu.out_regs[32]` and added the second load-delay slot. `T_CPU` is the raw
   struct, so both move every field after the GPRs. Older states are refused rather than restored
   shifted.
+
+### Absent by decision
+- **The gameplay shell cannot pick, swap or restart a disc.** No library (the disc still comes from
+  `--game=`), no hot swap (`cdrom_load_disc()` exists, but a swap the guest can believe needs the
+  shell-open latch, the INT it is owed and the region check, none of which are wired), and no reset
+  (there is no `system_reset()` — nothing re-initialises CPU and Interconnect against a live
+  machine). *Reset console* was left out of the quick menu rather than bound to something that only
+  looks like a reset.
+- **Video and audio settings are shown, not offered.** Scaling, crop, scanlines and volume have no
+  runtime setter in the renderer or the mixer, and reverb is guest state in SPUCNT rather than a host
+  preference. The quick menu carries the controls that exist — pad mode, save-state slots, the
+  workspace, quit — and reports the rest.
 
 ### Measured, not resolved
 - **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &

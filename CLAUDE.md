@@ -23,7 +23,8 @@ Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as w
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
-default digital, as on hardware).
+default digital, as on hardware), `ZS1_UI=gameplay|debug` (which shell the window opens in; default
+gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -34,6 +35,47 @@ rendering difference as an emulator bug.
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
+
+---
+
+## The two shells
+
+The window has a **gameplay shell** and the **debug workspace**, and switches between them at any
+time with the backquote key (`` ` ``), Shift+F1, the *Gameplay* button on the machine bar, or the
+quick menu's *Debug workspace*. `ZS1_UI=debug` opens straight into the workspace. The machine keeps
+running across a switch.
+
+- **Gameplay shell** — the emulated screen and nothing else. A HUD (fps, speed, host frame ms,
+  region and refresh, the pad's LED) fades out after ~3 s idle and returns on any input. `Esc` opens
+  a quick menu: session counters, save/load into four slots (slot 0 is the one F5/F8 use), pad mode,
+  a machine summary, the workspace, and quit. Nothing here polls the core — the shell asks and
+  `main.c` carries the request out (`debug_ui_take_state_request`, `debug_ui_take_quit_request`);
+  `Esc` reaches it through `debug_ui_escape_pressed()`, which returns false in the workspace so the
+  key still quits there.
+- **Debug workspace** — the nine view modes, the log dock and the inspector, unchanged.
+
+**Nothing on either shell is typed in.** The Host HW panel and the inspector's host block read
+`/proc`, `/sys`, `uname` and the live GL and SDL device strings through `src/core/host_info.c` —
+including which GPU actually got the context and whether a `ZS1_GPU` request was honoured, which is
+the first thing to check before blaming a rendering difference on the emulator. Thread load comes
+from `/proc/self/task`, sampled twice a second. The pinned watches are Lua expressions evaluated
+through `lua_debug_eval_expr()` — the Script console's whole `emu.*` surface, evaluated every sixth
+frame and only while the panel is visible; click a tile to edit its expression, right-click to drop
+it. The Pipeline view's status words are the drive state, the MDEC decode state, the DMA channel's
+sync mode, GPUSTAT, the display state, the count of keyed-on voices and the ring depth; per-frame
+figures come from the frame event ring, recorded only while a view that reads it is open.
+
+The Frame view holds a frame on demand (a copy — recording carries on), plots each event by CPU
+cycle with a millisecond axis, shows the payload beside the count, marks the display flip across
+every row, and marks the budget line only when the frame overran it.
+
+The Controller window draws a DualShock: every control is lit from the same 16-bit word the SIO
+sends the game, the sticks show their live deflection, the LED shows the pad mode's documented
+colour, and clicking a control rebinds it. The scancode list is still there, folded away.
+
+Fonts and spacing follow the display: a UI face, a display face and a real monospace face are loaded
+at a scale taken from `SDL_GetWindowDisplayScale()` (or the window's pixel height), and
+`ImGuiStyle::ScaleAllSizes` follows. `ZS1_UI_SCALE` overrides it.
 
 ---
 
@@ -195,8 +237,9 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
   fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
   Co. work" further down.
-- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: boots to the main menu
-  (2026-08-19, after the LWL/LWR fix below). Gameplay not tested.
+- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
+  (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
+  image, so the ECM path is exercised under real seek and streaming load, not just at boot.
 - **ECM images decode on the fly** (`src/cdrom/cdrom_ecm.c`, `src/cdrom/ecm_edc.c`). Never suspect
   the decoder from game behaviour: the container appends the EDC (CRC32, poly 0xD8018001) of the
   *entire* decoded output as its last four bytes, so decoding the whole image and running that CRC
@@ -280,6 +323,28 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 ## Known Broken / Absent
 
+- **The gameplay shell cannot change what is running.** Three pieces of the shell's design are not
+  implemented, and each is blocked on machine-side work rather than on interface work:
+  - **No disc library.** The disc still comes from `--game=` on the command line. `games/` is not
+    scanned and nothing in the shell can start a title; the quick menu describes the disc that was
+    loaded at startup and nothing else.
+  - **No disc swap while running.** `cdrom_load_disc()` exists and would load the image, but a swap
+    on hardware is a shell-open / shell-closed cycle the drive has to report — the status byte's
+    bit 4 latch, the pending INT the guest is owed, and the region check that rejects a PAL disc
+    under the US BIOS. None of that is wired, so a swap today would hand the guest a new image
+    behind its back. The disc list in the quick menu is a summary, not a picker.
+  - **No reset.** There is no `system_reset()`: nothing re-runs CPU and Interconnect init against a
+    live machine, and the savestate path is not a substitute because it restores rather than
+    restarts. *Reset console* was left out of the quick menu rather than wired to something that
+    only looks like a reset. Whoever adds it should treat the BIOS boot path as the reference —
+    `main.c` builds the machine once today, and the reset has to reach the drive, the SPU's RAM and
+    the event queue, not just the CPU.
+- **The shell's settings are read-only where the machine has no setter.** Volume, scanlines, scaling
+  mode and crop appear in the interface study's design and are not in the shell: the renderer has no
+  runtime switch for any of them, and reverb is guest state (SPUCNT), not a host preference. The
+  quick menu shows what the machine reports and offers the controls that do exist — pad mode,
+  savestate slots, the workspace, quit.
+
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
   `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the
@@ -304,6 +369,10 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   one wrong field from us — visible as the stretched 15bpp-read-as-24bpp frame after an FMV.
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
+
+`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: what exists (nothing automated),
+the four layers proposed, and the order. Read it before adding a test, and before claiming a
+subsystem is verified.
 
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
@@ -526,8 +595,12 @@ has to be there. Re-run before a release rather than trusting this line.
   like it had no effect, which invalidated most of a session — including three "measurements" taken
   against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
   check the binary's mtime before checking the change.
-- `make test` is broken and was already broken before this: `tests/` does not exist in the tree,
-  though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
+- `make test` is broken and was already broken before this: `tests/` is an empty directory, though
+  this file and the Makefile both reference `tests/cpu_minimal_test.c`. **There is no automated test
+  of any kind in this repository** — every accuracy claim here was established by running a game and
+  reading a log. That is the single largest structural gap, and `docs/TESTING_PLAN_2026-08-20.md`
+  is the plan for closing it, written the day after the LWL/LWR bug showed what it costs: months
+  live, most of a day to find, and sixteen assertions to have caught.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
   time" that was later withdrawn. It also applies to *diagnosing* slowness, not just quoting it: a
