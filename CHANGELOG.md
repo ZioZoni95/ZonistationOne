@@ -287,6 +287,18 @@ identical percentiles, which is the check that a host optimisation has not moved
   struct, so both move every field after the GPRs. Older states are refused rather than restored
   shifted.
 
+### Absent by decision
+- **The gameplay shell cannot pick, swap or restart a disc.** No library (the disc still comes from
+  `--game=`), no hot swap (`cdrom_load_disc()` exists, but a swap the guest can believe needs the
+  shell-open latch, the INT it is owed and the region check, none of which are wired), and no reset
+  (there is no `system_reset()` — nothing re-initialises CPU and Interconnect against a live
+  machine). *Reset console* was left out of the quick menu rather than bound to something that only
+  looks like a reset.
+- **Video and audio settings are shown, not offered.** Scaling, crop, scanlines and volume have no
+  runtime setter in the renderer or the mixer, and reverb is guest state in SPUCNT rather than a host
+  preference. The quick menu carries the controls that exist — pad mode, save-state slots, the
+  workspace, quit — and reports the rest.
+
 ### Measured, not resolved
 - **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &
   Co.: the game uploads its frames to `(x,8)` and `(x,264)` while its two display windows sit at

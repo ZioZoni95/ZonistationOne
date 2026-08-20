@@ -323,6 +323,28 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 ## Known Broken / Absent
 
+- **The gameplay shell cannot change what is running.** Three pieces of the shell's design are not
+  implemented, and each is blocked on machine-side work rather than on interface work:
+  - **No disc library.** The disc still comes from `--game=` on the command line. `games/` is not
+    scanned and nothing in the shell can start a title; the quick menu describes the disc that was
+    loaded at startup and nothing else.
+  - **No disc swap while running.** `cdrom_load_disc()` exists and would load the image, but a swap
+    on hardware is a shell-open / shell-closed cycle the drive has to report — the status byte's
+    bit 4 latch, the pending INT the guest is owed, and the region check that rejects a PAL disc
+    under the US BIOS. None of that is wired, so a swap today would hand the guest a new image
+    behind its back. The disc list in the quick menu is a summary, not a picker.
+  - **No reset.** There is no `system_reset()`: nothing re-runs CPU and Interconnect init against a
+    live machine, and the savestate path is not a substitute because it restores rather than
+    restarts. *Reset console* was left out of the quick menu rather than wired to something that
+    only looks like a reset. Whoever adds it should treat the BIOS boot path as the reference —
+    `main.c` builds the machine once today, and the reset has to reach the drive, the SPU's RAM and
+    the event queue, not just the CPU.
+- **The shell's settings are read-only where the machine has no setter.** Volume, scanlines, scaling
+  mode and crop appear in the interface study's design and are not in the shell: the renderer has no
+  runtime switch for any of them, and reverb is guest state (SPUCNT), not a host preference. The
+  quick menu shows what the machine reports and offers the controls that do exist — pad mode,
+  savestate slots, the workspace, quit.
+
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
   `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the
