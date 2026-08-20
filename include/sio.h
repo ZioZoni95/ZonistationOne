@@ -35,6 +35,7 @@ typedef struct {
     char filepath[256];           // Path to .mcd file
     bool present;                 // Card inserted flag
     bool dirty;                   // Needs save to file
+    bool backed_up;               // this process has already copied the file to .bak
 } MemoryCard;
 
 // SIO State

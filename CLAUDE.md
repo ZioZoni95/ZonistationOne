@@ -567,6 +567,17 @@ has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
 
+- **A savestate load used to erase the memory cards.** The cards live inside `Sio`, `T_SIO` is a raw
+  read of that struct, so loading a state replaced the live cards with whatever the state was written
+  with — and *every* boot writes frame 63 as the card driver's write test, which marks the card dirty
+  and rewrites all 128 KB of the `.mcd`. So a state captured with empty cards erased real saves one
+  boot later, silently, with no card operation the user performed. Fixed 2026-08-20 (state v10): the
+  cards are held across the `T_SIO` read and put back, saves go through a temp file and a rename, and
+  the first write of a session copies the card to `<path>.bak` first. If saves are missing anyway,
+  the `.mcd` files were tracked in git until 2026-08-07 — `git show 27f3293:memcard1.mcd` recovered an
+  Ace Combat 2 save that had already been lost this way.
+
+
 - **One runaway DMA presents as four unrelated defects.** A sliced transfer that keeps running after
   the guest aborted it wrote MDEC output over ~880 KB of guest RAM, and the report that came back was
   "the boot logo breaks, then the screen shows VRAM, then the audio cuts, and the DMA logs out of

@@ -35,8 +35,11 @@
  *    moving) and xa_mute (ADPCTL's ADPMUTE bit), both inside CDRH.
  * 9: Cpu lost out_regs[32] — the second register file the interpreter used to
  *    memcpy into regs on every instruction. T_CPU is the raw struct, so every
- *    field after the GPRs moved by 128 bytes. */
-#define ZS1_STATE_VERSION 9u
+ *    field after the GPRs moved by 128 bytes.
+ * 10: MemoryCard gained backed_up, which sits inside the raw T_SIO struct — and
+ *    loading a state no longer restores the memory cards at all (see the note
+ *    at the T_SIO read below). */
+#define ZS1_STATE_VERSION 10u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 
@@ -320,7 +323,21 @@ bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inte
     ok = ok && get_section(f, T_CDRH, &inter->cdrom,                          CDR_HEAD_SIZE);
     ok = ok && get_section(f, T_CDRT, (uint8_t*)&inter->cdrom + CDR_TAIL_OFF, CDR_TAIL_SIZE);
     ok = ok && get_section(f, T_SPU,  &inter->spu,  sizeof(Spu));
+    /* The memory cards are host storage, not machine state.
+     *
+     * They live inside Sio, so a raw read of the struct restores whatever cards
+     * the state was written with — and since every boot writes frame 63 as its
+     * write test, the next save flushes those cards over the .mcd files. A state
+     * captured with empty cards therefore erases real saves one boot later,
+     * which is exactly how two cards full of saves became two formatted blanks
+     * here. Nothing on hardware rewinds the card in your hand when the machine
+     * is restored, so the live cards are held across the read and put back. */
+    static MemoryCard keep_slot1, keep_slot2;   /* 128 KB each — not on the stack */
+    keep_slot1 = inter->sio.card_slot1;
+    keep_slot2 = inter->sio.card_slot2;
     ok = ok && get_section(f, T_SIO,  &inter->sio,  sizeof(Sio));
+    inter->sio.card_slot1 = keep_slot1;
+    inter->sio.card_slot2 = keep_slot2;
     bool sio_ok = ok && get_section(f, T_SIOI, sio_blk, sio_sz);
     ok = ok && sio_ok;
     ok = ok && get_section(f, T_MDEC, &inter->mdec, sizeof(Mdec));
