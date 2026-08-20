@@ -23,7 +23,8 @@ Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as w
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
-default digital, as on hardware).
+default digital, as on hardware), `ZS1_UI=gameplay|debug` (which shell the window opens in; default
+gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -34,6 +35,47 @@ rendering difference as an emulator bug.
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
+
+---
+
+## The two shells
+
+The window has a **gameplay shell** and the **debug workspace**, and switches between them at any
+time with the backquote key (`` ` ``), Shift+F1, the *Gameplay* button on the machine bar, or the
+quick menu's *Debug workspace*. `ZS1_UI=debug` opens straight into the workspace. The machine keeps
+running across a switch.
+
+- **Gameplay shell** — the emulated screen and nothing else. A HUD (fps, speed, host frame ms,
+  region and refresh, the pad's LED) fades out after ~3 s idle and returns on any input. `Esc` opens
+  a quick menu: session counters, save/load into four slots (slot 0 is the one F5/F8 use), pad mode,
+  a machine summary, the workspace, and quit. Nothing here polls the core — the shell asks and
+  `main.c` carries the request out (`debug_ui_take_state_request`, `debug_ui_take_quit_request`);
+  `Esc` reaches it through `debug_ui_escape_pressed()`, which returns false in the workspace so the
+  key still quits there.
+- **Debug workspace** — the nine view modes, the log dock and the inspector, unchanged.
+
+**Nothing on either shell is typed in.** The Host HW panel and the inspector's host block read
+`/proc`, `/sys`, `uname` and the live GL and SDL device strings through `src/core/host_info.c` —
+including which GPU actually got the context and whether a `ZS1_GPU` request was honoured, which is
+the first thing to check before blaming a rendering difference on the emulator. Thread load comes
+from `/proc/self/task`, sampled twice a second. The pinned watches are Lua expressions evaluated
+through `lua_debug_eval_expr()` — the Script console's whole `emu.*` surface, evaluated every sixth
+frame and only while the panel is visible; click a tile to edit its expression, right-click to drop
+it. The Pipeline view's status words are the drive state, the MDEC decode state, the DMA channel's
+sync mode, GPUSTAT, the display state, the count of keyed-on voices and the ring depth; per-frame
+figures come from the frame event ring, recorded only while a view that reads it is open.
+
+The Frame view holds a frame on demand (a copy — recording carries on), plots each event by CPU
+cycle with a millisecond axis, shows the payload beside the count, marks the display flip across
+every row, and marks the budget line only when the frame overran it.
+
+The Controller window draws a DualShock: every control is lit from the same 16-bit word the SIO
+sends the game, the sticks show their live deflection, the LED shows the pad mode's documented
+colour, and clicking a control rebinds it. The scancode list is still there, folded away.
+
+Fonts and spacing follow the display: a UI face, a display face and a real monospace face are loaded
+at a scale taken from `SDL_GetWindowDisplayScale()` (or the window's pixel height), and
+`ImGuiStyle::ScaleAllSizes` follows. `ZS1_UI_SCALE` overrides it.
 
 ---
 

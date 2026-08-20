@@ -39,6 +39,7 @@
 #include "system.h"
 #include "frame_events.h"
 #include "savestate.h"
+#include "host_info.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -199,6 +200,13 @@ static bool init_sdl(SdlCtx* out) {
                             gl_vendor ? gl_vendor : "?");
         else if (want)
             LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=%s honoured", want);
+
+        /* The Host HW panel reads this rather than carrying a typed-in GPU
+         * name: on a hybrid machine the honest answer changes per run. */
+        bool honoured = !want
+                     || (strcmp(want, "nvidia") == 0 && on_nvidia)
+                     || (strcmp(want, "intel")  == 0 && on_intel);
+        host_info_set_gl(gl_vendor, gl_renderer, gl_version, driver, want, honoured);
     }
 
     check_gl_error("GLEW init");
@@ -282,6 +290,7 @@ static void audio_init(Spu* spu) {
     if (dev) SDL_GetAudioDeviceFormat(dev, &got, &dev_frames);
     LOG_SYSTEM_INFO("[SYSTEM] Audio: %d Hz ch=%d fmt=0x%x buf=%d",
                     got.freq, got.channels, (unsigned)got.format, dev_frames);
+    host_info_set_audio(SDL_GetCurrentAudioDriver(), got.freq, got.channels, dev_frames);
 
     SDL_ResumeAudioStreamDevice(g_audio_stream);
 }
@@ -520,7 +529,12 @@ int main(int argc, char* argv[]) {
             controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
             if (ev.type == SDL_EVENT_QUIT) quit = true;
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) quit = true;
+            /* Escape belongs to the gameplay shell when that shell is up — it
+             * opens and closes the quick menu there. It still quits from the
+             * debug workspace, where there is no menu to open. */
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) {
+                if (!debug_ui_escape_pressed()) quit = true;
+            }
             /* Alt+Enter toggles borderless desktop fullscreen. SDL3 folded
              * FULLSCREEN_DESKTOP into a bool: a window with no display mode set
              * — which is ours — goes fullscreen-desktop. */
@@ -533,10 +547,12 @@ int main(int argc, char* argv[]) {
              * they work with every panel closed, which is when the emulator is
              * actually fast enough to reach the state worth capturing. */
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F5 && !ev.key.repeat) {
-                savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                bool ok = savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                debug_ui_notify_state_result(true, ok, SAVESTATE_DEFAULT_PATH);
             }
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F8 && !ev.key.repeat) {
                 load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                debug_ui_notify_state_result(false, true, SAVESTATE_DEFAULT_PATH);
             }
             /* F12 is the Analog button for players without a touchpad pad.
              * F1..F9 pick the debug UI mode, F10/F11 pause and step; F12 is the
@@ -544,6 +560,25 @@ int main(int argc, char* argv[]) {
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F12 && !ev.key.repeat) {
                 sio_cycle_pad_mode(&inter.sio);
             }
+        }
+
+        /* The gameplay shell's quick menu asks for a save or a load the same
+         * way a script does: it parks the request and the machine's owner
+         * carries it out here, outside the event dispatch. */
+        {
+            bool want_save = false;
+            char state_path[192];
+            if (debug_ui_take_state_request(&want_save, state_path, sizeof(state_path))) {
+                bool ok;
+                if (want_save) {
+                    ok = savestate_save(state_path, &cpu, &inter);
+                } else {
+                    load_state_guarded(state_path, &cpu, &inter);
+                    ok = true;
+                }
+                debug_ui_notify_state_result(want_save, ok, state_path);
+            }
+            if (debug_ui_take_quit_request()) quit = true;
         }
 
         /* A script's emu.load_state() parks its request rather than restoring

@@ -10,6 +10,7 @@
 
 #include <SDL3/SDL.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,18 @@ void debug_ui_set_machine_info(const char* bios_name, const char* disc_name);
  * Cheap by construction: two perf-counter reads, no logging. */
 void debug_ui_set_vitals(double frame_ms, double budget_ms,
                          int audio_queue, int audio_target, double drift_pct);
+
+/* --- gameplay shell handshake ---------------------------------------------
+ * The window has two shells: the debug workspace and a gameplay shell that
+ * shows the screen and an overlay. The shell does not own the machine, so the
+ * host loop asks it what the player pressed and then does the work itself.
+ *
+ * debug_ui_escape_pressed() returns true when the gameplay shell consumed the
+ * key (it opened or closed its menu). False means Escape still means quit. */
+bool debug_ui_escape_pressed(void);
+bool debug_ui_take_quit_request(void);
+bool debug_ui_take_state_request(bool* out_save, char* path, size_t path_size);
+void debug_ui_notify_state_result(bool save, bool ok, const char* path);
 
 #ifdef __cplusplus
 }
