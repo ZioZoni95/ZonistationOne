@@ -85,6 +85,16 @@ static inline int32_t clamp_s32(int32_t v, int32_t lo, int32_t hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* Macroblocks pushed to the output FIFO since boot.
+ *
+ * A file-static rather than a field in Mdec: the savestate writes the struct as
+ * one sized span and refuses a state whose section size does not match, so
+ * adding a counter to it would invalidate every existing v6 state for the sake
+ * of a number the UI reads. */
+static uint32_t g_mdec_macroblocks_out = 0;
+
+uint32_t mdec_stat_macroblocks(void) { return g_mdec_macroblocks_out; }
+
 /* -------------------------------------------------------------------------
  * RLE decode — DOCS/macroblockdecodermdec.md:138-158 (rl_decode_block).
  *
@@ -300,6 +310,7 @@ static void mdec_copy_out_block(Mdec* m) {
         default: break;
     }
     LOG_MDEC_DEBUG("[MDEC] Block copy out done, out_count=%u", m->out_count);
+    g_mdec_macroblocks_out++;
     /* State: idle if no more data, else loop for next macroblock */
     m->decode_state = (m->remaining_halfwords == 0) ? MDEC_ST_IDLE : MDEC_ST_DECODING;
 }

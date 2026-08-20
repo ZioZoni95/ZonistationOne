@@ -10,6 +10,10 @@
  * seek timing, and async reader thread.
  */
 
+/* pthread_setname_np: the thread list in the Host HW panel is only useful if
+ * the threads have names. */
+#define _GNU_SOURCE
+
 #include "cdrom_disc.h"
 #include "cdrom_ecm.h"
 #include "cdrom.h"
@@ -477,6 +481,9 @@ void cdrom_async_reader_init(CdromAsyncReader *r, CdromDisc *disc) {
     pthread_cond_init(&r->cond_req, NULL);
     pthread_cond_init(&r->cond_done, NULL);
     pthread_create(&r->thread, NULL, async_reader_thread, r);
+    /* Named so the Host HW thread list says which thread is which; the kernel
+     * truncates at 15 characters. */
+    pthread_setname_np(r->thread, "cdrom-read");
 }
 
 void cdrom_async_reader_shutdown(CdromAsyncReader *r) {

@@ -32,6 +32,12 @@ bool lua_debug_run_string(const char* code);
 /* Load and run a .lua file (script-editor "Load & Run"). */
 bool lua_debug_run_file(const char* path);
 
+/* Evaluate one expression ("emu.pc()", "emu.audio_stats().ring_used") and write
+ * a short printable form of the result into `out`. Returns false and writes the
+ * error message on failure — the pinned watch tiles show it in place of the
+ * value instead of logging it every refresh. */
+bool lua_debug_eval_expr(const char* expr, char* out, size_t out_size);
+
 /* Console output buffer (print()/emu.log() land here) for the ImGui panel. */
 const char* lua_debug_console_text(void);
 void        lua_debug_console_clear(void);
