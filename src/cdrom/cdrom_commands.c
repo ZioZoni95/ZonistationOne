@@ -343,6 +343,31 @@ void cdrom_execute_command(Cdrom *cdrom) {
             LOG_CDROM_DEBUG("[CDROM] Init dropped: one is already owed");
             break;
         }
+        /* "Multiple effects at once. Sets mode=20h, activates drive motor,
+         * Standby, abort all commands" (cdromdrive.md:536-537). None of that
+         * happened here: the mode kept whatever the last Setmode left — the
+         * game's own Setmode then arrived 50 fields later, so an Init issued
+         * while the drive was at double speed left it there — and an ongoing
+         * read carried on straight through a command whose whole purpose is to
+         * stop everything. */
+        cdrom->mode            = 0x20;
+        cdrom->double_speed    = false;
+        cdrom->xa_adpcm_enable = false;
+        cdrom->whole_sector    = true;
+        cdrom->xa_filter_enable= false;
+        cdrom->report_enable   = false;
+        cdrom->auto_pause      = false;
+        cdrom->cdda_enable     = false;
+        if (cdrom->drive_state == DRIVE_READING ||
+            cdrom->drive_state == DRIVE_PLAYING ||
+            cdrom->drive_state == DRIVE_SEEKING) {
+            cdrom->drive_state = DRIVE_IDLE;    /* Standby: motor on, head parked */
+            cdrom->seek_phase  = false;
+        }
+        cdrom->read_after_seek = false;
+        cdrom->play_after_seek = false;
+        cdrom->motor_on        = true;
+
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_INIT;
@@ -396,7 +421,9 @@ void cdrom_execute_command(Cdrom *cdrom) {
         cdrom->report_enable  = (m & 0x04) != 0;
         cdrom->auto_pause     = (m & 0x02) != 0;
         cdrom->cdda_enable    = (m & 0x01) != 0;
-        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d) @ 0x%08x",
+        /* The trailing "@ 0x%08x" here had no argument and printed whatever
+         * was next on the stack — four format specifiers, three values. */
+        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d)",
                         m, cdrom->double_speed, cdrom->whole_sector, cdrom->xa_adpcm_enable);
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
