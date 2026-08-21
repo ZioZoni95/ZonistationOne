@@ -241,8 +241,8 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
   (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
   image, so the ECM path is exercised under real seek and streaming load, not just at boot.
-- `Dino Crisis (E)` [SLES-02207], from a **`.bin.ecm`** plus its `.sbi`: boots past the protection
-  and draws its intro (2026-08-21). The disc is **LibCrypt**, and getting there took four separate
+- `Dino Crisis (E)` [SLES-02207], from a **`.bin.ecm`** plus its `.sbi`: boots past the protection,
+  plays its opening screens and reaches the **main menu** (2026-08-21). The disc is **LibCrypt**, and getting there took four separate
   fixes, none of them in the CDROM data path — see the four entries in `CHANGELOG.md` under this
   date. The one to remember: the protection keeps its own state in COP0's breakpoint registers,
   which is documented behaviour ("mis-used as general-purpose registers",
@@ -337,6 +337,14 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 ## Known Broken / Absent
 
+- **A VRAM write must flush whatever primitives are still pending.** `renderer_draw()` both builds a
+  batch and records its position in the frame's op list, so a primitive that has been submitted but
+  not flushed has no place in the order yet, and a VRAM op recorded meanwhile will be replayed before
+  it. `renderer_upload_vram_rect()` missed this and Dino Crisis lost every uploaded picture under its
+  own back-buffer clear — the images were in VRAM the whole time, which is why it looked like a
+  display bug. Fixed 2026-08-21. Anything new that touches VRAM from the CPU side has to flush first;
+  the reference emulator does it on the same four boundaries (FillVRAM, UpdateVRAM, CopyVRAM,
+  DownloadVRAMFromGPU).
 - **The gameplay shell cannot change what is running.** Three pieces of the shell's design are not
   implemented, and each is blocked on machine-side work rather than on interface work:
   - **No disc library.** The disc still comes from `--game=` on the command line. `games/` is not
@@ -359,6 +367,12 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   quick menu shows what the machine reports and offers the controls that do exist — pad mode,
   savestate slots, the workspace, quit.
 
+- **Audio in `Dino Crisis (E)`'s in-engine 3D cutscenes: repeats across some scene changes, and runs
+  ahead of the scene.** Both reported 2026-08-21, both absent from the FMVs, neither measured. The
+  FMVs staying in step is the useful half of the observation: it puts the XA path and the output
+  device in the clear and points at the SPU's own clock. Do not quote a drift figure from a run with
+  logging or a probe on — see the trap below; a guest burning cycles in a retry loop and a host that
+  cannot keep up look identical here and need opposite fixes.
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
   `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the

@@ -34,6 +34,9 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **`Dino Crisis (Europe)` [SLES-02207] reaches its main menu**, from a `.bin.ecm` plus its `.sbi` —
+  the first LibCrypt-protected disc to run here. Five separate defects stood between the disc booting
+  and the menu appearing, all listed under *Fixed* below; only one of them was in the CDROM.
 - **LibCrypt discs run, given their `.sbi`.** `Dino Crisis (E)` [SLES-02207] boots and reaches its
   intro. The protection stores a 16-bit key as deliberately wrong subchannel Q on 32 sectors of
   track 1; Q is not part of the 2352-byte sector, so no `.bin` dump carries it and the patches
@@ -122,6 +125,17 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **A VRAM upload jumped ahead of primitives that were submitted before it.** `renderer_draw()` is
+  what turns accumulated vertices into a batch *and* what records that batch's position in the
+  frame's op list, so a submitted primitive has no place in the order until something calls it.
+  `renderer_upload_vram_rect()` recorded its own op immediately and never flushed, so a draw issued
+  earlier was flushed later, took a higher op index, and was replayed on top of the upload.
+  Dino Crisis clears its back buffer with `GP0(02)` and then uploads the picture into it in the same
+  field: the clear landed after the picture, and its two opening screens and the title art stayed
+  black with the images sitting in VRAM the whole time. Measured in one frame — the upload carried
+  42116 of 76800 non-black pixels into `vram_tex`, and after that frame's five ops the same rect read
+  back 0 of 76800. `renderer_read_vram_rect()` already flushed for exactly this reason; the upload
+  side was missed.
 - **Timer 1 counted CPU cycles instead of hblanks, and it hung a game.** `timer_rate_cycles()` took
   counter 2's source rule and applied it to all three, but the three rows differ
   (`psx-spx-docs/docs/timers.md:34-36`): source 1 means Dotclock on counter 0 and Hblank on counter 1,
@@ -367,6 +381,17 @@ identical percentiles, which is the check that a host optimisation has not moved
   runtime setter in the renderer or the mixer, and reverb is guest state in SPUCNT rather than a host
   preference. The quick menu carries the controls that exist — pad mode, save-state slots, the
   workspace, quit — and reports the rest.
+
+### Open, in `Dino Crisis (Europe)`
+Both found 2026-08-21, both only in the in-engine 3D cutscenes and not in the FMVs, and neither
+measured yet.
+- **Audio repeats across some scene changes** — a fragment of the previous scene's sound plays again
+  as the new one starts.
+- **Audio drifts ahead of the cutscene it belongs to**, running faster than the scene so the two come
+  apart as it goes on. FMV playback stays in step, which points at the SPU's own clock rather than at
+  the XA path or the output device. The first run has to be a clean one — `ZS1_FRAME_PROFILE=1`, no
+  stderr logging, no Lua probe — because a guest burning cycles and a host that cannot keep up look
+  identical on screen and need opposite fixes.
 
 ### Measured, not resolved
 - **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &
