@@ -499,6 +499,16 @@ static const SbiEntry *sbi_find(const CdromDisc *disc, uint32_t lba) {
  * SubQ Generation
  * ========================================================================= */
 
+/* Whether this sector carries LibCrypt's deliberately wrong subchannel Q. The
+ * caller needs to know because the drive does not report such a sector at all:
+ * "the modified sectors have wrong CRCs (which means that the PSX cdrom
+ * controller will ignore them, and the GetlocP command will keep returning
+ * position data from the previous sector)" (cdromformat.md, CDROM Protection -
+ * LibCrypt). That repeat is the signal the protection reads. */
+bool cdrom_disc_sbi_covers(const CdromDisc *disc, uint32_t lba) {
+    return disc && sbi_find(disc, lba) != NULL;
+}
+
 SubQ cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba) {
     SubQ q = {0};
 

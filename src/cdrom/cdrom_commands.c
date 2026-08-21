@@ -965,9 +965,17 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom->current_read_buffer  = widx;
             cdrom->current_write_buffer = (widx + 1) % CDROM_SECTOR_BUFFERS;
 
-            /* Update SubQ */
-            cdrom->current_subq_lba = cdrom->current_lba;
-            cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+            /* Update SubQ — unless this is a LibCrypt sector, whose Q carries
+             * a deliberately wrong CRC. The controller discards such a sector's
+             * Q entirely and GetlocP keeps answering with the previous one
+             * (cdromformat.md, CDROM Protection - LibCrypt); that repeat is
+             * exactly the signal the protection counts, so handing the guest
+             * the modified values instead produced a wrong 16-bit key and Dino
+             * Crisis (E) walked into its own `j $` trap at 0x80029778. */
+            if (!cdrom_disc_sbi_covers(&cdrom->disc, cdrom->current_lba)) {
+                cdrom->current_subq_lba = cdrom->current_lba;
+                cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+            }
 
             LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1", cdrom->current_lba);
 
@@ -1045,9 +1053,11 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             prev_track = ct;
         }
 
-        /* Update SubQ */
-        cdrom->current_subq_lba = cdrom->current_lba;
-        cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+        /* Update SubQ — same LibCrypt rule as the data path above. */
+        if (!cdrom_disc_sbi_covers(&cdrom->disc, cdrom->current_lba)) {
+            cdrom->current_subq_lba = cdrom->current_lba;
+            cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+        }
 
         /* Report: INT1(stat, track, index, mm/amm, ss+80h/ass, sect/asect,
          * peaklo, peakhi) — eight bytes, and NOT on every sector. The packet

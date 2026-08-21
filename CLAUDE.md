@@ -24,7 +24,8 @@ windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FR
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
 default digital, as on hardware), `ZS1_UI=gameplay|debug` (which shell the window opens in; default
-gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale).
+gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale),
+`ZS1_SBI=<path>` (the LibCrypt patch file for the mounted disc, overriding the automatic search).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -240,6 +241,19 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
   (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
   image, so the ECM path is exercised under real seek and streaming load, not just at boot.
+- `Dino Crisis (E)` [SLES-02207], from a **`.bin.ecm`** plus its `.sbi`: boots past the protection
+  and draws its intro (2026-08-21). The disc is **LibCrypt**, and getting there took four separate
+  fixes, none of them in the CDROM data path — see the four entries in `CHANGELOG.md` under this
+  date. The one to remember: the protection keeps its own state in COP0's breakpoint registers,
+  which is documented behaviour ("mis-used as general-purpose registers",
+  `psx-spx-docs/docs/cdromformat.md`) and not something a CDROM trace can ever reveal.
+- **LibCrypt discs need an `.sbi`, and it must be the *same pressing*.** The 16-bit key lives in the
+  subchannel Q of 32 sectors, which no `.bin` dump holds. The file is found by the image's name with
+  extensions dropped one at a time, then the lone `.sbi` beside the image if there is exactly one;
+  `ZS1_SBI` overrides. `SLES-02210` is the Italian Dino Crisis and `SLES-02207` the English one:
+  the wrong file loads without complaint, patches sectors the game never reads, and the game hangs
+  exactly as if there were no file at all. DuckStation's `gamedb.yaml` lists `libcrypt: true` per
+  serial and is the quickest way to check whether a disc needs one.
 - **ECM images decode on the fly** (`src/cdrom/cdrom_ecm.c`, `src/cdrom/ecm_edc.c`). Never suspect
   the decoder from game behaviour: the container appends the EDC (CRC32, poly 0xD8018001) of the
   *entire* decoded output as its last four bytes, so decoding the whole image and running that CRC

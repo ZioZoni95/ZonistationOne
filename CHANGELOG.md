@@ -34,6 +34,18 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **LibCrypt discs run, given their `.sbi`.** `Dino Crisis (E)` [SLES-02207] boots and reaches its
+  intro. The protection stores a 16-bit key as deliberately wrong subchannel Q on 32 sectors of
+  track 1; Q is not part of the 2352-byte sector, so no `.bin` dump carries it and the patches
+  travel beside the image in an `.sbi`. `cdrom_disc_load_sbi()` reads the container (4-byte `SBI\0`
+  magic, then 14-byte records of BCD MSF + type + ten Q bytes) and `cdrom_disc_get_subq()` answers
+  from a patch where one covers the sector.
+
+  The file is looked for by the image's name with the extensions dropped one at a time, then — only
+  if exactly one exists — the lone `.sbi` beside the image, because redump names it after the disc's
+  serial rather than after the dump. `ZS1_SBI=<path>` overrides the search. The serial matters:
+  `SLES-02210` is the Italian pressing of the same game and its patches sit on different sectors, so
+  the wrong file loads cleanly and protects nothing.
 - **A gameplay shell.** The window now has two shells and switches between them at any time — the
   backquote key, Shift+F1, the *Gameplay* button on the machine bar, or the quick menu — with the
   machine running across the switch. The gameplay shell shows the emulated screen and nothing else:
@@ -110,6 +122,33 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **Timer 1 counted CPU cycles instead of hblanks, and it hung a game.** `timer_rate_cycles()` took
+  counter 2's source rule and applied it to all three, but the three rows differ
+  (`psx-spx-docs/docs/timers.md:34-36`): source 1 means Dotclock on counter 0 and Hblank on counter 1,
+  and only on counter 2 does it mean the system clock. Dino Crisis stalled a second after the BIOS
+  handed it control, spinning at `0x80087914` in a stable-read loop that reloads `1F801110h` until
+  two consecutive reads agree — they differed by 11 every time, because the counter was advancing
+  once per CPU cycle.
+- **The COP0 breakpoint registers threw writes away.** BPC, BDA, BDAM and BPCM are R/W
+  (`psx-spx-docs/docs/cpuspecifications.md:573-581`); ours ignored `MTC0` and returned 0 from `MFC0`.
+  The breakpoint behaviour is still not implemented, but the registers now hold what is written,
+  because a game may keep its own data there — psx-spx says as much, and Dino Crisis stores its
+  LibCrypt table pointer in BDAM and reads it back with `MFC0`. Reading zero sent its protection
+  state machine walking the wrong memory, so it issued `ReadS` with no `Setloc` and swept 36000
+  sectors of the disc without ever meeting a protected one. Savestates are **v11**: `Cpu` gained the
+  four registers.
+- **A LibCrypt sector was reported instead of ignored.** Those sectors carry a wrong CRC, so the
+  controller discards their Q and GetlocP keeps answering with the previous sector's position
+  (`psx-spx-docs/docs/cdromformat.md`, *CDROM Protection - LibCrypt*) — that repeat is the signal the
+  protection counts. Handing the guest the modified values instead yielded a wrong 16-bit key, and
+  Dino Crisis walked into its own trap: a routine at `0x80029748` sums 512 words of a decrypted
+  sector, compares against `0x283FC505`, and on a mismatch runs `j 0x80029778` forever.
+- **`Init` did none of what it is documented to do.** "Sets mode=20h, activates drive motor, Standby,
+  abort all commands" (`psx-spx-docs/docs/cdromdrive.md:536-537`); ours pushed a status byte and
+  scheduled the second response. The mode kept whatever the last Setmode left, so an Init issued at
+  double speed left the drive there until the guest's own Setmode arrived — 50 fields later in the
+  Dino Crisis trace — and an ongoing read carried on through the one command whose purpose is to stop
+  everything.
 - **Loading a savestate erased the memory cards.** `MemoryCard` sits inside `Sio` and `T_SIO` is a
   raw read of the struct, so a state restored its own card images over the live ones. Nothing looked
   wrong at that moment — but the card driver writes frame 63 as a write test during *every* boot,
