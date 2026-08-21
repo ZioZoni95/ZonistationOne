@@ -459,6 +459,13 @@ void cdrom_execute_command(Cdrom *cdrom) {
     /* --- 0x11 GetlocP --- */
     case CDC_GETLOCP: {
         SubQ *q = &cdrom->last_subq;
+        /* Printed in the same shape a DuckStation Devel run prints it, so the
+         * two logs can be put side by side without reformatting either. */
+        LOG_CDROM_DEBUG("[CDROM] GetlocP T%02X I%02X R[%02X:%02X:%02X] A[%02X:%02X:%02X] (lba %u)",
+                        q->track_bcd, q->index_bcd,
+                        q->rel_mm_bcd, q->rel_ss_bcd, q->rel_ff_bcd,
+                        q->abs_mm_bcd, q->abs_ss_bcd, q->abs_ff_bcd,
+                        cdrom->current_lba);
         cdrom_push_response(cdrom, q->track_bcd);
         cdrom_push_response(cdrom, q->index_bcd);
         cdrom_push_response(cdrom, q->rel_mm_bcd);
