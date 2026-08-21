@@ -1268,6 +1268,16 @@ void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
 void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
                                 uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (!renderer->initialized || w == 0 || h == 0) return;
+    /* Anything already submitted has to take its place in the order before this
+     * write does. Primitives sit in renderer->positions_data until something
+     * calls renderer_draw(), and only that call records their op — so a draw
+     * issued BEFORE this upload would be flushed afterwards and replayed on top
+     * of it. Dino Crisis (E) clears its back buffer with GP0(02) and then
+     * uploads the picture into it in the same field: the clear landed after the
+     * picture and the screen stayed black with the image sitting in VRAM.
+     * The reference emulator flushes on the same four boundaries (FillVRAM,
+     * UpdateVRAM, CopyVRAM, DownloadVRAMFromGPU). */
+    renderer_draw(renderer);
     /* Mirror the rect into display_texture too. On real hardware a CPU/DMA
      * write straight into the displayed VRAM area is immediately visible;
      * display_texture only ever carried GL-rasterized pixels, so anything a

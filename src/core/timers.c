@@ -328,20 +328,29 @@ void timer_write32(Timers* timers, int timer_index, uint32_t offset, uint32_t va
  * like Redux's Rcnt.rate). Dotclock (Timer0) and hblank (Timer1) derive from
  * the GPU's active video mode (PAL/NTSC) — see gpu_dotclock_hz/gpu_hblank_hz. */
 static uint32_t timer_rate_cycles(Timers* timers, Timer* t, int i) {
-    if (t->clock_source <= 1) return 1;             /* sysclock */
     const Gpu* gpu = timers->inter ? &timers->inter->gpu : NULL;
+    /* The two source bits do not mean the same thing in every counter
+     * (timers.md:34-36):
+     *   Counter 0:  0 or 2 = System Clock,  1 or 3 = Dotclock
+     *   Counter 1:  0 or 2 = System Clock,  1 or 3 = Hblank
+     *   Counter 2:  0 or 1 = System Clock,  2 or 3 = System Clock/8
+     * Reading "0 and 1 are the system clock" out of counter 2's row and
+     * applying it to all three left Timer 1 running at the CPU clock whenever a
+     * game selected source 1, which is the usual way to ask for Hblank. */
     switch (i) {
-        case 0: { /* Timer0 dotclock */
+        case 0: { /* Timer0: dotclock on an odd source */
+            if (!(t->clock_source & 1)) return 1;
             double hz = gpu ? gpu_dotclock_hz(gpu) : DOTCLOCK_NTSC_HZ;
             uint32_t r = (uint32_t)(PSX_CPU_HZ / hz + 0.5);
             return r ? r : 1;
         }
-        case 1: { /* Timer1 hblank: one tick per scanline */
+        case 1: { /* Timer1: one tick per scanline on an odd source */
+            if (!(t->clock_source & 1)) return 1;
             double hz = gpu ? gpu_hblank_hz(gpu) : (PSX_CPU_HZ / (60.0 * 263.0));
             uint32_t r = (uint32_t)(PSX_CPU_HZ / hz + 0.5);
             return r ? r : 1;
         }
-        default: return 8;                          /* Timer2 sysclock/8 */
+        default: return (t->clock_source & 2) ? 8 : 1;   /* Timer2 */
     }
 }
 

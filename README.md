@@ -12,7 +12,9 @@ third boots and runs its engine. That is three games on one machine, not a compa
 
 ## Screenshots
 
-Power on, BIOS shell, disc boot, movie, mission.
+Power on, BIOS shell, disc boot, movie, mission — and a LibCrypt disc past its protection.
+
+![Dino Crisis (Europe): the title screen](screenshots/2026-08-21-dino-crisis-title.png)
 
 ![Sony Computer Entertainment boot logo](screenshots/2026-08-06-boot-sony.png)
 ![PlayStation logo and the SCEE licence screen](screenshots/2026-08-06-boot-playstation.png)
@@ -178,16 +180,24 @@ is the whole sample.
 | Ace Combat 2 (Europe) | `SCES-00699` | `.bin` | **Full gameplay.** Boot, FMV intro, textured menus, missions, memory-card saves — played through and stable |
 | Disney·Pixar Monsters & Co. — L'Isola dello Spavento (Italy) | `SCES-03765` | `.bin` | Boots, plays both FMV intros, reaches the title screen, starts a new game and runs its 3D engine. Silent during gameplay — the one open bug below |
 | Crash Bandicoot 3 — Warped (Europe) | `SCES-01420` | `.bin.ecm` | **Full gameplay**, and the first disc run start to finish from a compressed image |
+| Dino Crisis (Europe) | `SLES-02207` | `.bin.ecm` + `.sbi` | Boots past its **LibCrypt** protection, plays the opening screens and reaches the main menu. The first protected disc to run here; it needs its own `.sbi`, and the file must be the same pressing — `SLES-02210` is the Italian release and its patched sectors are elsewhere |
 
-All three are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
+All four are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
 emulated-field axis: `Execute !` at f804, f874 and f843 respectively, with no disc errors.
 
 ---
 
 ## Known bugs
 
-One, currently:
-
+- **Audio repeats across some scene changes in `Dino Crisis (Europe)`** — a fragment of the previous
+  scene's sound plays again as the new one starts. Observed 2026-08-21 in the in-engine 3D cutscenes,
+  not in the FMVs.
+- **Audio drifts ahead of the in-engine 3D cutscenes in `Dino Crisis (Europe)`.** The sound runs
+  faster than the scene it belongs to, so the two come apart as the cutscene goes on. Again only in
+  the 3D cutscenes; FMV playback stays in step, which points at the SPU's own clock rather than at
+  the XA path or the output device. Neither figure is measured yet: a run with
+  `ZS1_FRAME_PROFILE=1`, no stderr logging and no Lua probe comes first, because a guest that is
+  slow and a host that cannot keep up look identical here and need opposite fixes.
 - **No audio during gameplay and the in-engine 3D cutscenes of `Monsters & Co. (Italy)`.** The FMV
   intros play with their sound, so the XA path and the output device are both fine; it is the SPU
   voice mix that goes quiet once the game is running its own engine.

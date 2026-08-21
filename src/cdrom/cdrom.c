@@ -15,6 +15,7 @@
 #include "interconnect.h"
 #include "event_scheduler.h"
 #include "log.h"
+#include "cpu.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -336,6 +337,13 @@ void cdrom_write8(Cdrom *cdrom, uint32_t addr, uint8_t value) {
                 LOG_CDROM_WARN("[CDROM] Cmd 0x%02X dropped (busy)", value);
                 return;
             }
+            /* Which guest code issued it: the command is queued here and run
+             * later, so the PC at execute time is somebody else's. */
+            LOG_CDROM_DEBUG("[CDROM] Cmd 0x%02X written from pc=%08x ra=%08x (%d params)",
+                            value,
+                            (cdrom->inter && cdrom->inter->cpu) ? cdrom->inter->cpu->pc : 0,
+                            (cdrom->inter && cdrom->inter->cpu) ? cdrom->inter->cpu->regs[31] : 0,
+                            cdrom->param_fifo.count);
             cdrom->pending_command       = (CdromCommand)value;
             cdrom->pending_param_count   = cdrom->param_fifo.count;
             for (int i = 0; i < cdrom->pending_param_count; i++)

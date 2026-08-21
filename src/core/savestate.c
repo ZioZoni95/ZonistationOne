@@ -39,7 +39,7 @@
  * 10: MemoryCard gained backed_up, which sits inside the raw T_SIO struct — and
  *    loading a state no longer restores the memory cards at all (see the note
  *    at the T_SIO read below). */
-#define ZS1_STATE_VERSION 10u
+#define ZS1_STATE_VERSION 11u
 
 #define TAG(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 

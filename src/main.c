@@ -528,12 +528,20 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&ev)) {
             controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
-            if (ev.type == SDL_EVENT_QUIT) quit = true;
+            if (ev.type == SDL_EVENT_QUIT) {
+                /* Say who ended the session: a window closed by the desktop and
+                 * a guest that stopped drawing look identical from outside. */
+                LOG_SYSTEM_INFO("[SYSTEM] Quit: SDL_EVENT_QUIT (window closed)");
+                quit = true;
+            }
             /* Escape belongs to the gameplay shell when that shell is up — it
              * opens and closes the quick menu there. It still quits from the
              * debug workspace, where there is no menu to open. */
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) {
-                if (!debug_ui_escape_pressed()) quit = true;
+                if (!debug_ui_escape_pressed()) {
+                    LOG_SYSTEM_INFO("[SYSTEM] Quit: Escape in the debug workspace");
+                    quit = true;
+                }
             }
             /* Alt+Enter toggles borderless desktop fullscreen. SDL3 folded
              * FULLSCREEN_DESKTOP into a bool: a window with no display mode set
@@ -578,7 +586,10 @@ int main(int argc, char* argv[]) {
                 }
                 debug_ui_notify_state_result(want_save, ok, state_path);
             }
-            if (debug_ui_take_quit_request()) quit = true;
+            if (debug_ui_take_quit_request()) {
+                LOG_SYSTEM_INFO("[SYSTEM] Quit: requested from the quick menu");
+                quit = true;
+            }
         }
 
         /* A script's emu.load_state() parks its request rather than restoring

@@ -107,9 +107,14 @@ void op_mtc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value = cpu_reg(cpu, cpu_r);
 
     switch (cop_r) {
-        case 3: case 5: case 9: case 11: // Breakpoint regs — not implemented, ignore
-             if (value != 0) LOG_CPU_DEBUG("[CPU] MTC0 breakpoint reg %u <- 0x%08x (ignored)", cop_r, value);
-             break;
+        /* The breakpoints themselves are not implemented, but the registers
+         * are R/W (cpuspecifications.md:573-581) and a game may keep its own
+         * data in them — Dino Crisis (E) stores its LibCrypt table pointer in
+         * BDAM. Dropping the write made every MFC0 of it read back zero. */
+        case 3:  cpu->cop0_bpc  = value; break;  // BPC
+        case 5:  cpu->cop0_bda  = value; break;  // BDA
+        case 9:  cpu->cop0_bdam = value; break;  // BDAM
+        case 11: cpu->cop0_bpcm = value; break;  // BPCM
         case 6: cpu->cop0_tar = value; break;   // TAR / JUMPDEST
         case 7: cpu->cop0_dcic = value; break;  // DCIC
         case 12: // SR (Status Register)
@@ -309,13 +314,13 @@ void op_mfc0(Cpu* cpu, uint32_t instruction) {
     uint32_t value_read = 0; // Default value if read fails or is unhandled
 
     switch (cop_r_src) {
-        case  3: value_read = 0; break;              // BPC — not implemented
-        case  5: value_read = 0; break;              // BDA — not implemented
+        case  3: value_read = cpu->cop0_bpc; break;  // BPC
+        case  5: value_read = cpu->cop0_bda; break;  // BDA
         case  6: value_read = cpu->cop0_tar; break;  // TAR / JUMPDEST
         case  7: value_read = cpu->cop0_dcic; break; // DCIC
         case  8: value_read = cpu->badvaddr; break;  // BadVaddr
-        case  9: value_read = 0; break;              // BDAM — not implemented
-        case 11: value_read = 0; break;              // BPCM — not implemented
+        case  9: value_read = cpu->cop0_bdam; break; // BDAM
+        case 11: value_read = cpu->cop0_bpcm; break; // BPCM
         case 12: value_read = cpu->sr; break; // SR
         case 13: value_read = cpu->cause; break; // CAUSE
         case 14: value_read = cpu->epc; break; // EPC
