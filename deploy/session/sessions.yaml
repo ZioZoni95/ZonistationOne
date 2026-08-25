@@ -21,6 +21,24 @@ spec:
       labels: { app: zs1-session, game: acecombat }
     spec:
       runtimeClassName: nvidia
+      # WebRTC media needs candidates the viewer can actually reach. Inside the
+      # pod network every candidate is a 10.44.x.x address, which nothing outside
+      # the cluster routes to, and the media is UDP so the Ingress does not carry
+      # it either: the browser got the offer, tried every candidate, and sat on
+      # "connecting" forever. On the node's network the candidates become the
+      # node container's own 172.19.0.x, which the host reaches over the Docker
+      # bridge.
+      #
+      # The cost is that ports are now the node's, so two sessions cannot share
+      # one — hence the anti-affinity below. Three workers, two sessions.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: zs1-session }
+              topologyKey: kubernetes.io/hostname
       nodeSelector:
         node-role.kubernetes.io/worker: worker
       containers:
@@ -82,6 +100,24 @@ spec:
       labels: { app: zs1-session, game: crash }
     spec:
       runtimeClassName: nvidia
+      # WebRTC media needs candidates the viewer can actually reach. Inside the
+      # pod network every candidate is a 10.44.x.x address, which nothing outside
+      # the cluster routes to, and the media is UDP so the Ingress does not carry
+      # it either: the browser got the offer, tried every candidate, and sat on
+      # "connecting" forever. On the node's network the candidates become the
+      # node container's own 172.19.0.x, which the host reaches over the Docker
+      # bridge.
+      #
+      # The cost is that ports are now the node's, so two sessions cannot share
+      # one — hence the anti-affinity below. Three workers, two sessions.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: zs1-session }
+              topologyKey: kubernetes.io/hostname
       nodeSelector:
         node-role.kubernetes.io/worker: worker
       containers:
