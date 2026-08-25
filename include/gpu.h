@@ -208,6 +208,15 @@ uint32_t gpu_read_data(Gpu* gpu);         // Reads data from GPUREAD port (e.g.,
 void gpu_init_full(Gpu* gpu, Interconnect* inter);
 // GPU soft reset (does NOT clear VRAM)
 void gpu_soft_reset(Gpu* gpu);
+/* Re-send every piece of persistent drawing state to the renderer.
+ * The ten renderer_set_* values live in the backend, not in Gpu, so a backend
+ * that has just been created starts from its own defaults and would draw the
+ * next frame with the wrong offset, area, window and mask flags. Call this
+ * after renderer_init() on a hot backend switch. The per-primitive state
+ * (dither, semi-transparency, texture/raw-texture mode) is deliberately left
+ * out: every draw command in gpu_commands.c sets it immediately before it
+ * pushes geometry, so there is nothing to restore. */
+void gpu_reapply_renderer_state(Gpu* gpu);
 // Advance the CRTC scanline counter and update STAT[31] / in_vblank.
 // Call once per VBlank with the number of CPU cycles elapsed since the last call.
 void gpu_crtc_tick(Gpu* gpu, uint32_t cpu_cycles_elapsed);

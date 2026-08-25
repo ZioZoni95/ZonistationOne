@@ -58,7 +58,17 @@ bool renderer_select_backend(Renderer* renderer, GfxBackendType type);
 /** @brief The live backend, or NULL before renderer_select_backend(). */
 const GfxBackend* renderer_backend(const Renderer* renderer);
 
-bool renderer_init(Renderer* renderer);
+bool renderer_init(Renderer* renderer, SDL_Window* window);
+
+/** @brief renderer_init() with a device and internal-scale request.
+ *  Vulkan honours both; the GL backend ignores them, because the GLX vendor
+ *  is resolved at the first dlopen of libGL and it has no scaled target. */
+bool renderer_init_ex(Renderer* renderer, SDL_Window* window, const GfxDeviceRequest* req);
+
+/** @brief The GPUs a backend offers, without needing a live Renderer.
+ *  Asked by the interface before a switch, so it can list a backend that is
+ *  not the one currently running. Returns how many entries were written. */
+int renderer_enumerate_devices(GfxBackendType type, GfxDeviceInfo* out, int max);
 
 /**
  * @brief Starts the GPU render thread. Call after renderer_init() and AFTER

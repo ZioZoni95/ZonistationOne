@@ -2478,11 +2478,11 @@ static GlRenderer s_gl_renderer;
  * the struct was embedded in Gpu, those same writes landed in an equally
  * zeroed, equally not-yet-initialised struct. */
 static inline GlRenderer* R(GfxImpl impl) {
-    return impl ? R(impl) : &s_gl_renderer;
+    return impl ? (GlRenderer*)impl : &s_gl_renderer;
 }
 
-static bool vt_init(GfxImpl* impl, const GfxDeviceRequest* req) {
-    (void)req;  /* the GL backend has no device or scale to choose: PRIME is
+static bool vt_init(GfxImpl* impl, SDL_Window* window, const GfxDeviceRequest* req) {
+    (void)window; (void)req;  /* the GL backend has no device or scale to choose: PRIME is
                  * resolved before the context exists, see apply_gpu_preference() */
     if (!glr_init(&s_gl_renderer)) return false;
     *impl = &s_gl_renderer;

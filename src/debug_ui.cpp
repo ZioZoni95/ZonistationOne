@@ -28,6 +28,7 @@ extern "C" {
 #include "cpu.h"
 #include "interconnect.h"
 #include "renderer.h"
+#include "gpu_backend.h"
 #include "debugger.h"
 #include "spu.h"
 #include "lua_debug.h"
@@ -74,6 +75,10 @@ static const ImVec4 ZS_MODE_ON   = COL(0x1E, 0x2A, 0x3E);
  * debug_ui_init picks it from ZS1_UI before the shell's own code appears. */
 enum ZsShell { SHELL_GAMEPLAY = 0, SHELL_DEBUG = 1 };
 static int g_shell = SHELL_GAMEPLAY;
+
+/* Which backend the UI was brought up against. Decides which ImGui renderer
+ * half this file owns and which one the graphics backend owns. */
+static int s_gfx_backend = GFX_BACKEND_GL33;
 
 /* Faces and the display scale, set once in debug_ui_init. The panels reach for
  * these rather than Fonts[0]: a "monospace" log window that pushes the
@@ -3353,7 +3358,38 @@ static void rebuild_layout(ImGuiID dockspace_id) {
 // Public API
 // ---------------------------------------------------------------------------
 
-extern "C" void debug_ui_init(SDL_Window* window, void* gl_context) {
+/* --- the two ImGui backend halves, on their own ----------------------------
+ *
+ * ImGui is in three parts: the context (fonts, imgui.ini, the docking layout,
+ * the pinned watches, the toast queue), a platform half bound to the SDL
+ * window, and a renderer half bound to the graphics device. A hot backend
+ * switch destroys the window and the device, so both halves have to go — but
+ * the context must not, or the interface would come back with its layout reset
+ * and its fonts reloaded every time somebody changed backend.
+ *
+ * The asymmetry between the two backends is real and not a shortcut: OpenGL's
+ * renderer half is created here, on the thread that holds the context, while
+ * Vulkan's needs a VkDevice that renderer_init() has not built yet, so the
+ * Vulkan backend brings its own half up and tears it down with the device it
+ * belongs to. That is why only the OpenGL side appears below. */
+extern "C" void debug_ui_backend_init(SDL_Window* window, void* gl_context, int backend) {
+    s_gfx_backend = backend;
+    if (backend == GFX_BACKEND_VULKAN) {
+        ImGui_ImplSDL3_InitForVulkan(window);
+    } else {
+        ImGui_ImplSDL3_InitForOpenGL(window, (SDL_GLContext)gl_context);
+        ImGui_ImplOpenGL3_Init("#version 330");
+    }
+}
+
+extern "C" void debug_ui_backend_shutdown(void) {
+    /* The Vulkan renderer half is shut down by its own backend, which owns the
+     * device it was built against. */
+    if (s_gfx_backend != GFX_BACKEND_VULKAN) ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+}
+
+extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -3440,8 +3476,14 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context) {
     apply_zonistation_style();
     ImGui::GetStyle().ScaleAllSizes(ui_scale);
 
-    ImGui_ImplSDL3_InitForOpenGL(window, (SDL_GLContext)gl_context);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    /* The platform half of ImGui is set up here for either backend; the
+     * renderer half is not symmetrical. OpenGL's is initialised right now,
+     * while the context is current on this thread. Vulkan's cannot be — it
+     * needs a VkDevice that renderer_init() has not created yet — so the Vulkan
+     * backend brings it up itself once the device exists. The ImGui *context*
+     * is created here in both cases and outlives either, which is what a hot
+     * backend switch depends on. */
+    debug_ui_backend_init(window, gl_context, backend);
 
     /* Open per-component log files (one file per category, lives for whole session) */
     mkdir("logs", 0755);
@@ -3488,6 +3530,39 @@ static bool g_req_quit        = false;
 static bool g_req_state       = false;
 static bool g_req_state_save  = false;
 static char g_req_state_path[192] = {0};
+
+/* The pending graphics-backend change, and the device list it is chosen from.
+ *
+ * The list is enumerated once and cached because asking costs a whole
+ * VkInstance — created, queried and destroyed — which is not something to do
+ * every frame a panel is visible. It cannot change during a session anyway:
+ * hot-plugging a GPU is not a case this emulator has. */
+static bool             g_req_gfx = false;
+static GfxDeviceRequest g_req_gfx_what = { GFX_BACKEND_GL33, -1, 1 };
+
+static GfxDeviceInfo g_gfx_devs[2][8];
+static int           g_gfx_dev_count[2] = { -1, -1 };   /* -1 = not asked yet */
+
+static const GfxDeviceInfo* gfx_devices(GfxBackendType type, int* count) {
+    int idx = (int)type;
+    if (idx < 0 || idx > 1) { *count = 0; return nullptr; }
+    if (g_gfx_dev_count[idx] < 0)
+        g_gfx_dev_count[idx] = renderer_enumerate_devices(type, g_gfx_devs[idx], 8);
+    *count = g_gfx_dev_count[idx];
+    return g_gfx_devs[idx];
+}
+
+/* What is running right now, so the panel can mark it rather than guess. The
+ * device index is what was asked for at the last switch; -1 means the backend
+ * picked, which is the honest answer at startup. */
+static int g_gfx_live_device = -1;
+
+static void gp_request_gfx(GfxBackendType type, int device_index, uint32_t scale) {
+    g_req_gfx = true;
+    g_req_gfx_what.type           = type;
+    g_req_gfx_what.device_index   = device_index;
+    g_req_gfx_what.internal_scale = scale ? scale : 1;
+}
 
 struct GpToast { char msg[96]; char sub[80]; double born; ImVec4 col; };
 static GpToast g_gp_toasts[4];
@@ -3655,12 +3730,22 @@ static void gp_draw_toasts(void) {
 // --- quick menu ---------------------------------------------------------------
 
 struct GpMenuItem { const char* label; const char* key; bool danger; };
+
+/* Named, because the pane below and the keyboard handler both switch on the
+ * index and a bare number breaks silently the moment an entry is inserted —
+ * which is exactly what adding Video did. */
+enum {
+    GP_RESUME = 0, GP_SAVE, GP_LOAD, GP_PADS,
+    GP_MACHINE, GP_VIDEO, GP_WORKSPACE, GP_QUIT
+};
+
 static const GpMenuItem g_gp_items[] = {
     { "Resume",           "Esc",  false },
     { "Save state",       "F5",   false },
     { "Load state",       "F8",   false },
     { "Controllers",      "F12",  false },
     { "Machine",          "",     false },
+    { "Video",            "",     false },
     { "Debug workspace",  "F1",   false },
     { "Quit",             "",     true  },
 };
@@ -3747,8 +3832,8 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
         ImGui::PushStyleColor(ImGuiCol_Header, ZS_MODE_ON);
         if (ImGui::Selectable(g_gp_items[i].label, sel, 0, ImVec2(0, 26.0f * g_ui_scale))) {
             g_gp_menu_idx = i;
-            if (i == 0) g_gp_menu_open = false;                    /* Resume  */
-            if (i == 5) { g_shell = SHELL_DEBUG; g_gp_menu_open = false; }
+            if (i == GP_RESUME) g_gp_menu_open = false;
+            if (i == GP_WORKSPACE) { g_shell = SHELL_DEBUG; g_gp_menu_open = false; }
         }
         if (ImGui::IsItemHovered()) g_gp_menu_idx = i;
         ImGui::PopStyleColor(2);
@@ -3766,7 +3851,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
 
     char buf[192];
     switch (g_gp_menu_idx) {
-        case 0: {  /* Resume — the session, from counters that already exist */
+        case GP_RESUME: {  /* Resume — the session, from counters that already exist */
             card_header_icon("This session", ZS_DATA, draw_icon_clock);
             if (ImGui::BeginTable("gp_sess", 2, ImGuiTableFlags_SizingStretchProp)) {
                 double speed = (g_vit_frame_ms > 0.001) ? (g_vit_budget_ms / g_vit_frame_ms) * 100.0 : 0.0;
@@ -3790,15 +3875,15 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                 g_gp_menu_open = false;
             break;
         }
-        case 1:
+        case GP_SAVE:
             card_header_icon("Save state", ZS_OK, draw_icon_disc);
             gp_draw_slots(inter, true);
             break;
-        case 2:
+        case GP_LOAD:
             card_header_icon("Load state", ZS_DATA, draw_icon_disc);
             gp_draw_slots(inter, false);
             break;
-        case 3: {  /* Controllers */
+        case GP_PADS: {  /* Controllers */
             card_header_icon("Controllers", ZS_PS_BLUE, draw_icon_pad);
             SioPadMode mode = inter ? sio_get_pad_mode(&inter->sio) : SIO_PAD_DIGITAL;
             const char* names[3] = { "Digital", "Analog", "Stick" };
@@ -3835,7 +3920,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             }
             break;
         }
-        case 4: {  /* Machine */
+        case GP_MACHINE: {
             const HostInfo* host = host_info_get();
             host_info_sample();
             card_header_icon("Machine", ZS_OK, draw_icon_screen);
@@ -3863,7 +3948,110 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             }
             break;
         }
-        case 5:
+        case GP_VIDEO: {
+            /* The house rule applies here as everywhere: this reports what the
+             * machine says and offers the controls that exist. What does not
+             * exist is marked, not hidden — a GL device row that says "next
+             * launch" is worth more than a control that looks live and does
+             * nothing, because the GLX vendor library is resolved at the first
+             * dlopen of libGL and cannot be changed under a running process. */
+            const HostInfo* host = host_info_get();
+            card_header_icon("Video", ZS_PS_BLUE, draw_icon_screen);
+
+            if (ImGui::BeginTable("gp_video_now", 2, ImGuiTableFlags_SizingStretchProp)) {
+                gp_row("Backend", s_gfx_backend == GFX_BACKEND_VULKAN
+                                  ? "Vulkan 1.3" : "OpenGL 3.3", ZS_DATA);
+                gp_row("GPU", host->gl_renderer[0] ? host->gl_renderer : "unknown", ZS_DATA);
+                gp_row("Driver", host->gl_version[0] ? host->gl_version : host->gl_driver, ZS_MUTED);
+                snprintf(buf, sizeof(buf), "%ux%u  %s",
+                         inter ? inter->gpu.crtc.display_width  : 0,
+                         inter ? inter->gpu.crtc.display_height : 0,
+                         inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
+                gp_row("Output", buf, ZS_TEXT);
+                ImGui::EndTable();
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+
+            /* --- backend --- */
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+            ImGui::TextUnformatted("Backend");
+            ImGui::PopStyleColor();
+
+            const char* vk_why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
+            struct { const char* label; GfxBackendType type; } backends[2] = {
+                { "OpenGL 3.3", GFX_BACKEND_GL33 },
+                { "Vulkan 1.3", GFX_BACKEND_VULKAN },
+            };
+            for (int i = 0; i < 2; i++) {
+                bool live     = (s_gfx_backend == (int)backends[i].type);
+                bool blocked  = (backends[i].type == GFX_BACKEND_VULKAN) && vk_why;
+                if (i) ImGui::SameLine();
+                ImGui::BeginDisabled(live || blocked || g_req_gfx);
+                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_TEXT);
+                if (ImGui::Button(backends[i].label, ImVec2(160.0f * g_ui_scale, 32.0f * g_ui_scale)))
+                    gp_request_gfx(backends[i].type, -1, g_req_gfx_what.internal_scale);
+                ImGui::PopStyleColor();
+                ImGui::EndDisabled();
+                if (live) {
+                    ImGui::SameLine();
+                    ImGui::PushStyleColor(ImGuiCol_Text, ZS_OK);
+                    ImGui::TextUnformatted("running");
+                    ImGui::PopStyleColor();
+                }
+            }
+            if (vk_why) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+                ImGui::TextWrapped("Vulkan: %s", vk_why);
+                ImGui::PopStyleColor();
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+
+            /* --- device --- */
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+            ImGui::TextUnformatted("GPU");
+            ImGui::PopStyleColor();
+
+            int ndev = 0;
+            const GfxDeviceInfo* devs = gfx_devices((GfxBackendType)s_gfx_backend, &ndev);
+            if (ndev <= 0) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+                ImGui::TextUnformatted("No selectable device reported.");
+                ImGui::PopStyleColor();
+            }
+            for (int i = 0; i < ndev; i++) {
+                ImGui::PushID(1000 + i);
+                bool live = (i == g_gfx_live_device);
+                ImGui::BeginDisabled(live || !devs[i].live_switchable || g_req_gfx);
+                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_TEXT);
+                if (ImGui::Button(devs[i].name, ImVec2(340.0f * g_ui_scale, 30.0f * g_ui_scale)))
+                    gp_request_gfx((GfxBackendType)s_gfx_backend, i, g_req_gfx_what.internal_scale);
+                ImGui::PopStyleColor();
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_FAINT);
+                ImGui::TextUnformatted(live ? "running"
+                                       : devs[i].live_switchable ? "" : "next launch");
+                ImGui::PopStyleColor();
+                ImGui::PopID();
+            }
+            ImGui::Dummy(ImVec2(0, 8));
+
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+            ImGui::TextWrapped("Switching rebuilds the window and the device. VRAM is carried "
+                               "across as host memory, the drawing state is re-sent, and the "
+                               "machine keeps running — no reset, no save state. If the new "
+                               "backend fails to come up, the old one is put back.");
+            ImGui::PopStyleColor();
+
+            if (g_req_gfx) {
+                ImGui::Dummy(ImVec2(0, 6));
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+                ImGui::TextUnformatted("Switching at the end of this frame...");
+                ImGui::PopStyleColor();
+            }
+            break;
+        }
+        case GP_WORKSPACE:
             card_header_icon("Debug workspace", ZS_PS_GREEN, draw_icon_cpu);
             ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
             ImGui::TextWrapped("The same window, the other shell: nine view modes, the pipeline, "
@@ -3876,7 +4064,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                 g_gp_menu_open = false;
             }
             break;
-        case 6:
+        case GP_QUIT:
             card_header_icon("Quit", ZS_CRIT, draw_icon_pin);
             ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
             ImGui::TextWrapped("The machine stops. Memory cards are written on the way out; "
@@ -3935,11 +4123,11 @@ static void gp_handle_keys(Interconnect* inter) {
         g_gp_menu_idx = (g_gp_menu_idx + GP_ITEM_COUNT - 1) % GP_ITEM_COUNT;
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
         switch (g_gp_menu_idx) {
-            case 0: g_gp_menu_open = false; break;
-            case 1: gp_request_state(true,  g_gp_slot); break;
-            case 2: gp_request_state(false, g_gp_slot); break;
-            case 5: g_shell = SHELL_DEBUG; g_gp_menu_open = false; break;
-            case 6: g_req_quit = true; break;
+            case GP_RESUME:    g_gp_menu_open = false; break;
+            case GP_SAVE:      gp_request_state(true,  g_gp_slot); break;
+            case GP_LOAD:      gp_request_state(false, g_gp_slot); break;
+            case GP_WORKSPACE: g_shell = SHELL_DEBUG; g_gp_menu_open = false; break;
+            case GP_QUIT:      g_req_quit = true; break;
             default: break;
         }
     }
@@ -4186,8 +4374,7 @@ extern "C" void debug_ui_shutdown(void) {
             }
         }
     }
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplSDL3_Shutdown();
+    debug_ui_backend_shutdown();
     ImGui::DestroyContext();
 }
 
@@ -4215,6 +4402,26 @@ extern "C" bool debug_ui_take_state_request(bool* out_save, char* path, size_t p
     if (out_save) *out_save = g_req_state_save;
     if (path && path_size) snprintf(path, path_size, "%s", g_req_state_path);
     return true;
+}
+
+extern "C" bool debug_ui_take_gfx_request(GfxDeviceRequest* out) {
+    if (!g_req_gfx) return false;
+    g_req_gfx = false;
+    if (out) *out = g_req_gfx_what;
+    return true;
+}
+
+/* What the host actually ended up running, after the switch — including the
+ * case where it failed and the old backend was put back. The panel marks the
+ * live entry from this rather than from what was asked for, so a fallback shows
+ * as a fallback instead of as a change that never happened. */
+extern "C" void debug_ui_notify_gfx_result(int backend, int device_index, bool ok,
+                                           const char* detail) {
+    s_gfx_backend     = backend;
+    g_gfx_live_device = device_index;
+    gp_toast(ok ? "Renderer switched" : "Switch failed — kept the old renderer",
+             detail ? detail : (backend == GFX_BACKEND_VULKAN ? "Vulkan 1.3" : "OpenGL 3.3"),
+             ok ? ZS_OK : ZS_CRIT);
 }
 
 extern "C" void debug_ui_notify_state_result(bool save, bool ok, const char* path) {

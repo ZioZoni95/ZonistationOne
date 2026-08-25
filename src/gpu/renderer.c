@@ -35,7 +35,11 @@ static const GfxBackend* s_active = NULL;
 const GfxBackend* gfx_backend_get(GfxBackendType type) {
     switch (type) {
         case GFX_BACKEND_GL33:   return &gfx_backend_gl33;
-        case GFX_BACKEND_VULKAN: return NULL;   /* not built yet */
+#ifdef ENABLE_VULKAN
+        case GFX_BACKEND_VULKAN: return &gfx_backend_vulkan;
+#else
+        case GFX_BACKEND_VULKAN: return NULL;
+#endif
         default:                 return NULL;
     }
 }
@@ -43,7 +47,11 @@ const GfxBackend* gfx_backend_get(GfxBackendType type) {
 const char* gfx_backend_unavailable_reason(GfxBackendType type) {
     switch (type) {
         case GFX_BACKEND_GL33:   return NULL;
-        case GFX_BACKEND_VULKAN: return "not compiled in";
+#ifdef ENABLE_VULKAN
+        case GFX_BACKEND_VULKAN: return NULL;
+#else
+        case GFX_BACKEND_VULKAN: return "not compiled in — needs libvulkan-dev and glslang-tools at build time";
+#endif
         default:                 return "unknown backend";
     }
 }
@@ -67,18 +75,28 @@ const GfxBackend* renderer_backend(const Renderer* renderer) {
     return renderer ? renderer->vt : NULL;
 }
 
-bool renderer_init(Renderer* renderer) {
+bool renderer_init_ex(Renderer* renderer, SDL_Window* window, const GfxDeviceRequest* req) {
     if (!renderer) return false;
     /* Nobody called renderer_select_backend(): take the one that is always
      * there rather than failing, so an older caller still boots. */
     if (!renderer->vt && !renderer_select_backend(renderer, GFX_BACKEND_GL33))
         return false;
-    if (!renderer->vt->init(&renderer->impl, NULL)) {
+    if (!renderer->vt->init(&renderer->impl, window, req)) {
         LOG_RENDERER_ERROR("[RENDERER] %s backend failed to initialise", renderer->vt->name);
         renderer->impl = NULL;
         return false;
     }
     return true;
+}
+
+bool renderer_init(Renderer* renderer, SDL_Window* window) {
+    return renderer_init_ex(renderer, window, NULL);
+}
+
+int renderer_enumerate_devices(GfxBackendType type, GfxDeviceInfo* out, int max) {
+    const GfxBackend* be = gfx_backend_get(type);
+    if (!be || !be->enumerate_devices || !out || max <= 0) return 0;
+    return be->enumerate_devices(out, max);
 }
 
 void renderer_destroy(Renderer* renderer) {

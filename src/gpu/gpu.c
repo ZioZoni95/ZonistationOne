@@ -676,6 +676,52 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     LOG_GPU_DEBUG("[GPU] GPU Initialized.");
 }
 
+/* Push everything the renderer keeps on our behalf back down to it.
+ *
+ * The ten renderer_set_* values are backend state, not Gpu state: a fresh
+ * backend starts at its own defaults, and the guest has no reason to re-send
+ * GP0(E2..E6) or GP1(05..08) just because the host swapped its graphics API.
+ * Without this, the first frame after a hot switch draws with a zero draw
+ * offset, a full-VRAM scissor and the mask flags cleared.
+ *
+ * Every value here is read from Gpu, which is the authority — the same
+ * expressions the GP0/GP1 handlers use. Per-primitive state (dither,
+ * semi-transparency, texture and raw-texture mode) is not here on purpose:
+ * gpu_commands.c sets all four immediately before each push, so the next
+ * primitive carries them anyway. */
+void gpu_reapply_renderer_state(Gpu* gpu) {
+    if (!gpu) return;
+
+    renderer_set_screen_scale(&gpu->renderer, VRAM_WIDTH, VRAM_HEIGHT);
+    renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
+    renderer_set_drawing_area(&gpu->renderer,
+        gpu->drawing_area_left, gpu->drawing_area_top,
+        gpu->drawing_area_right, gpu->drawing_area_bottom);
+    renderer_set_texture_window(&gpu->renderer,
+        gpu->texture_window_x_mask,   gpu->texture_window_y_mask,
+        gpu->texture_window_x_offset, gpu->texture_window_y_offset);
+    renderer_set_mask_mode(&gpu->renderer, gpu->force_set_mask_bit);
+    renderer_set_mask_test(&gpu->renderer, gpu->preserve_masked_pixels);
+
+    renderer_set_display_region(&gpu->renderer,
+        gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+        gpu->crtc.display_width,  gpu->crtc.display_height);
+    renderer_set_display_depth24(&gpu->renderer, gpu->display_depth == D24Bits);
+    renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
+
+    LOG_GPU_INFO("[GPU] Renderer state re-applied: offset(%d,%d) area[%u..%u,%u..%u] "
+                 "texwin(%u,%u,%u,%u) mask(set=%d test=%d) display(%u,%u %ux%u) d24=%d blank=%d",
+                 gpu->drawing_x_offset, gpu->drawing_y_offset,
+                 gpu->drawing_area_left, gpu->drawing_area_right,
+                 gpu->drawing_area_top,  gpu->drawing_area_bottom,
+                 gpu->texture_window_x_mask, gpu->texture_window_y_mask,
+                 gpu->texture_window_x_offset, gpu->texture_window_y_offset,
+                 (int)gpu->force_set_mask_bit, (int)gpu->preserve_masked_pixels,
+                 gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+                 gpu->crtc.display_width,  gpu->crtc.display_height,
+                 (int)(gpu->display_depth == D24Bits), (int)gpu->display_disabled);
+}
+
 void gpu_soft_reset(Gpu* gpu) {
     LOG_GPU_DEBUG("[GPU] GPU soft reset (VRAM preserved)");
     gpu_reset_state(gpu);

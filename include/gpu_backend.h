@@ -27,6 +27,10 @@
 #include <stdbool.h>
 #include <SDL3/SDL.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* --- Vertex data handed to a backend ---
  *
  * These were GL-typed (GLshort/GLubyte/GLushort) and lived in renderer.h, which
@@ -82,7 +86,7 @@ typedef uintptr_t GfxTexHandle;
  * backend reports the PRIME choices, which cannot be applied without a restart
  * because the GLX vendor is resolved at the first dlopen of libGL. */
 typedef struct {
-    char name[128];
+    char name[256];   /* VK_MAX_PHYSICAL_DEVICE_NAME_SIZE, so a device name never truncates */
     bool live_switchable;   /* false on GL: the change needs a restart */
 } GfxDeviceInfo;
 
@@ -100,7 +104,7 @@ typedef struct GfxBackend {
     GfxBackendType type;
 
     /* --- lifecycle --- */
-    bool (*init)(GfxImpl* impl, const GfxDeviceRequest* req);
+    bool (*init)(GfxImpl* impl, SDL_Window* window, const GfxDeviceRequest* req);
     void (*destroy)(GfxImpl impl);
     int  (*enumerate_devices)(GfxDeviceInfo* out, int max);
 
@@ -165,5 +169,12 @@ const GfxBackend* gfx_backend_get(GfxBackendType type);
 const char*       gfx_backend_unavailable_reason(GfxBackendType type);
 
 extern const GfxBackend gfx_backend_gl33;
+#ifdef ENABLE_VULKAN
+extern const GfxBackend gfx_backend_vulkan;
+#endif
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GPU_BACKEND_H */

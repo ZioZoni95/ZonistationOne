@@ -34,6 +34,83 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **A Vulkan 1.3 renderer, and the ability to swap renderers while a game is running.** The GPU had
+  one OpenGL 3.3 implementation that owned its own header; `<GL/glew.h>` came in through
+  `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every translation unit that
+  touched the interconnect — `debug_ui.cpp` included, where texture names were cast to `ImTextureID`.
+  There are now two backends behind one vtable and no graphics type above it.
+
+  **The abstraction** (`include/gpu_backend.h`). A 38-entry `GfxBackend` of function pointers, with
+  the vertex structs moved out of `renderer.h` and retyped from `GLshort`/`GLubyte` to
+  `int16_t`/`uint8_t` — the same layout, without the API. What ImGui receives for a texture is an
+  opaque `GfxTexHandle`: a texture name on one backend, a `VkDescriptorSet` on the other.
+  `src/gpu/renderer.c` became a dispatcher and the OpenGL implementation moved to
+  `src/gpu/renderer_gl.c`; the ~120 `renderer_*(&gpu->renderer, ...)` call sites did not change,
+  which is what kept the diff readable.
+
+  Two things about the split are not obvious. `renderer_select_backend()` is separate from
+  `renderer_init()` because `gpu_reset_state()` pushes GP0/GP1 reset values through four setters from
+  inside `interconnect_init()`, before any device exists, and those values are not redundant — the
+  backend resolves a NULL `impl` to its own file-static state so they land where init will find them.
+  And savestates were unaffected: `savestate.c` derives both `Gpu` spans from `offsetof(Gpu,
+  renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two pointers moved both
+  boundaries together. Verified by loading a state written before the change — PC and cycle exact.
+
+  **The Vulkan backend** (`src/gpu/vk/`). Vulkan 1.3 with dynamic rendering, so there is no
+  `VkRenderPass` anywhere. The loader is opened at runtime through `SDL_Vulkan_LoadLibrary()` under
+  `VK_NO_PROTOTYPES`, so nothing links against `libvulkan` and the binary starts on a machine with no
+  driver installed. The three GLSL programs left their C string literals for
+  `src/gpu/shaders/*.{vert,frag}`, compiled to SPIR-V by `glslangValidator` at build time; the
+  Makefile builds GL-only with a message when `libvulkan-dev` or `glslang-tools` is missing, rather
+  than failing.
+
+  The feedback loop — the PS1 fragment shader samples the VRAM image that is also its colour
+  attachment — turned out to be less of a problem than planned for.
+  `VK_EXT_fragment_shader_interlock` is an optimisation; a `vkCmdPipelineBarrier` between batches
+  with the image permanently in `VK_IMAGE_LAYOUT_GENERAL` is correct everywhere and is what ships.
+  That is `glTextureBarrier()` in Vulkan terms. Semi-transparency keeps GL's two-pass shape, because
+  blend state is per-draw while the STP bit is per-texel; `dualSrcBlend` would collapse it and is
+  left for after parity is proven across more than one frame.
+
+  Parity is a byte comparison of the same dumped frame from each backend, and at frame 900 of
+  `Ace Combat 2 (Europe)` under `SCPH-7502` the two are identical.
+
+  **The switch** (`switch_gfx_backend()` in `main.c`, *Video* in the quick menu). SDL fixes
+  `SDL_WINDOW_OPENGL` and `SDL_WINDOW_VULKAN` when a window is created and neither can be added
+  later, so changing API means a new window, not just a new context. Three things cross it:
+
+  - **VRAM**, read back into host memory before the device goes and re-uploaded after. It has to come
+    from the GPU — `gpu.vram.data` holds what the CPU wrote and never what the rasteriser drew — and
+    since the readback is a synchronous round-trip through the GPU thread, it happens while that
+    thread is still alive.
+  - **The drawing state**, through a new `gpu_reapply_renderer_state()`: draw offset, drawing area,
+    texture window, screen scale, display region, depth24, blank and the two mask flags. All ten live
+    in the backend rather than in `Gpu`, and the guest has no reason to re-send `GP0(E2..E6)` because
+    the host changed API. The per-primitive state is deliberately left out — every draw command sets
+    dither, semi-transparency and texture mode immediately before pushing geometry.
+  - **The ImGui context** — fonts, `imgui.ini`, the docking layout, the pinned watches — through
+    `debug_ui_backend_init()`/`debug_ui_backend_shutdown()`, which touch only the platform and
+    renderer halves. `ImGui::DestroyContext()` stays where it was.
+
+  The emulated machine is not involved: no reset, no save state, and the CPU, SPU and drive never
+  learn anything happened. A backend that fails to come up is rolled back to the previous one and
+  reported. `ZS1_GFX_SWITCH_TEST=<n>` flips backends every n fields; nine switches in one run of
+  Ace Combat 2 under X11 were clean.
+
+  **The interface** is *Esc → Video*: the live backend, the GPU and driver the machine actually got,
+  the output mode, and buttons for each backend and each device it offers. Vulkan enumerates real
+  devices from `vkEnumeratePhysicalDevices` and switches between them live; OpenGL cannot, because
+  the GLX vendor library is resolved at the first `dlopen` of libGL, so its two PRIME choices are
+  listed marked *next launch*. A control that says so is worth more than one that looks live and does
+  nothing. Vulkan runs now report their device through `host_info`, so the Host HW panel stops
+  showing a GL string on a Vulkan run.
+
+  Two platform limits found on the way, both environmental rather than defects: the OpenGL backend
+  will not start under `SDL_VIDEODRIVER=wayland` here (`glewInit()` returns "Unknown error"), and
+  Vulkan on the Intel iGPU will not create a swapchain under X11 while the screen is owned by the
+  NVIDIA driver in dGPU mode. Each backend has one session type that works, and a hot switch to a
+  backend that cannot start rolls back rather than failing the run.
+
 - **`Dino Crisis (Europe)` [SLES-02207] reaches its main menu**, from a `.bin.ecm` plus its `.sbi` —
   the first LibCrypt-protected disc to run here. Five separate defects stood between the disc booting
   and the menu appearing, all listed under *Fixed* below; only one of them was in the CDROM.
@@ -125,6 +202,12 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **The OpenGL backend's `impl` resolver called itself.** `R()` in `renderer_gl.c` read
+  `return impl ? R(impl) : &s_gl_renderer;` where it meant `(GlRenderer*)impl` — unbounded recursion
+  on every one of the ~120 forwarded calls. It ran correctly anyway, which is the interesting part:
+  an infinite loop with no side effects is undefined behaviour in C, so gcc deleted it and the
+  function compiled down to `return impl`, which is what was intended. At `-O0`, or under a compiler
+  that kept the loop, it would have overflowed the stack on the first draw.
 - **A VRAM upload jumped ahead of primitives that were submitted before it.** `renderer_draw()` is
   what turns accumulated vertices into a batch *and* what records that batch's position in the
   frame's op list, so a submitted primitive has no place in the order until something calls it.

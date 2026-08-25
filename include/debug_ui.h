@@ -12,11 +12,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "gpu_backend.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void debug_ui_init(SDL_Window* window, void* gl_context);
+void debug_ui_init(SDL_Window* window, void* gl_context, int backend);
+
+/* The two ImGui backend halves on their own, for a hot renderer switch: the
+ * platform half is bound to the SDL window and the renderer half to the
+ * graphics device, and a switch destroys both. The ImGui *context* — fonts,
+ * imgui.ini, the docking layout, the pinned watches — is created by
+ * debug_ui_init() and must survive, so it is not touched by either of these. */
+void debug_ui_backend_init(SDL_Window* window, void* gl_context, int backend);
+void debug_ui_backend_shutdown(void);
 void debug_ui_process_event(SDL_Event* event);
 void debug_ui_render(void* cpu_ptr, void* interconnect_ptr);
 void debug_ui_shutdown(void);
@@ -44,6 +54,13 @@ bool debug_ui_escape_pressed(void);
 bool debug_ui_take_quit_request(void);
 bool debug_ui_take_state_request(bool* out_save, char* path, size_t path_size);
 void debug_ui_notify_state_result(bool save, bool ok, const char* path);
+
+/* The renderer switch, same shape as the savestate handshake: the shell asks,
+ * main.c owns the window and the device and carries it out, then says what
+ * actually happened — which is not always what was asked for, since a backend
+ * that fails to come up is rolled back to the previous one. */
+bool debug_ui_take_gfx_request(GfxDeviceRequest* out);
+void debug_ui_notify_gfx_result(int backend, int device_index, bool ok, const char* detail);
 
 #ifdef __cplusplus
 }
