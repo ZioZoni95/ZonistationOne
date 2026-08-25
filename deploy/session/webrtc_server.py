@@ -41,8 +41,27 @@ SINK_MON = os.environ.get("ZS1_PULSE_MONITOR", "zs1.monitor")
 # a TURN server on an address the viewer can actually reach, webrtcbin also
 # gathers a relay candidate there and the media has somewhere to land.
 #
-# Empty disables it, which is right when the viewer is the host's own browser.
-TURN = os.environ.get("ZS1_WEBRTC_TURN", "")
+# The credential is derived, not stored. coturn runs with --use-auth-secret, so
+# a valid username is an expiry timestamp and the password is its HMAC under a
+# secret only the server and coturn hold. Nothing long-lived is ever handed to a
+# browser: what it receives stops working after TURN_TTL seconds, so a credential
+# captured from a page or a log is worth minutes rather than forever.
+TURN_HOST   = os.environ.get("ZS1_WEBRTC_TURN_HOST", "")
+TURN_SECRET = os.environ.get("ZS1_WEBRTC_TURN_SECRET", "")
+TURN_TTL    = int(os.environ.get("ZS1_WEBRTC_TURN_TTL", "600"))
+
+
+def turn_credentials():
+    """A username/password pair coturn will accept until it expires."""
+    import base64
+    import hashlib
+    import hmac
+    import time
+    user = f"{int(time.time()) + TURN_TTL}:zs1"
+    pwd = base64.b64encode(
+        hmac.new(TURN_SECRET.encode(), user.encode(), hashlib.sha1).digest()
+    ).decode()
+    return user, pwd
 
 # nvcudah264enc, not nvh264enc.
 #
@@ -118,9 +137,12 @@ class Session:
         self.stop()
         self.pipe = Gst.parse_launch(PIPELINE)
         self.webrtc = self.pipe.get_by_name("sendrecv")
-        if TURN:
-            self.webrtc.set_property("turn-server", TURN)
-            log("turn:", TURN.split("@")[-1])
+        if TURN_HOST and TURN_SECRET:
+            from urllib.parse import quote
+            user, pwd = turn_credentials()
+            self.webrtc.set_property(
+                "turn-server", f"turn://{quote(user, safe='')}:{quote(pwd, safe='')}@{TURN_HOST}")
+            log(f"turn: {TURN_HOST} (credential valid {TURN_TTL}s)")
         self.webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
         self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
         bus = self.pipe.get_bus()
@@ -213,16 +235,13 @@ async def handler(ws, session):
         except Exception:
             pass
     session.ws = ws
-    if TURN:
+    if TURN_HOST and TURN_SECRET:
         # The viewer needs the same relay: on a network where neither side can
         # reach the other directly, both ends have to meet at the TURN server.
-        u = TURN.split("://", 1)[1]
-        cred, host = u.split("@", 1)
-        user, pwd = cred.split(":", 1)
-        from urllib.parse import unquote
+        # It gets its own short-lived pair, minted per connection.
+        user, pwd = turn_credentials()
         await ws.send(json.dumps({"ice_servers": [
-            {"urls": "turn:" + host, "username": unquote(user),
-             "credential": unquote(pwd)}]}))
+            {"urls": "turn:" + TURN_HOST, "username": user, "credential": pwd}]}))
     session.start()
     try:
         async for raw in ws:

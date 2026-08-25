@@ -80,9 +80,12 @@ spec:
             # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
             - name: ZS1_WEBRTC_BITRATE_KBPS
               value: "2500"
-            - name: ZS1_WEBRTC_TURN
+            - name: ZS1_WEBRTC_TURN_HOST
               valueFrom:
-                secretKeyRef: { name: zs1-turn, key: uri }
+                secretKeyRef: { name: zs1-turn, key: host }
+            - name: ZS1_WEBRTC_TURN_SECRET
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: secret }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }
@@ -179,9 +182,12 @@ spec:
             # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
             - name: ZS1_WEBRTC_BITRATE_KBPS
               value: "2500"
-            - name: ZS1_WEBRTC_TURN
+            - name: ZS1_WEBRTC_TURN_HOST
               valueFrom:
-                secretKeyRef: { name: zs1-turn, key: uri }
+                secretKeyRef: { name: zs1-turn, key: host }
+            - name: ZS1_WEBRTC_TURN_SECRET
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: secret }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }
@@ -287,9 +293,12 @@ spec:
             # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
             - name: ZS1_WEBRTC_BITRATE_KBPS
               value: "2500"
-            - name: ZS1_WEBRTC_TURN
+            - name: ZS1_WEBRTC_TURN_HOST
               valueFrom:
-                secretKeyRef: { name: zs1-turn, key: uri }
+                secretKeyRef: { name: zs1-turn, key: host }
+            - name: ZS1_WEBRTC_TURN_SECRET
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: secret }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }

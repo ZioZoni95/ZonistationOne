@@ -22,6 +22,76 @@ spec:
     secret: zs1-auth
     realm: ZoniStation One
 ---
+# Rate limit. A single password in front of three live machines is worth
+# guessing at; this makes guessing at speed impractical. Applied to every route,
+# not only the auth challenge, since the challenge is what an attacker retries.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zs1-ratelimit
+  namespace: zs1
+spec:
+  rateLimit:
+    average: 20
+    burst: 40
+    period: 1s
+---
+# Ordinary hardening. Most of it only matters once this is reachable from a
+# hostile network, which is exactly when it is too late to add it.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zs1-headers
+  namespace: zs1
+spec:
+  headers:
+    contentTypeNosniff: true
+    browserXssFilter: true
+    referrerPolicy: no-referrer
+    # The player page frames noVNC from its own origin, so deny would break it.
+    customFrameOptionsValue: SAMEORIGIN
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+---
+# One credential per game rather than one for all three: a password that leaks
+# from a shared screen or a browser history then costs one session, not every
+# session. Secrets are created out of band — see the note at the top of this file.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zs1-auth-acecombat
+  namespace: zs1
+spec:
+  basicAuth:
+    secret: zs1-auth-acecombat
+    realm: ZoniStation One — acecombat
+---
+# One credential per game rather than one for all three: a password that leaks
+# from a shared screen or a browser history then costs one session, not every
+# session. Secrets are created out of band — see the note at the top of this file.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zs1-auth-crash
+  namespace: zs1
+spec:
+  basicAuth:
+    secret: zs1-auth-crash
+    realm: ZoniStation One — crash
+---
+# One credential per game rather than one for all three: a password that leaks
+# from a shared screen or a browser history then costs one session, not every
+# session. Secrets are created out of band — see the note at the top of this file.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zs1-auth-dino
+  namespace: zs1
+spec:
+  basicAuth:
+    secret: zs1-auth-dino
+    realm: ZoniStation One — dino
+---
 # Host-based, not path-based: noVNC loads its assets from absolute paths, so a
 # prefix like /acecombat/ would break every one of them. *.localhost resolves to
 # 127.0.0.1 without touching /etc/hosts on this machine.
@@ -35,7 +105,7 @@ metadata:
   namespace: zs1
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-basicauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-ratelimit@kubernetescrd,zs1-zs1-headers@kubernetescrd,zs1-zs1-auth-acecombat@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
@@ -113,7 +183,7 @@ metadata:
   namespace: zs1
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-basicauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-ratelimit@kubernetescrd,zs1-zs1-headers@kubernetescrd,zs1-zs1-auth-crash@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
@@ -191,7 +261,7 @@ metadata:
   namespace: zs1
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-basicauth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-ratelimit@kubernetescrd,zs1-zs1-headers@kubernetescrd,zs1-zs1-auth-dino@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
