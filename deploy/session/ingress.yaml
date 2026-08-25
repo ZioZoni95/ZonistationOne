@@ -84,6 +84,21 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: zs1-acecombat, port: { number: 6080 } } }
+    - host: acecombat.100.104.165.115.nip.io
+      http:
+        paths:
+          # WebRTC signalling. Traefik upgrades to WebSocket on its own.
+          - path: /ws
+            pathType: Prefix
+            backend: { service: { name: zs1-acecombat, port: { number: 6082 } } }
+          # The HTTP audio stream used by the VNC page.
+          - path: /audio
+            pathType: Prefix
+            backend: { service: { name: zs1-acecombat, port: { number: 6081 } } }
+          # noVNC, its own websocket, and the two player pages.
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zs1-acecombat, port: { number: 6080 } } }
 ---
 # Host-based, not path-based: noVNC loads its assets from absolute paths, so a
 # prefix like /acecombat/ would break every one of them. *.localhost resolves to
@@ -147,6 +162,21 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: zs1-crash, port: { number: 6080 } } }
+    - host: crash.100.104.165.115.nip.io
+      http:
+        paths:
+          # WebRTC signalling. Traefik upgrades to WebSocket on its own.
+          - path: /ws
+            pathType: Prefix
+            backend: { service: { name: zs1-crash, port: { number: 6082 } } }
+          # The HTTP audio stream used by the VNC page.
+          - path: /audio
+            pathType: Prefix
+            backend: { service: { name: zs1-crash, port: { number: 6081 } } }
+          # noVNC, its own websocket, and the two player pages.
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zs1-crash, port: { number: 6080 } } }
 ---
 # Host-based, not path-based: noVNC loads its assets from absolute paths, so a
 # prefix like /acecombat/ would break every one of them. *.localhost resolves to
@@ -196,6 +226,21 @@ spec:
             pathType: Prefix
             backend: { service: { name: zs1-dino, port: { number: 6080 } } }
     - host: dino.192.168.1.46.nip.io
+      http:
+        paths:
+          # WebRTC signalling. Traefik upgrades to WebSocket on its own.
+          - path: /ws
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6082 } } }
+          # The HTTP audio stream used by the VNC page.
+          - path: /audio
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6081 } } }
+          # noVNC, its own websocket, and the two player pages.
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6080 } } }
+    - host: dino.100.104.165.115.nip.io
       http:
         paths:
           # WebRTC signalling. Traefik upgrades to WebSocket on its own.
