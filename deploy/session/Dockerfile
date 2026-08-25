@@ -46,6 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libasound2t64 libpulse0 libudev1 \
       pulseaudio pulseaudio-utils \
       x11vnc novnc websockify \
+      ffmpeg \
       fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
@@ -54,6 +55,9 @@ RUN ldconfig
 
 COPY --from=builder /src/ZoniStation_One /opt/zs1/ZoniStation_One
 COPY deploy/session/entrypoint.sh /opt/zs1/entrypoint.sh
+# Dropped into noVNC's own web root so websockify serves it — the picture and
+# the audio player end up on one page without a second HTTP server.
+COPY deploy/session/play.html /usr/share/novnc/play.html
 RUN chmod +x /opt/zs1/entrypoint.sh
 
 # The NVIDIA container runtime exposes only compute+utility by default, which

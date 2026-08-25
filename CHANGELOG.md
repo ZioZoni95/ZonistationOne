@@ -77,8 +77,16 @@ identical percentiles, which is the check that a host optimisation has not moved
   `VK_EXT_fragment_shader_interlock` available. The manifests set `ZS1_GFX=vulkan`. The usual
   answers to headless GL — VirtualGL, or an Xorg carrying the NVIDIA driver — are not needed.
 
-  Not there yet: the browser view is noVNC, which carries no audio and no low-latency path. That is
-  the WebRTC work.
+  Sound reaches the browser on a second port: the SPU's output off a PulseAudio null sink, encoded
+  as WebM/Opus by ffmpeg, with `play.html` putting it on one page with the noVNC picture. Verified
+  at the sink rather than assumed — `mean_volume -18.7 dB`, `max_volume -5.3 dB` over a four-second
+  capture, so the SPU is genuinely feeding it.
+
+  It is not synchronised with the picture and cannot be: two transports, no shared clock. The gap is
+  dominated not by the encoder but by the browser's media buffer, which grows without bound on a
+  progressive stream and settles a second or more behind. So the page chases the live edge — 5%
+  playback rate for small drift, a seek for a large one — and reports the measured lag, which holds
+  in the low hundreds of milliseconds. One transport carrying both is the WebRTC work.
 
 - **A Vulkan 1.3 renderer, and the ability to swap renderers while a game is running.** The GPU had
   one OpenGL 3.3 implementation that owned its own header; `<GL/glew.h>` came in through

@@ -214,7 +214,12 @@ kubectl apply -f deploy/session/sessions.yaml       # two sessions, two differen
 kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
 ```
 
-Then open `http://localhost:6080/vnc.html`.
+```sh
+kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080 6081:6081
+```
+
+Then open `http://localhost:6080/play.html` — the picture and an *Enable audio* button on one
+page. (`vnc.html` on its own still works and is video only.)
 
 **The BIOS and the discs never enter an image.** They stay on the host and are bind-mounted into the
 nodes at cluster creation, then exposed to one namespace by PersistentVolumes whose `claimRef` is
@@ -246,7 +251,13 @@ Four things cost a session's worth of debugging and are worth knowing before sta
    `NVIDIA GeForce RTX 4060 Laptop GPU` with a real swapchain. The manifests set `ZS1_GFX=vulkan` for
    this reason. It also means no VirtualGL and no NVIDIA X server are needed for headless rendering.
 
-`deploy/session/` carries no audio path to the browser yet: VNC does not transport sound.
+**Audio and picture are not synchronised.** VNC carries no sound, so the SPU's output is encoded off
+a PulseAudio null sink as WebM/Opus and served on a second port — two transports with nothing tying
+their clocks together. What dominates the gap is the browser's own media buffer, which grows without
+bound on a progressive stream, so `play.html` chases the live edge: small drift is absorbed by
+playing 5% fast, a large one by seeking, and the page shows the measured lag. It lands in the low
+hundreds of milliseconds rather than the second-plus it settles at untouched. Real synchronisation
+means one transport carrying both, which is the WebRTC work.
 
 ---
 

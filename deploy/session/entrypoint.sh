@@ -65,6 +65,35 @@ if [ "${ZS1_VNC:-1}" = "1" ]; then
     echo "[entrypoint] noVNC on :6080 (vnc.html)"
 fi
 
+# Audio to the browser, on its own port.
+#
+# VNC carries no sound, so the SPU's output is encoded straight off the null
+# sink's monitor and served as WebM/Opus. ffmpeg's http muxer with -listen 1
+# serves exactly one client and exits when it disconnects, which is why this
+# sits in a loop — a session has one player, and reconnecting should just work.
+#
+# This is NOT in sync with the picture: progressive HTTP is buffered by the
+# browser, so expect the audio to trail the video by roughly a second. Putting
+# both in one transport is the WebRTC work, not this.
+if [ "${ZS1_AUDIO_STREAM:-1}" = "1" ]; then
+    (
+        while true; do
+            # Every setting here trades bitrate or robustness for delay:
+            # a 480-frame pulse fragment is 10 ms of capture, lowdelay plus a
+            # 10 ms Opus frame keeps the encoder from looking ahead, and a
+            # 40 ms cluster is the smallest that still muxes cleanly.
+            ffmpeg -hide_banner -loglevel error -fflags nobuffer \
+                   -f pulse -fragment_size 480 -i zs1.monitor \
+                   -c:a libopus -b:a 96k -application lowdelay -frame_duration 10 \
+                   -flush_packets 1 -cluster_time_limit 40 -max_delay 0 \
+                   -content_type audio/webm -listen 1 -f webm \
+                   "http://0.0.0.0:6081" || true
+            sleep 1
+        done
+    ) &
+    echo "[entrypoint] audio stream on :6081 (WebM/Opus, one listener)"
+fi
+
 echo "[entrypoint] bios=${ZS1_BIOS} game=${ZS1_GAME:-<none>} session=${ZS1_SESSION}"
 
 if [ -n "$ZS1_GAME" ]; then
