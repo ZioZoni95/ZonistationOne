@@ -33,6 +33,26 @@ PORT     = int(os.environ.get("ZS1_WEBRTC_PORT", "6082"))
 DISPLAY  = os.environ.get("DISPLAY", ":0")
 SINK_MON = os.environ.get("ZS1_PULSE_MONITOR", "zs1.monitor")
 
+# nvcudah264enc, not nvh264enc.
+#
+# Both are present and both claim the GPU at registration time, but the older
+# element drives the NVENC preset API that NVIDIA removed from the encoder SDK,
+# so against a 610-series driver it registers, accepts the pipeline, and then
+# fails to configure a session with "Selected preset not supported" — the stream
+# never negotiates and the browser sits on "connecting". The newer element uses
+# the current tune/rate-control API and works.
+#
+# openh264enc is the escape hatch for a machine with no usable NVENC; it costs
+# CPU and latency, and is not the default for that reason.
+ENCODER = os.environ.get("ZS1_WEBRTC_ENCODER", "nvcudah264enc")
+if ENCODER == "nvcudah264enc":
+    ENC = (f"nvcudah264enc name=venc bitrate={{BITRATE}} gop-size={{FPS}} "
+           f"rate-control=cbr tune=ultra-low-latency zero-reorder-delay=true b-frames=0")
+elif ENCODER == "openh264enc":
+    ENC = "openh264enc name=venc bitrate={BITRATE}000 complexity=low"
+else:
+    ENC = ENCODER + " name=venc"
+
 # 50 fps is not a throughput choice, it is the machine's own cadence: a PAL field
 # is 20 ms, so anything above it transmits duplicate frames and anything below it
 # drops real ones. gop-size follows at one keyframe a second.
@@ -48,7 +68,7 @@ ximagesrc display-name={DISPLAY} use-damage=0 show-pointer=false
   ! video/x-raw,framerate={FPS}/1
   ! queue max-size-buffers=1 leaky=downstream
   ! videoconvert
-  ! nvh264enc name=venc zerolatency=true rc-mode=cbr bitrate={BITRATE} gop-size={FPS}
+  ! {ENC.format(BITRATE=BITRATE, FPS=FPS)}
   ! h264parse config-interval=-1
   ! rtph264pay pt=96 config-interval=-1 aggregate-mode=zero-latency
   ! queue max-size-buffers=1 max-size-time=0 max-size-bytes=0
