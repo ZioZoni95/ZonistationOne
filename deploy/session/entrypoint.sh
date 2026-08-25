@@ -16,9 +16,19 @@ WORK="/mnt/zs1/data/sessions/${ZS1_SESSION}"
 mkdir -p "$WORK/savestates" "$WORK/logs"
 cd "$WORK"
 
+# The container's xkeyboard-config is older than the keysyms the default rules
+# name (XF86CameraAccess*, XF86NavChart, ...), so xkbcomp prints a warning per
+# unknown keysym every time a keymap is compiled — twice per start, once for
+# Xvfb and once when x11vnc attaches. The X server says itself that they are not
+# fatal. They are dropped by name so anything else Xvfb has to say still shows.
+drop_xkb_noise() {
+    grep --line-buffered -vE \
+        '^(> Warning:[[:space:]]+Could not resolve keysym|The XKEYBOARD keymap compiler \(xkbcomp\) reports:|Errors from xkbcomp are not fatal)'
+}
+
 # -nolisten tcp: the X server is for this pod only and must not be reachable.
 Xvfb :0 -screen 0 "${ZS1_SCREEN_W}x${ZS1_SCREEN_H}x24" -nolisten tcp \
-     +extension GLX +extension RANDR +extension RENDER &
+     +extension GLX +extension RANDR +extension RENDER 2>&1 | drop_xkb_noise &
 
 i=0
 until xdpyinfo -display :0 >/dev/null 2>&1; do

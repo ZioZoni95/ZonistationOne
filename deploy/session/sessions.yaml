@@ -34,8 +34,12 @@ spec:
               value: /mnt/zs1/roms/SCPH-7502.BIN
             - name: ZS1_GAME
               value: "/mnt/zs1/games/Ace Combat 2 (Europe).bin"
+            # Vulkan, not GL. Xvfb serves no NVIDIA GLX extension, so libglvnd
+            # resolves OpenGL to libGLX_mesa and the 4060 never draws. Vulkan
+            # does not go through GLX: the ICD in /etc/vulkan/icd.d is enough,
+            # and the device comes up as the RTX 4060 with a real swapchain.
             - name: ZS1_GFX
-              value: gl
+              value: vulkan
           ports:
             - { name: novnc, containerPort: 6080 }
           resources:
@@ -84,8 +88,12 @@ spec:
             # path to pass — --game= wants the .bin.
             - name: ZS1_GAME
               value: "/mnt/zs1/games/Crash Bandicoot 3 - Warped (E) [SCES-01420].bin.ecm"
+            # Vulkan, not GL. Xvfb serves no NVIDIA GLX extension, so libglvnd
+            # resolves OpenGL to libGLX_mesa and the 4060 never draws. Vulkan
+            # does not go through GLX: the ICD in /etc/vulkan/icd.d is enough,
+            # and the device comes up as the RTX 4060 with a real swapchain.
             - name: ZS1_GFX
-              value: gl
+              value: vulkan
           ports:
             - { name: novnc, containerPort: 6080 }
           resources:

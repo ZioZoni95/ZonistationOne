@@ -69,10 +69,16 @@ identical percentiles, which is the check that a host optimisation has not moved
   card as part of the card driver's write test, so two sessions started in one directory would
   destroy each other's saves on the first boot.
 
-  Not there yet: the GPU is attached but is not what draws. Xvfb offers no hardware GLX, and the
-  running process maps `libGLX_mesa.so` with no NVIDIA GL library present, so the OpenGL backend is
-  on Mesa. The browser view is noVNC, which carries no audio. Both are the same next piece of work —
-  an X server with the NVIDIA driver, and WebRTC in front of it.
+  **The Vulkan backend is what makes headless rendering work**, and it needs nothing added to get
+  there. Xvfb serves no NVIDIA GLX extension, so OpenGL resolves through libglvnd to
+  `libGLX_mesa.so` and the 4060 sits idle while a software rasteriser draws; Vulkan does not go
+  through GLX at all, and the ICD the container runtime drops in `/etc/vulkan/icd.d` is enough for
+  the device to come up as the RTX 4060 with a 1280x720 swapchain and
+  `VK_EXT_fragment_shader_interlock` available. The manifests set `ZS1_GFX=vulkan`. The usual
+  answers to headless GL — VirtualGL, or an Xorg carrying the NVIDIA driver — are not needed.
+
+  Not there yet: the browser view is noVNC, which carries no audio and no low-latency path. That is
+  the WebRTC work.
 
 - **A Vulkan 1.3 renderer, and the ability to swap renderers while a game is running.** The GPU had
   one OpenGL 3.3 implementation that owned its own header; `<GL/glew.h>` came in through

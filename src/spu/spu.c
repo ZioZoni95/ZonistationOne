@@ -144,7 +144,7 @@ void spu_set_control(Spu* spu, uint16_t value) {
                              | ((value & (1u << 5)) ? SPU_STATUS_DMA_REQUEST : 0u));
 
     if (value != old) {
-        LOG_SPU_INFO("[SPU] Control=0x%04X (enable=%d, muted=%d, irq=%d, mode=%d)",
+        LOG_SPU_DEBUG("[SPU] Control=0x%04X (enable=%d, muted=%d, irq=%d, mode=%d)",
                      value,
                      (value & SPU_CTRL_ENABLE) ? 1 : 0,
                      spu->muted ? 1 : 0,

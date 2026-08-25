@@ -239,11 +239,12 @@ Four things cost a session's worth of debugging and are worth knowing before sta
    `10.43.0.0/16`, and the host's iptables then answer the cluster's own service IP with a foreign
    certificate. Every system pod fails with `x509: certificate signed by unknown authority` while the
    CA bundle and the server CA match perfectly. The script uses `10.44`/`10.45` instead.
-4. **Rendering does not use the GPU yet.** Xvfb offers no hardware GLX, so the OpenGL backend binds
-   Mesa: the running process maps `libGLX_mesa.so` and no NVIDIA GL library at all. The GPU *is*
-   attached — `nvidia-smi` in the pod sees the 4060 and the device plugin hands out slices — it just
-   is not what draws. Getting there needs an X server with the NVIDIA driver, which is the same
-   piece of work as adding WebRTC streaming.
+4. **Use the Vulkan backend, not OpenGL.** Xvfb serves no NVIDIA GLX extension, so libglvnd
+   resolves OpenGL to `libGLX_mesa.so` and the 4060 never draws — the GPU is attached and idle while
+   a software rasteriser does the work. Vulkan does not go through GLX: the ICD the container runtime
+   drops in `/etc/vulkan/icd.d` is all it needs, and the device comes up as
+   `NVIDIA GeForce RTX 4060 Laptop GPU` with a real swapchain. The manifests set `ZS1_GFX=vulkan` for
+   this reason. It also means no VirtualGL and no NVIDIA X server are needed for headless rendering.
 
 `deploy/session/` carries no audio path to the browser yet: VNC does not transport sound.
 

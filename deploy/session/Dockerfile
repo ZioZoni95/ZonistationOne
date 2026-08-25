@@ -67,6 +67,12 @@ ENV NVIDIA_DRIVER_CAPABILITIES=graphics,display,compute,utility \
 # uid 1000 matches the host user that owns the bind-mounted data directory, so
 # memory cards and savestates written from the pod stay readable outside it.
 # It also lets pulseaudio run at all: it refuses to start as root.
+# Xvfb wants /tmp/.X11-unix and cannot create it as a non-root user, which it
+# reports as "_XSERVTransmkdir: ERROR: euid != 0". Creating it here with the
+# usual sticky-bit permissions removes the message; the server worked either
+# way, since it also listens on an abstract socket.
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
 RUN mkdir -p /home/ubuntu && chown -R ubuntu:ubuntu /home/ubuntu /opt/zs1
 USER ubuntu
 ENV HOME=/home/ubuntu
