@@ -46,7 +46,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libasound2t64 libpulse0 libudev1 \
       pulseaudio pulseaudio-utils \
       x11vnc novnc websockify \
-      ffmpeg \
+      ffmpeg xdotool \
+      gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+      gstreamer1.0-plugins-bad gstreamer1.0-nice \
+      python3-gi python3-websockets gir1.2-gst-plugins-bad-1.0 \
       fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
@@ -58,12 +61,14 @@ COPY deploy/session/entrypoint.sh /opt/zs1/entrypoint.sh
 # Dropped into noVNC's own web root so websockify serves it — the picture and
 # the audio player end up on one page without a second HTTP server.
 COPY deploy/session/play.html /usr/share/novnc/play.html
-RUN chmod +x /opt/zs1/entrypoint.sh
+COPY deploy/session/webrtc.html /usr/share/novnc/webrtc.html
+COPY deploy/session/webrtc_server.py /opt/zs1/webrtc_server.py
+RUN chmod +x /opt/zs1/entrypoint.sh /opt/zs1/webrtc_server.py
 
 # The NVIDIA container runtime exposes only compute+utility by default, which
 # leaves the container with no libGLX/libEGL and no Vulkan ICD. Both renderers
 # need graphics; display is what lets the driver present to the X server.
-ENV NVIDIA_DRIVER_CAPABILITIES=graphics,display,compute,utility \
+ENV NVIDIA_DRIVER_CAPABILITIES=graphics,display,video,compute,utility \
     NVIDIA_VISIBLE_DEVICES=all \
     DISPLAY=:0 \
     ZS1_UI=gameplay

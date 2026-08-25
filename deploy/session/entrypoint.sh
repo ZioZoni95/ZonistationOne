@@ -78,7 +78,12 @@ fi
 if [ "${ZS1_AUDIO_STREAM:-1}" = "1" ]; then
     (
         while true; do
-            # Every setting here trades bitrate or robustness for delay:
+            # -live 1 matters: without it the WebM muxer writes a header meant
+            # for a seekable file. ffmpeg's own decoder tolerates the result and
+            # a browser does not, which presents as a silent stream rather than
+            # a malformed one.
+            #
+            # Every other setting here trades bitrate or robustness for delay:
             # a 480-frame pulse fragment is 10 ms of capture, lowdelay plus a
             # 10 ms Opus frame keeps the encoder from looking ahead, and a
             # 40 ms cluster is the smallest that still muxes cleanly.
@@ -86,12 +91,22 @@ if [ "${ZS1_AUDIO_STREAM:-1}" = "1" ]; then
                    -f pulse -fragment_size 480 -i zs1.monitor \
                    -c:a libopus -b:a 96k -application lowdelay -frame_duration 10 \
                    -flush_packets 1 -cluster_time_limit 40 -max_delay 0 \
-                   -content_type audio/webm -listen 1 -f webm \
+                   -content_type audio/webm -listen 1 -f webm -live 1 \
                    "http://0.0.0.0:6081" || true
             sleep 1
         done
     ) &
     echo "[entrypoint] audio stream on :6081 (WebM/Opus, one listener)"
+fi
+
+# WebRTC: picture and sound in one transport, H.264 on NVENC.
+#
+# This runs beside the VNC path rather than replacing it. The pipeline is only
+# built when a viewer connects, so an unused session costs nothing, and if the
+# GStreamer side ever fails there is still a working way to see the machine.
+if [ "${ZS1_WEBRTC:-1}" = "1" ]; then
+    /opt/zs1/webrtc_server.py &
+    echo "[entrypoint] webrtc signalling on :6082"
 fi
 
 echo "[entrypoint] bios=${ZS1_BIOS} game=${ZS1_GAME:-<none>} session=${ZS1_SESSION}"

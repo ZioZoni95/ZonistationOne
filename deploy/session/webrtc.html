@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>ZoniStation One — WebRTC</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin:0; height:100%; background:#08080a; color:#e8e8ea;
+               font:13px/1.45 system-ui, sans-serif; }
+  body { display:flex; flex-direction:column; }
+  #wrap { flex:1; display:flex; align-items:center; justify-content:center; min-height:0; }
+  video { max-width:100%; max-height:100%; background:#000; image-rendering:pixelated; }
+  #bar { display:flex; gap:16px; align-items:center; flex-wrap:wrap;
+         padding:8px 12px; background:#141418; border-top:1px solid #26262c; }
+  button { background:#2a2a33; color:inherit; border:1px solid #3a3a45; border-radius:5px;
+           padding:5px 12px; cursor:pointer; font:inherit; }
+  button:hover { background:#34343f; }
+  .stat { font-variant-numeric:tabular-nums; color:#9aa; }
+  .stat b { color:#e8e8ea; font-weight:600; }
+  #hint { color:#66666f; }
+</style>
+
+<div id="wrap"><video id="v" autoplay playsinline></video></div>
+
+<div id="bar">
+  <button id="go">Connect</button>
+  <span class="stat" id="s-state">idle</span>
+  <span class="stat" id="s-rtt"></span>
+  <span class="stat" id="s-fps"></span>
+  <span class="stat" id="s-br"></span>
+  <span class="stat" id="s-jit"></span>
+  <span id="hint">Click the picture to send keys · arrows, Enter, Space, F5/F8</span>
+</div>
+
+<script>
+// One transport for picture and sound, so they share a clock — the whole reason
+// this exists next to the VNC page, where they did not.
+const WS = 'ws://' + location.hostname + ':' +
+           (new URLSearchParams(location.search).get('sig') || '6082');
+
+const v = document.getElementById('v');
+const go = document.getElementById('go');
+const S = id => document.getElementById(id);
+
+let pc = null, ws = null;
+
+// Browser key names are not X keysyms, and xdotool speaks keysyms. Only the keys
+// the emulator actually binds are mapped; anything else is dropped rather than
+// guessed, so a stray browser shortcut cannot turn into a random keypress.
+const KEYMAP = {
+  ArrowUp:'Up', ArrowDown:'Down', ArrowLeft:'Left', ArrowRight:'Right',
+  Enter:'Return', Space:'space', Escape:'Escape', Backspace:'BackSpace',
+  Tab:'Tab', ShiftLeft:'Shift_L', ShiftRight:'Shift_R',
+  ControlLeft:'Control_L', ControlRight:'Control_R',
+  AltLeft:'Alt_L', AltRight:'Alt_R', Backquote:'grave',
+};
+for (let i = 0; i < 26; i++) KEYMAP['Key' + String.fromCharCode(65+i)] = String.fromCharCode(97+i);
+for (let i = 0; i <= 9; i++) KEYMAP['Digit' + i] = String(i);
+for (let i = 1; i <= 12; i++) KEYMAP['F' + i] = 'F' + i;
+
+function connect() {
+  ws = new WebSocket(WS);
+  pc = new RTCPeerConnection({ iceServers: [] });   // same host: no STUN needed
+
+  pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
+  pc.onicecandidate = e => {
+    if (e.candidate) ws.send(JSON.stringify({ ice: {
+      candidate: e.candidate.candidate, sdpMLineIndex: e.candidate.sdpMLineIndex } }));
+  };
+  pc.onconnectionstatechange = () => {
+    S('s-state').textContent = pc.connectionState;
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      go.disabled = false; go.textContent = 'Reconnect';
+    }
+  };
+
+  ws.onmessage = async ev => {
+    const m = JSON.parse(ev.data);
+    if (m.sdp) {
+      await pc.setRemoteDescription(m.sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({ sdp: { type: answer.type, sdp: answer.sdp } }));
+    } else if (m.ice) {
+      try { await pc.addIceCandidate(m.ice); } catch (e) { /* late candidate */ }
+    }
+  };
+  ws.onclose = () => { S('s-state').textContent = 'signalling closed';
+                       go.disabled = false; go.textContent = 'Reconnect'; };
+}
+
+go.onclick = () => { go.disabled = true; go.textContent = 'Connecting'; connect(); };
+
+// Keys only while the picture has focus, so the page's own controls still work.
+v.tabIndex = 0;
+v.addEventListener('click', () => v.focus());
+function key(action, e) {
+  const sym = KEYMAP[e.code];
+  if (!sym || !ws || ws.readyState !== 1) return;
+  e.preventDefault();
+  ws.send(JSON.stringify({ key: { action, sym } }));
+}
+v.addEventListener('keydown', e => key('down', e));
+v.addEventListener('keyup',   e => key('up', e));
+
+// Reported, not estimated. round-trip time is the network leg only — encode and
+// decode sit on top of it — but it is the part that a stat can actually prove.
+let last = null;
+setInterval(async () => {
+  if (!pc || pc.connectionState !== 'connected') return;
+  const stats = await pc.getStats();
+  let inb = null, pair = null;
+  stats.forEach(r => {
+    if (r.type === 'inbound-rtp' && r.kind === 'video') inb = r;
+    if (r.type === 'candidate-pair' && r.state === 'succeeded') pair = r;
+  });
+  if (pair && pair.currentRoundTripTime != null)
+    S('s-rtt').innerHTML = 'rtt <b>' + (pair.currentRoundTripTime*1000).toFixed(0) + ' ms</b>';
+  if (inb) {
+    if (last) {
+      const dt = (inb.timestamp - last.timestamp) / 1000;
+      if (dt > 0) {
+        S('s-fps').innerHTML = 'fps <b>' + ((inb.framesDecoded-last.framesDecoded)/dt).toFixed(0) + '</b>';
+        S('s-br').innerHTML  = 'bitrate <b>' +
+          (((inb.bytesReceived-last.bytesReceived)*8/dt/1e6)).toFixed(1) + ' Mbit/s</b>';
+      }
+    }
+    S('s-jit').innerHTML = 'jitter <b>' + ((inb.jitter||0)*1000).toFixed(1) + ' ms</b>';
+    last = inb;
+  }
+}, 1000);
+</script>

@@ -39,7 +39,14 @@
 // which is inaudible on speech and music alike at these rates; a large gap —
 // after a stall, a tab in the background, a reconnect — is closed by seeking,
 // because playing fast enough to recover a second would be audible.
-const AUDIO_URL = location.protocol + '//' + location.hostname + ':6081/';
+// The audio port is derived rather than fixed, so two sessions forwarded to
+// different local ports each reach their own stream: a session publishes noVNC
+// on N and audio on N+1, and kubectl port-forward preserves that pairing when
+// both are mapped together (6080:6080 6081:6081, 6090:6080 6091:6081, ...).
+// ?audio=<port> overrides it for any layout that does not follow the rule.
+const AUDIO_PORT = new URLSearchParams(location.search).get('audio')
+                || String(Number(location.port || 80) + 1);
+const AUDIO_URL = location.protocol + '//' + location.hostname + ':' + AUDIO_PORT + '/';
 const NUDGE_AT = 0.30;   // s behind: start playing 5% fast
 const SEEK_AT  = 0.60;   // s behind: give up and jump
 const TARGET   = 0.15;   // s of buffer to keep after a jump
@@ -51,7 +58,9 @@ const lag = document.getElementById('lag');
 go.onclick = () => {
   // A browser will not start audio without a gesture, which is why this is a
   // button rather than autoplay.
-  a.src = AUDIO_URL + '?t=' + Date.now();
+  // No cache-buster query: ffmpeg's own HTTP server does not serve a path with
+  // one the way a normal server would, and the stream is live in any case.
+  a.src = AUDIO_URL;
   a.play().then(() => { go.textContent = 'Audio on'; go.disabled = true; })
           .catch(e => { lag.textContent = 'audio failed: ' + e.message; });
 };

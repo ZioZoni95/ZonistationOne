@@ -214,44 +214,41 @@ kubectl apply -f deploy/session/sessions.yaml       # two sessions, two differen
 kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
 ```
 
+### Watching a session
+
+Each session publishes three ports. Forward them together — the player page derives the audio port
+from the one it is served on (`N` -> `N+1`), so mapping them as a block is what lets two sessions run
+side by side:
+
 ```sh
-kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080 6081:6081
+kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080 6081:6081 6082:6082
+kubectl port-forward -n zs1 svc/zs1-crash     6090:6080 6091:6081 6092:6082   # a second session
 ```
 
-Then open `http://localhost:6080/play.html` — the picture and an *Enable audio* button on one
-page. (`vnc.html` on its own still works and is video only.)
+| Port | What |
+|---|---|
+| 6080 | noVNC (picture, and the pages below are served from here) |
+| 6081 | audio, WebM/Opus over HTTP |
+| 6082 | WebRTC signalling (WebSocket) |
 
-**The BIOS and the discs never enter an image.** They stay on the host and are bind-mounted into the
-nodes at cluster creation, then exposed to one namespace by PersistentVolumes whose `claimRef` is
-pinned up front, and mounted `readOnly`. Nothing is published beyond a ClusterIP: reaching a session
-requires cluster credentials.
+Two ways in, and they are not equivalent:
 
-A session is picked entirely by environment: `ZS1_GAME` chooses the disc, `ZS1_SESSION` names the
-working directory. That last one matters — `interconnect.c` opens `memcard1.mcd` and `memcard2.mcd`
-by fixed name relative to the CWD, and every boot rewrites the card as part of the driver's write
-test, so two sessions sharing a directory would destroy each other's saves immediately.
+- **`http://localhost:6080/webrtc.html`** — picture and sound in **one** WebRTC transport, H.264
+  encoded on the GPU's NVENC block, keyboard forwarded. Click *Connect*, then click the picture to
+  give it focus before using the keys. The bar shows measured round-trip time, frame rate, bitrate
+  and jitter, so latency is read rather than guessed. Add `?sig=6092` for the second session.
+- **`http://localhost:6080/play.html`** — the older VNC path: noVNC for the picture, a separate HTTP
+  audio stream, an *Enable audio* button. Kept as the fallback, because it depends on nothing but
+  x11vnc.
 
-Four things cost a session's worth of debugging and are worth knowing before starting:
+The stream runs at **50 fps**, matching a PAL field. That is a cadence, not a throughput target:
+above it the encoder sends duplicate frames, below it real ones are dropped. `ZS1_WEBRTC_FPS` and
+`ZS1_WEBRTC_BITRATE_KBPS` override it, `ZS1_WEBRTC=0` and `ZS1_VNC=0` switch either path off.
 
-1. **Docker Desktop cannot do this.** Its daemon runs in a LinuxKit VM with no NVIDIA passthrough,
-   and `nvidia-ctk runtime configure` writes to the *system* daemon's config. Run
-   `docker context use default` first; the create script does it itself.
-2. **The k3s node image needs the NVIDIA container runtime inside it.** `rancher/k3s` is busybox with
-   no package manager, so `deploy/k3d-cuda/Dockerfile` lays it over a CUDA base — mapping `/bin` and
-   `/lib` onto the usr-merged destinations, since they are directories in one image and symlinks in
-   the other.
-3. **A native `k3s.service` on the host collides with k3d.** Both default to `10.42.0.0/16` and
-   `10.43.0.0/16`, and the host's iptables then answer the cluster's own service IP with a foreign
-   certificate. Every system pod fails with `x509: certificate signed by unknown authority` while the
-   CA bundle and the server CA match perfectly. The script uses `10.44`/`10.45` instead.
-4. **Use the Vulkan backend, not OpenGL.** Xvfb serves no NVIDIA GLX extension, so libglvnd
-   resolves OpenGL to `libGLX_mesa.so` and the 4060 never draws — the GPU is attached and idle while
-   a software rasteriser does the work. Vulkan does not go through GLX: the ICD the container runtime
-   drops in `/etc/vulkan/icd.d` is all it needs, and the device comes up as
-   `NVIDIA GeForce RTX 4060 Laptop GPU` with a real swapchain. The manifests set `ZS1_GFX=vulkan` for
-   this reason. It also means no VirtualGL and no NVIDIA X server are needed for headless rendering.
+The pipeline is only built once a viewer connects, so an idle session costs nothing. One viewer at a
+time: a second connection replaces the first rather than being multiplexed.
 
-**Audio and picture are not synchronised.** VNC carries no sound, so the SPU's output is encoded off
+**On the VNC path, audio and picture are not synchronised** — that is what WebRTC is for. VNC carries no sound, so the SPU's output is encoded off
 a PulseAudio null sink as WebM/Opus and served on a second port — two transports with nothing tying
 their clocks together. What dominates the gap is the browser's own media buffer, which grows without
 bound on a progressive stream, so `play.html` chases the live edge: small drift is absorbed by
