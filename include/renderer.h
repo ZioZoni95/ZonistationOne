@@ -12,158 +12,25 @@
 #include <stdbool.h>
 #include <SDL3/SDL.h>
 
-// --- OpenGL Includes ---
-// Make sure you have GLEW (or GLAD) headers included correctly in your project setup
-#define GLEW_STATIC // Or define dynamically if preferred
-#include <GL/glew.h> // Or your GLAD/other GL header
+/* The backend interface, and with it the vertex types, VramViewParams and
+ * VERTEX_BUFFER_LEN. Those used to be declared here in GL types, which is how
+ * <GL/glew.h> reached every unit that includes gpu.h. */
+#include "gpu_backend.h"
 
-// --- Renderer-Specific Data Types ---
-
-// Represents a 2D vertex position in PSX VRAM coordinates (signed 16-bit)
+/* The renderer as the rest of the machine sees it: which backend is live, and
+ * that backend's private state.
+ *
+ * Everything that used to be here — the VAO, the four VBOs, the uniform
+ * locations, the three FBOs and the ~1 MB of CPU-side vertex staging — belongs
+ * to one backend and now lives inside it (src/gpu/renderer_gl.h).
+ *
+ * Gpu embeds this by value. savestate.c derives the two spans it writes from
+ * offsetof(Gpu, renderer) and sizeof(Renderer) rather than hard-coding them
+ * (savestate.c:76-78), so shrinking this struct moves both boundaries by the
+ * same amount and does not change a single saved byte. */
 typedef struct {
-    GLshort x, y; // OpenGL types (GLshort is int16_t)
-} RendererPosition;
-
-// Represents an RGB color (unsigned 8-bit per component)
-typedef struct {
-    GLubyte r, g, b; // OpenGL types (GLubyte is uint8_t)
-} RendererColor;
-
-// Represents texture coordinates (absolute VRAM coordinates)
-typedef struct {
-    GLshort u, v;
-} RendererTexCoord;
-
-// Represents CLUT and Texture Page information
-typedef struct {
-    GLushort clut;    // CLUT ID (contains X,Y of palette)
-    GLushort tpage;   // Texture Page ID (contains BaseX, BaseY, Depth)
-} RendererTPage;
-
-// --- Renderer State ---
-
-// Maximum number of vertices the renderer can buffer before forcing a draw call.
-// Adjust as needed for performance/memory trade-offs. (Guide uses 64*1024)
-#define VERTEX_BUFFER_LEN (64 * 1024)
-
-/* VRAM viewer decode modes, mirroring PCSX-Redux's vram-viewer widget: VRAM is
- * a raw 1024x512 halfword store that games address as 4bpp/8bpp indexed,
- * 16bpp direct or 24bpp packed depending on the region, so the viewer has to
- * be told how to read the bytes it is being asked to show. */
-typedef enum {
-    VRAM_VIEW_4BPP = 0,
-    VRAM_VIEW_8BPP,
-    VRAM_VIEW_16BPP,
-    VRAM_VIEW_24BPP
-} VramViewMode;
-
-typedef struct {
-    VramViewMode mode;
-    int      shift24;         /* 0-3: byte phase for 24bpp unpacking */
-    bool     greyscale;
-    bool     show_alpha;      /* render the mask bit (bit 15) as intensity */
-    uint16_t clut_x, clut_y;  /* CLUT position for the indexed modes */
-} VramViewParams;
-
-// Structure holding the state of the OpenGL renderer
-typedef struct {
-    // OpenGL Object IDs
-    GLuint vao;             // Vertex Array Object: Groups VBO bindings and attribute pointers
-    GLuint position_buffer; // Vertex Buffer Object (VBO) storing vertex positions
-    GLuint color_buffer;    // Vertex Buffer Object (VBO) storing vertex colors
-    GLuint texcoord_buffer; // VBO for texture coordinates
-    GLuint tpage_buffer;    // VBO for CLUT/TPage info
-    GLuint shader_program;  // ID of the compiled and linked GLSL shader program
-    GLuint vram_texture;    // Texture object for VRAM
-
-    // --- Unified VRAM (single GL texture) ---
-    // ONE RGBA8 texture is the rasterization target, the CPU/MDEC upload
-    // target, and the scanout source, so anything written to VRAM is on screen
-    // by construction. PSX 16-bit halfwords are stored 5:5:5:1 expanded to 8
-    // bits per channel ((v<<3)|(v>>2)), which round-trips losslessly, so CLUT
-    // index bits survive for texture sampling.
-    GLuint display_fbo;     // FBO whose colour attachment is vram_tex
-    GLuint vram_tex;        // RGBA8 1024x512 — the one VRAM
-    GLuint display_texture; // legacy alias target (kept until Phase 2b)
-
-    // Scanout-extract pass: renders the CRTC display window out of vram_tex,
-    // unpacking per depth (15bpp direct / 24bpp packed triplets).
-    GLuint scanout_fbo;
-    GLuint scanout_texture;   // RGB8 display-ready image
-    GLuint scanout_program;
-    GLuint dummy_vao;         // attribute-less VAO for the fullscreen triangle
-    GLint  scanout_vram_loc;
-    GLint  scanout_off_loc;
-    GLint  scanout_size_loc;
-    GLint  scanout_d24_loc;
-
-    GLuint vram_viewer_texture; // RGBA8 1024x512 for ImGui VRAM viewer
-    VramViewParams vram_view;   // how the viewer decodes VRAM (set from the UI)
-
-    // VRAM-viewer pass: decodes the unified VRAM into vram_viewer_texture on
-    // the GPU thread. It has to read vram_tex, not the CPU-side mirror: the
-    // mirror only ever receives uploads and DMA, so everything the game
-    // rasterises was missing from the viewer and the display area showed black.
-    GLuint viewer_fbo;
-    GLuint viewer_program;
-    GLint  viewer_vram_loc;
-    GLint  viewer_mode_loc;
-    GLint  viewer_clut_loc;
-    GLint  viewer_flags_loc;   // x=greyscale, y=show_alpha, z=shift24
-
-    // Shader Uniform Location
-    GLint uniform_offset_loc; // Location ID of the 'offset' uniform in the vertex shader
-    GLint uniform_use_texture_loc;
-    GLint uniform_raw_texture_loc; // 1 = use raw texture color (no modulation)
-    GLint uniform_vram_texture_loc;
-    GLint uniform_screen_scale_loc; // Location for screen scaling uniform
-    GLint uniform_tex_window_loc;   // Location for ivec4 u_texWindow (and_x,and_y,or_x,or_y)
-    GLint uniform_dither_loc;       // Location for u_dither_enable (1=on, 0=off)
-    GLint uniform_stp_mode_loc;     /* -1=off, 0=opaque pass (discard STP=1), 1=blend pass (discard STP=0) */
-    GLint uniform_set_mask_loc;     /* Location for u_set_mask (GP0(E6).0) */
-    GLint uniform_mask_test_loc;    /* Location for u_mask_test (GP0(E6).1) */
-
-    // CPU-Side Buffers (Temporary storage before uploading to GPU)
-    // These hold the data pushed by the GPU command handlers.
-    RendererPosition positions_data[VERTEX_BUFFER_LEN]; // CPU buffer for vertex positions
-    RendererColor colors_data[VERTEX_BUFFER_LEN];       // CPU buffer for vertex colors
-    RendererTexCoord texcoords_data[VERTEX_BUFFER_LEN]; // CPU buffer for texture coordinates
-    RendererTPage tpage_data[VERTEX_BUFFER_LEN];        // CPU buffer for TPage/CLUT
-
-    // State Tracking
-    uint32_t vertex_count;      // Number of vertices currently buffered in the CPU-side arrays
-    bool initialized;           // Flag indicating if the renderer has been successfully initialized
-    bool texture_enabled;       // Current texture mode
-    bool raw_texture_enabled;   // Current raw-texture mode (skip modulation)
-    float screen_width;         // Target display width (in PSX pixels)
-    float screen_height;        // Target display height (in PSX pixels)
-    bool semi_trans_enabled;    // Whether semi-transparency blending is active
-    uint8_t semi_trans_mode;    // 0=B/2+F/2, 1=B+F, 2=B-F, 3=B+F/4
-    bool dither_enabled;        // Whether 4x4 PSX dithering is active for current primitive
-    bool set_mask_enabled;      // GP0(E6).0 — force bit 15 set on every pixel drawn
-    bool mask_test_enabled;     // GP0(E6).1 — skip pixels whose destination bit 15 is set
-
-    /* Cached pipeline state — snapshot into each batch for GPU thread replay */
-    int16_t  cached_offset_x, cached_offset_y;
-    int32_t  cached_tex_window[4];  /* and_x, and_y, or_x, or_y */
-    int32_t  cached_scissor[4];     /* gl_x, gl_y, clip_w, clip_h (GL coords) */
-
-    /* Display region — cropped from CRTC state, passed to GPU thread blit */
-    uint16_t display_x, display_y, display_w, display_h;
-    bool     display_depth24;   /* GPUSTAT.21 — display area is packed 24bpp */
-    bool     display_blank;     /* GPUSTAT.23 — display off: hardware shows black */
-
-    /* GPU render thread (Phase 2 threading refactor) */
-    SDL_Thread*  gpu_thread;
-    SDL_Mutex*   gpu_mutex;
-    SDL_Condition*    frame_ready;   /* GPU wakes when CPU submits a frame */
-    SDL_Condition*    frame_done;    /* CPU waits if GPU is behind */
-    SDL_AtomicInt gpu_stop;
-    int          write_idx;     /* CPU writes to slot [write_idx]; GPU reads [1-write_idx] */
-    int          frames_pending;
-    SDL_Window*  sdl_window;    /* needed by GPU thread for SwapWindow */
-    SDL_GLContext gl_context;   /* moved from main thread to GPU thread */
-
+    const GfxBackend* vt;    /* NULL until renderer_init() has succeeded */
+    GfxImpl           impl;  /* the live backend's own state */
 } Renderer;
 
 // --- Function Prototypes ---
@@ -173,13 +40,41 @@ typedef struct {
  * Compiles shaders, links program, creates VAO and VBOs, sets initial GL state.
  * Must be called with the GL context current on the calling thread.
  */
-bool renderer_init(Renderer* renderer);
+/**
+ * @brief Binds a rendering backend to this Renderer without touching the GPU.
+ *
+ * Must be called before anything else, renderer_init() included. gpu_reset_state()
+ * pushes the GP0/GP1 reset values through renderer_set_texture_window(),
+ * _set_drawing_area(), _set_display_region() and _set_display_blank() while the
+ * machine is being built (gpu.c:661-668), which is *before* main.c reaches
+ * renderer_init() — and those four calls carry real state, because the GL
+ * backend's init does not reset those fields. Splitting the bind from the init
+ * keeps that order working instead of quietly dropping the reset values.
+ *
+ * @return false if the requested backend was not compiled in.
+ */
+bool renderer_select_backend(Renderer* renderer, GfxBackendType type);
+
+/** @brief The live backend, or NULL before renderer_select_backend(). */
+const GfxBackend* renderer_backend(const Renderer* renderer);
+
+bool renderer_init(Renderer* renderer, SDL_Window* window);
+
+/** @brief renderer_init() with a device and internal-scale request.
+ *  Vulkan honours both; the GL backend ignores them, because the GLX vendor
+ *  is resolved at the first dlopen of libGL and it has no scaled target. */
+bool renderer_init_ex(Renderer* renderer, SDL_Window* window, const GfxDeviceRequest* req);
+
+/** @brief The GPUs a backend offers, without needing a live Renderer.
+ *  Asked by the interface before a switch, so it can list a backend that is
+ *  not the one currently running. Returns how many entries were written. */
+int renderer_enumerate_devices(GfxBackendType type, GfxDeviceInfo* out, int max);
 
 /**
  * @brief Starts the GPU render thread. Call after renderer_init() and AFTER
  * releasing the GL context from the main thread with SDL_GL_MakeCurrent(w, NULL).
  */
-void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, SDL_GLContext ctx);
+void renderer_start_gpu_thread(Renderer* renderer, SDL_Window* window, void* native_ctx);
 
 /**
  * @brief Signals GPU thread to stop and waits for it to exit.
@@ -207,12 +102,12 @@ void renderer_wait_frame_done(Renderer* renderer);
  * @param renderer Pointer to the Renderer.
  * @return OpenGL texture ID.
  */
-GLuint renderer_get_display_texture(Renderer* renderer);
+GfxTexHandle renderer_get_display_texture(Renderer* renderer);
 /* The display-ready image produced by the scanout pass (what the screen shows). */
-GLuint renderer_get_scanout_texture(Renderer* renderer);
+GfxTexHandle renderer_get_scanout_texture(Renderer* renderer);
 void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
-GLuint renderer_get_vram_viewer_texture(Renderer* renderer);
+GfxTexHandle renderer_get_vram_viewer_texture(Renderer* renderer);
 
 /* --- Phase 5: cross-thread VRAM readback ---------------------------------
  * The GPU thread owns the GL context, so the CPU cannot read vram_tex. Raise

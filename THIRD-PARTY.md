@@ -22,6 +22,14 @@ project's *code* is derivation. Only the second kind is listed here.
 
 MIT is permissive and imposes only attribution, which the file headers carry.
 
+The vendored Dear ImGui is the **docking** branch at commit `310f3c837000`
+(2026-05-06, `IMGUI_VERSION_NUM` 19275). Recorded because the version string alone
+does not identify it: "1.92.8 WIP" sits between two releases and the docking branch
+differs from master by the multi-viewport support. `imgui_impl_opengl3.cpp` in tree is
+byte-identical to that commit, and `imgui_impl_vulkan.{cpp,h}` were taken from the same
+one so the backends cannot drift apart. Re-take both from that commit, never from a
+tag, if they ever need refreshing.
+
 ---
 
 ## Derived source

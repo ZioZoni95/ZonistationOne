@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-PS1 emulator written in C. SDL3 + OpenGL 3.3 (GLEW). Early development.
+PS1 emulator written in C. SDL3, with an OpenGL 3.3 (GLEW) and a Vulkan 1.3 backend that can be
+swapped while a game runs. Early development.
 
 ```bash
 make                    # build
@@ -25,7 +26,10 @@ windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FR
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
 default digital, as on hardware), `ZS1_UI=gameplay|debug` (which shell the window opens in; default
 gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale),
-`ZS1_SBI=<path>` (the LibCrypt patch file for the mounted disc, overriding the automatic search).
+`ZS1_SBI=<path>` (the LibCrypt patch file for the mounted disc, overriding the automatic search),
+`ZS1_GFX=gl|vulkan` (which renderer starts; also changeable at runtime from Esc -> Video),
+`ZS1_VK_VALIDATE=1` (Vulkan validation layer), `ZS1_GFX_SWITCH_TEST=<n>` (flip the renderer every
+n fields — the leak check for the switch path).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -114,10 +118,16 @@ src/core/
   lua_debug.c                  — Lua scripting surface (emu.*) for live debugging
 
 src/gpu/
-  gpu.c                        — GPU init/reset/GP1/GPUSTAT
+  gpu.c                        — GPU init/reset/GP1/GPUSTAT, gpu_reapply_renderer_state()
   gpu_commands.c               — GP0 256-entry dispatch table, all draw commands
   gpu_helpers.c                — GP0 helper utilities
-  renderer.c                   — OpenGL 3.3 renderer, unified VRAM texture, GPU thread
+  renderer.c                   — backend dispatch: forwards renderer_* onto the live GfxBackend
+  renderer_gl.c                — OpenGL 3.3 backend, unified VRAM texture, GPU thread
+  vk/vk_loader.c               — runtime Vulkan entry points (no -lvulkan)
+  vk/vk_device.c               — instance, physical device, logical device, swapchain, caps
+  vk/renderer_vk.c             — Vulkan 1.3 backend (dynamic rendering, no VkRenderPass)
+  vk/vk_imgui.cpp              — C bridge onto imgui_impl_vulkan
+  shaders/*.{vert,frag}        — GLSL, compiled to SPIR-V at build time
   vram.c                       — 1024×512 VRAM buffer management
 
 src/gte/
@@ -288,6 +298,61 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   scanning the display window out of VRAM
 - GPU: polygons, rects, lines, textured/CLUT, semi-transparency, scissor, unified VRAM texture,
   15bpp and 24bpp display
+- **The renderer sits behind a vtable** (`include/gpu_backend.h`, since 2026-08-25). `renderer.c` is a
+  dispatcher; the whole OpenGL implementation is `renderer_gl.c` plus its private `renderer_gl.h`,
+  which is the only place besides `main.c` allowed to include `<GL/glew.h>`. That header used to be
+  `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every unit that touched the
+  interconnect. The ~120 `renderer_*(&gpu->renderer, ...)` call sites are unchanged.
+  Two things about it that are not obvious:
+  - **Bind the backend before the machine is built.** `gpu_reset_state()` pushes the GP0/GP1 reset
+    values through four renderer setters (`gpu.c:661-668`) from inside `interconnect_init()`, which
+    runs *before* `renderer_init()` (`main.c:446` against `:448`). Those values are not redundant —
+    `glr_init()` defaults only screen width/height — so `renderer_select_backend()` binds the vtable
+    without touching the GPU, and the backend resolves a NULL `impl` to its own file-static state.
+  - **Savestates were not affected.** `savestate.c:76-78` derives both `Gpu` spans from
+    `offsetof(Gpu, renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two
+    pointers moved both boundaries by the same amount. Verified: a state saved and reloaded across
+    the change restores PC and cycle exactly and the machine runs on.
+- **Vulkan 1.3 is the second backend** (`src/gpu/vk/`, since 2026-08-25), and it is swapped **live**
+  from the quick menu's *Video* entry. Things about it that cost time to learn:
+  - **`renderer_upload_vram()` is a no-op on Vulkan, on purpose.** GL records the whole-VRAM upload
+    `main.c` does every frame with `update_display=false`, so it feeds only the `GL_R16UI` mirror
+    that non-`ARB_texture_barrier` drivers sample — never `vram_tex`. Vulkan has one VRAM image, so
+    honouring that upload erased the rasteriser's work once a frame; the picture was "completely
+    broken" and looked like a display bug. Only `upload_vram_rect()` and rasterisation write it.
+  - **`VK_EXT_fragment_shader_interlock` is an optimisation, not a prerequisite.** The feedback loop
+    (the PS1 fragment shader samples the image it is also drawing to) is handled by a
+    `vkCmdPipelineBarrier` between batches with the image permanently in `VK_IMAGE_LAYOUT_GENERAL`,
+    which works everywhere. That is the GL `glTextureBarrier()` call, in Vulkan terms.
+  - **Vulkan is loaded at runtime, not linked.** `VK_NO_PROTOTYPES` plus `SDL_Vulkan_LoadLibrary()`,
+    so there is no `-lvulkan` and the binary starts on a machine with no ICD.
+  - **Shaders are files now.** `src/gpu/shaders/*.{vert,frag}` compiled to SPIR-V by
+    `glslangValidator` at build time; the Makefile degrades to GL-only with a message if either
+    `libvulkan-dev` or `glslang-tools` is absent.
+  - **The GL backend needs X11 on this box.** Under `SDL_VIDEODRIVER=wayland`, `glewInit()` returns
+    "Unknown error" and the backend refuses to start — which is also what a hot switch *to* GL hits
+    on a Wayland session, where it rolls back to Vulkan. Vulkan on the Intel iGPU is the reverse and
+    needs Wayland; see the memory note.
+- **The renderer switches while the machine runs** (`switch_gfx_backend()` in `main.c`, 2026-08-25).
+  SDL fixes `SDL_WINDOW_OPENGL`/`SDL_WINDOW_VULKAN` at window creation, so the window is destroyed
+  and rebuilt — which makes three things the switch has to carry, and each was a real failure before
+  it did:
+  - **VRAM comes back from the GPU, not from `gpu.vram.data`.** The CPU-side array holds what the
+    CPU wrote and never what the rasteriser drew. `renderer_read_vram_rect()` is a synchronous
+    round-trip *through the GPU thread*, so it has to run before `renderer_stop_gpu_thread()`.
+  - **`gpu_reapply_renderer_state()`** (`gpu.c`) re-sends draw offset, drawing area, texture window,
+    screen scale, display region, depth24, blank and the two mask flags. All ten live in the backend,
+    not in `Gpu`, and a new backend starts at its own defaults. The per-primitive state (dither,
+    semi-transparency, texture/raw-texture mode) is deliberately *not* re-sent: every draw command in
+    `gpu_commands.c` sets it immediately before pushing geometry.
+  - **The ImGui context survives; only its two backend halves are rebuilt.**
+    `debug_ui_backend_shutdown()`/`debug_ui_backend_init()` exist for exactly this, and
+    `ImGui::DestroyContext()` stays in `debug_ui_shutdown()`. The order matters on the way down —
+    the halves go before `renderer_destroy()`, because the Vulkan renderer half belongs to the
+    device that call destroys.
+  A failed switch rebuilds the previous backend and reports it rather than ending the session.
+  `ZS1_GFX_SWITCH_TEST=<n>` flips backends every n fields; nine switches in one run of Ace Combat 2
+  under X11 were clean.
 - MDEC: full decode pipeline, verified against real FMV playback
 - DMA: all channels, linked-list + block, completion interrupts
 - Timers 0/1/2: derived counters, sync modes, video-mode-derived rates

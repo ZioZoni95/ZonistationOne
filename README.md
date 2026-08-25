@@ -1,12 +1,15 @@
 # ZoniStation One
 
-A PlayStation 1 emulator written from scratch in C99, with an OpenGL 3.3 renderer and a built-in
-debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way hardware
-boots them.
+A PlayStation 1 emulator written from scratch in C99, with two interchangeable renderers and a
+built-in debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way
+hardware boots them.
 
-SDL3 + OpenGL 3.3 Core (GLEW), ImGui for the debug interface. Two commercial discs play through —
-boot, FMV, menus, missions, memory-card saves — one of them straight from a compressed image, and a
-third boots and runs its engine. That is three games on one machine, not a compatibility claim.
+SDL3, an OpenGL 3.3 Core backend (GLEW) and a Vulkan 1.3 backend, ImGui for the debug interface. The
+two can be swapped **while a game is running** — the window and the device are rebuilt, VRAM is
+carried across as host memory, and the emulated machine never stops. Two commercial discs play
+through — boot, FMV, menus, missions, memory-card saves — one of them straight from a compressed
+image, and a third boots and runs its engine. That is three games on one machine, not a
+compatibility claim.
 
 ---
 
@@ -30,6 +33,18 @@ Power on, BIOS shell, disc boot, movie, mission — and a LibCrypt disc past its
 sudo apt install build-essential libglew-dev libgl1-mesa-dev
 make
 ```
+
+**Vulkan is optional and the build degrades rather than fails without it.** Two things are needed at
+compile time — the headers and a shader compiler:
+
+```sh
+sudo apt install libvulkan-dev glslang-tools     # vulkan-tools too, for vulkaninfo
+```
+
+Missing either one, `make` prints which one it wanted and builds the OpenGL backend alone; the
+`Vulkan 1.3` entry in the interface then says so instead of offering a control that cannot work.
+Note what is *not* in that list: `libvulkan.so` is never linked. The loader is opened at runtime
+through SDL, so the binary starts on a machine with no Vulkan driver at all.
 
 SDL3 is not packaged on Ubuntu 24.04 or its derivatives. Build it once:
 
@@ -70,6 +85,49 @@ Three things trip people up, in order of how often:
 2. **The BIOS must match the disc's region**, exactly as on hardware. A PAL disc with a US BIOS is
    rejected and you are left sitting at the BIOS menu, which looks like a boot regression.
 3. **The game path needs `--game=`.** A bare positional path is taken as the BIOS path.
+
+### Renderers
+
+Two backends, the same pixels. OpenGL 3.3 is the default; Vulkan 1.3 is there when the build found
+its headers and a shader compiler.
+
+```sh
+ZS1_GFX=gl      ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"   # default
+ZS1_GFX=vulkan  ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"
+```
+
+Or change it without restarting: **Esc → Video** in the gameplay shell lists both backends and the
+GPUs each one offers, says which is running, and switches on the spot. The switch rebuilds the SDL
+window and the graphics device — SDL fixes `SDL_WINDOW_OPENGL` and `SDL_WINDOW_VULKAN` when a window
+is created and neither can be added later, so a new window is unavoidable — while three things are
+carried across it:
+
+- **VRAM**, read back into host memory before the device goes and pushed into the new one after.
+  It has to be read from the GPU: `gpu.vram.data` holds what the CPU wrote, never what the
+  rasteriser drew.
+- **The drawing state** — draw offset, drawing area, texture window, display region, the mask flags.
+  These live in the backend, and the guest has no reason to re-send `GP0(E2..E6)` just because the
+  host changed graphics API.
+- **The ImGui context** — fonts, `imgui.ini`, the docking layout, the pinned watches. Only the two
+  backend halves are rebuilt, so the workspace comes back exactly as it was.
+
+The emulated machine is not involved at all: no reset, no save state, and the CPU, the SPU and the
+drive never learn that anything happened. If the new backend fails to come up the old one is
+rebuilt and the interface says so.
+
+**Picking a GPU** differs between the two, and the interface says which is which rather than hiding
+it. Vulkan enumerates real devices and switches between them live. OpenGL cannot: the GLX vendor
+library is resolved at the first `dlopen` of libGL, so its two PRIME choices are listed marked
+*next launch* and set through `ZS1_GPU` for the run after.
+
+Two platform limits worth knowing before reporting a bug:
+
+- **The OpenGL backend needs X11 here.** Under `SDL_VIDEODRIVER=wayland` GLEW fails to initialise
+  ("Unknown error") and the backend refuses to come up — including as the target of a hot switch,
+  which then rolls back to Vulkan and says so.
+- **Vulkan on an Intel iGPU needs Wayland**, for the opposite reason: with the X screen owned by
+  the NVIDIA driver in dGPU mode, `vkCreateSwapchainKHR` returns `VK_ERROR_INITIALIZATION_FAILED`
+  even though the surface reports itself supported.
 
 ### Controllers
 
@@ -119,7 +177,10 @@ swaps which physical button drives which bit if you prefer × to confirm everywh
 | `ZS1_LOG_STDERR=1` | Also write the log to stderr, not just the in-app windows |
 | `ZS1_LUA_SCRIPT=scripts/x.lua` | Run a Lua debug script at startup |
 | `ZS1_FRAME_PROFILE=1` | Where each frame's wall-clock time goes, plus cycles per emulated instruction |
-| `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU |
+| `ZS1_GFX=gl\|vulkan` | Which renderer to start with (default `gl`); also changeable at runtime from **Esc → Video** |
+| `ZS1_GPU=nvidia\|intel` | On a hybrid-graphics machine, ask for the discrete or the integrated GPU (OpenGL only — Vulkan picks its device from the interface) |
+| `ZS1_VK_VALIDATE=1` | Turn the Vulkan validation layer on, if it is installed |
+| `ZS1_GFX_SWITCH_TEST=<n>` | Flip the renderer every `n` fields, for as long as the run lasts — the leak check for the switch path, not something to run normally |
 | `ZS1_AUDIO_DUMP=path` | Record what is handed to the sound device, as raw interleaved 16-bit stereo |
 | `ZS1_SPU_NO_REVERB=1` | Bypass the reverb stage — an A/B switch when judging an artefact |
 | `ZS1_OVERSCAN=0` | Show the 8 display lines an NTSC TV crops at the top and bottom instead of cropping them (PAL is never cropped — it is underscanned already) |
@@ -152,7 +213,7 @@ is a normal failure, and it is a real source of rendering differences.
 | CDROM | Working | Async command/response, region detection, XA audio, drive seek and spin-up timing; a response owes its own deadline, which an interrupt acknowledge or a re-issued command cannot shorten; GetlocL/Pause refuse with 80h during a seek, Setloc validates BCD, and the ATV volume matrix reaches the mix. `.bin` and `.bin.ecm` images, the latter decoded on the fly and verified byte-identical against the container's own whole-file EDC |
 | SIO / controllers | Working | DualShock 4 over USB/Bluetooth (the only pad tested), keyboard alongside; digital 41h, analog pad 73h, analog stick 53h, config F3h, both memory card slots |
 | GTE | Working | All 22 opcodes with saturation/flags, per-op cycle costs charged to the CPU |
-| GPU / renderer | Working | OpenGL 3.3 only. Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture |
+| GPU / renderer | Working | Two backends behind one vtable, swappable while a game runs: **OpenGL 3.3** and **Vulkan 1.3** (dynamic rendering, no render passes). Unified VRAM texture (raster + upload + scanout), 15bpp and 24bpp, VRAM readback for render-to-texture. The two are byte-identical on the frames compared so far |
 | MDEC | Working | Full decode pipeline, exercised by real FMV playback |
 | SPU / audio | Working | Sample generation on the emulated clock, WSOLA time-stretch on the output |
 | Savestates | Working | F5 / F8, whole machine, disc identity checked on load. Format v9 |
@@ -168,7 +229,10 @@ carries the CRTC field count, and a reference emulator's run is put on that axis
 v-blanks. `Ace Combat 2` reaches each of its BIOS TTY milestones within ~2% of the reference, end to
 end, and the machine holds 50 fields a second while doing it.
 
-Rendering is OpenGL 3.3 only — no Vulkan, no software renderer.
+Rendering has two backends and no software renderer. Parity between them is checked by dumping the
+same frame from each and comparing the bytes; that has been done at one boot-phase frame so far, not
+across a heavy 3D scene. Internal-resolution upscaling on the Vulkan path is designed and not yet
+written — every backend still rasterises at the native 1024×512.
 
 ### Tested games
 
@@ -243,7 +307,11 @@ button, not pause.
 ```
 src/cpu/      MIPS R3000A: decode, execute, exceptions, I-cache, BIOS syscall side-channel
 src/core/     bus, RAM, BIOS, DMA, timers, SIO, MDEC, event scheduler, savestates, Lua surface
-src/gpu/      GP0/GP1 command handling, OpenGL renderer, VRAM
+src/gpu/      GP0/GP1 command handling, VRAM, and the renderer:
+                renderer.c     dispatch onto the live backend
+                renderer_gl.c  the OpenGL 3.3 backend
+                vk/            the Vulkan 1.3 backend
+                shaders/       GLSL sources, compiled to SPIR-V at build time
 src/gte/      the 22 GTE operations
 src/cdrom/    controller, commands, disc images, XA/CDDA audio
 src/spu/      24 voices, ADSR, reverb, DMA, IRQ, time-stretch
@@ -255,8 +323,13 @@ Design notes worth knowing before changing anything:
 
 - The **SPU ring is the machine's clock**. The emulation loop runs ahead only until the ring is full
   enough, so anything that changes how fast the ring drains changes how fast the whole machine runs.
-- **VRAM is one GL texture** that is simultaneously the render target, the upload target and the
-  scanout source. `gpu.vram.data` is a CPU-side model that never sees rasterised pixels.
+- **VRAM is one texture** — a GL texture or a `VkImage` — that is simultaneously the render target,
+  the upload target and the scanout source. `gpu.vram.data` is a CPU-side model that never sees
+  rasterised pixels, which is why a backend switch has to read VRAM back from the GPU rather than
+  re-upload that array.
+- **The renderer is reached through a vtable** (`include/gpu_backend.h`). No GL or Vulkan type is
+  visible above `renderer.c`; what ImGui gets for a texture is an opaque `GfxTexHandle` that holds a
+  GL name on one backend and a `VkDescriptorSet` on the other.
 - **The event scheduler is the single timing authority.** Nothing else may schedule work.
 - **No `malloc` in hot paths.** Structs are embedded, not heap-allocated.
 

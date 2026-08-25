@@ -74,8 +74,62 @@ endif
 # build with "no rule to make target".
 DEPFLAGS = -MMD -MP
 
-CFLAGS = -std=c99 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(SDL_CFLAGS)
-CXXFLAGS = -std=c++11 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(SDL_CFLAGS)
+# --- Vulkan backend, optional ---
+#
+# Two things are needed and neither is guaranteed on a machine that can still
+# build and run this emulator: the Vulkan headers, and a GLSL-to-SPIR-V
+# compiler. When either is missing the tree builds with the OpenGL backend
+# alone and says so, the same way LTO above warns instead of failing — a
+# default that does not build is not a default.
+#
+# The Vulkan *loader* is deliberately NOT a link-time dependency: vk_loader.c
+# resolves every entry point through SDL_Vulkan_LoadLibrary() at runtime, so the
+# binary still starts on a machine with no ICD, with the backend absent from the
+# picker and the reason written out.
+VK_HEADERS := $(wildcard /usr/include/vulkan/vulkan.h)
+GLSLANG    := $(shell command -v glslangValidator 2>/dev/null)
+
+ifeq ($(strip $(VK_HEADERS)),)
+  $(info [build] Vulkan backend off: no <vulkan/vulkan.h> — install libvulkan-dev)
+else ifeq ($(strip $(GLSLANG)),)
+  $(info [build] Vulkan backend off: no glslangValidator — install glslang-tools)
+else
+  ENABLE_VULKAN := 1
+endif
+
+ifdef ENABLE_VULKAN
+  VK_DEFS     = -DENABLE_VULKAN=1
+  VK_INCLUDES = -Isrc/gpu/vk -Isrc/gpu/shaders
+endif
+
+# --- Shaders -> SPIR-V -> C arrays ---
+#
+# The GLSL stays readable in src/gpu/shaders/; the build turns each stage into a
+# .spv and then into a .spv.h holding it as a byte array, so the binary carries
+# its shaders and needs no compiler at runtime. The .spv/.spv.h are generated,
+# gitignored, and rebuilt when the GLSL changes — ps1_common.glsl is a
+# dependency of every stage that includes it, which is why it is listed
+# explicitly rather than left to the pattern rule.
+VK_SHADER_SRCS = \
+    src/gpu/shaders/ps1.vert src/gpu/shaders/ps1.frag \
+    src/gpu/shaders/fullscreen.vert src/gpu/shaders/scanout.frag \
+    src/gpu/shaders/vram_view.frag
+VK_SHADER_HDRS = $(addsuffix .spv.h,$(VK_SHADER_SRCS))
+
+GLSLFLAGS = -V --target-env vulkan1.3 -Isrc/gpu/shaders
+
+%.spv: % src/gpu/shaders/ps1_common.glsl
+	@$(GLSLANG) $(GLSLFLAGS) -o $@ $< > /dev/null
+
+# Symbol name from the file: src/gpu/shaders/ps1.frag -> zs1_shader_ps1_frag
+%.spv.h: %.spv
+	@xxd -i -n zs1_shader_$(subst .,_,$(notdir $*)) $< > $@
+
+shaders: $(VK_SHADER_HDRS)
+.PHONY: shaders
+
+CFLAGS = -std=c99 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(VK_INCLUDES) $(SDL_CFLAGS) $(VK_DEFS)
+CXXFLAGS = -std=c++11 $(OPT) -Wall -Wextra $(DEPFLAGS) $(INCLUDES) $(VK_INCLUDES) $(SDL_CFLAGS) $(VK_DEFS)
 
 # Build every translation unit at once by default. The tree is ~90 objects and
 # they are independent; an explicit -j on the command line still wins, because
@@ -110,7 +164,11 @@ EMU_LUA_SRCS = $(filter-out third_party/lua/lua.c third_party/lua/luac.c \
 # --- GPU ---
 EMU_GPU_SRCS = \
     src/gpu/gpu.c src/gpu/gpu_helpers.c src/gpu/gpu_commands.c \
-    src/gpu/renderer.c src/gpu/vram.c
+    src/gpu/renderer.c src/gpu/renderer_gl.c src/gpu/vram.c
+
+ifdef ENABLE_VULKAN
+EMU_GPU_SRCS += src/gpu/vk/vk_loader.c src/gpu/vk/vk_device.c src/gpu/vk/renderer_vk.c
+endif
 
 # --- GTE ---
 EMU_GTE_SRCS = \
@@ -146,6 +204,13 @@ EMU_CXX_SRCS = src/debug_ui.cpp \
                third_party/imgui/backends/imgui_impl_sdl3.cpp \
                third_party/imgui/backends/imgui_impl_opengl3.cpp
 
+ifdef ENABLE_VULKAN
+EMU_CXX_SRCS += third_party/imgui/backends/imgui_impl_vulkan.cpp src/gpu/vk/vk_imgui.cpp
+# ImGui must not pull in Vulkan prototypes either: the process links no
+# libvulkan, so its backend is handed our resolved pointers instead.
+CXXFLAGS += -DIMGUI_IMPL_VULKAN_NO_PROTOTYPES
+endif
+
 EMU_OBJS = $(EMU_C_SRCS:.c=.o) $(EMU_CXX_SRCS:.cpp=.o)
 EMU_BIN = ZoniStation_One
 
@@ -155,7 +220,7 @@ TEST_SRCS = tests/cpu_minimal_test.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/bios.c \
     src/core/mdec.c src/core/debugger.c src/core/lua_debug.c $(EMU_LUA_SRCS) \
     src/gte/gte.c src/gte/gte_ops.c src/utils/log.c \
-    src/gpu/gpu.c src/gpu/renderer.c src/gpu/vram.c \
+    src/gpu/gpu.c src/gpu/renderer.c src/gpu/renderer_gl.c src/gpu/vram.c \
     src/spu/spu.c src/utils/rxi_log.c src/core/event_scheduler.c
 TEST_BIN = cpu_test
 
@@ -199,6 +264,9 @@ compile_commands:
 	@printf '\n]\n' >> compile_commands.json
 	@echo "compile_commands.json: $(words $(EMU_C_SRCS) $(EMU_CXX_SRCS)) entries"
 
+ifdef ENABLE_VULKAN
+all: $(VK_SHADER_HDRS)
+endif
 all: $(EMU_BIN)
 
 $(EMU_BIN): $(EMU_OBJS)
@@ -221,9 +289,11 @@ split_log: split_log.c
 
 clean:
 	rm -f $(EMU_BIN) $(TEST_BIN) split_log \
+	    src/gpu/shaders/*.spv src/gpu/shaders/*.spv.h \
 	    src/*.[od] src/cpu/*.[od] src/core/*.[od] src/gpu/*.[od] src/gte/*.[od] \
 	    src/cdrom/*.[od] src/spu/*.[od] src/utils/*.[od] tests/*.[od] \
-	    third_party/imgui/*.[od] third_party/imgui/backends/*.[od] third_party/lua/*.[od] \
+	    src/gpu/vk/*.[od] \
+    third_party/imgui/*.[od] third_party/imgui/backends/*.[od] third_party/lua/*.[od] \
 	    *.txt logs/*.txt logs/*_old.txt
 
 # Last: the .d files are generated, so a build that has never run simply has
