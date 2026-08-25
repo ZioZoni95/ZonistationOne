@@ -1291,7 +1291,7 @@ static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
     if (!g_show_vram_viewer || !renderer) return;
 
     renderer_set_vram_view_params(renderer, &g_vram_view);
-    GLuint tex = renderer_get_vram_viewer_texture(renderer);
+    GfxTexHandle tex = renderer_get_vram_viewer_texture(renderer);
 
     ImGui::SetNextWindowSize(ImVec2(1060, 620), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("VRAM Viewer", &g_show_vram_viewer)) {
@@ -1487,7 +1487,7 @@ static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
 // Draw the emulated screen into `avail`, letterboxed at 4:3 and placed by the
 // GP1(07) scanline range. Both shells call this: the debug stage puts it in a
 // dock node, the gameplay shell gives it the whole window.
-static void draw_scanout(GLuint texture_id, Interconnect* inter, ImVec2 avail) {
+static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 avail) {
     {
         if (texture_id && inter) {
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
@@ -1564,7 +1564,7 @@ static void draw_scanout(GLuint texture_id, Interconnect* inter, ImVec2 avail) {
     }
 }
 
-static void draw_ps1_display(GLuint texture_id, Interconnect* inter) {
+static void draw_ps1_display(GfxTexHandle texture_id, Interconnect* inter) {
     if (!g_show_display) return;
 
     ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
@@ -3353,7 +3353,7 @@ static void rebuild_layout(ImGuiID dockspace_id) {
 // Public API
 // ---------------------------------------------------------------------------
 
-extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
+extern "C" void debug_ui_init(SDL_Window* window, void* gl_context) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -3440,7 +3440,7 @@ extern "C" void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context) {
     apply_zonistation_style();
     ImGui::GetStyle().ScaleAllSizes(ui_scale);
 
-    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
+    ImGui_ImplSDL3_InitForOpenGL(window, (SDL_GLContext)gl_context);
     ImGui_ImplOpenGL3_Init("#version 330");
 
     /* Open per-component log files (one file per category, lives for whole session) */
@@ -3960,7 +3960,7 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
                  ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
                  ImGuiWindowFlags_NoSavedSettings);
 
-    GLuint tex_id = inter ? renderer_get_display_texture(&inter->gpu.renderer) : 0;
+    GfxTexHandle tex_id = inter ? renderer_get_display_texture(&inter->gpu.renderer) : 0;
     draw_scanout(tex_id, inter, ImGui::GetContentRegionAvail());
 
     /* The veil goes on this window's own draw list. Not the foreground one,
@@ -4067,7 +4067,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     draw_mode_rail();
 
     // The emulated screen — pinned to the top of the stage in every mode
-    GLuint tex_id = 0;
+    GfxTexHandle tex_id = 0;
     if (inter) tex_id = renderer_get_display_texture(&inter->gpu.renderer);
     draw_ps1_display(tex_id, inter);
 

@@ -443,6 +443,17 @@ int main(int argc, char* argv[]) {
 
     if (!bios_load(&bios, args.bios_path)) { shutdown_sdl(&sdl); return 1; }
 
+    /* Bind the rendering backend before the machine is built. gpu_reset_state()
+     * runs inside interconnect_init() and pushes the GP0/GP1 reset values
+     * through four renderer setters (gpu.c:661-668) — that is before
+     * renderer_init() below, and those values are not redundant, so the
+     * renderer has to know which backend it is talking to by now. */
+    if (!renderer_select_backend(&inter.gpu.renderer, GFX_BACKEND_GL33)) {
+        LOG_SYSTEM_ERROR("[SYSTEM] No rendering backend available");
+        shutdown_sdl(&sdl);
+        return 1;
+    }
+
     interconnect_init(&inter, &bios, &ram);
 
     if (!renderer_init(&inter.gpu.renderer)) {

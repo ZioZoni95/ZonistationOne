@@ -117,7 +117,8 @@ src/gpu/
   gpu.c                        — GPU init/reset/GP1/GPUSTAT
   gpu_commands.c               — GP0 256-entry dispatch table, all draw commands
   gpu_helpers.c                — GP0 helper utilities
-  renderer.c                   — OpenGL 3.3 renderer, unified VRAM texture, GPU thread
+  renderer.c                   — backend dispatch: forwards renderer_* onto the live GfxBackend
+  renderer_gl.c                — OpenGL 3.3 backend, unified VRAM texture, GPU thread
   vram.c                       — 1024×512 VRAM buffer management
 
 src/gte/
@@ -288,6 +289,21 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   scanning the display window out of VRAM
 - GPU: polygons, rects, lines, textured/CLUT, semi-transparency, scissor, unified VRAM texture,
   15bpp and 24bpp display
+- **The renderer sits behind a vtable** (`include/gpu_backend.h`, since 2026-08-25). `renderer.c` is a
+  dispatcher; the whole OpenGL implementation is `renderer_gl.c` plus its private `renderer_gl.h`,
+  which is the only place besides `main.c` allowed to include `<GL/glew.h>`. That header used to be
+  `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every unit that touched the
+  interconnect. The ~120 `renderer_*(&gpu->renderer, ...)` call sites are unchanged.
+  Two things about it that are not obvious:
+  - **Bind the backend before the machine is built.** `gpu_reset_state()` pushes the GP0/GP1 reset
+    values through four renderer setters (`gpu.c:661-668`) from inside `interconnect_init()`, which
+    runs *before* `renderer_init()` (`main.c:446` against `:448`). Those values are not redundant —
+    `glr_init()` defaults only screen width/height — so `renderer_select_backend()` binds the vtable
+    without touching the GPU, and the backend resolves a NULL `impl` to its own file-static state.
+  - **Savestates were not affected.** `savestate.c:76-78` derives both `Gpu` spans from
+    `offsetof(Gpu, renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two
+    pointers moved both boundaries by the same amount. Verified: a state saved and reloaded across
+    the change restores PC and cycle exactly and the machine runs on.
 - MDEC: full decode pipeline, verified against real FMV playback
 - DMA: all channels, linked-list + block, completion interrupts
 - Timers 0/1/2: derived counters, sync modes, video-mode-derived rates

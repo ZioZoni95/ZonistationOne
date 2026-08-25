@@ -316,9 +316,9 @@ static void gp0_fill_rectangle(Gpu* gpu) {
     uint32_t dim_val   = gpu->gp0_command_buffer.buffer[2];
 
     RendererColor col = {
-        .r = (GLubyte)(color_val & 0xFF),
-        .g = (GLubyte)((color_val >> 8) & 0xFF),
-        .b = (GLubyte)((color_val >> 16) & 0xFF)
+        .r = (uint8_t)(color_val & 0xFF),
+        .g = (uint8_t)((color_val >> 8) & 0xFF),
+        .b = (uint8_t)((color_val >> 16) & 0xFF)
     };
 
     // GPU-2 FIX: Fill rectangle coordinate masking per PSX-SPX docs:
@@ -521,15 +521,15 @@ static void gp0_interrupt_request(Gpu* gpu) {
 static void gp0_tri_mono_opaque(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 4) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererColor colors[3] = {col, col, col};
     RendererPosition p[3];
     for (int i = 0; i < 3; i++) {
         uint32_t v = gpu->gp0_command_buffer.buffer[i + 1];
-        p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(v >> 16);
+        p[i].x = (int16_t)(int16_t)(v & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(v >> 16);
     }
     renderer_set_dither_mode(&gpu->renderer, false); // mono: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, false, 0);
@@ -541,15 +541,15 @@ static void gp0_tri_mono_opaque(Gpu* gpu) {
 static void gp0_tri_mono_semi(Gpu* gpu) {
     if (gpu->gp0_command_buffer.count < 4) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererColor colors[3] = {col, col, col};
     RendererPosition p[3];
     for (int i = 0; i < 3; i++) {
         uint32_t v = gpu->gp0_command_buffer.buffer[i + 1];
-        p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(v >> 16);
+        p[i].x = (int16_t)(int16_t)(v & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(v >> 16);
     }
     renderer_set_dither_mode(&gpu->renderer, false); // mono: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, true, gpu->semi_transparency);
@@ -564,31 +564,31 @@ static void gp0_tri_mono_semi(Gpu* gpu) {
 static void gp0_tri_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     if (gpu->gp0_command_buffer.count < 7) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererColor colors[3] = {col, col, col};
     RendererPosition p[3];
     RendererTexCoord t[3];
     uint16_t clut = 0, texpage = 0;
 
-    p[0].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
-    p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
-    t[0].u = (GLshort)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
-    t[0].v = (GLshort)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
+    p[0].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
+    p[0].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
+    t[0].u = (int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
+    t[0].v = (int16_t)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
     clut   = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
 
-    p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
-    p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
-    t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
-    t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
+    p[1].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
+    p[1].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
+    t[1].u = (int16_t)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
+    t[1].v = (int16_t)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
     apply_texpage_attribute(gpu, texpage);
 
-    p[2].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
-    p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
-    t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
-    t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
+    p[2].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
+    p[2].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
+    t[2].u = (int16_t)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
+    t[2].v = (int16_t)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
 
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
@@ -644,11 +644,11 @@ static void gp0_tri_shaded_impl(Gpu* gpu, bool semi_trans) {
     for (int i = 0; i < 3; i++) {
         uint32_t cw = gpu->gp0_command_buffer.buffer[i * 2];
         uint32_t vw = gpu->gp0_command_buffer.buffer[i * 2 + 1];
-        c[i].r = (GLubyte)(cw & 0xFF);
-        c[i].g = (GLubyte)((cw >> 8) & 0xFF);
-        c[i].b = (GLubyte)((cw >> 16) & 0xFF);
-        p[i].x = (GLshort)(int16_t)(vw & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(vw >> 16);
+        c[i].r = (uint8_t)(cw & 0xFF);
+        c[i].g = (uint8_t)((cw >> 8) & 0xFF);
+        c[i].b = (uint8_t)((cw >> 16) & 0xFF);
+        p[i].x = (int16_t)(int16_t)(vw & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(vw >> 16);
     }
     // Gouraud shaded: always dither when dithering enabled (per PSX spec)
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
@@ -672,32 +672,32 @@ static void gp0_tri_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture)
     RendererColor c[3]; RendererPosition p[3]; RendererTexCoord t[3];
     uint16_t clut = 0, texpage = 0;
     // v0
-    c[0].r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    c[0].g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    c[0].b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
-    p[0].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
-    p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
-    t[0].u = (GLshort)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
-    t[0].v = (GLshort)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
+    c[0].r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    c[0].g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    c[0].b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    p[0].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
+    p[0].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
+    t[0].u = (int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
+    t[0].v = (int16_t)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
     clut   = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
     // v1
-    c[1].r = (GLubyte)(gpu->gp0_command_buffer.buffer[3] & 0xFF);
-    c[1].g = (GLubyte)((gpu->gp0_command_buffer.buffer[3] >> 8) & 0xFF);
-    c[1].b = (GLubyte)((gpu->gp0_command_buffer.buffer[3] >> 16) & 0xFF);
-    p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[4] & 0xFFFF);
-    p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
-    t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[5] & 0xFF);
-    t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[5] >> 8) & 0xFF);
+    c[1].r = (uint8_t)(gpu->gp0_command_buffer.buffer[3] & 0xFF);
+    c[1].g = (uint8_t)((gpu->gp0_command_buffer.buffer[3] >> 8) & 0xFF);
+    c[1].b = (uint8_t)((gpu->gp0_command_buffer.buffer[3] >> 16) & 0xFF);
+    p[1].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[4] & 0xFFFF);
+    p[1].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
+    t[1].u = (int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFF);
+    t[1].v = (int16_t)((gpu->gp0_command_buffer.buffer[5] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
     apply_texpage_attribute(gpu, texpage);
     // v2
-    c[2].r = (GLubyte)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
-    c[2].g = (GLubyte)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
-    c[2].b = (GLubyte)((gpu->gp0_command_buffer.buffer[6] >> 16) & 0xFF);
-    p[2].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7] & 0xFFFF);
-    p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7] >> 16);
-    t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
-    t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
+    c[2].r = (uint8_t)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
+    c[2].g = (uint8_t)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
+    c[2].b = (uint8_t)((gpu->gp0_command_buffer.buffer[6] >> 16) & 0xFF);
+    p[2].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[7] & 0xFFFF);
+    p[2].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[7] >> 16);
+    t[2].u = (int16_t)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
+    t[2].v = (int16_t)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
 
     // Validate texture coordinates. raw/blend mode comes from the GP0 opcode
     // (bit24), not from tpage bit15 which is reserved/always 0 on real hardware.
@@ -751,15 +751,15 @@ static void gp0_tri_shaded_tex_raw_semi(Gpu* gpu)     { gp0_tri_shaded_tex_impl(
 static void gp0_quad_mono_impl(Gpu* gpu, bool semi_trans) {
     if (gpu->gp0_command_buffer.count < 5) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererColor colors[4] = {col, col, col, col};
     RendererPosition p[4];
     for (int i = 0; i < 4; i++) {
         uint32_t v = gpu->gp0_command_buffer.buffer[i + 1];
-        p[i].x = (GLshort)(int16_t)(v & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(v >> 16);
+        p[i].x = (int16_t)(int16_t)(v & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(v >> 16);
     }
     renderer_set_dither_mode(&gpu->renderer, false); // mono quad: no dither
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
@@ -780,35 +780,35 @@ static void gp0_quad_mono_semi(Gpu* gpu)   { gp0_quad_mono_impl(gpu, true);  }
 static void gp0_quad_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     if (gpu->gp0_command_buffer.count < 9) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererColor c[4] = {col, col, col, col};
     RendererPosition p[4]; RendererTexCoord t[4];
     uint16_t clut = 0, texpage = 0;
 
-    p[0].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
-    p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
-    t[0].u = (GLshort)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
-    t[0].v = (GLshort)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
+    p[0].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
+    p[0].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
+    t[0].u = (int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
+    t[0].v = (int16_t)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
     clut   = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
 
-    p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
-    p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
-    t[1].u = (GLshort)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
-    t[1].v = (GLshort)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
+    p[1].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
+    p[1].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
+    t[1].u = (int16_t)(gpu->gp0_command_buffer.buffer[4] & 0xFF);
+    t[1].v = (int16_t)((gpu->gp0_command_buffer.buffer[4] >> 8) & 0xFF);
     texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[4] >> 16);
     apply_texpage_attribute(gpu, texpage);
 
-    p[2].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
-    p[2].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
-    t[2].u = (GLshort)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
-    t[2].v = (GLshort)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
+    p[2].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[5] & 0xFFFF);
+    p[2].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
+    t[2].u = (int16_t)(gpu->gp0_command_buffer.buffer[6] & 0xFF);
+    t[2].v = (int16_t)((gpu->gp0_command_buffer.buffer[6] >> 8) & 0xFF);
 
-    p[3].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7] & 0xFFFF);
-    p[3].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[7] >> 16);
-    t[3].u = (GLshort)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
-    t[3].v = (GLshort)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
+    p[3].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[7] & 0xFFFF);
+    p[3].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[7] >> 16);
+    t[3].u = (int16_t)(gpu->gp0_command_buffer.buffer[8] & 0xFF);
+    t[3].v = (int16_t)((gpu->gp0_command_buffer.buffer[8] >> 8) & 0xFF);
 
     // Validate texture coordinates
     uint8_t page_x, page_y, depth;
@@ -875,11 +875,11 @@ static void gp0_quad_shaded_impl(Gpu* gpu, bool semi_trans) {
     for (int i = 0; i < 4; i++) {
         uint32_t cw = gpu->gp0_command_buffer.buffer[i * 2];
         uint32_t vw = gpu->gp0_command_buffer.buffer[i * 2 + 1];
-        c[i].r = (GLubyte)(cw & 0xFF);
-        c[i].g = (GLubyte)((cw >> 8) & 0xFF);
-        c[i].b = (GLubyte)((cw >> 16) & 0xFF);
-        p[i].x = (GLshort)(int16_t)(vw & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(vw >> 16);
+        c[i].r = (uint8_t)(cw & 0xFF);
+        c[i].g = (uint8_t)((cw >> 8) & 0xFF);
+        c[i].b = (uint8_t)((cw >> 16) & 0xFF);
+        p[i].x = (int16_t)(int16_t)(vw & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(vw >> 16);
     }
     // Gouraud shaded quad: dither when enabled
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
@@ -905,13 +905,13 @@ static void gp0_quad_shaded_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture
     RendererColor c[4]; RendererPosition p[4]; RendererTexCoord t[4];
     uint16_t clut = 0, texpage = 0;
     for (int i = 0; i < 4; i++) {
-        c[i].r = (GLubyte)(gpu->gp0_command_buffer.buffer[i * 3] & 0xFF);
-        c[i].g = (GLubyte)((gpu->gp0_command_buffer.buffer[i * 3] >> 8) & 0xFF);
-        c[i].b = (GLubyte)((gpu->gp0_command_buffer.buffer[i * 3] >> 16) & 0xFF);
-        p[i].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[i * 3 + 1] & 0xFFFF);
-        p[i].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[i * 3 + 1] >> 16);
-        t[i].u = (GLshort)(gpu->gp0_command_buffer.buffer[i * 3 + 2] & 0xFF);
-        t[i].v = (GLshort)((gpu->gp0_command_buffer.buffer[i * 3 + 2] >> 8) & 0xFF);
+        c[i].r = (uint8_t)(gpu->gp0_command_buffer.buffer[i * 3] & 0xFF);
+        c[i].g = (uint8_t)((gpu->gp0_command_buffer.buffer[i * 3] >> 8) & 0xFF);
+        c[i].b = (uint8_t)((gpu->gp0_command_buffer.buffer[i * 3] >> 16) & 0xFF);
+        p[i].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[i * 3 + 1] & 0xFFFF);
+        p[i].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[i * 3 + 1] >> 16);
+        t[i].u = (int16_t)(gpu->gp0_command_buffer.buffer[i * 3 + 2] & 0xFF);
+        t[i].v = (int16_t)((gpu->gp0_command_buffer.buffer[i * 3 + 2] >> 8) & 0xFF);
         if (i == 0) clut    = (uint16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
         if (i == 1) texpage = (uint16_t)(gpu->gp0_command_buffer.buffer[5] >> 16);
     }
@@ -971,15 +971,15 @@ static void gp0_quad_shaded_tex_raw_semi(Gpu* gpu)     { gp0_quad_shaded_tex_imp
 static void gp0_line_mono_impl(Gpu* gpu, bool semi_trans) {
     if (gpu->gp0_command_buffer.count < 3) return;
     RendererColor col;
-    col.r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    col.g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    col.b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    col.r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    col.g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    col.b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
     RendererPosition p[2];
     RendererColor c[2] = {col, col};
-    p[0].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
-    p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
-    p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFFFF);
-    p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
+    p[0].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
+    p[0].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
+    p[1].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[2] & 0xFFFF);
+    p[1].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[2] >> 16);
     // Lines always dither (per PSX spec), regardless of mono/shaded
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
@@ -995,16 +995,16 @@ static void gp0_line_shaded_impl(Gpu* gpu, bool semi_trans) {
     if (gpu->gp0_command_buffer.count < 4) return;
     RendererPosition p[2];
     RendererColor c[2];
-    c[0].r = (GLubyte)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
-    c[0].g = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
-    c[0].b = (GLubyte)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
-    p[0].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
-    p[0].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
-    c[1].r = (GLubyte)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
-    c[1].g = (GLubyte)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
-    c[1].b = (GLubyte)((gpu->gp0_command_buffer.buffer[2] >> 16) & 0xFF);
-    p[1].x = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
-    p[1].y = (GLshort)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
+    c[0].r = (uint8_t)(gpu->gp0_command_buffer.buffer[0] & 0xFF);
+    c[0].g = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 8) & 0xFF);
+    c[0].b = (uint8_t)((gpu->gp0_command_buffer.buffer[0] >> 16) & 0xFF);
+    p[0].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] & 0xFFFF);
+    p[0].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[1] >> 16);
+    c[1].r = (uint8_t)(gpu->gp0_command_buffer.buffer[2] & 0xFF);
+    c[1].g = (uint8_t)((gpu->gp0_command_buffer.buffer[2] >> 8) & 0xFF);
+    c[1].b = (uint8_t)((gpu->gp0_command_buffer.buffer[2] >> 16) & 0xFF);
+    p[1].x = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] & 0xFFFF);
+    p[1].y = (int16_t)(int16_t)(gpu->gp0_command_buffer.buffer[3] >> 16);
     // Lines always dither
     renderer_set_dither_mode(&gpu->renderer, gpu->dithering);
     renderer_set_semi_trans_mode(&gpu->renderer, semi_trans, gpu->semi_transparency);
@@ -1056,16 +1056,16 @@ static void flush_polyline(Gpu* gpu) {
     if (!gpu->polyline_shaded) {
         // Monochrome: buf[0]=cmd+color, buf[1]=v0, buf[2]=v1, buf[3]=v2, ...
         RendererColor col;
-        col.r = (GLubyte)(gpu->polyline_buffer[0] & 0xFF);
-        col.g = (GLubyte)((gpu->polyline_buffer[0] >> 8) & 0xFF);
-        col.b = (GLubyte)((gpu->polyline_buffer[0] >> 16) & 0xFF);
+        col.r = (uint8_t)(gpu->polyline_buffer[0] & 0xFF);
+        col.g = (uint8_t)((gpu->polyline_buffer[0] >> 8) & 0xFF);
+        col.b = (uint8_t)((gpu->polyline_buffer[0] >> 16) & 0xFF);
         for (uint32_t i = 1; i + 1 < gpu->polyline_count; i++) {
             RendererPosition p[2];
             RendererColor c[2] = {col, col};
-            p[0].x = (GLshort)(int16_t)(gpu->polyline_buffer[i] & 0xFFFF);
-            p[0].y = (GLshort)(int16_t)(gpu->polyline_buffer[i] >> 16);
-            p[1].x = (GLshort)(int16_t)(gpu->polyline_buffer[i + 1] & 0xFFFF);
-            p[1].y = (GLshort)(int16_t)(gpu->polyline_buffer[i + 1] >> 16);
+            p[0].x = (int16_t)(int16_t)(gpu->polyline_buffer[i] & 0xFFFF);
+            p[0].y = (int16_t)(int16_t)(gpu->polyline_buffer[i] >> 16);
+            p[1].x = (int16_t)(int16_t)(gpu->polyline_buffer[i + 1] & 0xFFFF);
+            p[1].y = (int16_t)(int16_t)(gpu->polyline_buffer[i + 1] >> 16);
             renderer_push_line(&gpu->renderer, p, c);
         }
     } else {
@@ -1078,16 +1078,16 @@ static void flush_polyline(Gpu* gpu) {
             uint32_t v1_idx = k * 2 + 3;
             RendererPosition p[2];
             RendererColor c[2];
-            c[0].r = (GLubyte)(gpu->polyline_buffer[c0_idx] & 0xFF);
-            c[0].g = (GLubyte)((gpu->polyline_buffer[c0_idx] >> 8) & 0xFF);
-            c[0].b = (GLubyte)((gpu->polyline_buffer[c0_idx] >> 16) & 0xFF);
-            p[0].x = (GLshort)(int16_t)(gpu->polyline_buffer[v0_idx] & 0xFFFF);
-            p[0].y = (GLshort)(int16_t)(gpu->polyline_buffer[v0_idx] >> 16);
-            c[1].r = (GLubyte)(gpu->polyline_buffer[c1_idx] & 0xFF);
-            c[1].g = (GLubyte)((gpu->polyline_buffer[c1_idx] >> 8) & 0xFF);
-            c[1].b = (GLubyte)((gpu->polyline_buffer[c1_idx] >> 16) & 0xFF);
-            p[1].x = (GLshort)(int16_t)(gpu->polyline_buffer[v1_idx] & 0xFFFF);
-            p[1].y = (GLshort)(int16_t)(gpu->polyline_buffer[v1_idx] >> 16);
+            c[0].r = (uint8_t)(gpu->polyline_buffer[c0_idx] & 0xFF);
+            c[0].g = (uint8_t)((gpu->polyline_buffer[c0_idx] >> 8) & 0xFF);
+            c[0].b = (uint8_t)((gpu->polyline_buffer[c0_idx] >> 16) & 0xFF);
+            p[0].x = (int16_t)(int16_t)(gpu->polyline_buffer[v0_idx] & 0xFFFF);
+            p[0].y = (int16_t)(int16_t)(gpu->polyline_buffer[v0_idx] >> 16);
+            c[1].r = (uint8_t)(gpu->polyline_buffer[c1_idx] & 0xFF);
+            c[1].g = (uint8_t)((gpu->polyline_buffer[c1_idx] >> 8) & 0xFF);
+            c[1].b = (uint8_t)((gpu->polyline_buffer[c1_idx] >> 16) & 0xFF);
+            p[1].x = (int16_t)(int16_t)(gpu->polyline_buffer[v1_idx] & 0xFFFF);
+            p[1].y = (int16_t)(int16_t)(gpu->polyline_buffer[v1_idx] >> 16);
             renderer_push_line(&gpu->renderer, p, c);
         }
     }
@@ -1106,7 +1106,7 @@ static void gp0_rect_var_mono_impl(Gpu* gpu, bool semi_trans) {
     uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
     uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
     uint32_t dim = gpu->gp0_command_buffer.buffer[2];
-    RendererColor col = { .r=(GLubyte)(cmd&0xFF), .g=(GLubyte)((cmd>>8)&0xFF), .b=(GLubyte)((cmd>>16)&0xFF) };
+    RendererColor col = { .r=(uint8_t)(cmd&0xFF), .g=(uint8_t)((cmd>>8)&0xFF), .b=(uint8_t)((cmd>>16)&0xFF) };
     int16_t x = (int16_t)(vtx & 0xFFFF); int16_t y = (int16_t)(vtx >> 16);
     uint16_t w = (uint16_t)(dim & 0xFFFF); uint16_t h = (uint16_t)(dim >> 16);
     if (w == 0) w = 1;
@@ -1124,9 +1124,9 @@ static void gp0_rect_var_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture) {
     uint32_t vtx     = gpu->gp0_command_buffer.buffer[1];
     uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
     uint32_t dim     = gpu->gp0_command_buffer.buffer[3];
-    RendererColor col = { .r=(GLubyte)(cmd&0xFF), .g=(GLubyte)((cmd>>8)&0xFF), .b=(GLubyte)((cmd>>16)&0xFF) };
+    RendererColor col = { .r=(uint8_t)(cmd&0xFF), .g=(uint8_t)((cmd>>8)&0xFF), .b=(uint8_t)((cmd>>16)&0xFF) };
     int16_t x = (int16_t)(vtx & 0xFFFF); int16_t y = (int16_t)(vtx >> 16);
-    RendererTexCoord tex = { .u=(GLshort)(uv_clut & 0xFF), .v=(GLshort)((uv_clut>>8)&0xFF) };
+    RendererTexCoord tex = { .u=(int16_t)(uv_clut & 0xFF), .v=(int16_t)((uv_clut>>8)&0xFF) };
     uint16_t clut  = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = make_tpage(gpu);
     uint16_t w = (uint16_t)(dim & 0xFFFF); uint16_t h = (uint16_t)(dim >> 16);
@@ -1164,7 +1164,7 @@ static void gp0_rect_fixed_mono_impl(Gpu* gpu, bool semi_trans, uint16_t size) {
     if (gpu->gp0_command_buffer.count < 2) return;
     uint32_t cmd = gpu->gp0_command_buffer.buffer[0];
     uint32_t vtx = gpu->gp0_command_buffer.buffer[1];
-    RendererColor col = { .r=(GLubyte)(cmd&0xFF), .g=(GLubyte)((cmd>>8)&0xFF), .b=(GLubyte)((cmd>>16)&0xFF) };
+    RendererColor col = { .r=(uint8_t)(cmd&0xFF), .g=(uint8_t)((cmd>>8)&0xFF), .b=(uint8_t)((cmd>>16)&0xFF) };
     int16_t x = (int16_t)(vtx & 0xFFFF); int16_t y = (int16_t)(vtx >> 16);
     draw_rectangle(gpu, x, y, size, size, col, false, false, NULL, 0, 0, semi_trans);
 }
@@ -1182,9 +1182,9 @@ static void gp0_rect_fixed_tex_impl(Gpu* gpu, bool semi_trans, bool raw_texture,
     uint32_t cmd     = gpu->gp0_command_buffer.buffer[0];
     uint32_t vtx     = gpu->gp0_command_buffer.buffer[1];
     uint32_t uv_clut = gpu->gp0_command_buffer.buffer[2];
-    RendererColor col = { .r=(GLubyte)(cmd&0xFF), .g=(GLubyte)((cmd>>8)&0xFF), .b=(GLubyte)((cmd>>16)&0xFF) };
+    RendererColor col = { .r=(uint8_t)(cmd&0xFF), .g=(uint8_t)((cmd>>8)&0xFF), .b=(uint8_t)((cmd>>16)&0xFF) };
     int16_t x = (int16_t)(vtx & 0xFFFF); int16_t y = (int16_t)(vtx >> 16);
-    RendererTexCoord tex = { .u=(GLshort)(uv_clut & 0xFF), .v=(GLshort)((uv_clut>>8)&0xFF) };
+    RendererTexCoord tex = { .u=(int16_t)(uv_clut & 0xFF), .v=(int16_t)((uv_clut>>8)&0xFF) };
     uint16_t clut  = (uint16_t)(uv_clut >> 16);
     uint16_t tpage = make_tpage(gpu);
 

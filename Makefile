@@ -110,7 +110,7 @@ EMU_LUA_SRCS = $(filter-out third_party/lua/lua.c third_party/lua/luac.c \
 # --- GPU ---
 EMU_GPU_SRCS = \
     src/gpu/gpu.c src/gpu/gpu_helpers.c src/gpu/gpu_commands.c \
-    src/gpu/renderer.c src/gpu/vram.c
+    src/gpu/renderer.c src/gpu/renderer_gl.c src/gpu/vram.c
 
 # --- GTE ---
 EMU_GTE_SRCS = \
@@ -155,7 +155,7 @@ TEST_SRCS = tests/cpu_minimal_test.c \
     src/core/ram.c src/core/dma.c src/core/timers.c src/core/bios.c \
     src/core/mdec.c src/core/debugger.c src/core/lua_debug.c $(EMU_LUA_SRCS) \
     src/gte/gte.c src/gte/gte_ops.c src/utils/log.c \
-    src/gpu/gpu.c src/gpu/renderer.c src/gpu/vram.c \
+    src/gpu/gpu.c src/gpu/renderer.c src/gpu/renderer_gl.c src/gpu/vram.c \
     src/spu/spu.c src/utils/rxi_log.c src/core/event_scheduler.c
 TEST_BIN = cpu_test
 

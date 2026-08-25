@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-void debug_ui_init(SDL_Window* window, SDL_GLContext gl_context);
+void debug_ui_init(SDL_Window* window, void* gl_context);
 void debug_ui_process_event(SDL_Event* event);
 void debug_ui_render(void* cpu_ptr, void* interconnect_ptr);
 void debug_ui_shutdown(void);
