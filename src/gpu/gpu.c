@@ -571,7 +571,7 @@ uint32_t gpu_read_data(Gpu* gpu) {
         gpu->gp0_words_remaining--;
         if (gpu->gp0_words_remaining == 0) {
             gpu->gp0_mode = GP0_MODE_COMMAND;
-            LOG_GPU_INFO("[GPU] GP0(0xC0): VRAM→CPU transfer COMPLETE");
+            LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM→CPU transfer COMPLETE");
         }
         return (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
     }

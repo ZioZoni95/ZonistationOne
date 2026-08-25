@@ -95,7 +95,7 @@ void spu_process_key_on_off(Spu* spu) {
             voice->vol_left_count  = 0;
             voice->vol_right_count = 0;
             spu->total_key_on_events++;
-            LOG_SPU_INFO("[SPU] Voice %d Key On: start=0x%04X pitch=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
+            LOG_SPU_DEBUG("[SPU] Voice %d Key On: start=0x%04X pitch=0x%04X volL=0x%04X volR=0x%04X adsr=%04X/%04X",
                          v, voice->start_address, voice->pitch,
                          voice->volume_left, voice->volume_right,
                          voice->adsr_low, voice->adsr_high);
@@ -337,13 +337,13 @@ void spu_write16(struct Interconnect* inter, uint32_t addr, uint16_t value) {
             /* Same rule as the voice volumes: only fixed mode sets the level. */
             if (!(value & 0x8000))
                 spu->main_vol_left_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
-            LOG_SPU_INFO("[SPU] Main Vol L <- 0x%04X (working=%d)", value, spu->main_vol_left_cur);
+            LOG_SPU_DEBUG("[SPU] Main Vol L <- 0x%04X (working=%d)", value, spu->main_vol_left_cur);
             break;
         case SPU_REG_MVOL_R:
             spu->main_vol_right = value;
             if (!(value & 0x8000))
                 spu->main_vol_right_cur = (int32_t)(int16_t)((value & 0x7FFF) << 1);
-            LOG_SPU_INFO("[SPU] Main Vol R <- 0x%04X (working=%d)", value, spu->main_vol_right_cur);
+            LOG_SPU_DEBUG("[SPU] Main Vol R <- 0x%04X (working=%d)", value, spu->main_vol_right_cur);
             break;
         case SPU_REG_RVOL_L: spu->reverb_vol_left = (int16_t)value; break;
         case SPU_REG_RVOL_R: spu->reverb_vol_right = (int16_t)value; break;
