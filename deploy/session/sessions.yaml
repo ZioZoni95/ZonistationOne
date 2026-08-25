@@ -40,6 +40,13 @@ spec:
             # and the device comes up as the RTX 4060 with a real swapchain.
             - name: ZS1_GFX
               value: vulkan
+            # The emulator's own log otherwise goes only to the ImGui panels and
+            # the per-category files under the session directory, leaving the
+            # pod's stdout with nothing but the entrypoint's four lines. At INFO
+            # this is init and state changes only — the per-field SPUCNT writes
+            # that used to be 72% of it now sit at DEBUG.
+            - name: ZS1_LOG_STDERR
+              value: "1"
           ports:
             - { name: novnc, containerPort: 6080 }
           resources:
@@ -94,6 +101,13 @@ spec:
             # and the device comes up as the RTX 4060 with a real swapchain.
             - name: ZS1_GFX
               value: vulkan
+            # The emulator's own log otherwise goes only to the ImGui panels and
+            # the per-category files under the session directory, leaving the
+            # pod's stdout with nothing but the entrypoint's four lines. At INFO
+            # this is init and state changes only — the per-field SPUCNT writes
+            # that used to be 72% of it now sit at DEBUG.
+            - name: ZS1_LOG_STDERR
+              value: "1"
           ports:
             - { name: novnc, containerPort: 6080 }
           resources:

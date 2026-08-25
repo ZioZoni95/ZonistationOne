@@ -169,11 +169,23 @@ void gpu_update_display_mapping(Gpu* gpu) {
      * below is firing on a 240-line mode; if out.y is 0 while the frames land at
      * y=8, the window and the upload disagree. */
     {
-        static uint32_t prev = 0xFFFFFFFFu, prev2 = 0xFFFFFFFFu;
-        uint32_t now  = ((uint32_t)gpu->crtc.display_vram_x << 16) | gpu->crtc.display_vram_y;
-        uint32_t now2 = ((uint32_t)disp_w << 16) | disp_h;
-        if (now != prev || now2 != prev2) {
-            prev = now; prev2 = now2;
+        /* A seen-set, not a single previous value. A double-buffered game flips
+         * the display address between two halves of VRAM every field — Crash 3
+         * alternates out x=0 and x=512 — so a one-slot gate is re-armed by the
+         * flip itself and the line comes back ~25 times a second. Holding the
+         * states already reported lets the pair log once each and then go quiet,
+         * while a genuinely new mapping still gets through. Same idiom as the
+         * GP0(E1)/GP0(E2) gates in gpu_commands.c. */
+        enum { DISPMAP_SEEN_MAX = 16 };
+        static uint64_t seen[DISPMAP_SEEN_MAX];
+        static int      seen_n = 0;
+        uint64_t key = ((uint64_t)gpu->crtc.display_vram_x << 48)
+                     | ((uint64_t)gpu->crtc.display_vram_y << 32)
+                     | ((uint64_t)disp_w << 16) | (uint64_t)disp_h;
+        bool known = false;
+        for (int i = 0; i < seen_n; i++) if (seen[i] == key) { known = true; break; }
+        if (!known && seen_n < DISPMAP_SEEN_MAX) {
+            seen[seen_n++] = key;
             LOG_GPU_INFO("[GPU] display map: win x1=%u x2=%u y1=%u y2=%u cyc=%u | "
                          "out x=%u y=%u w=%u h=%u | %s vres=%s %s %s",
                          x1, x2, y1, y2, cyc_per_pix,
