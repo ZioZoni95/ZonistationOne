@@ -214,6 +214,21 @@ kubectl apply -f deploy/session/sessions.yaml       # two sessions, two differen
 kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
 ```
 
+### Starting and stopping
+
+```sh
+./deploy/session/start.sh    # cluster, relay, sessions, and the URLs to open
+./deploy/session/stop.sh     # stops everything; deletes nothing
+```
+
+`stop.sh` stops, it does not delete. The node containers, their volumes, the
+cluster's secrets and every memory card under `cluster-data/` survive it. `k3d cluster delete
+cluster-zs1` is the destructive form, and it loses the basic-auth and TURN secrets with the cluster.
+
+`start.sh` re-runs `expose.sh` each time rather than trusting the host rules already in the Ingress:
+addresses change between sessions, and a rule naming yesterday's DHCP lease resolves to whatever
+holds it today.
+
 ### Watching a session
 
 Each session publishes three ports. Forward them together — the player page derives the audio port
