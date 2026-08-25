@@ -241,6 +241,36 @@ Two ways in, and they are not equivalent:
   audio stream, an *Enable audio* button. Kept as the fallback, because it depends on nothing but
   x11vnc.
 
+### Through the Ingress
+
+`deploy/session/ingress.yaml` publishes both sessions on one port with Traefik, one hostname each:
+
+```sh
+kubectl create secret generic zs1-auth -n zs1 \
+  --from-literal=users="zs1:$(openssl passwd -apr1 "$(read -s -p 'password: ' p; echo "$p")")"
+kubectl apply -f deploy/session/ingress.yaml
+```
+
+| | |
+|---|---|
+| `http://acecombat.localhost:8081/webrtc.html` | Ace Combat |
+| `http://crash.localhost:8081/webrtc.html` | Crash |
+
+`8081` is where `create-cluster.sh` maps the cluster's port 80; `*.localhost` resolves to 127.0.0.1
+without touching `/etc/hosts`. `play.html` works on the same hosts.
+
+**Basic auth is not optional here.** Until this point a session was ClusterIP-only, so reaching one
+needed cluster credentials and the read-only BIOS and disc mounts were unreachable from any network.
+An Ingress removes that: without the middleware, anyone who can route to the host can drive the
+emulated machine. The credential is deliberately *not* in the manifest — a committed htpasswd hash
+is a committed credential — so the secret is created separately, as above.
+
+Routing is by host rather than by path because noVNC loads its assets from absolute paths, and a
+`/acecombat/` prefix would break every one of them. Each host carries three backends: `/ws` for the
+WebRTC signalling socket, `/audio` for the HTTP audio stream, and `/` for noVNC and the pages. The
+player pages detect which way they were reached — a path behind the Ingress, a port under
+`port-forward` — so both routes work from the same file.
+
 The stream runs at **50 fps**, matching a PAL field. That is a cadence, not a throughput target:
 above it the encoder sends duplicate frames, below it real ones are dropped. `ZS1_WEBRTC_FPS` and
 `ZS1_WEBRTC_BITRATE_KBPS` override it, `ZS1_WEBRTC=0` and `ZS1_VNC=0` switch either path off.

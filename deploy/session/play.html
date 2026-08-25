@@ -44,9 +44,13 @@
 // on N and audio on N+1, and kubectl port-forward preserves that pairing when
 // both are mapped together (6080:6080 6081:6081, 6090:6080 6091:6081, ...).
 // ?audio=<port> overrides it for any layout that does not follow the rule.
-const AUDIO_PORT = new URLSearchParams(location.search).get('audio')
-                || String(Number(location.port || 80) + 1);
-const AUDIO_URL = location.protocol + '//' + location.hostname + ':' + AUDIO_PORT + '/';
+const AUDIO_Q = new URLSearchParams(location.search).get('audio');
+const AUDIO_URL =
+    AUDIO_Q && !/^\d+$/.test(AUDIO_Q) ? location.origin + AUDIO_Q
+  : AUDIO_Q                            ? location.protocol + '//' + location.hostname + ':' + AUDIO_Q + '/'
+  : (location.port === '' || location.port === '80' || location.port === '443')
+      ? location.origin + '/audio'      // behind the Ingress: one port, a path
+      : location.protocol + '//' + location.hostname + ':' + (Number(location.port) + 1) + '/';
 const NUDGE_AT = 0.30;   // s behind: start playing 5% fast
 const SEEK_AT  = 0.60;   // s behind: give up and jump
 const TARGET   = 0.15;   // s of buffer to keep after a jump
