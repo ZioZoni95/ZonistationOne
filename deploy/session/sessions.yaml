@@ -71,6 +71,15 @@ spec:
             # committed credential is a committed credential. Create it with:
             #   kubectl create secret generic zs1-turn -n zs1 \
             #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            # 12 Mbit/s is fine on a LAN and wrong across a WAN, and doubly
+            # wrong through a Tailscale DERP relay: those are shared and promise
+            # no bandwidth at all, so the excess does not drop, it queues — and
+            # the queue lands on top of the round trip. 2.5 Mbit/s carries PS1
+            # content at 50 fps comfortably; the source is 320x240 or 640x480
+            # upscaled, which costs far less than the frame size suggests.
+            # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
+            - name: ZS1_WEBRTC_BITRATE_KBPS
+              value: "2500"
             - name: ZS1_WEBRTC_TURN
               valueFrom:
                 secretKeyRef: { name: zs1-turn, key: uri }
@@ -161,6 +170,15 @@ spec:
             # committed credential is a committed credential. Create it with:
             #   kubectl create secret generic zs1-turn -n zs1 \
             #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            # 12 Mbit/s is fine on a LAN and wrong across a WAN, and doubly
+            # wrong through a Tailscale DERP relay: those are shared and promise
+            # no bandwidth at all, so the excess does not drop, it queues — and
+            # the queue lands on top of the round trip. 2.5 Mbit/s carries PS1
+            # content at 50 fps comfortably; the source is 320x240 or 640x480
+            # upscaled, which costs far less than the frame size suggests.
+            # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
+            - name: ZS1_WEBRTC_BITRATE_KBPS
+              value: "2500"
             - name: ZS1_WEBRTC_TURN
               valueFrom:
                 secretKeyRef: { name: zs1-turn, key: uri }
@@ -182,6 +200,7 @@ spec:
           persistentVolumeClaim: { claimName: games, readOnly: true }
         - name: data
           persistentVolumeClaim: { claimName: data }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -259,6 +278,15 @@ spec:
             # committed credential is a committed credential. Create it with:
             #   kubectl create secret generic zs1-turn -n zs1 \
             #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            # 12 Mbit/s is fine on a LAN and wrong across a WAN, and doubly
+            # wrong through a Tailscale DERP relay: those are shared and promise
+            # no bandwidth at all, so the excess does not drop, it queues — and
+            # the queue lands on top of the round trip. 2.5 Mbit/s carries PS1
+            # content at 50 fps comfortably; the source is 320x240 or 640x480
+            # upscaled, which costs far less than the frame size suggests.
+            # ZS1_WEBRTC_BITRATE_KBPS raises it again on a local network.
+            - name: ZS1_WEBRTC_BITRATE_KBPS
+              value: "2500"
             - name: ZS1_WEBRTC_TURN
               valueFrom:
                 secretKeyRef: { name: zs1-turn, key: uri }
