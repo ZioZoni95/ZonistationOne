@@ -1,0 +1,23 @@
+# Build context for the session image. Without these the context is ~4 GB:
+# the reference emulator clones, the disc images and the git history dwarf the
+# ~30 MB of source that actually gets compiled. The discs are deliberately out
+# too — they are bind-mounted at runtime and must never enter an image.
+.git
+duckstation_ref
+pcsx-redux
+psx-spx-docs
+DOCS
+games
+roms
+cluster-data
+savestates
+logs
+backup
+screenshots
+*.mcd
+*.mcd.bak
+*.bin
+*.ecm
+ZoniStation_One
+*.o
+*.d

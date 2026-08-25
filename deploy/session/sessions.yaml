@@ -1,0 +1,131 @@
+# Two independent sessions, differing only in which disc they mount and which
+# working directory they own. The image carries no game: ZS1_GAME picks it and
+# ZS1_SESSION keeps the memory cards apart.
+#
+# Deployment rather than a bare Pod so a crashed emulator comes back, with
+# strategy Recreate because two replicas would fight over the same session
+# directory during a rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zs1-acecombat
+  namespace: zs1
+  labels: { app: zs1-session, game: acecombat }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: zs1-session, game: acecombat }
+  template:
+    metadata:
+      labels: { app: zs1-session, game: acecombat }
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        node-role.kubernetes.io/worker: worker
+      containers:
+        - name: emulator
+          image: zs1/session:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZS1_SESSION
+              value: acecombat
+            - name: ZS1_BIOS
+              value: /mnt/zs1/roms/SCPH-7502.BIN
+            - name: ZS1_GAME
+              value: "/mnt/zs1/games/Ace Combat 2 (Europe).bin"
+            - name: ZS1_GFX
+              value: gl
+          ports:
+            - { name: novnc, containerPort: 6080 }
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - { name: roms,  mountPath: /mnt/zs1/roms,  readOnly: true }
+            - { name: games, mountPath: /mnt/zs1/games, readOnly: true }
+            - { name: data,  mountPath: /mnt/zs1/data }
+      volumes:
+        - name: roms
+          persistentVolumeClaim: { claimName: roms, readOnly: true }
+        - name: games
+          persistentVolumeClaim: { claimName: games, readOnly: true }
+        - name: data
+          persistentVolumeClaim: { claimName: data }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zs1-crash
+  namespace: zs1
+  labels: { app: zs1-session, game: crash }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: zs1-session, game: crash }
+  template:
+    metadata:
+      labels: { app: zs1-session, game: crash }
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        node-role.kubernetes.io/worker: worker
+      containers:
+        - name: emulator
+          image: zs1/session:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZS1_SESSION
+              value: crash
+            - name: ZS1_BIOS
+              value: /mnt/zs1/roms/SCPH-7502.BIN
+            # A .bin.ecm, decoded on the fly. The .cue beside it is not the
+            # path to pass — --game= wants the .bin.
+            - name: ZS1_GAME
+              value: "/mnt/zs1/games/Crash Bandicoot 3 - Warped (E) [SCES-01420].bin.ecm"
+            - name: ZS1_GFX
+              value: gl
+          ports:
+            - { name: novnc, containerPort: 6080 }
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - { name: roms,  mountPath: /mnt/zs1/roms,  readOnly: true }
+            - { name: games, mountPath: /mnt/zs1/games, readOnly: true }
+            - { name: data,  mountPath: /mnt/zs1/data }
+      volumes:
+        - name: roms
+          persistentVolumeClaim: { claimName: roms, readOnly: true }
+        - name: games
+          persistentVolumeClaim: { claimName: games, readOnly: true }
+        - name: data
+          persistentVolumeClaim: { claimName: data }
+---
+# ClusterIP only, on purpose. Reaching a session means `kubectl port-forward`,
+# which needs cluster credentials — nothing is published to the LAN, and the
+# read-only disc mounts stay unreachable from outside the cluster. Putting an
+# Ingress in front of these is a separate decision that needs authentication
+# first.
+apiVersion: v1
+kind: Service
+metadata:
+  name: zs1-acecombat
+  namespace: zs1
+spec:
+  type: ClusterIP
+  selector: { app: zs1-session, game: acecombat }
+  ports:
+    - { name: novnc, port: 6080, targetPort: 6080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zs1-crash
+  namespace: zs1
+spec:
+  type: ClusterIP
+  selector: { app: zs1-session, game: crash }
+  ports:
+    - { name: novnc, port: 6080, targetPort: 6080 }

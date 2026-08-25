@@ -34,6 +34,46 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **The emulator runs as a Kubernetes workload**, one pod per session, each holding a GPU, its own X
+  server and its own memory cards. `deploy/k3d-cuda/` builds the cluster and `deploy/session/` builds
+  the session image; both were verified against a local k3d cluster (1 server, 3 workers) on an
+  RTX 4060, booting `Ace Combat 2 (Europe)` and `Crash Bandicoot 3` side by side from a single
+  `kubectl apply`. A session is selected entirely by environment — `ZS1_GAME` picks the disc,
+  `ZS1_SESSION` names the working directory — so two sessions differ only in their manifest.
+
+  Nothing about the machine's content is in an image. The BIOS and the discs stay on the host, reach
+  the nodes as bind mounts, and are exposed to one namespace by PersistentVolumes whose `claimRef` is
+  pinned in advance and mounted `readOnly`; the sessions are ClusterIP-only, so reaching one needs
+  cluster credentials. An image can be pushed to a registry, a bind mount cannot.
+
+  Four things had to be true before any of it worked, none of them in this project's code:
+  - The **NVIDIA container runtime must be in the k3s node image**. `rancher/k3s` is busybox with no
+    package manager, so it is laid over a CUDA base — `/bin` and `/lib` mapped onto their usr-merged
+    destinations, because they are real directories in one image and symlinks in the other.
+  - **Docker Desktop cannot host it.** Its daemon runs in a LinuxKit VM with no NVIDIA passthrough,
+    while `nvidia-ctk runtime configure` writes to the *system* daemon's config — so the toolkit
+    looks correctly installed and `docker info` still lists only `runc`.
+  - **A native `k3s.service` on the same host collides with k3d.** Both take `10.42.0.0/16` and
+    `10.43.0.0/16`, and the host's iptables then answer the cluster's own service IP with a foreign
+    certificate. Every system pod fails `x509: certificate signed by unknown authority` while
+    `kube-root-ca.crt` and the k3d server's CA match byte for byte — the tell is that
+    `openssl s_client` against the service IP and against the node's `:6443` return different
+    `k3s-server-ca@<epoch>` issuers. The cluster now uses `10.44`/`10.45`.
+  - **`eviction-hard` alone does not lift a disk-pressure taint.** k3s defaults
+    `eviction-minimum-reclaim` to 10%, so the kubelet holds `DiskPressure` until free space reaches
+    threshold *plus* reclaim. Lowering the threshold and watching the node stay tainted with the disk
+    visibly above it is the symptom; both have to move together.
+
+  Memory cards are why `ZS1_SESSION` exists rather than being cosmetic: `interconnect.c` opens
+  `memcard1.mcd` and `memcard2.mcd` by fixed name relative to the CWD, and every boot rewrites the
+  card as part of the card driver's write test, so two sessions started in one directory would
+  destroy each other's saves on the first boot.
+
+  Not there yet: the GPU is attached but is not what draws. Xvfb offers no hardware GLX, and the
+  running process maps `libGLX_mesa.so` with no NVIDIA GL library present, so the OpenGL backend is
+  on Mesa. The browser view is noVNC, which carries no audio. Both are the same next piece of work —
+  an X server with the NVIDIA driver, and WebRTC in front of it.
+
 - **A Vulkan 1.3 renderer, and the ability to swap renderers while a game is running.** The GPU had
   one OpenGL 3.3 implementation that owned its own header; `<GL/glew.h>` came in through
   `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every translation unit that

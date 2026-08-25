@@ -199,6 +199,56 @@ is a normal failure, and it is a real source of rendering differences.
 
 ---
 
+## Running on a Kubernetes cluster
+
+`deploy/` runs the emulator as a cluster workload: one pod per session, each with a GPU, its own
+display and its own memory cards. It was built and verified against a local **k3d** cluster
+(`cluster-zs1`, 1 server + 3 workers) on an RTX 4060.
+
+```sh
+./deploy/k3d-cuda/create-cluster.sh                 # cluster + GPU device plugin
+kubectl apply -f deploy/k3d-cuda/zs1-storage.yaml   # namespace, disks, GPU budget
+docker build -f deploy/session/Dockerfile -t zs1/session:dev .
+k3d image import zs1/session:dev -c cluster-zs1     # node containerd cannot see the host's images
+kubectl apply -f deploy/session/sessions.yaml       # two sessions, two different discs
+kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
+```
+
+Then open `http://localhost:6080/vnc.html`.
+
+**The BIOS and the discs never enter an image.** They stay on the host and are bind-mounted into the
+nodes at cluster creation, then exposed to one namespace by PersistentVolumes whose `claimRef` is
+pinned up front, and mounted `readOnly`. Nothing is published beyond a ClusterIP: reaching a session
+requires cluster credentials.
+
+A session is picked entirely by environment: `ZS1_GAME` chooses the disc, `ZS1_SESSION` names the
+working directory. That last one matters — `interconnect.c` opens `memcard1.mcd` and `memcard2.mcd`
+by fixed name relative to the CWD, and every boot rewrites the card as part of the driver's write
+test, so two sessions sharing a directory would destroy each other's saves immediately.
+
+Four things cost a session's worth of debugging and are worth knowing before starting:
+
+1. **Docker Desktop cannot do this.** Its daemon runs in a LinuxKit VM with no NVIDIA passthrough,
+   and `nvidia-ctk runtime configure` writes to the *system* daemon's config. Run
+   `docker context use default` first; the create script does it itself.
+2. **The k3s node image needs the NVIDIA container runtime inside it.** `rancher/k3s` is busybox with
+   no package manager, so `deploy/k3d-cuda/Dockerfile` lays it over a CUDA base — mapping `/bin` and
+   `/lib` onto the usr-merged destinations, since they are directories in one image and symlinks in
+   the other.
+3. **A native `k3s.service` on the host collides with k3d.** Both default to `10.42.0.0/16` and
+   `10.43.0.0/16`, and the host's iptables then answer the cluster's own service IP with a foreign
+   certificate. Every system pod fails with `x509: certificate signed by unknown authority` while the
+   CA bundle and the server CA match perfectly. The script uses `10.44`/`10.45` instead.
+4. **Rendering does not use the GPU yet.** Xvfb offers no hardware GLX, so the OpenGL backend binds
+   Mesa: the running process maps `libGLX_mesa.so` and no NVIDIA GL library at all. The GPU *is*
+   attached — `nvidia-smi` in the pod sees the 4060 and the device plugin hands out slices — it just
+   is not what draws. Getting there needs an X server with the NVIDIA driver, which is the same
+   piece of work as adding WebRTC streaming.
+
+`deploy/session/` carries no audio path to the browser yet: VNC does not transport sound.
+
+---
+
 ## Status
 
 | Component | Status | Notes |
