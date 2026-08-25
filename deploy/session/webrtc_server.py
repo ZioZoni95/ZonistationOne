@@ -33,6 +33,17 @@ PORT     = int(os.environ.get("ZS1_WEBRTC_PORT", "6082"))
 DISPLAY  = os.environ.get("DISPLAY", ":0")
 SINK_MON = os.environ.get("ZS1_PULSE_MONITOR", "zs1.monitor")
 
+# A relay, because the pipeline's own candidates go nowhere.
+#
+# The session runs on the k3d node's network, so every host candidate it gathers
+# is a 172.19.0.x address on the Docker bridge — reachable from the machine that
+# hosts the cluster and from nothing else, phone on the same wifi included. With
+# a TURN server on an address the viewer can actually reach, webrtcbin also
+# gathers a relay candidate there and the media has somewhere to land.
+#
+# Empty disables it, which is right when the viewer is the host's own browser.
+TURN = os.environ.get("ZS1_WEBRTC_TURN", "")
+
 # nvcudah264enc, not nvh264enc.
 #
 # Both are present and both claim the GPU at registration time, but the older
@@ -107,6 +118,9 @@ class Session:
         self.stop()
         self.pipe = Gst.parse_launch(PIPELINE)
         self.webrtc = self.pipe.get_by_name("sendrecv")
+        if TURN:
+            self.webrtc.set_property("turn-server", TURN)
+            log("turn:", TURN.split("@")[-1])
         self.webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
         self.webrtc.connect("on-ice-candidate", self._on_ice_candidate)
         bus = self.pipe.get_bus()
@@ -199,6 +213,16 @@ async def handler(ws, session):
         except Exception:
             pass
     session.ws = ws
+    if TURN:
+        # The viewer needs the same relay: on a network where neither side can
+        # reach the other directly, both ends have to meet at the TURN server.
+        u = TURN.split("://", 1)[1]
+        cred, host = u.split("@", 1)
+        user, pwd = cred.split(":", 1)
+        from urllib.parse import unquote
+        await ws.send(json.dumps({"ice_servers": [
+            {"urls": "turn:" + host, "username": unquote(user),
+             "credential": unquote(pwd)}]}))
     session.start()
     try:
         async for raw in ws:

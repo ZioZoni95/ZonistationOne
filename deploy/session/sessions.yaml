@@ -65,6 +65,15 @@ spec:
             # that used to be 72% of it now sit at DEBUG.
             - name: ZS1_LOG_STDERR
               value: "1"
+            # The relay lives on the host, not in the cluster: it has to sit on
+            # an address the viewer can reach, and no address inside k3d is.
+            # From a Secret, because the URI carries the TURN credential and a
+            # committed credential is a committed credential. Create it with:
+            #   kubectl create secret generic zs1-turn -n zs1 \
+            #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            - name: ZS1_WEBRTC_TURN
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: uri }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }
@@ -146,6 +155,15 @@ spec:
             # that used to be 72% of it now sit at DEBUG.
             - name: ZS1_LOG_STDERR
               value: "1"
+            # The relay lives on the host, not in the cluster: it has to sit on
+            # an address the viewer can reach, and no address inside k3d is.
+            # From a Secret, because the URI carries the TURN credential and a
+            # committed credential is a committed credential. Create it with:
+            #   kubectl create secret generic zs1-turn -n zs1 \
+            #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            - name: ZS1_WEBRTC_TURN
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: uri }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }
@@ -235,6 +253,15 @@ spec:
             # that used to be 72% of it now sit at DEBUG.
             - name: ZS1_LOG_STDERR
               value: "1"
+            # The relay lives on the host, not in the cluster: it has to sit on
+            # an address the viewer can reach, and no address inside k3d is.
+            # From a Secret, because the URI carries the TURN credential and a
+            # committed credential is a committed credential. Create it with:
+            #   kubectl create secret generic zs1-turn -n zs1 \
+            #     --from-literal=uri="turn://zs1:<pass>@<host-lan-ip>:3478"
+            - name: ZS1_WEBRTC_TURN
+              valueFrom:
+                secretKeyRef: { name: zs1-turn, key: uri }
           ports:
             - { name: novnc, containerPort: 6080 }
             - { name: audio, containerPort: 6081 }

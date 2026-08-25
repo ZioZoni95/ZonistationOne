@@ -60,6 +60,10 @@ const go = document.getElementById('go');
 const S = id => document.getElementById(id);
 
 let pc = null, ws = null;
+// Filled from the server's first message when a relay is configured. Without
+// one the only candidates are on the cluster's Docker bridge, which no other
+// device can route to.
+let iceServers = [];
 
 // Browser key names are not X keysyms, and xdotool speaks keysyms. Only the keys
 // the emulator actually binds are mapped; anything else is dropped rather than
@@ -120,7 +124,7 @@ function connect() {
       connect();
     }
   });
-  pc = new RTCPeerConnection({ iceServers: [] });   // same host: no STUN needed
+  pc = new RTCPeerConnection({ iceServers: iceServers });
 
   pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
   pc.onicecandidate = e => {
@@ -136,7 +140,11 @@ function connect() {
 
   ws.onmessage = async ev => {
     const m = JSON.parse(ev.data);
-    if (m.sdp) {
+    if (m.ice_servers) {
+      iceServers = m.ice_servers;
+      if (pc) pc.setConfiguration({ iceServers });
+      S('s-state').textContent = 'relay configured';
+    } else if (m.sdp) {
       await pc.setRemoteDescription(m.sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
