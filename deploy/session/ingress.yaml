@@ -87,3 +87,36 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: zs1-crash, port: { number: 6080 } } }
+---
+# Host-based, not path-based: noVNC loads its assets from absolute paths, so a
+# prefix like /acecombat/ would break every one of them. *.localhost resolves to
+# 127.0.0.1 without touching /etc/hosts on this machine.
+#
+# Three backends behind one host. The order matters — Traefik matches the most
+# specific path first, so /ws and /audio must be declared before /.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zs1-dino
+  namespace: zs1
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: zs1-zs1-basicauth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: dino.localhost
+      http:
+        paths:
+          # WebRTC signalling. Traefik upgrades to WebSocket on its own.
+          - path: /ws
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6082 } } }
+          # The HTTP audio stream used by the VNC page.
+          - path: /audio
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6081 } } }
+          # noVNC, its own websocket, and the two player pages.
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zs1-dino, port: { number: 6080 } } }

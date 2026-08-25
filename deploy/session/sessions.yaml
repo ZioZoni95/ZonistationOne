@@ -164,6 +164,95 @@ spec:
           persistentVolumeClaim: { claimName: games, readOnly: true }
         - name: data
           persistentVolumeClaim: { claimName: data }
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zs1-dino
+  namespace: zs1
+  labels: { app: zs1-session, game: dino }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: zs1-session, game: dino }
+  template:
+    metadata:
+      labels: { app: zs1-session, game: dino }
+    spec:
+      runtimeClassName: nvidia
+      # WebRTC media needs candidates the viewer can actually reach. Inside the
+      # pod network every candidate is a 10.44.x.x address, which nothing outside
+      # the cluster routes to, and the media is UDP so the Ingress does not carry
+      # it either: the browser got the offer, tried every candidate, and sat on
+      # "connecting" forever. On the node's network the candidates become the
+      # node container's own 172.19.0.x, which the host reaches over the Docker
+      # bridge.
+      #
+      # The cost is that ports are now the node's, so two sessions cannot share
+      # one — hence the anti-affinity below. Three workers, two sessions.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: zs1-session }
+              topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        node-role.kubernetes.io/worker: worker
+      containers:
+        - name: emulator
+          image: zs1/session:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZS1_SESSION
+              value: dino
+            - name: ZS1_BIOS
+              value: /mnt/zs1/roms/SCPH-7502.BIN
+            # A .bin.ecm, decoded on the fly. The .cue beside it is not the
+            # path to pass — --game= wants the .bin.
+            - name: ZS1_GAME
+              value: "/mnt/zs1/games/Dino Crisis (E) (Track 1) [SLES-02207].bin.ecm"
+            # LibCrypt: the 16-bit key lives in subchannel Q of 32 sectors and no
+            # .bin dump holds it, so the disc needs its .sbi and it must be the
+            # same pressing. Named explicitly rather than left to the automatic
+            # search, because games/ holds two of them — SLES_022.10.sbi is the
+            # Italian release. The wrong file loads without complaint, patches
+            # sectors the game never reads, and hangs exactly as if there were
+            # none at all.
+            - name: ZS1_SBI
+              value: "/mnt/zs1/games/Dino Crisis (E) (Track 1) [SLES-02207].sbi"
+            # Vulkan, not GL. Xvfb serves no NVIDIA GLX extension, so libglvnd
+            # resolves OpenGL to libGLX_mesa and the 4060 never draws. Vulkan
+            # does not go through GLX: the ICD in /etc/vulkan/icd.d is enough,
+            # and the device comes up as the RTX 4060 with a real swapchain.
+            - name: ZS1_GFX
+              value: vulkan
+            # The emulator's own log otherwise goes only to the ImGui panels and
+            # the per-category files under the session directory, leaving the
+            # pod's stdout with nothing but the entrypoint's four lines. At INFO
+            # this is init and state changes only — the per-field SPUCNT writes
+            # that used to be 72% of it now sit at DEBUG.
+            - name: ZS1_LOG_STDERR
+              value: "1"
+          ports:
+            - { name: novnc, containerPort: 6080 }
+            - { name: audio, containerPort: 6081 }
+            - { name: webrtc, containerPort: 6082 }
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - { name: roms,  mountPath: /mnt/zs1/roms,  readOnly: true }
+            - { name: games, mountPath: /mnt/zs1/games, readOnly: true }
+            - { name: data,  mountPath: /mnt/zs1/data }
+      volumes:
+        - name: roms
+          persistentVolumeClaim: { claimName: roms, readOnly: true }
+        - name: games
+          persistentVolumeClaim: { claimName: games, readOnly: true }
+        - name: data
+          persistentVolumeClaim: { claimName: data }
 ---
 # ClusterIP only, on purpose. Reaching a session means `kubectl port-forward`,
 # which needs cluster credentials — nothing is published to the LAN, and the
@@ -191,6 +280,19 @@ metadata:
 spec:
   type: ClusterIP
   selector: { app: zs1-session, game: crash }
+  ports:
+    - { name: novnc, port: 6080, targetPort: 6080 }
+    - { name: audio, port: 6081, targetPort: 6081 }
+    - { name: webrtc, port: 6082, targetPort: 6082 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zs1-dino
+  namespace: zs1
+spec:
+  type: ClusterIP
+  selector: { app: zs1-session, game: dino }
   ports:
     - { name: novnc, port: 6080, targetPort: 6080 }
     - { name: audio, port: 6081, targetPort: 6081 }
