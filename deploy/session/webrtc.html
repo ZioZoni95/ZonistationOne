@@ -65,8 +65,42 @@ for (let i = 0; i < 26; i++) KEYMAP['Key' + String.fromCharCode(65+i)] = String.
 for (let i = 0; i <= 9; i++) KEYMAP['Digit' + i] = String(i);
 for (let i = 1; i <= 12; i++) KEYMAP['F' + i] = 'F' + i;
 
+// Basic auth and WebSockets do not cooperate. The browser holds the credentials
+// you typed for the page, but it does not attach them to a socket opened from
+// JavaScript, so Traefik answers the handshake with 401 and the connection is
+// closed before it opens — which surfaces as "signalling closed" with the page
+// itself working perfectly. Credentials in the URL are the one thing a browser
+// does send on a WebSocket handshake.
+//
+// They are asked for only after a socket has actually been refused, so a
+// deployment without auth never sees a prompt, and kept in sessionStorage so it
+// is once per tab rather than once per reconnect.
+function wsURL() {
+  const cred = sessionStorage.getItem('zs1cred');
+  if (!cred) return WS;
+  return WS.replace(/^(wss?:\/\/)/, '$1' + cred + '@');
+}
+
+let askedForCredentials = false;
+
 function connect() {
-  ws = new WebSocket(WS);
+  const opened = { yes: false };
+  ws = new WebSocket(wsURL());
+  ws.addEventListener('open', () => { opened.yes = true; });
+  ws.addEventListener('close', () => {
+    // Closed without ever opening: the handshake was rejected, and 401 is by far
+    // the likeliest reason. Ask once, then retry.
+    if (!opened.yes && !askedForCredentials) {
+      askedForCredentials = true;
+      const u = prompt('Signalling requires the same user as the page:', 'zs1');
+      if (u === null) return;
+      const p = prompt('Password:');
+      if (p === null) return;
+      sessionStorage.setItem('zs1cred', encodeURIComponent(u) + ':' + encodeURIComponent(p));
+      S('s-state').textContent = 'retrying with credentials';
+      connect();
+    }
+  });
   pc = new RTCPeerConnection({ iceServers: [] });   // same host: no STUN needed
 
   pc.ontrack = e => { if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0]; };
