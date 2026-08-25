@@ -37,13 +37,23 @@
 // is one port for everything and the signalling socket is a path; with
 // kubectl port-forward each service port is mapped separately and it is a port.
 // ?sig= forces either (a bare number is a port, anything else a path).
+// Where the signalling socket lives depends on how the page was reached, and
+// that cannot be inferred from the port: the Ingress is published on 8081 here,
+// not on 80, so "is this a standard port" gets it wrong. Rather than guess,
+// try each candidate in turn — the path first, since that is the route that
+// survives a pod restart — and keep the one that opens.
+//
+//   /ws            behind the Ingress: one port for everything, paths to split it
+//   :6082          under kubectl port-forward: one local port per service port
+//
+// ?sig= pins it: a bare number is a port, anything else a path.
 const SIG = new URLSearchParams(location.search).get('sig');
 const WSPROTO = location.protocol === 'https:' ? 'wss://' : 'ws://';
-const WS = SIG
-  ? (/^\d+$/.test(SIG) ? WSPROTO + location.hostname + ':' + SIG : WSPROTO + location.host + SIG)
-  : (location.port === '' || location.port === '80' || location.port === '443'
-       ? WSPROTO + location.host + '/ws'
-       : WSPROTO + location.hostname + ':6082');
+const CANDIDATES = SIG
+  ? [ /^\d+$/.test(SIG) ? WSPROTO + location.hostname + ':' + SIG
+                        : WSPROTO + location.host + SIG ]
+  : [ WSPROTO + location.host + '/ws',
+      WSPROTO + location.hostname + ':6082' ];
 
 const v = document.getElementById('v');
 const go = document.getElementById('go');
@@ -75,28 +85,37 @@ for (let i = 1; i <= 12; i++) KEYMAP['F' + i] = 'F' + i;
 // They are asked for only after a socket has actually been refused, so a
 // deployment without auth never sees a prompt, and kept in sessionStorage so it
 // is once per tab rather than once per reconnect.
-function wsURL() {
-  const cred = sessionStorage.getItem('zs1cred');
-  if (!cred) return WS;
-  return WS.replace(/^(wss?:\/\/)/, '$1' + cred + '@');
-}
-
+let candidate = 0;
 let askedForCredentials = false;
+
+function wsURL() {
+  const base = CANDIDATES[candidate];
+  const cred = sessionStorage.getItem('zs1cred');
+  return cred ? base.replace(/^(wss?:\/\/)/, '$1' + cred + '@') : base;
+}
 
 function connect() {
   const opened = { yes: false };
   ws = new WebSocket(wsURL());
   ws.addEventListener('open', () => { opened.yes = true; });
   ws.addEventListener('close', () => {
-    // Closed without ever opening: the handshake was rejected, and 401 is by far
-    // the likeliest reason. Ask once, then retry.
-    if (!opened.yes && !askedForCredentials) {
+    if (opened.yes) return;
+    // Closed without ever opening. Either this candidate is not the right route,
+    // or it is and the handshake was rejected — a browser will not attach the
+    // credentials you typed for the page to a socket opened from JavaScript, so
+    // Traefik answers 401. Exhaust the routes first, then ask once.
+    if (candidate < CANDIDATES.length - 1) {
+      candidate++;
+      S('s-state').textContent = 'trying ' + CANDIDATES[candidate];
+      connect();
+    } else if (!askedForCredentials) {
       askedForCredentials = true;
-      const u = prompt('Signalling requires the same user as the page:', 'zs1');
+      const u = prompt('Signalling needs the same user as the page:', 'zs1');
       if (u === null) return;
       const p = prompt('Password:');
       if (p === null) return;
       sessionStorage.setItem('zs1cred', encodeURIComponent(u) + ':' + encodeURIComponent(p));
+      candidate = 0;
       S('s-state').textContent = 'retrying with credentials';
       connect();
     }

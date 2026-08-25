@@ -112,8 +112,16 @@ class Session:
         bus = self.pipe.get_bus()
         bus.add_signal_watch()
         bus.connect("message::error", self._on_error)
-        self.pipe.set_state(Gst.State.PLAYING)
-        log(f"pipeline playing: {FPS} fps, {BITRATE} kbps, NVENC")
+        bus.connect("message::warning",
+                    lambda _b, m: log("warning:", m.parse_warning()[0].message))
+        bus.connect("message::state-changed", self._on_state)
+        rc = self.pipe.set_state(Gst.State.PLAYING)
+        log(f"set_state(PLAYING) -> {rc.value_nick}; {FPS} fps, {BITRATE} kbps, {ENCODER}")
+
+    def _on_state(self, _bus, msg):
+        if msg.src is self.pipe:
+            old, new, _ = msg.parse_state_changed()
+            log(f"pipeline {old.value_nick} -> {new.value_nick}")
 
     def stop(self):
         if self.pipe is not None:
@@ -126,14 +134,37 @@ class Session:
         log("pipeline error:", err.message, "|", dbg)
 
     def _on_negotiation_needed(self, element):
-        promise = Gst.Promise.new_with_change_func(self._on_offer_created, element, None)
-        element.emit("create-offer", None, promise)
+        log("negotiation needed")
 
-    def _on_offer_created(self, promise, element, _):
-        promise.wait()
-        offer = promise.get_reply().get_value("offer")
-        element.emit("set-local-description", offer, Gst.Promise.new())
-        self._send({"sdp": {"type": "offer", "sdp": offer.sdp.as_text()}})
+        # The reply is handled in a closure with exactly one user-data slot.
+        # Passing two — the pattern in the older GStreamer examples — is silently
+        # rejected by this binding: negotiation fired, create-offer ran, and the
+        # callback simply never executed, so no offer was ever sent and the
+        # browser sat waiting until it gave up with "signalling closed".
+        #
+        # Everything here is wrapped, because an exception raised inside a
+        # GStreamer callback does not reach the interpreter's handler and would
+        # vanish the same way.
+        def on_offer(promise, _user_data=None):
+            try:
+                promise.wait()
+                reply = promise.get_reply()
+                offer = reply.get_value("offer") if reply is not None else None
+                if offer is None or offer.sdp is None:
+                    log("create-offer produced no SDP")
+                    return
+                # Read the text before handing the description over:
+                # set-local-description takes ownership of the GstSDPMessage and
+                # leaves offer.sdp None behind it.
+                sdp_text = offer.sdp.as_text()
+                log("offer created:", len(sdp_text), "bytes,",
+                    sum(1 for l in sdp_text.splitlines() if l.startswith("m=")), "media")
+                element.emit("set-local-description", offer, Gst.Promise.new())
+                self._send({"sdp": {"type": "offer", "sdp": sdp_text}})
+            except Exception as e:
+                log("offer failed:", type(e).__name__, e)
+
+        element.emit("create-offer", None, Gst.Promise.new_with_change_func(on_offer, None))
 
     def _on_ice_candidate(self, _element, mline, candidate):
         self._send({"ice": {"candidate": candidate, "sdpMLineIndex": mline}})
