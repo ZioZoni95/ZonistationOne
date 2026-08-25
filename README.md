@@ -234,7 +234,7 @@ kubectl port-forward -n zs1 svc/zs1-crash     6090:6080 6091:6081 6092:6082   # 
 Two ways in, and they are not equivalent:
 
 - **`http://localhost:6080/webrtc.html`** — picture and sound in **one** WebRTC transport, H.264
-  encoded on the GPU's NVENC block, keyboard forwarded. Click *Connect*, then click the picture to
+  encoded on the GPU's NVENC block, keyboard forwarded. This is the one to use. Click *Connect*, then click the picture to
   give it focus before using the keys. The bar shows measured round-trip time, frame rate, bitrate
   and jitter, so latency is read rather than guessed. Add `?sig=6092` for the second session.
 - **`http://localhost:6080/play.html`** — the older VNC path: noVNC for the picture, a separate HTTP

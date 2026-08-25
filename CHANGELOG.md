@@ -77,7 +77,28 @@ identical percentiles, which is the check that a host optimisation has not moved
   `VK_EXT_fragment_shader_interlock` available. The manifests set `ZS1_GFX=vulkan`. The usual
   answers to headless GL — VirtualGL, or an Xorg carrying the NVIDIA driver — are not needed.
 
-  Sound reaches the browser on a second port: the SPU's output off a PulseAudio null sink, encoded
+  **WebRTC carries picture and sound together**, H.264 on the 4060's NVENC block,
+  50 fps to match a PAL field, keyboard forwarded through the X server. Working end to end. Four
+  defects stood between the first version and that, and none of them announced itself:
+  - `Gst.Promise.new_with_change_func` was given two user-data arguments, the pattern in the older
+    GStreamer examples. This binding takes one, rejects the call inside the C callback, and reports
+    nothing — so `create-offer` ran, its reply handler never did, and no offer was ever sent. The
+    pipeline reached PLAYING and `on-negotiation-needed` fired correctly the whole time.
+  - `offer.sdp` was read *after* `set-local-description`, which takes ownership of the message and
+    leaves None behind.
+  - The page picked its signalling endpoint by testing for a standard port, but the Ingress is
+    published on 8081, so it chose the port-forward route and dialled a port nothing served.
+  - Every ICE candidate was a pod address (`10.44.x.x`) or link-local, and the media is UDP that no
+    Ingress carries. `hostNetwork` moves the pipeline onto the node's own `172.19.0.x`, which the
+    host reaches over the Docker bridge; anti-affinity keeps two sessions off one node, since the
+    ports are now the node's.
+
+  A browser opening a WebSocket does not attach the credentials already entered for the page, so the
+  signalling socket is refused behind basic auth. Credentials in the URL are the one form a browser
+  does send, and JavaScript cannot read the ones already typed — so the page asks once, and only
+  after a socket has actually been refused.
+
+  Sound also reaches the browser on a second port for the VNC page: the SPU's output off a PulseAudio null sink, encoded
   as WebM/Opus by ffmpeg, with `play.html` putting it on one page with the noVNC picture. Verified
   at the sink rather than assumed — `mean_volume -18.7 dB`, `max_volume -5.3 dB` over a four-second
   capture, so the SPU is genuinely feeding it.
