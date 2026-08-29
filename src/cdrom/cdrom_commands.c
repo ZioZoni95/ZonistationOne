@@ -343,6 +343,31 @@ void cdrom_execute_command(Cdrom *cdrom) {
             LOG_CDROM_DEBUG("[CDROM] Init dropped: one is already owed");
             break;
         }
+        /* "Multiple effects at once. Sets mode=20h, activates drive motor,
+         * Standby, abort all commands" (cdromdrive.md:536-537). None of that
+         * happened here: the mode kept whatever the last Setmode left — the
+         * game's own Setmode then arrived 50 fields later, so an Init issued
+         * while the drive was at double speed left it there — and an ongoing
+         * read carried on straight through a command whose whole purpose is to
+         * stop everything. */
+        cdrom->mode            = 0x20;
+        cdrom->double_speed    = false;
+        cdrom->xa_adpcm_enable = false;
+        cdrom->whole_sector    = true;
+        cdrom->xa_filter_enable= false;
+        cdrom->report_enable   = false;
+        cdrom->auto_pause      = false;
+        cdrom->cdda_enable     = false;
+        if (cdrom->drive_state == DRIVE_READING ||
+            cdrom->drive_state == DRIVE_PLAYING ||
+            cdrom->drive_state == DRIVE_SEEKING) {
+            cdrom->drive_state = DRIVE_IDLE;    /* Standby: motor on, head parked */
+            cdrom->seek_phase  = false;
+        }
+        cdrom->read_after_seek = false;
+        cdrom->play_after_seek = false;
+        cdrom->motor_on        = true;
+
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
         cdrom->second_response_cmd = CDC_INIT;
@@ -396,7 +421,9 @@ void cdrom_execute_command(Cdrom *cdrom) {
         cdrom->report_enable  = (m & 0x04) != 0;
         cdrom->auto_pause     = (m & 0x02) != 0;
         cdrom->cdda_enable    = (m & 0x01) != 0;
-        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d) @ 0x%08x",
+        /* The trailing "@ 0x%08x" here had no argument and printed whatever
+         * was next on the stack — four format specifiers, three values. */
+        LOG_CDROM_DEBUG("[CDROM] Setmode 0x%02X (2x=%d whole=%d xa=%d)",
                         m, cdrom->double_speed, cdrom->whole_sector, cdrom->xa_adpcm_enable);
         cdrom_push_response(cdrom, cdrom_get_stat_byte(cdrom));
         cdrom_send_ack(cdrom);
@@ -459,6 +486,13 @@ void cdrom_execute_command(Cdrom *cdrom) {
     /* --- 0x11 GetlocP --- */
     case CDC_GETLOCP: {
         SubQ *q = &cdrom->last_subq;
+        /* Printed in the same shape a DuckStation Devel run prints it, so the
+         * two logs can be put side by side without reformatting either. */
+        LOG_CDROM_DEBUG("[CDROM] GetlocP T%02X I%02X R[%02X:%02X:%02X] A[%02X:%02X:%02X] (lba %u)",
+                        q->track_bcd, q->index_bcd,
+                        q->rel_mm_bcd, q->rel_ss_bcd, q->rel_ff_bcd,
+                        q->abs_mm_bcd, q->abs_ss_bcd, q->abs_ff_bcd,
+                        cdrom->current_lba);
         cdrom_push_response(cdrom, q->track_bcd);
         cdrom_push_response(cdrom, q->index_bcd);
         cdrom_push_response(cdrom, q->rel_mm_bcd);
@@ -931,9 +965,17 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             cdrom->current_read_buffer  = widx;
             cdrom->current_write_buffer = (widx + 1) % CDROM_SECTOR_BUFFERS;
 
-            /* Update SubQ */
-            cdrom->current_subq_lba = cdrom->current_lba;
-            cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+            /* Update SubQ — unless this is a LibCrypt sector, whose Q carries
+             * a deliberately wrong CRC. The controller discards such a sector's
+             * Q entirely and GetlocP keeps answering with the previous one
+             * (cdromformat.md, CDROM Protection - LibCrypt); that repeat is
+             * exactly the signal the protection counts, so handing the guest
+             * the modified values instead produced a wrong 16-bit key and Dino
+             * Crisis (E) walked into its own `j $` trap at 0x80029778. */
+            if (!cdrom_disc_sbi_covers(&cdrom->disc, cdrom->current_lba)) {
+                cdrom->current_subq_lba = cdrom->current_lba;
+                cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+            }
 
             LOG_CDROM_DEBUG("[CDROM] Sector LBA=%u -> INT1", cdrom->current_lba);
 
@@ -1011,9 +1053,11 @@ void cdrom_execute_drive(Cdrom *cdrom) {
             prev_track = ct;
         }
 
-        /* Update SubQ */
-        cdrom->current_subq_lba = cdrom->current_lba;
-        cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+        /* Update SubQ — same LibCrypt rule as the data path above. */
+        if (!cdrom_disc_sbi_covers(&cdrom->disc, cdrom->current_lba)) {
+            cdrom->current_subq_lba = cdrom->current_lba;
+            cdrom->last_subq = cdrom_disc_get_subq(&cdrom->disc, cdrom->current_lba);
+        }
 
         /* Report: INT1(stat, track, index, mm/amm, ss+80h/ass, sect/asect,
          * peaklo, peakhi) — eight bytes, and NOT on every sector. The packet

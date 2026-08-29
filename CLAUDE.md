@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-PS1 emulator written in C. SDL3 + OpenGL 3.3 (GLEW). Early development.
+PS1 emulator written in C. SDL3, with an OpenGL 3.3 (GLEW) and a Vulkan 1.3 backend that can be
+swapped while a game runs. Early development.
 
 ```bash
 make                    # build
@@ -23,7 +24,12 @@ Useful env vars: `ZS1_LOG_LEVEL=<level>`, `ZS1_LOG_STDERR=1` (log to stderr as w
 windows), `ZS1_LUA_SCRIPT=scripts/x.lua`, `ZS1_DUMP_FRAME=<path>` + `ZS1_DUMP_FRAME_N=<n>`,
 `ZS1_FRAME_PROFILE=1` (per-frame time split plus cycles per instruction),
 `ZS1_AUDIO_DUMP=<path>`, `ZS1_SPU_NO_REVERB=1`, `ZS1_PAD_MODE=digital|analog|stick` (boot pad mode;
-default digital, as on hardware).
+default digital, as on hardware), `ZS1_UI=gameplay|debug` (which shell the window opens in; default
+gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale),
+`ZS1_SBI=<path>` (the LibCrypt patch file for the mounted disc, overriding the automatic search),
+`ZS1_GFX=gl|vulkan` (which renderer starts; also changeable at runtime from Esc -> Video),
+`ZS1_VK_VALIDATE=1` (Vulkan validation layer), `ZS1_GFX_SWITCH_TEST=<n>` (flip the renderer every
+n fields — the leak check for the switch path).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -34,6 +40,47 @@ rendering difference as an emulator bug.
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
+
+---
+
+## The two shells
+
+The window has a **gameplay shell** and the **debug workspace**, and switches between them at any
+time with the backquote key (`` ` ``), Shift+F1, the *Gameplay* button on the machine bar, or the
+quick menu's *Debug workspace*. `ZS1_UI=debug` opens straight into the workspace. The machine keeps
+running across a switch.
+
+- **Gameplay shell** — the emulated screen and nothing else. A HUD (fps, speed, host frame ms,
+  region and refresh, the pad's LED) fades out after ~3 s idle and returns on any input. `Esc` opens
+  a quick menu: session counters, save/load into four slots (slot 0 is the one F5/F8 use), pad mode,
+  a machine summary, the workspace, and quit. Nothing here polls the core — the shell asks and
+  `main.c` carries the request out (`debug_ui_take_state_request`, `debug_ui_take_quit_request`);
+  `Esc` reaches it through `debug_ui_escape_pressed()`, which returns false in the workspace so the
+  key still quits there.
+- **Debug workspace** — the nine view modes, the log dock and the inspector, unchanged.
+
+**Nothing on either shell is typed in.** The Host HW panel and the inspector's host block read
+`/proc`, `/sys`, `uname` and the live GL and SDL device strings through `src/core/host_info.c` —
+including which GPU actually got the context and whether a `ZS1_GPU` request was honoured, which is
+the first thing to check before blaming a rendering difference on the emulator. Thread load comes
+from `/proc/self/task`, sampled twice a second. The pinned watches are Lua expressions evaluated
+through `lua_debug_eval_expr()` — the Script console's whole `emu.*` surface, evaluated every sixth
+frame and only while the panel is visible; click a tile to edit its expression, right-click to drop
+it. The Pipeline view's status words are the drive state, the MDEC decode state, the DMA channel's
+sync mode, GPUSTAT, the display state, the count of keyed-on voices and the ring depth; per-frame
+figures come from the frame event ring, recorded only while a view that reads it is open.
+
+The Frame view holds a frame on demand (a copy — recording carries on), plots each event by CPU
+cycle with a millisecond axis, shows the payload beside the count, marks the display flip across
+every row, and marks the budget line only when the frame overran it.
+
+The Controller window draws a DualShock: every control is lit from the same 16-bit word the SIO
+sends the game, the sticks show their live deflection, the LED shows the pad mode's documented
+colour, and clicking a control rebinds it. The scancode list is still there, folded away.
+
+Fonts and spacing follow the display: a UI face, a display face and a real monospace face are loaded
+at a scale taken from `SDL_GetWindowDisplayScale()` (or the window's pixel height), and
+`ImGuiStyle::ScaleAllSizes` follows. `ZS1_UI_SCALE` overrides it.
 
 ---
 
@@ -71,10 +118,16 @@ src/core/
   lua_debug.c                  — Lua scripting surface (emu.*) for live debugging
 
 src/gpu/
-  gpu.c                        — GPU init/reset/GP1/GPUSTAT
+  gpu.c                        — GPU init/reset/GP1/GPUSTAT, gpu_reapply_renderer_state()
   gpu_commands.c               — GP0 256-entry dispatch table, all draw commands
   gpu_helpers.c                — GP0 helper utilities
-  renderer.c                   — OpenGL 3.3 renderer, unified VRAM texture, GPU thread
+  renderer.c                   — backend dispatch: forwards renderer_* onto the live GfxBackend
+  renderer_gl.c                — OpenGL 3.3 backend, unified VRAM texture, GPU thread
+  vk/vk_loader.c               — runtime Vulkan entry points (no -lvulkan)
+  vk/vk_device.c               — instance, physical device, logical device, swapchain, caps
+  vk/renderer_vk.c             — Vulkan 1.3 backend (dynamic rendering, no VkRenderPass)
+  vk/vk_imgui.cpp              — C bridge onto imgui_impl_vulkan
+  shaders/*.{vert,frag}        — GLSL, compiled to SPIR-V at build time
   vram.c                       — 1024×512 VRAM buffer management
 
 src/gte/
@@ -195,8 +248,22 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
   fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
   Co. work" further down.
-- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: boots to the main menu
-  (2026-08-19, after the LWL/LWR fix below). Gameplay not tested.
+- `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
+  (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
+  image, so the ECM path is exercised under real seek and streaming load, not just at boot.
+- `Dino Crisis (E)` [SLES-02207], from a **`.bin.ecm`** plus its `.sbi`: boots past the protection,
+  plays its opening screens and reaches the **main menu** (2026-08-21). The disc is **LibCrypt**, and getting there took four separate
+  fixes, none of them in the CDROM data path — see the four entries in `CHANGELOG.md` under this
+  date. The one to remember: the protection keeps its own state in COP0's breakpoint registers,
+  which is documented behaviour ("mis-used as general-purpose registers",
+  `psx-spx-docs/docs/cdromformat.md`) and not something a CDROM trace can ever reveal.
+- **LibCrypt discs need an `.sbi`, and it must be the *same pressing*.** The 16-bit key lives in the
+  subchannel Q of 32 sectors, which no `.bin` dump holds. The file is found by the image's name with
+  extensions dropped one at a time, then the lone `.sbi` beside the image if there is exactly one;
+  `ZS1_SBI` overrides. `SLES-02210` is the Italian Dino Crisis and `SLES-02207` the English one:
+  the wrong file loads without complaint, patches sectors the game never reads, and the game hangs
+  exactly as if there were no file at all. DuckStation's `gamedb.yaml` lists `libcrypt: true` per
+  serial and is the quickest way to check whether a disc needs one.
 - **ECM images decode on the fly** (`src/cdrom/cdrom_ecm.c`, `src/cdrom/ecm_edc.c`). Never suspect
   the decoder from game behaviour: the container appends the EDC (CRC32, poly 0xD8018001) of the
   *entire* decoded output as its last four bytes, so decoding the whole image and running that CRC
@@ -231,6 +298,61 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   scanning the display window out of VRAM
 - GPU: polygons, rects, lines, textured/CLUT, semi-transparency, scissor, unified VRAM texture,
   15bpp and 24bpp display
+- **The renderer sits behind a vtable** (`include/gpu_backend.h`, since 2026-08-25). `renderer.c` is a
+  dispatcher; the whole OpenGL implementation is `renderer_gl.c` plus its private `renderer_gl.h`,
+  which is the only place besides `main.c` allowed to include `<GL/glew.h>`. That header used to be
+  `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every unit that touched the
+  interconnect. The ~120 `renderer_*(&gpu->renderer, ...)` call sites are unchanged.
+  Two things about it that are not obvious:
+  - **Bind the backend before the machine is built.** `gpu_reset_state()` pushes the GP0/GP1 reset
+    values through four renderer setters (`gpu.c:661-668`) from inside `interconnect_init()`, which
+    runs *before* `renderer_init()` (`main.c:446` against `:448`). Those values are not redundant —
+    `glr_init()` defaults only screen width/height — so `renderer_select_backend()` binds the vtable
+    without touching the GPU, and the backend resolves a NULL `impl` to its own file-static state.
+  - **Savestates were not affected.** `savestate.c:76-78` derives both `Gpu` spans from
+    `offsetof(Gpu, renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two
+    pointers moved both boundaries by the same amount. Verified: a state saved and reloaded across
+    the change restores PC and cycle exactly and the machine runs on.
+- **Vulkan 1.3 is the second backend** (`src/gpu/vk/`, since 2026-08-25), and it is swapped **live**
+  from the quick menu's *Video* entry. Things about it that cost time to learn:
+  - **`renderer_upload_vram()` is a no-op on Vulkan, on purpose.** GL records the whole-VRAM upload
+    `main.c` does every frame with `update_display=false`, so it feeds only the `GL_R16UI` mirror
+    that non-`ARB_texture_barrier` drivers sample — never `vram_tex`. Vulkan has one VRAM image, so
+    honouring that upload erased the rasteriser's work once a frame; the picture was "completely
+    broken" and looked like a display bug. Only `upload_vram_rect()` and rasterisation write it.
+  - **`VK_EXT_fragment_shader_interlock` is an optimisation, not a prerequisite.** The feedback loop
+    (the PS1 fragment shader samples the image it is also drawing to) is handled by a
+    `vkCmdPipelineBarrier` between batches with the image permanently in `VK_IMAGE_LAYOUT_GENERAL`,
+    which works everywhere. That is the GL `glTextureBarrier()` call, in Vulkan terms.
+  - **Vulkan is loaded at runtime, not linked.** `VK_NO_PROTOTYPES` plus `SDL_Vulkan_LoadLibrary()`,
+    so there is no `-lvulkan` and the binary starts on a machine with no ICD.
+  - **Shaders are files now.** `src/gpu/shaders/*.{vert,frag}` compiled to SPIR-V by
+    `glslangValidator` at build time; the Makefile degrades to GL-only with a message if either
+    `libvulkan-dev` or `glslang-tools` is absent.
+  - **The GL backend needs X11 on this box.** Under `SDL_VIDEODRIVER=wayland`, `glewInit()` returns
+    "Unknown error" and the backend refuses to start — which is also what a hot switch *to* GL hits
+    on a Wayland session, where it rolls back to Vulkan. Vulkan on the Intel iGPU is the reverse and
+    needs Wayland; see the memory note.
+- **The renderer switches while the machine runs** (`switch_gfx_backend()` in `main.c`, 2026-08-25).
+  SDL fixes `SDL_WINDOW_OPENGL`/`SDL_WINDOW_VULKAN` at window creation, so the window is destroyed
+  and rebuilt — which makes three things the switch has to carry, and each was a real failure before
+  it did:
+  - **VRAM comes back from the GPU, not from `gpu.vram.data`.** The CPU-side array holds what the
+    CPU wrote and never what the rasteriser drew. `renderer_read_vram_rect()` is a synchronous
+    round-trip *through the GPU thread*, so it has to run before `renderer_stop_gpu_thread()`.
+  - **`gpu_reapply_renderer_state()`** (`gpu.c`) re-sends draw offset, drawing area, texture window,
+    screen scale, display region, depth24, blank and the two mask flags. All ten live in the backend,
+    not in `Gpu`, and a new backend starts at its own defaults. The per-primitive state (dither,
+    semi-transparency, texture/raw-texture mode) is deliberately *not* re-sent: every draw command in
+    `gpu_commands.c` sets it immediately before pushing geometry.
+  - **The ImGui context survives; only its two backend halves are rebuilt.**
+    `debug_ui_backend_shutdown()`/`debug_ui_backend_init()` exist for exactly this, and
+    `ImGui::DestroyContext()` stays in `debug_ui_shutdown()`. The order matters on the way down —
+    the halves go before `renderer_destroy()`, because the Vulkan renderer half belongs to the
+    device that call destroys.
+  A failed switch rebuilds the previous backend and reports it rather than ending the session.
+  `ZS1_GFX_SWITCH_TEST=<n>` flips backends every n fields; nine switches in one run of Ace Combat 2
+  under X11 were clean.
 - MDEC: full decode pipeline, verified against real FMV playback
 - DMA: all channels, linked-list + block, completion interrupts
 - Timers 0/1/2: derived counters, sync modes, video-mode-derived rates
@@ -280,6 +402,42 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 ## Known Broken / Absent
 
+- **A VRAM write must flush whatever primitives are still pending.** `renderer_draw()` both builds a
+  batch and records its position in the frame's op list, so a primitive that has been submitted but
+  not flushed has no place in the order yet, and a VRAM op recorded meanwhile will be replayed before
+  it. `renderer_upload_vram_rect()` missed this and Dino Crisis lost every uploaded picture under its
+  own back-buffer clear — the images were in VRAM the whole time, which is why it looked like a
+  display bug. Fixed 2026-08-21. Anything new that touches VRAM from the CPU side has to flush first;
+  the reference emulator does it on the same four boundaries (FillVRAM, UpdateVRAM, CopyVRAM,
+  DownloadVRAMFromGPU).
+- **The gameplay shell cannot change what is running.** Three pieces of the shell's design are not
+  implemented, and each is blocked on machine-side work rather than on interface work:
+  - **No disc library.** The disc still comes from `--game=` on the command line. `games/` is not
+    scanned and nothing in the shell can start a title; the quick menu describes the disc that was
+    loaded at startup and nothing else.
+  - **No disc swap while running.** `cdrom_load_disc()` exists and would load the image, but a swap
+    on hardware is a shell-open / shell-closed cycle the drive has to report — the status byte's
+    bit 4 latch, the pending INT the guest is owed, and the region check that rejects a PAL disc
+    under the US BIOS. None of that is wired, so a swap today would hand the guest a new image
+    behind its back. The disc list in the quick menu is a summary, not a picker.
+  - **No reset.** There is no `system_reset()`: nothing re-runs CPU and Interconnect init against a
+    live machine, and the savestate path is not a substitute because it restores rather than
+    restarts. *Reset console* was left out of the quick menu rather than wired to something that
+    only looks like a reset. Whoever adds it should treat the BIOS boot path as the reference —
+    `main.c` builds the machine once today, and the reset has to reach the drive, the SPU's RAM and
+    the event queue, not just the CPU.
+- **The shell's settings are read-only where the machine has no setter.** Volume, scanlines, scaling
+  mode and crop appear in the interface study's design and are not in the shell: the renderer has no
+  runtime switch for any of them, and reverb is guest state (SPUCNT), not a host preference. The
+  quick menu shows what the machine reports and offers the controls that do exist — pad mode,
+  savestate slots, the workspace, quit.
+
+- **Audio in `Dino Crisis (E)`'s in-engine 3D cutscenes: repeats across some scene changes, and runs
+  ahead of the scene.** Both reported 2026-08-21, both absent from the FMVs, neither measured. The
+  FMVs staying in step is the useful half of the observation: it puts the XA path and the output
+  device in the clear and points at the SPU's own clock. Do not quote a drift figure from a run with
+  logging or a probe on — see the trap below; a guest burning cycles in a retry loop and a host that
+  cannot keep up look identical here and need opposite fixes.
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
   `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the
@@ -304,6 +462,10 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   one wrong field from us — visible as the stretched 15bpp-read-as-24bpp frame after an FMV.
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
+
+`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: what exists (nothing automated),
+the four layers proposed, and the order. Read it before adding a test, and before claiming a
+subsystem is verified.
 
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
@@ -498,6 +660,17 @@ has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
 
+- **A savestate load used to erase the memory cards.** The cards live inside `Sio`, `T_SIO` is a raw
+  read of that struct, so loading a state replaced the live cards with whatever the state was written
+  with — and *every* boot writes frame 63 as the card driver's write test, which marks the card dirty
+  and rewrites all 128 KB of the `.mcd`. So a state captured with empty cards erased real saves one
+  boot later, silently, with no card operation the user performed. Fixed 2026-08-20 (state v10): the
+  cards are held across the `T_SIO` read and put back, saves go through a temp file and a rename, and
+  the first write of a session copies the card to `<path>.bak` first. If saves are missing anyway,
+  the `.mcd` files were tracked in git until 2026-08-07 — `git show 27f3293:memcard1.mcd` recovered an
+  Ace Combat 2 save that had already been lost this way.
+
+
 - **One runaway DMA presents as four unrelated defects.** A sliced transfer that keeps running after
   the guest aborted it wrote MDEC output over ~880 KB of guest RAM, and the report that came back was
   "the boot logo breaks, then the screen shows VRAM, then the audio cuts, and the DMA logs out of
@@ -526,8 +699,12 @@ has to be there. Re-run before a release rather than trusting this line.
   like it had no effect, which invalidated most of a session — including three "measurements" taken
   against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
   check the binary's mtime before checking the change.
-- `make test` is broken and was already broken before this: `tests/` does not exist in the tree,
-  though this file and the Makefile both reference `tests/cpu_minimal_test.c`.
+- `make test` is broken and was already broken before this: `tests/` is an empty directory, though
+  this file and the Makefile both reference `tests/cpu_minimal_test.c`. **There is no automated test
+  of any kind in this repository** — every accuracy claim here was established by running a game and
+  reading a log. That is the single largest structural gap, and `docs/TESTING_PLAN_2026-08-20.md`
+  is the plan for closing it, written the day after the LWL/LWR bug showed what it costs: months
+  live, most of a day to find, and sixteen assertions to have caught.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
   time" that was later withdrawn. It also applies to *diagnosing* slowness, not just quoting it: a

@@ -95,4 +95,8 @@ bool     mdec_input_has_space(const Mdec* m);    /* true: room for >=1 more word
 bool     mdec_output_has_data(const Mdec* m);    /* true: at least 1 word ready to pop */
 void     mdec_execute(Mdec* m);                  /* try to advance the decode state machine */
 
+/* Macroblocks pushed out since boot — a UI counter, deliberately not part of
+ * the savestated struct. */
+uint32_t mdec_stat_macroblocks(void);
+
 #endif /* MDEC_H */

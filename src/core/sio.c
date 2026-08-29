@@ -733,7 +733,11 @@ static void sio_shift_byte(void) {
             data_in = 0xFF;  // N/A per PSX-SPX spec
             ack = true;
             SIO_DBG("[SIO] Memory card detected (0x81, slot=%d)", (sio_internal.ctrl & CTRL_SLOT) ? 2 : 1);
-        } else if (sio_internal.controller_connected) {
+        } else if (sio_internal.controller_connected && !(sio_internal.ctrl & CTRL_SLOT)) {
+            /* Port 2 is empty. The two ports are wired in parallel and narrowed
+             * by the address byte (:50-57), so a pad that answered whichever
+             * slot happened to be selected put the same controller in both
+             * ports — and the BIOS probes both. */
             ack = sio_controller_transfer(data_out, &data_in);
             if (ack) {
                 sio_internal.addressed = SIO_DEV_CONTROLLER;
@@ -1195,12 +1199,34 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
             s->mc_checksum = 0;
             s->mc_byte_pos = 0;
             resp = s->mc_flag;
-            s->mc_step++;
             LOG_SYSTEM_DEBUG("[MC] Command 0x%02x (flag=0x%02x)", tx, s->mc_flag);
+            /* "Transfer aborts immediately after the faulty command byte"
+             * (psx-spx-docs/docs/controllersandmemorycards.md:2409-2415). Without
+             * this the card went on acknowledging a command it was never going to
+             * answer, so the host waited on a device that would not let go of the
+             * bus. */
+            if (tx != 0x52 && tx != 0x57 && tx != 0x53) {
+                s->mc_step = 0xFF;
+                LOG_SYSTEM_DEBUG("[MC] Invalid command 0x%02x — aborting transfer", tx);
+                break;
+            }
+            s->mc_step++;
             break;
 
         case 1: resp = 0x5A; s->mc_step++; break;  // ID1
-        case 2: resp = 0x5D; s->mc_step++; break;  // ID2
+        case 2:
+            resp = 0x5D;                            // ID2
+            /* Get ID takes no address byte-pair: after ID2 the card answers 5Ch,
+             * 5Dh, 04h, 00h, 00h, 80h
+             * (psx-spx-docs/docs/controllersandmemorycards.md:2386-2397), while
+             * Read and Write send the sector number first (:2360-2361,
+             * :2380-2381). Running every command through the address steps
+             * shifted the whole Get ID reply by two bytes: the host read 00h and
+             * the echoed address byte where the two acknowledge bytes belong,
+             * which reads as a card that failed to identify itself — that is, as
+             * no card at all. */
+            s->mc_step = (s->mc_cmd == 0x53) ? 5 : 3;
+            break;
 
         case 3:  // Addr MSB
             s->mc_sector = (uint16_t)(tx << 8);
@@ -1226,10 +1252,24 @@ static uint8_t sio_memcard_transfer(uint8_t tx) {
                 if (pos == 0) { resp = 0x5C; s->mc_step++; }          // CMD ack1
                 else if (pos == 1) { resp = 0x5D; s->mc_step++; }     // CMD ack2
                 else if (pos == 2) {                                    // confirmed MSB
-                    resp = (s->mc_sector >> 8) & 0xFF;
+                    /* An out-of-range sector answers FFFFh as the confirmed
+                     * address and then aborts — no data, no checksum, no end
+                     * flag. That is the original Sony card
+                     * (psx-spx-docs/docs/controllersandmemorycards.md:2371-2375);
+                     * third-party cards mask to 3FFh instead, and the console's
+                     * own driver is written against the Sony behaviour. */
+                    bool bad_sector = (s->mc_sector >= MEMCARD_SECTORS);
+                    resp = bad_sector ? 0xFF : (uint8_t)((s->mc_sector >> 8) & 0xFF);
                     s->mc_checksum = resp;
                     s->mc_step++;
                 } else if (pos == 3) {                                  // confirmed LSB
+                    if (s->mc_sector >= MEMCARD_SECTORS) {
+                        resp = 0xFF;
+                        s->mc_step = 0xFF;                              // abort
+                        LOG_SYSTEM_DEBUG("[MC] READ sector=%u out of range — FFFFh, abort",
+                                         s->mc_sector);
+                        break;
+                    }
                     resp = s->mc_sector & 0xFF;
                     s->mc_checksum ^= resp;
                     s->mc_step++;
@@ -1318,15 +1358,62 @@ bool sio_load_memcard(MemoryCard* card, const char* filepath) {
     return true;
 }
 
+/* Copy the card file aside once per session, the first time this process is
+ * about to overwrite it.
+ *
+ * A memory card is the one file here that holds something the user cannot
+ * regenerate, and a save rewrites all 128 KB of it — every boot writes frame 63
+ * as its write test, so the rewrite happens in the first twenty seconds of
+ * every run whether or not the guest saved anything. One bad in-memory card is
+ * therefore one boot away from replacing a card full of saves. The .bak is what
+ * makes that recoverable; it is taken before the first write and not touched
+ * again, so it always holds the card as this session found it. */
+static void memcard_backup_once(MemoryCard* card) {
+    if (card->backed_up) return;
+    card->backed_up = true;
+
+    FILE* src = fopen(card->filepath, "rb");
+    if (!src) return;                       /* nothing to lose yet */
+
+    char bak[sizeof(card->filepath) + 8];
+    snprintf(bak, sizeof(bak), "%s.bak", card->filepath);
+    FILE* dst = fopen(bak, "wb");
+    if (!dst) { fclose(src); return; }
+
+    static uint8_t buf[8192];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0)
+        fwrite(buf, 1, n, dst);
+    fclose(src);
+    fclose(dst);
+    LOG_SYSTEM_INFO("[SIO] Memory card backed up: %s", bak);
+}
+
 bool sio_save_memcard(MemoryCard* card) {
     if (!card->present || !card->dirty) return true;
-    FILE* f = fopen(card->filepath, "wb");
+
+    memcard_backup_once(card);
+
+    /* Written to a temporary file and renamed over the original: a crash or a
+     * kill in the middle of the write would otherwise leave a truncated card,
+     * and rename() is atomic on the same filesystem. */
+    char tmp[sizeof(card->filepath) + 8];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", card->filepath);
+
+    FILE* f = fopen(tmp, "wb");
     if (!f) {
-        LOG_SYSTEM_ERROR("[SIO] Memory card save failed: %s", card->filepath);
+        LOG_SYSTEM_ERROR("[SIO] Memory card save failed: %s", tmp);
         return false;
     }
-    fwrite(card->data, 1, MEMCARD_SIZE, f);
+    size_t written = fwrite(card->data, 1, MEMCARD_SIZE, f);
+    bool ok = (written == MEMCARD_SIZE) && (fflush(f) == 0);
     fclose(f);
+    if (!ok || rename(tmp, card->filepath) != 0) {
+        LOG_SYSTEM_ERROR("[SIO] Memory card save failed: %s", card->filepath);
+        remove(tmp);
+        return false;
+    }
+
     card->dirty = false;
     LOG_SYSTEM_INFO("[SIO] Memory card saved: %s", card->filepath);
     return true;

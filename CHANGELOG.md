@@ -34,6 +34,213 @@ identical percentiles, which is the check that a host optimisation has not moved
   `gcc -fsyntax-only` accepts on its own.
 
 ### Added
+- **The emulator runs as a Kubernetes workload**, one pod per session, each holding a GPU, its own X
+  server and its own memory cards. `deploy/k3d-cuda/` builds the cluster and `deploy/session/` builds
+  the session image; both were verified against a local k3d cluster (1 server, 3 workers) on an
+  RTX 4060, booting `Ace Combat 2 (Europe)` and `Crash Bandicoot 3` side by side from a single
+  `kubectl apply`. A session is selected entirely by environment — `ZS1_GAME` picks the disc,
+  `ZS1_SESSION` names the working directory — so two sessions differ only in their manifest. Three
+  run side by side: Ace Combat 2, Crash Bandicoot 3 and Dino Crisis, one per worker node.
+
+  Nothing about the machine's content is in an image. The BIOS and the discs stay on the host, reach
+  the nodes as bind mounts, and are exposed to one namespace by PersistentVolumes whose `claimRef` is
+  pinned in advance and mounted `readOnly`; the sessions are ClusterIP-only, so reaching one needs
+  cluster credentials. An image can be pushed to a registry, a bind mount cannot.
+
+  Four things had to be true before any of it worked, none of them in this project's code:
+  - The **NVIDIA container runtime must be in the k3s node image**. `rancher/k3s` is busybox with no
+    package manager, so it is laid over a CUDA base — `/bin` and `/lib` mapped onto their usr-merged
+    destinations, because they are real directories in one image and symlinks in the other.
+  - **Docker Desktop cannot host it.** Its daemon runs in a LinuxKit VM with no NVIDIA passthrough,
+    while `nvidia-ctk runtime configure` writes to the *system* daemon's config — so the toolkit
+    looks correctly installed and `docker info` still lists only `runc`.
+  - **A native `k3s.service` on the same host collides with k3d.** Both take `10.42.0.0/16` and
+    `10.43.0.0/16`, and the host's iptables then answer the cluster's own service IP with a foreign
+    certificate. Every system pod fails `x509: certificate signed by unknown authority` while
+    `kube-root-ca.crt` and the k3d server's CA match byte for byte — the tell is that
+    `openssl s_client` against the service IP and against the node's `:6443` return different
+    `k3s-server-ca@<epoch>` issuers. The cluster now uses `10.44`/`10.45`.
+  - **`eviction-hard` alone does not lift a disk-pressure taint.** k3s defaults
+    `eviction-minimum-reclaim` to 10%, so the kubelet holds `DiskPressure` until free space reaches
+    threshold *plus* reclaim. Lowering the threshold and watching the node stay tainted with the disk
+    visibly above it is the symptom; both have to move together.
+
+  Memory cards are why `ZS1_SESSION` exists rather than being cosmetic: `interconnect.c` opens
+  `memcard1.mcd` and `memcard2.mcd` by fixed name relative to the CWD, and every boot rewrites the
+  card as part of the card driver's write test, so two sessions started in one directory would
+  destroy each other's saves on the first boot.
+
+  **The Vulkan backend is what makes headless rendering work**, and it needs nothing added to get
+  there. Xvfb serves no NVIDIA GLX extension, so OpenGL resolves through libglvnd to
+  `libGLX_mesa.so` and the 4060 sits idle while a software rasteriser draws; Vulkan does not go
+  through GLX at all, and the ICD the container runtime drops in `/etc/vulkan/icd.d` is enough for
+  the device to come up as the RTX 4060 with a 1280x720 swapchain and
+  `VK_EXT_fragment_shader_interlock` available. The manifests set `ZS1_GFX=vulkan`. The usual
+  answers to headless GL — VirtualGL, or an Xorg carrying the NVIDIA driver — are not needed.
+
+  **WebRTC carries picture and sound together**, H.264 on the 4060's NVENC block,
+  50 fps to match a PAL field, keyboard forwarded through the X server. Working end to end. Four
+  defects stood between the first version and that, and none of them announced itself:
+  - `Gst.Promise.new_with_change_func` was given two user-data arguments, the pattern in the older
+    GStreamer examples. This binding takes one, rejects the call inside the C callback, and reports
+    nothing — so `create-offer` ran, its reply handler never did, and no offer was ever sent. The
+    pipeline reached PLAYING and `on-negotiation-needed` fired correctly the whole time.
+  - `offer.sdp` was read *after* `set-local-description`, which takes ownership of the message and
+    leaves None behind.
+  - The page picked its signalling endpoint by testing for a standard port, but the Ingress is
+    published on 8081, so it chose the port-forward route and dialled a port nothing served.
+  - Every ICE candidate was a pod address (`10.44.x.x`) or link-local, and the media is UDP that no
+    Ingress carries. `hostNetwork` moves the pipeline onto the node's own `172.19.0.x`, which the
+    host reaches over the Docker bridge; anti-affinity keeps sessions off a shared node, since the
+    ports are now the node's.
+
+  It is served over HTTPS on the tailnet through `tailscale serve`, with a real certificate and no
+  port forwarding — tailnet membership is WireGuard keys per device, which is a stronger front door
+  than the password behind it. The certificate needs the tailnet's HTTPS setting enabled *before*
+  `tailscaled` starts; enabled afterwards it keeps serving a self-signed one and the proxy falls back
+  to it without saying so, which reads as a TLS failure and is a stale cache.
+
+  A browser opening a WebSocket does not attach the credentials already entered for the page, so the
+  signalling socket is refused behind basic auth. Credentials in the URL are the one form a browser
+  does send, and JavaScript cannot read the ones already typed — so the page asks once, and only
+  after a socket has actually been refused.
+
+  Sound also reaches the browser on a second port for the VNC page: the SPU's output off a PulseAudio null sink, encoded
+  as WebM/Opus by ffmpeg, with `play.html` putting it on one page with the noVNC picture. Verified
+  at the sink rather than assumed — `mean_volume -18.7 dB`, `max_volume -5.3 dB` over a four-second
+  capture, so the SPU is genuinely feeding it.
+
+  It is not synchronised with the picture and cannot be: two transports, no shared clock. The gap is
+  dominated not by the encoder but by the browser's media buffer, which grows without bound on a
+  progressive stream and settles a second or more behind. So the page chases the live edge — 5%
+  playback rate for small drift, a seek for a large one — and reports the measured lag, which holds
+  in the low hundreds of milliseconds. One transport carrying both is the WebRTC work.
+
+- **A Vulkan 1.3 renderer, and the ability to swap renderers while a game is running.** The GPU had
+  one OpenGL 3.3 implementation that owned its own header; `<GL/glew.h>` came in through
+  `include/renderer.h`, which `gpu.h` includes, so `GLuint` reached every translation unit that
+  touched the interconnect — `debug_ui.cpp` included, where texture names were cast to `ImTextureID`.
+  There are now two backends behind one vtable and no graphics type above it.
+
+  **The abstraction** (`include/gpu_backend.h`). A 38-entry `GfxBackend` of function pointers, with
+  the vertex structs moved out of `renderer.h` and retyped from `GLshort`/`GLubyte` to
+  `int16_t`/`uint8_t` — the same layout, without the API. What ImGui receives for a texture is an
+  opaque `GfxTexHandle`: a texture name on one backend, a `VkDescriptorSet` on the other.
+  `src/gpu/renderer.c` became a dispatcher and the OpenGL implementation moved to
+  `src/gpu/renderer_gl.c`; the ~120 `renderer_*(&gpu->renderer, ...)` call sites did not change,
+  which is what kept the diff readable.
+
+  Two things about the split are not obvious. `renderer_select_backend()` is separate from
+  `renderer_init()` because `gpu_reset_state()` pushes GP0/GP1 reset values through four setters from
+  inside `interconnect_init()`, before any device exists, and those values are not redundant — the
+  backend resolves a NULL `impl` to its own file-static state so they land where init will find them.
+  And savestates were unaffected: `savestate.c` derives both `Gpu` spans from `offsetof(Gpu,
+  renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two pointers moved both
+  boundaries together. Verified by loading a state written before the change — PC and cycle exact.
+
+  **The Vulkan backend** (`src/gpu/vk/`). Vulkan 1.3 with dynamic rendering, so there is no
+  `VkRenderPass` anywhere. The loader is opened at runtime through `SDL_Vulkan_LoadLibrary()` under
+  `VK_NO_PROTOTYPES`, so nothing links against `libvulkan` and the binary starts on a machine with no
+  driver installed. The three GLSL programs left their C string literals for
+  `src/gpu/shaders/*.{vert,frag}`, compiled to SPIR-V by `glslangValidator` at build time; the
+  Makefile builds GL-only with a message when `libvulkan-dev` or `glslang-tools` is missing, rather
+  than failing.
+
+  The feedback loop — the PS1 fragment shader samples the VRAM image that is also its colour
+  attachment — turned out to be less of a problem than planned for.
+  `VK_EXT_fragment_shader_interlock` is an optimisation; a `vkCmdPipelineBarrier` between batches
+  with the image permanently in `VK_IMAGE_LAYOUT_GENERAL` is correct everywhere and is what ships.
+  That is `glTextureBarrier()` in Vulkan terms. Semi-transparency keeps GL's two-pass shape, because
+  blend state is per-draw while the STP bit is per-texel; `dualSrcBlend` would collapse it and is
+  left for after parity is proven across more than one frame.
+
+  Parity is a byte comparison of the same dumped frame from each backend, and at frame 900 of
+  `Ace Combat 2 (Europe)` under `SCPH-7502` the two are identical.
+
+  **The switch** (`switch_gfx_backend()` in `main.c`, *Video* in the quick menu). SDL fixes
+  `SDL_WINDOW_OPENGL` and `SDL_WINDOW_VULKAN` when a window is created and neither can be added
+  later, so changing API means a new window, not just a new context. Three things cross it:
+
+  - **VRAM**, read back into host memory before the device goes and re-uploaded after. It has to come
+    from the GPU — `gpu.vram.data` holds what the CPU wrote and never what the rasteriser drew — and
+    since the readback is a synchronous round-trip through the GPU thread, it happens while that
+    thread is still alive.
+  - **The drawing state**, through a new `gpu_reapply_renderer_state()`: draw offset, drawing area,
+    texture window, screen scale, display region, depth24, blank and the two mask flags. All ten live
+    in the backend rather than in `Gpu`, and the guest has no reason to re-send `GP0(E2..E6)` because
+    the host changed API. The per-primitive state is deliberately left out — every draw command sets
+    dither, semi-transparency and texture mode immediately before pushing geometry.
+  - **The ImGui context** — fonts, `imgui.ini`, the docking layout, the pinned watches — through
+    `debug_ui_backend_init()`/`debug_ui_backend_shutdown()`, which touch only the platform and
+    renderer halves. `ImGui::DestroyContext()` stays where it was.
+
+  The emulated machine is not involved: no reset, no save state, and the CPU, SPU and drive never
+  learn anything happened. A backend that fails to come up is rolled back to the previous one and
+  reported. `ZS1_GFX_SWITCH_TEST=<n>` flips backends every n fields; nine switches in one run of
+  Ace Combat 2 under X11 were clean.
+
+  **The interface** is *Esc → Video*: the live backend, the GPU and driver the machine actually got,
+  the output mode, and buttons for each backend and each device it offers. Vulkan enumerates real
+  devices from `vkEnumeratePhysicalDevices` and switches between them live; OpenGL cannot, because
+  the GLX vendor library is resolved at the first `dlopen` of libGL, so its two PRIME choices are
+  listed marked *next launch*. A control that says so is worth more than one that looks live and does
+  nothing. Vulkan runs now report their device through `host_info`, so the Host HW panel stops
+  showing a GL string on a Vulkan run.
+
+  Two platform limits found on the way, both environmental rather than defects: the OpenGL backend
+  will not start under `SDL_VIDEODRIVER=wayland` here (`glewInit()` returns "Unknown error"), and
+  Vulkan on the Intel iGPU will not create a swapchain under X11 while the screen is owned by the
+  NVIDIA driver in dGPU mode. Each backend has one session type that works, and a hot switch to a
+  backend that cannot start rolls back rather than failing the run.
+
+- **`Dino Crisis (Europe)` [SLES-02207] reaches its main menu**, from a `.bin.ecm` plus its `.sbi` —
+  the first LibCrypt-protected disc to run here. Five separate defects stood between the disc booting
+  and the menu appearing, all listed under *Fixed* below; only one of them was in the CDROM.
+- **LibCrypt discs run, given their `.sbi`.** `Dino Crisis (E)` [SLES-02207] boots and reaches its
+  intro. The protection stores a 16-bit key as deliberately wrong subchannel Q on 32 sectors of
+  track 1; Q is not part of the 2352-byte sector, so no `.bin` dump carries it and the patches
+  travel beside the image in an `.sbi`. `cdrom_disc_load_sbi()` reads the container (4-byte `SBI\0`
+  magic, then 14-byte records of BCD MSF + type + ten Q bytes) and `cdrom_disc_get_subq()` answers
+  from a patch where one covers the sector.
+
+  The file is looked for by the image's name with the extensions dropped one at a time, then — only
+  if exactly one exists — the lone `.sbi` beside the image, because redump names it after the disc's
+  serial rather than after the dump. `ZS1_SBI=<path>` overrides the search. The serial matters:
+  `SLES-02210` is the Italian pressing of the same game and its patches sit on different sectors, so
+  the wrong file loads cleanly and protects nothing.
+- **A gameplay shell.** The window now has two shells and switches between them at any time — the
+  backquote key, Shift+F1, the *Gameplay* button on the machine bar, or the quick menu — with the
+  machine running across the switch. The gameplay shell shows the emulated screen and nothing else:
+  a HUD (fps, speed, host frame ms, region and refresh, the pad's LED) that fades after ~3 s idle and
+  returns on any input, and `Esc` for a quick menu with session counters, four save-state slots, pad
+  mode, a machine summary and quit. It owns no machine state: `Esc` reaches it through
+  `debug_ui_escape_pressed()` and the menu parks requests that `main.c` carries out, the same way a
+  Lua script's `emu.load_state()` does. `ZS1_UI=debug` opens straight into the workspace.
+- **The pad is drawn.** The Controller window shows a DualShock — grips, cross, symbol buttons, four
+  shoulders, both sticks with their live deflection, and the Analog LED in its documented colour —
+  lit from the same 16-bit word the SIO sends the game. Clicking a control rebinds it; the scancode
+  table is still there, folded away.
+- **Pinned watches are real.** The four tiles were constants. They are now Lua expressions evaluated
+  through the new `lua_debug_eval_expr()` — the whole `emu.*` surface — every sixth frame and only
+  while the panel is visible, with the error text shown in the tile instead of a console line per
+  refresh. Click a tile to edit, right-click to remove, up to eight.
+- **`src/core/host_info.c`** reads the host from `/proc`, `/sys`, `uname` and the live GL and SDL
+  device strings: machine, CPU model and core count, kernel, memory, the GL renderer and driver,
+  whether a `ZS1_GPU` request was honoured, the audio device's own format and buffer, and per-thread
+  CPU from `/proc/self/task`. The threads are named (`GPU`, `cdrom-read`) so the list is readable.
+- **Interface scale.** A UI face, a display face and a real monospace face are loaded at a factor
+  taken from `SDL_GetWindowDisplayScale()` (or the window's pixel height), with
+  `ImGuiStyle::ScaleAllSizes` to match; `ZS1_UI_SCALE` overrides it. 15 px on a 1440p panel was a
+  squint, and the "monospace" log windows were pushing the proportional face — `Fonts[0]` is the UI
+  font, so the toggle did nothing.
+- **The Frame view holds a frame** (a copy, so recording carries on), plots events on a millisecond
+  axis, shows each row's payload beside its count, draws the display flip across every row as the
+  anchor the rest is read against, and draws the budget line only when the frame overran it. Hovering
+  a tick reports its time, cycle and payload.
+- `mdec_stat_macroblocks()` — macroblocks pushed out since boot, kept as a file-static rather than a
+  field in `Mdec`, because the savestate writes that struct as one sized span and would refuse every
+  existing v6 state for the sake of a counter the UI reads.
+
 - **ECM disc images** (`.bin.ecm`), decoded on the fly. A lookup table built at load time maps each
   decoded sector to its position in the compressed stream, so random access costs one `fseek`; the
   sector's own MSF is reconstructed from the absolute LBA, since the format strips it. Written from
@@ -77,6 +284,96 @@ identical percentiles, which is the check that a host optimisation has not moved
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **The OpenGL backend's `impl` resolver called itself.** `R()` in `renderer_gl.c` read
+  `return impl ? R(impl) : &s_gl_renderer;` where it meant `(GlRenderer*)impl` — unbounded recursion
+  on every one of the ~120 forwarded calls. It ran correctly anyway, which is the interesting part:
+  an infinite loop with no side effects is undefined behaviour in C, so gcc deleted it and the
+  function compiled down to `return impl`, which is what was intended. At `-O0`, or under a compiler
+  that kept the loop, it would have overflowed the stack on the first draw.
+- **A VRAM upload jumped ahead of primitives that were submitted before it.** `renderer_draw()` is
+  what turns accumulated vertices into a batch *and* what records that batch's position in the
+  frame's op list, so a submitted primitive has no place in the order until something calls it.
+  `renderer_upload_vram_rect()` recorded its own op immediately and never flushed, so a draw issued
+  earlier was flushed later, took a higher op index, and was replayed on top of the upload.
+  Dino Crisis clears its back buffer with `GP0(02)` and then uploads the picture into it in the same
+  field: the clear landed after the picture, and its two opening screens and the title art stayed
+  black with the images sitting in VRAM the whole time. Measured in one frame — the upload carried
+  42116 of 76800 non-black pixels into `vram_tex`, and after that frame's five ops the same rect read
+  back 0 of 76800. `renderer_read_vram_rect()` already flushed for exactly this reason; the upload
+  side was missed.
+- **Timer 1 counted CPU cycles instead of hblanks, and it hung a game.** `timer_rate_cycles()` took
+  counter 2's source rule and applied it to all three, but the three rows differ
+  (`psx-spx-docs/docs/timers.md:34-36`): source 1 means Dotclock on counter 0 and Hblank on counter 1,
+  and only on counter 2 does it mean the system clock. Dino Crisis stalled a second after the BIOS
+  handed it control, spinning at `0x80087914` in a stable-read loop that reloads `1F801110h` until
+  two consecutive reads agree — they differed by 11 every time, because the counter was advancing
+  once per CPU cycle.
+- **The COP0 breakpoint registers threw writes away.** BPC, BDA, BDAM and BPCM are R/W
+  (`psx-spx-docs/docs/cpuspecifications.md:573-581`); ours ignored `MTC0` and returned 0 from `MFC0`.
+  The breakpoint behaviour is still not implemented, but the registers now hold what is written,
+  because a game may keep its own data there — psx-spx says as much, and Dino Crisis stores its
+  LibCrypt table pointer in BDAM and reads it back with `MFC0`. Reading zero sent its protection
+  state machine walking the wrong memory, so it issued `ReadS` with no `Setloc` and swept 36000
+  sectors of the disc without ever meeting a protected one. Savestates are **v11**: `Cpu` gained the
+  four registers.
+- **A LibCrypt sector was reported instead of ignored.** Those sectors carry a wrong CRC, so the
+  controller discards their Q and GetlocP keeps answering with the previous sector's position
+  (`psx-spx-docs/docs/cdromformat.md`, *CDROM Protection - LibCrypt*) — that repeat is the signal the
+  protection counts. Handing the guest the modified values instead yielded a wrong 16-bit key, and
+  Dino Crisis walked into its own trap: a routine at `0x80029748` sums 512 words of a decrypted
+  sector, compares against `0x283FC505`, and on a mismatch runs `j 0x80029778` forever.
+- **`Init` did none of what it is documented to do.** "Sets mode=20h, activates drive motor, Standby,
+  abort all commands" (`psx-spx-docs/docs/cdromdrive.md:536-537`); ours pushed a status byte and
+  scheduled the second response. The mode kept whatever the last Setmode left, so an Init issued at
+  double speed left the drive there until the guest's own Setmode arrived — 50 fields later in the
+  Dino Crisis trace — and an ongoing read carried on through the one command whose purpose is to stop
+  everything.
+- **Loading a savestate erased the memory cards.** `MemoryCard` sits inside `Sio` and `T_SIO` is a
+  raw read of the struct, so a state restored its own card images over the live ones. Nothing looked
+  wrong at that moment — but the card driver writes frame 63 as a write test during *every* boot,
+  which marks the card dirty and rewrites the whole 128 KB file, so a state captured with empty cards
+  destroyed a card full of saves one boot later. Savestate format is **v10**: the cards are held
+  across the `T_SIO` read and put back, because a memory card is host storage like the disc image and
+  nothing on hardware rewinds the card in your hand when the machine is restored.
+- **Memory card writes are atomic, and the first write of a session takes a backup.** The save wrote
+  straight over the `.mcd`, so a crash mid-write left a truncated card. It now writes a temp file and
+  renames it, and copies the file to `<path>.bak` before the first overwrite — the card as the
+  session found it.
+- **Get ID (53h) answered two bytes out of step.** The card state machine ran every command through
+  the address byte-pair, but Get ID takes none: after ID2 the card owes 5Ch, 5Dh, 04h, 00h, 00h, 80h
+  (`psx-spx-docs/docs/controllersandmemorycards.md:2386-2397`). The host read 00h and the echoed
+  address where the two acknowledge bytes belong — a card that fails to identify itself, which is
+  indistinguishable from an empty slot.
+- **An invalid card command kept the bus.** "Transfer aborts immediately after the faulty command
+  byte" (`:2409-2415`); the card went on acknowledging instead, so the host waited on a device that
+  would not let go.
+- **An out-of-range sector read now answers FFFFh and aborts**, as an original Sony card does
+  (`:2371-2375`), instead of returning FFh-filled data as though the sector existed.
+- **The controller answered on port 2 as well.** The ports are wired in parallel and narrowed by the
+  address byte (`:50-57`), so one pad appeared in both — and the BIOS probes both ports.
+- **The frame-rate readout was not a frame rate.** It was `1000 / frame_ms` of a single loop
+  iteration; with an audio device open the pacing loop waits in `SDL_Delay(1)` steps, so consecutive
+  iterations land at 16 ms and 24 ms around the same 20 ms mean and the reciprocal swings between 42
+  and 62 while the machine keeps exact PAL time. That is what "60+ fps on a PAL BIOS" was. Both
+  shells now count VBlanks over half a second, show it against the mode's nominal rate, and derive
+  Speed from the same measurement; the millisecond readout is smoothed.
+
+- **The debug panels were showing invented data.** The Host HW panel carried a hard-coded laptop
+  model, CPU, GPU, driver version, kernel, RAM figure and four thread-load bars with constants in
+  them; the inspector repeated four of them. A panel that says "RTX 4060" on a machine running on the
+  iGPU is worse than no panel, since that line is the first thing checked before a rendering
+  difference is blamed on the emulator. Everything there is now read from the kernel and the live
+  context.
+- **The Pipeline view's status words were literals** — "OK", "READY", "RUNNING", "24 Voices 44.1 kHz"
+  — so the view answered the same thing whether the drive was seeking, idle or absent, which is the
+  one question it exists to answer. Each node now reports the drive state, the MDEC decode state, the
+  DMA channel's sync mode and MADR, GPUSTAT, the display state, the count of keyed-on voices and the
+  ring depth, with per-frame figures from the frame event ring.
+- The gameplay quick menu drew its backdrop on the foreground draw list, which is painted over every
+  window — so the veil landed on top of the menu and the whole panel came out in shadow.
+- `micro_label()` letter-spaced every header into a 64-byte buffer, which truncated any header longer
+  than about thirty characters. Spacing is now applied only while the label stays a label.
+
 - **LWL/LWR merged against the wrong pipeline slot**, corrupting every unaligned 32-bit load whose
   pair needed a real merge. The two functions read `cpu->load_reg_idx` — the slot for the load *this*
   instruction issues, which `cpu_retire_load_delay()` has just cleared — instead of
@@ -237,6 +534,29 @@ identical percentiles, which is the check that a host optimisation has not moved
   range; v9 removed `Cpu.out_regs[32]` and added the second load-delay slot. `T_CPU` is the raw
   struct, so both move every field after the GPRs. Older states are refused rather than restored
   shifted.
+
+### Absent by decision
+- **The gameplay shell cannot pick, swap or restart a disc.** No library (the disc still comes from
+  `--game=`), no hot swap (`cdrom_load_disc()` exists, but a swap the guest can believe needs the
+  shell-open latch, the INT it is owed and the region check, none of which are wired), and no reset
+  (there is no `system_reset()` — nothing re-initialises CPU and Interconnect against a live
+  machine). *Reset console* was left out of the quick menu rather than bound to something that only
+  looks like a reset.
+- **Video and audio settings are shown, not offered.** Scaling, crop, scanlines and volume have no
+  runtime setter in the renderer or the mixer, and reverb is guest state in SPUCNT rather than a host
+  preference. The quick menu carries the controls that exist — pad mode, save-state slots, the
+  workspace, quit — and reports the rest.
+
+### Open, in `Dino Crisis (Europe)`
+Both found 2026-08-21, both only in the in-engine 3D cutscenes and not in the FMVs, and neither
+measured yet.
+- **Audio repeats across some scene changes** — a fragment of the previous scene's sound plays again
+  as the new one starts.
+- **Audio drifts ahead of the cutscene it belongs to**, running faster than the scene so the two come
+  apart as it goes on. FMV playback stays in step, which points at the SPU's own clock rather than at
+  the XA path or the output device. The first run has to be a clean one — `ZS1_FRAME_PROFILE=1`, no
+  stderr logging, no Lua probe — because a guest burning cycles and a host that cannot keep up look
+  identical on screen and need opposite fixes.
 
 ### Measured, not resolved
 - **FMV frames land 8 lines below the window they are displayed through.** Measured on Monsters &

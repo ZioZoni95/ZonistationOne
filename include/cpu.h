@@ -167,6 +167,15 @@ typedef struct Cpu {
     uint32_t prid;          // COP0 Reg 15: Processor Revision Identifier (Read-only, 0x00000002 for PSX).
     uint32_t cop0_tar;      // COP0 Reg 6: TAR / JUMPDEST (last branch target address).
     uint32_t cop0_dcic;     // COP0 Reg 7: DCIC (Debug/Cache Isolation Control).
+    /* The four hardware-breakpoint registers. The breakpoint behaviour itself
+     * is not implemented, but the registers are R/W (cpuspecifications.md:
+     * 573-581) and at least one game uses them as general-purpose storage:
+     * Dino Crisis (E) keeps its LibCrypt table pointer in BDAM and reads it
+     * back with MFC0, which returned 0 while these were write-ignored. */
+    uint32_t cop0_bpc;      // COP0 Reg 3:  BPC  (Breakpoint Program Counter).
+    uint32_t cop0_bda;      // COP0 Reg 5:  BDA  (Breakpoint Data Address).
+    uint32_t cop0_bdam;     // COP0 Reg 9:  BDAM (Breakpoint Data Address Mask).
+    uint32_t cop0_bpcm;     // COP0 Reg 11: BPCM (Breakpoint PC Mask).
 
     // --- Connection to Memory System ---
     Interconnect* inter;    // Pointer to the interconnect module for memory accesses.

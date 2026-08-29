@@ -48,6 +48,10 @@ void cpu_init(Cpu* cpu, Interconnect* inter) {
     cpu->prid = 0x00000002; // Processor Revision Identifier: PSX value
     cpu->cop0_tar = 0;
     cpu->cop0_dcic = 0;
+    cpu->cop0_bpc  = 0;
+    cpu->cop0_bda  = 0;
+    cpu->cop0_bdam = 0;
+    cpu->cop0_bpcm = 0;
 
     // Initialize boot stage tracking
     cpu->boot_stage = BOOT_STAGE_POWER_ON;

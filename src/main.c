@@ -39,6 +39,7 @@
 #include "system.h"
 #include "frame_events.h"
 #include "savestate.h"
+#include "host_info.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -124,13 +125,41 @@ static void apply_gpu_preference(void) {
      * are logged once the context is up. Compare them, do not assume. */
 }
 
-static bool init_sdl(SdlCtx* out) {
-    apply_gpu_preference();
-
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
-        LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
-        return false;
+/* Which rendering backend to bring up.
+ *
+ * An environment variable rather than a setting, for now, because the picker in
+ * the interface is Phase 5 work and the window flag has to be decided before
+ * the window exists — SDL fixes SDL_WINDOW_OPENGL and SDL_WINDOW_VULKAN at
+ * creation and neither can be added later. That is also why a hot switch has to
+ * recreate the window rather than just the context. */
+static GfxBackendType pick_backend(void) {
+    const char* want = getenv("ZS1_GFX");
+    if (!want) return GFX_BACKEND_GL33;
+    if (!strcmp(want, "vulkan") || !strcmp(want, "vk")) {
+        const char* why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
+        if (why) {
+            LOG_SYSTEM_WARN("[SYSTEM] ZS1_GFX=vulkan requested but unavailable: %s", why);
+            return GFX_BACKEND_GL33;
+        }
+        return GFX_BACKEND_VULKAN;
     }
+    if (strcmp(want, "gl") && strcmp(want, "opengl"))
+        LOG_SYSTEM_WARN("[SYSTEM] ZS1_GFX=\"%s\" not recognised (want \"gl\" or \"vulkan\")", want);
+    return GFX_BACKEND_GL33;
+}
+
+/* Window plus context, and nothing that belongs to the process.
+ *
+ * Split out of init_sdl() because a backend switch has to run it again: the
+ * SDL_WINDOW_OPENGL and SDL_WINDOW_VULKAN flags are fixed when the window is
+ * created and cannot be added or removed afterwards, so going from one backend
+ * to the other means a new window. SDL_Init() and SDL_Quit() are bracketed
+ * around the whole session and deliberately stay out of here — re-initialising
+ * the subsystems would take the audio device and the open gamepads with them. */
+static bool create_gfx_window(SdlCtx* out, GfxBackendType backend) {
+    out->win = NULL;
+    out->ctx = NULL;
+
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -140,20 +169,30 @@ static bool init_sdl(SdlCtx* out) {
      * lands wherever the backend puts it, so centre it explicitly to keep the
      * old placement. (Moot once it is maximised below, but only on a desktop
      * where maximising works.) */
+    const SDL_WindowFlags gfx_flag = (backend == GFX_BACKEND_VULKAN)
+                                   ? SDL_WINDOW_VULKAN : SDL_WINDOW_OPENGL;
     out->win = SDL_CreateWindow("ZoniStation One", 1280, 720,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        gfx_flag | SDL_WINDOW_RESIZABLE);
     if (out->win)
         SDL_SetWindowPosition(out->win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     if (!out->win) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_CreateWindow: %s", SDL_GetError());
-        SDL_Quit();
         return false;
     }
+    /* Vulkan's device and surface belong to the backend, and it creates them
+     * from this window in renderer_init(). Everything below here is the GL
+     * bring-up and is skipped. */
+    if (backend == GFX_BACKEND_VULKAN) {
+        out->ctx = NULL;
+        LOG_SYSTEM_INFO("[SYSTEM] Vulkan window created; the device comes up with the renderer");
+        return true;
+    }
+
     out->ctx = SDL_GL_CreateContext(out->win);
     if (!out->ctx) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_GL_CreateContext: %s", SDL_GetError());
         SDL_DestroyWindow(out->win);
-        SDL_Quit();
+        out->win = NULL;
         return false;
     }
     glewExperimental = GL_TRUE;
@@ -162,7 +201,8 @@ static bool init_sdl(SdlCtx* out) {
         LOG_SYSTEM_ERROR("[SYSTEM] GLEW init: %s", glewGetErrorString(err));
         SDL_GL_DestroyContext(out->ctx);
         SDL_DestroyWindow(out->win);
-        SDL_Quit();
+        out->ctx = NULL;
+        out->win = NULL;
         return false;
     }
     /* Which GPU actually got the context matters on hybrid machines — the same
@@ -199,16 +239,159 @@ static bool init_sdl(SdlCtx* out) {
                             gl_vendor ? gl_vendor : "?");
         else if (want)
             LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=%s honoured", want);
+
+        /* The Host HW panel reads this rather than carrying a typed-in GPU
+         * name: on a hybrid machine the honest answer changes per run. */
+        bool honoured = !want
+                     || (strcmp(want, "nvidia") == 0 && on_nvidia)
+                     || (strcmp(want, "intel")  == 0 && on_intel);
+        host_info_set_gl(gl_vendor, gl_renderer, gl_version, driver, want, honoured);
     }
 
     check_gl_error("GLEW init");
     return true;
 }
 
+/* The window and its context, without ending the SDL session. */
+static void destroy_gfx_window(SdlCtx* s) {
+    if (s->ctx) { SDL_GL_DestroyContext(s->ctx); s->ctx = NULL; }
+    if (s->win) { SDL_DestroyWindow(s->win);     s->win = NULL; }
+}
+
+static bool init_sdl(SdlCtx* out, GfxBackendType backend) {
+    apply_gpu_preference();
+
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
+        LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
+        return false;
+    }
+    if (!create_gfx_window(out, backend)) {
+        SDL_Quit();
+        return false;
+    }
+    return true;
+}
+
 static void shutdown_sdl(SdlCtx* s) {
-    SDL_GL_DestroyContext(s->ctx);
-    SDL_DestroyWindow(s->win);
+    destroy_gfx_window(s);
     SDL_Quit();
+}
+
+/* Swap the rendering backend, or the GPU under it, without stopping the machine.
+ *
+ * The hard constraint is SDL's: SDL_WINDOW_OPENGL and SDL_WINDOW_VULKAN are
+ * fixed when the window is created and neither can be added later, so going
+ * from one API to the other means a new window — not just a new context. That
+ * is what makes this a sequence rather than a call.
+ *
+ * Three things have to survive it:
+ *
+ *   VRAM. It lives on the GPU, and gpu.vram.data is not a copy of it — the
+ *   CPU-side store holds what the CPU wrote, never what the rasteriser drew.
+ *   So it is read back into host memory before the device goes and pushed into
+ *   the new one after. One megabyte, once per switch.
+ *
+ *   The drawing state. The ten renderer_set_* values are backend state; a fresh
+ *   backend starts at its own defaults and the guest has no reason to re-send
+ *   GP0(E2..E6). gpu_reapply_renderer_state() puts them back from Gpu, which is
+ *   the authority for all of them.
+ *
+ *   The ImGui context — fonts, imgui.ini, the docking layout, the pinned
+ *   watches. Only the two backend halves are recreated; the context is not
+ *   touched, which is why the workspace comes back exactly as it was.
+ *
+ * The guest never notices: CPU, Interconnect, SPU and the drive are not
+ * involved. No reset and no save state.
+ *
+ * Returns true when the requested backend is live. On failure the previous one
+ * is rebuilt and false is returned with `sdl`, `backend_io` and the machine
+ * left in a working state — a failed switch must not end the session. */
+static bool switch_gfx_backend(SdlCtx* sdl, Interconnect* inter,
+                               GfxBackendType* backend_io, int* device_io,
+                               const GfxDeviceRequest* req) {
+    /* One megabyte, static rather than on the stack: main()'s frame is already
+     * carrying the machine. */
+    static uint16_t vram_carry[VRAM_WIDTH * VRAM_HEIGHT];
+
+    const GfxBackendType from = *backend_io;
+    const GfxBackendType to   = req->type;
+
+    LOG_SYSTEM_INFO("[SYSTEM] Renderer switch: %s -> %s, device %d",
+                    from == GFX_BACKEND_VULKAN ? "Vulkan" : "OpenGL",
+                    to   == GFX_BACKEND_VULKAN ? "Vulkan" : "OpenGL",
+                    req->device_index);
+
+    /* 1. The GPU thread must be idle before anything it owns is read or torn
+     *    down, and the readback below is a synchronous round-trip through it —
+     *    so it happens here, while the thread is still alive. */
+    renderer_wait_frame_done(&inter->gpu.renderer);
+    bool have_vram = renderer_read_vram_rect(&inter->gpu.renderer, vram_carry,
+                                             0, 0, VRAM_WIDTH, VRAM_HEIGHT);
+    if (!have_vram)
+        LOG_SYSTEM_WARN("[SYSTEM] VRAM readback refused before the switch — "
+                        "the picture will be rebuilt by the guest instead of carried over");
+
+    /* 2. Stop the thread, then take the GL context back onto this one: every
+     *    teardown call below is a GL call on the GL path. */
+    renderer_stop_gpu_thread(&inter->gpu.renderer);
+    if (from != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl->win, sdl->ctx);
+
+    /* 3. Both ImGui backend halves, but not the context. The Vulkan renderer
+     *    half belongs to the Vulkan backend and goes down inside
+     *    renderer_destroy() — hence this order, which is the same one the
+     *    shutdown path uses and for the same reason. */
+    debug_ui_backend_shutdown();
+    renderer_destroy(&inter->gpu.renderer);
+    destroy_gfx_window(sdl);
+
+    /* 4. Bring the requested backend up. Anything from here on that fails
+     *    falls through to the rollback below. */
+    bool ok = create_gfx_window(sdl, to)
+           && renderer_select_backend(&inter->gpu.renderer, to)
+           && renderer_init_ex(&inter->gpu.renderer, sdl->win, req);
+
+    if (!ok) {
+        LOG_SYSTEM_ERROR("[SYSTEM] %s failed to come up — rebuilding %s",
+                         to   == GFX_BACKEND_VULKAN ? "Vulkan" : "OpenGL",
+                         from == GFX_BACKEND_VULKAN ? "Vulkan" : "OpenGL");
+        renderer_destroy(&inter->gpu.renderer);
+        destroy_gfx_window(sdl);
+
+        GfxDeviceRequest back = { from, *device_io, 1 };
+        if (!create_gfx_window(sdl, from)
+         || !renderer_select_backend(&inter->gpu.renderer, from)
+         || !renderer_init_ex(&inter->gpu.renderer, sdl->win, &back)) {
+            /* Both backends are gone. There is nothing left to render with and
+             * nothing to fall back to, so say so plainly rather than carrying
+             * on against a dead device. */
+            LOG_SYSTEM_ERROR("[SYSTEM] The previous renderer could not be rebuilt either");
+            return false;
+        }
+    }
+
+    const GfxBackendType live = ok ? to : from;
+
+    /* 5. Put the machine's picture and its drawing state into the new backend,
+     *    in that order: the state setters are cheap and the upload is what the
+     *    next frame samples. */
+    if (have_vram)
+        renderer_upload_vram_rect(&inter->gpu.renderer, vram_carry,
+                                  0, 0, VRAM_WIDTH, VRAM_HEIGHT);
+    gpu_reapply_renderer_state(&inter->gpu);
+
+    /* 6. ImGui's two halves against the new window and device, then the thread.
+     *    GL hands its context away again, exactly as at startup. */
+    debug_ui_backend_init(sdl->win, sdl->ctx, (int)live);
+    if (live != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl->win, NULL);
+    renderer_start_gpu_thread(&inter->gpu.renderer, sdl->win, sdl->ctx);
+    SDL_MaximizeWindow(sdl->win);
+
+    *backend_io = live;
+    *device_io  = ok ? req->device_index : *device_io;
+    LOG_SYSTEM_INFO("[SYSTEM] Renderer switch %s — now on %s",
+                    ok ? "done" : "rolled back",
+                    live == GFX_BACKEND_VULKAN ? "Vulkan" : "OpenGL");
+    return ok;
 }
 
 // --- SDL3 audio ---
@@ -282,6 +465,7 @@ static void audio_init(Spu* spu) {
     if (dev) SDL_GetAudioDeviceFormat(dev, &got, &dev_frames);
     LOG_SYSTEM_INFO("[SYSTEM] Audio: %d Hz ch=%d fmt=0x%x buf=%d",
                     got.freq, got.channels, (unsigned)got.format, dev_frames);
+    host_info_set_audio(SDL_GetCurrentAudioDriver(), got.freq, got.channels, dev_frames);
 
     SDL_ResumeAudioStreamDevice(g_audio_stream);
 }
@@ -414,10 +598,15 @@ int main(int argc, char* argv[]) {
     }
     LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
 
-    SdlCtx sdl;
-    if (!init_sdl(&sdl)) return 1;
+    /* Not const: the quick menu's Video panel can change it while the machine
+     * runs, through switch_gfx_backend(). */
+    GfxBackendType backend = pick_backend();
+    int gfx_device = -1;   /* -1 = whichever the backend chose for itself */
 
-    debug_ui_init(sdl.win, sdl.ctx);
+    SdlCtx sdl;
+    if (!init_sdl(&sdl, backend)) return 1;
+
+    debug_ui_init(sdl.win, sdl.ctx, (int)backend);
 
     // --- Component init ---
     // static: these structs are multi-MB (Bios 512KB, Ram 2MB, Interconnect ~3.4MB) —
@@ -434,15 +623,35 @@ int main(int argc, char* argv[]) {
 
     if (!bios_load(&bios, args.bios_path)) { shutdown_sdl(&sdl); return 1; }
 
-    interconnect_init(&inter, &bios, &ram);
+    /* Bind the rendering backend before the machine is built. gpu_reset_state()
+     * runs inside interconnect_init() and pushes the GP0/GP1 reset values
+     * through four renderer setters (gpu.c:661-668) — that is before
+     * renderer_init() below, and those values are not redundant, so the
+     * renderer has to know which backend it is talking to by now. */
+    if (!renderer_select_backend(&inter.gpu.renderer, backend)) {
+        LOG_SYSTEM_ERROR("[SYSTEM] No rendering backend available");
+        shutdown_sdl(&sdl);
+        return 1;
+    }
 
-    if (!renderer_init(&inter.gpu.renderer)) {
+    /* The renderer comes up before the machine now, not after.
+     *
+     * Vulkan needs it: its device and its ImGui half are created here, and the
+     * surface comes from the window. GL is happy either way. The old order also
+     * meant the four setters gpu_reset_state() calls (gpu.c:661-668) landed on
+     * a renderer that did not exist yet; running init first means they land on
+     * the live backend instead of on its pre-init state. */
+    if (!renderer_init(&inter.gpu.renderer, sdl.win)) {
         LOG_SYSTEM_ERROR("[SYSTEM] Renderer init failed");
         shutdown_sdl(&sdl);
         return 1;
     }
-    /* Release GL context from main thread — GPU thread will acquire it */
-    SDL_GL_MakeCurrent(sdl.win, NULL);
+
+    interconnect_init(&inter, &bios, &ram);
+
+    /* GL only: hand the context to the GPU thread. Vulkan has no context to
+     * release — the backend owns its device outright. */
+    if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, NULL);
     renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
 
     /* Fill the screen while keeping the titlebar's minimise/maximise/close
@@ -519,8 +728,21 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&ev)) {
             controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
-            if (ev.type == SDL_EVENT_QUIT) quit = true;
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) quit = true;
+            if (ev.type == SDL_EVENT_QUIT) {
+                /* Say who ended the session: a window closed by the desktop and
+                 * a guest that stopped drawing look identical from outside. */
+                LOG_SYSTEM_INFO("[SYSTEM] Quit: SDL_EVENT_QUIT (window closed)");
+                quit = true;
+            }
+            /* Escape belongs to the gameplay shell when that shell is up — it
+             * opens and closes the quick menu there. It still quits from the
+             * debug workspace, where there is no menu to open. */
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) {
+                if (!debug_ui_escape_pressed()) {
+                    LOG_SYSTEM_INFO("[SYSTEM] Quit: Escape in the debug workspace");
+                    quit = true;
+                }
+            }
             /* Alt+Enter toggles borderless desktop fullscreen. SDL3 folded
              * FULLSCREEN_DESKTOP into a bool: a window with no display mode set
              * — which is ours — goes fullscreen-desktop. */
@@ -533,16 +755,80 @@ int main(int argc, char* argv[]) {
              * they work with every panel closed, which is when the emulator is
              * actually fast enough to reach the state worth capturing. */
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F5 && !ev.key.repeat) {
-                savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                bool ok = savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                debug_ui_notify_state_result(true, ok, SAVESTATE_DEFAULT_PATH);
             }
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F8 && !ev.key.repeat) {
                 load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
+                debug_ui_notify_state_result(false, true, SAVESTATE_DEFAULT_PATH);
             }
             /* F12 is the Analog button for players without a touchpad pad.
              * F1..F9 pick the debug UI mode, F10/F11 pause and step; F12 is the
              * only function key left unclaimed. */
             else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F12 && !ev.key.repeat) {
                 sio_cycle_pad_mode(&inter.sio);
+            }
+        }
+
+        /* The gameplay shell's quick menu asks for a save or a load the same
+         * way a script does: it parks the request and the machine's owner
+         * carries it out here, outside the event dispatch. */
+        {
+            bool want_save = false;
+            char state_path[192];
+            if (debug_ui_take_state_request(&want_save, state_path, sizeof(state_path))) {
+                bool ok;
+                if (want_save) {
+                    ok = savestate_save(state_path, &cpu, &inter);
+                } else {
+                    load_state_guarded(state_path, &cpu, &inter);
+                    ok = true;
+                }
+                debug_ui_notify_state_result(want_save, ok, state_path);
+            }
+            if (debug_ui_take_quit_request()) {
+                LOG_SYSTEM_INFO("[SYSTEM] Quit: requested from the quick menu");
+                quit = true;
+            }
+
+            /* ZS1_GFX_SWITCH_TEST=<n>: flip the backend every n fields, for as
+             * long as the run lasts. The switch is a sequence of a dozen steps
+             * across three subsystems and a human at a menu cannot exercise it
+             * often enough to see a leak — twenty switches with RSS watched is
+             * the check that renderer_destroy() releases everything it should.
+             * Off unless the variable is set. */
+            {
+                static int test_every = -1;
+                static uint64_t field = 0;
+                if (test_every < 0) {
+                    const char* e = getenv("ZS1_GFX_SWITCH_TEST");
+                    test_every = e ? atoi(e) : 0;
+                    if (test_every > 0)
+                        LOG_SYSTEM_INFO("[SYSTEM] Renderer switch stress: every %d fields", test_every);
+                }
+                if (test_every > 0 && ++field % (uint64_t)test_every == 0
+                    && !gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN)) {
+                    GfxDeviceRequest r = { backend == GFX_BACKEND_VULKAN
+                                           ? GFX_BACKEND_GL33 : GFX_BACKEND_VULKAN, -1, 1 };
+                    bool ok = switch_gfx_backend(&sdl, &inter, &backend, &gfx_device, &r);
+                    debug_ui_notify_gfx_result((int)backend, gfx_device, ok, NULL);
+                    if (!ok && !inter.gpu.renderer.impl) quit = true;
+                }
+            }
+
+            /* The Video panel asks for a backend or a GPU; the window and the
+             * device belong here, so the switch happens here — between frames,
+             * with no draw in flight and nothing reading VRAM. */
+            GfxDeviceRequest gfx_req;
+            if (debug_ui_take_gfx_request(&gfx_req)) {
+                bool ok = switch_gfx_backend(&sdl, &inter, &backend, &gfx_device, &gfx_req);
+                const HostInfo* hi = host_info_get();
+                debug_ui_notify_gfx_result((int)backend, gfx_device, ok,
+                                           hi->gl_renderer[0] ? hi->gl_renderer : NULL);
+                if (!ok && !inter.gpu.renderer.impl) {
+                    LOG_SYSTEM_ERROR("[SYSTEM] No renderer left after the switch — stopping");
+                    quit = true;
+                }
             }
         }
 
@@ -714,11 +1000,21 @@ int main(int argc, char* argv[]) {
     audio_shutdown();
     renderer_stop_gpu_thread(&inter.gpu.renderer);
     /* Re-acquire GL context for cleanup calls (destroy, ImGui shutdown) */
-    SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
+    if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
+    /* The renderer goes first, and the order is load-bearing.
+     *
+     * ImGui is two halves: the context, owned here, and a renderer backend
+     * owned by whichever graphics backend is live. Tearing the context down
+     * first leaves the Vulkan half holding descriptor sets and pipelines
+     * belonging to a context that no longer exists, and the process segfaults
+     * on the way out. The GL path never showed it because its ImGui half is
+     * shut down from inside debug_ui_shutdown(), before the context goes.
+     * renderer_destroy() shuts down the backend's ImGui half and then the
+     * device; debug_ui_shutdown() drops the context afterwards. */
+    renderer_destroy(&inter.gpu.renderer);
     debug_ui_shutdown();
     lua_debug_shutdown();
     cdrom_eject_disc(&inter.cdrom);
-    renderer_destroy(&inter.gpu.renderer);
     shutdown_sdl(&sdl);
     LOG_SYSTEM_INFO("[SYSTEM] Shutdown complete");
     return 0;

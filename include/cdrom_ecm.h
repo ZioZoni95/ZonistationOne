@@ -29,31 +29,42 @@
 /* Maximum sectors for an 80-minute CD (75 frames/s × 60 s × 80 min) */
 #define ECM_MAX_SECTORS (75 * 60 * 80)
 
-/* Per-sector entry in the lookup table.
- * file_pos: byte offset in the ECM file where this sector's data starts
- *           (the type/length byte of the block containing this sector).
- * The type/length bytes are NOT included — file_pos points to the first
- * data byte of the block. For Type 0 this is the literal data; for
- * Type 1-3 this is the ADDR/FLAGS/DATA payload. */
+/* Bytes a modelled block contributes: the sector minus the 12-byte sync and
+ * the 4-byte header, which the container stores as a literal block just before
+ * it. */
+#define ECM_MODELLED_PAYLOAD 2336u
+
+/* One run of the reconstructed image.
+ *
+ * The container alternates two kinds of block. Type 0 is literal bytes copied
+ * to the output as they are; types 1-3 are sectors whose error codes were
+ * stripped and are regenerated here. Both produce output, so the index is
+ * built over *output byte offsets* rather than over a sector count.
+ *
+ * Every modelled sector is preceded by a 16-byte literal carrying its sync and
+ * header, so a modelled block contributes the remaining 2336 bytes. Ignoring
+ * the literals entirely still reconstructs a disc whose sectors are all
+ * modelled — which is why Crash 3 came out byte-exact — but a disc that stores
+ * whole sectors literally loses them: Dino Crisis has 60.5 MB of them, and
+ * every sector after the first landed 4 too early, so the BIOS read the ISO
+ * descriptor where it was not. */
 typedef struct {
-    uint32_t file_pos;
-} EcmLutEntry;
+    uint64_t out_start;   /* first output byte this run produces */
+    uint32_t out_len;     /* output bytes produced */
+    uint32_t file_pos;    /* payload offset in the ECM file */
+    uint32_t count;       /* literal bytes (type 0) or sectors (types 1-3) */
+    uint8_t  type;        /* 0 = literal, 1-3 = modelled sector */
+} EcmRun;
 
 typedef struct EcmDecoder {
-    FILE        *fp;            /* open file handle (caller owns close) */
-    EcmLutEntry *lut;           /* LUT[decoded_sector] = file position */
-    uint32_t     total_sectors; /* number of decoded sectors */
+    FILE     *fp;            /* open file handle (caller owns close) */
+    EcmRun   *runs;
+    uint32_t  run_count;
+    uint32_t  run_capacity;
+    uint64_t  out_bytes;     /* size of the reconstructed image */
+    uint32_t  total_sectors; /* out_bytes / 2352 */
 } EcmDecoder;
 
-/*
- * Detect and open an ECM file.
- * Reads the magic header, builds the LUT by scanning the stream,
- * and returns a fully initialised decoder. Returns NULL on failure.
- * The caller is responsible for calling ecm_decoder_free() when done.
- *
- * After this call, fp is positioned at the start of the ECM data
- * (ready for sector reads).
- */
 EcmDecoder *ecm_decoder_open(FILE *fp);
 
 /*

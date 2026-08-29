@@ -30,11 +30,23 @@ typedef struct {
     EcmDecoder *ecm;            /* non-NULL if this track is an ECM image */
 } CdromTrack;
 
+/* One LibCrypt patch: the subchannel Q a protected sector really carries on
+ * the pressed disc, which a 2352-byte dump cannot hold because Q lives outside
+ * the sector data. An .sbi file is a list of these
+ * (DOCS/cdromformat.md describes the Q layout; the container itself is the
+ * de-facto format every emulator reads). */
+typedef struct {
+    uint32_t lba;      /* absolute LBA the entry replaces the Q of */
+    uint8_t  q[10];    /* control/adr, track, index, rel MSF, zero, abs MSF */
+} SbiEntry;
+
 typedef struct {
     uint8_t    first_track;
     uint8_t    last_track;
     uint32_t   total_sectors;
     CdromTrack tracks[100];
+    SbiEntry  *sbi;             /* NULL when the disc needs no patches */
+    uint32_t   sbi_count;
 } CdromDisc;
 
 typedef struct {
@@ -76,6 +88,8 @@ void     cdrom_disc_unload(CdromDisc *disc);
 bool     cdrom_disc_read_sector(CdromDisc *disc, uint32_t lba, uint8_t *out_2352);
 char     cdrom_disc_detect_region(CdromDisc *disc);
 SubQ     cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba);
+bool     cdrom_disc_load_sbi(CdromDisc *disc, const char *sbi_path);
+bool     cdrom_disc_sbi_covers(const CdromDisc *disc, uint32_t lba);
 uint8_t  cdrom_disc_get_track_at_lba(CdromDisc *disc, uint32_t lba);
 uint32_t cdrom_disc_get_seek_ticks(uint32_t from_lba, uint32_t to_lba);
 

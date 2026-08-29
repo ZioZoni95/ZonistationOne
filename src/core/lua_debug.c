@@ -872,6 +872,82 @@ bool lua_debug_run_string(const char* code) {
     return report_lua_error(status);
 }
 
+/* Evaluate one expression and format its result as a short string.
+ *
+ * This is what the pinned watch tiles are built on: a tile is an expression
+ * plus its value, refreshed while the panel is visible. Errors are returned in
+ * `out` instead of being logged — a watch with a typo in it would otherwise
+ * write a line to the console on every refresh, which is exactly the kind of
+ * instrumentation cost the panels are supposed to avoid.
+ *
+ * A table result is summarised as its numeric fields rather than as an address,
+ * because most of the emu.* accessors (audio_stats, spu_stats, reverb) return
+ * one. */
+bool lua_debug_eval_expr(const char* expr, char* out, size_t out_size) {
+    if (!out || out_size == 0) return false;
+    out[0] = '\0';
+    if (!g_active) { snprintf(out, out_size, "lua not running"); return false; }
+    if (!expr || !expr[0]) return false;
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), "return (%s)", expr);
+
+    int base = lua_gettop(g_L);
+    int status = luaL_loadstring(g_L, buf);
+    if (status != LUA_OK) {
+        snprintf(out, out_size, "%s", lua_tostring(g_L, -1) ? lua_tostring(g_L, -1) : "syntax error");
+        lua_settop(g_L, base);
+        return false;
+    }
+    status = lua_pcall(g_L, 0, 1, 0);
+    if (status != LUA_OK) {
+        const char* msg = lua_tostring(g_L, -1);
+        /* Strip the chunk-name prefix Lua puts on runtime errors; the tile has
+         * no room for [string "return (...)"]:1: */
+        const char* colon = msg ? strrchr(msg, ':') : NULL;
+        snprintf(out, out_size, "%s", colon ? colon + 2 : (msg ? msg : "error"));
+        lua_settop(g_L, base);
+        return false;
+    }
+
+    int t = lua_type(g_L, -1);
+    if (t == LUA_TNUMBER) {
+        lua_Number n = lua_tonumber(g_L, -1);
+        if (n == (lua_Number)(long long)n && n < 1e15 && n > -1e15) {
+            long long i = (long long)n;
+            if (i >= 0x1000 || i <= -0x1000) snprintf(out, out_size, "%lld  (0x%llX)", i, (unsigned long long)i);
+            else snprintf(out, out_size, "%lld", i);
+        } else {
+            snprintf(out, out_size, "%.4f", (double)n);
+        }
+    } else if (t == LUA_TTABLE) {
+        size_t used = 0;
+        out[0] = '\0';
+        lua_pushnil(g_L);
+        while (lua_next(g_L, -2) != 0) {
+            if (lua_type(g_L, -2) == LUA_TSTRING && lua_isnumber(g_L, -1)) {
+                const char* k = lua_tostring(g_L, -2);
+                double v = lua_tonumber(g_L, -1);
+                int wrote = snprintf(out + used, out_size - used, "%s%s=%g",
+                                     used ? " " : "", k, v);
+                if (wrote > 0) used += (size_t)wrote;
+                if (used >= out_size - 1) { lua_pop(g_L, 2); break; }
+            }
+            lua_pop(g_L, 1);
+        }
+        if (!out[0]) snprintf(out, out_size, "table");
+    } else if (t == LUA_TNIL) {
+        snprintf(out, out_size, "nil");
+    } else if (t == LUA_TBOOLEAN) {
+        snprintf(out, out_size, "%s", lua_toboolean(g_L, -1) ? "true" : "false");
+    } else {
+        const char* sv = lua_tostring(g_L, -1);
+        snprintf(out, out_size, "%s", sv ? sv : lua_typename(g_L, t));
+    }
+    lua_settop(g_L, base);
+    return true;
+}
+
 bool lua_debug_run_file(const char* path) {
     if (!g_active) return false;
     int status = luaL_loadfile(g_L, path);

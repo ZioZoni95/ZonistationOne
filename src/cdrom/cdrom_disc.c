@@ -10,6 +10,10 @@
  * seek timing, and async reader thread.
  */
 
+/* pthread_setname_np: the thread list in the Host HW panel is only useful if
+ * the threads have names. */
+#define _GNU_SOURCE
+
 #include "cdrom_disc.h"
 #include "cdrom_ecm.h"
 #include "cdrom.h"
@@ -17,10 +21,15 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <dirent.h>
+#include <strings.h>
 
 /* =========================================================================
  * CUE Sheet Parser
  * ========================================================================= */
+
+/* Defined with the rest of the SBI code, below; the loader calls it. */
+static void sbi_autoload(CdromDisc *disc, const char *image_path);
 
 static uint32_t parse_msf_lba(const char *msf_str) {
     unsigned mm = 0, ss = 0, ff = 0;
@@ -81,6 +90,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
             disc->tracks[1].file_offset_bytes = 0;
             disc->tracks[1].ecm               = ecm;
             LOG_CDROM_INFO("[CDROM] Loaded ECM: %s (%u sectors)", cue_path, disc->total_sectors);
+            sbi_autoload(disc, cue_path);
             return true;
         }
 
@@ -97,6 +107,7 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
         disc->tracks[1].file              = bin;
         disc->tracks[1].file_offset_bytes = 0;
         LOG_CDROM_INFO("[CDROM] Loaded BIN: %s (%u sectors)", cue_path, disc->total_sectors);
+        sbi_autoload(disc, cue_path);
         return true;
     }
 
@@ -254,11 +265,13 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
                         disc->tracks[i].is_audio,
                         disc->tracks[i].file_offset_bytes);
     }
+    sbi_autoload(disc, cue_path);
     return true;
 }
 
 void cdrom_disc_unload(CdromDisc *disc) {
     close_all_track_files(disc);
+    free(disc->sbi);
     memset(disc, 0, sizeof(*disc));
 }
 
@@ -330,11 +343,194 @@ char cdrom_disc_detect_region(CdromDisc *disc) {
 }
 
 /* =========================================================================
+ * SBI — LibCrypt subchannel patches
+ *
+ * A LibCrypt disc carries deliberately wrong values in the subchannel Q of a
+ * few dozen sectors, and the game refuses to run unless it reads them back.
+ * Q is not part of the 2352-byte sector, so no .bin dump can hold it: the
+ * patches travel beside the image in an .sbi, which is a 4-byte "SBI\0" magic
+ * followed by 14-byte records — three BCD bytes of absolute MSF, one type byte
+ * (1 = Q data follows), then the ten Q bytes from control/adr to the absolute
+ * frame. The two CRC bytes are not stored; nothing here needs them, since
+ * GetlocP answers from the ten bytes only.
+ * ========================================================================= */
+
+#define SBI_RECORD_SIZE 14
+
+static uint8_t sbi_from_bcd(uint8_t b) { return (uint8_t)((b >> 4) * 10 + (b & 0x0F)); }
+
+bool cdrom_disc_load_sbi(CdromDisc *disc, const char *sbi_path) {
+    FILE *f = fopen(sbi_path, "rb");
+    if (!f) return false;
+
+    char magic[4];
+    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "SBI\0", 4) != 0) {
+        LOG_CDROM_WARN("[CDROM] %s is not an SBI file (bad magic)", sbi_path);
+        fclose(f);
+        return false;
+    }
+
+    free(disc->sbi);
+    disc->sbi = NULL;
+    disc->sbi_count = 0;
+
+    uint32_t capacity = 64;
+    SbiEntry *list = (SbiEntry *)malloc(capacity * sizeof(SbiEntry));
+    if (!list) { fclose(f); return false; }
+
+    uint8_t rec[SBI_RECORD_SIZE];
+    uint32_t count = 0, skipped = 0;
+    while (fread(rec, 1, SBI_RECORD_SIZE, f) == SBI_RECORD_SIZE) {
+        /* Type 1 is the only one in use: the ten Q bytes follow verbatim.
+         * Anything else would need a different record length, so stop rather
+         * than walk the file out of step. */
+        if (rec[3] != 0x01) { skipped++; break; }
+
+        uint32_t mm = sbi_from_bcd(rec[0]);
+        uint32_t ss = sbi_from_bcd(rec[1]);
+        uint32_t ff = sbi_from_bcd(rec[2]);
+        if (ss >= 60 || ff >= 75) { skipped++; continue; }
+
+        if (count == capacity) {
+            capacity *= 2;
+            SbiEntry *grown = (SbiEntry *)realloc(list, capacity * sizeof(SbiEntry));
+            if (!grown) { free(list); fclose(f); return false; }
+            list = grown;
+        }
+        /* The MSF in the record is absolute, i.e. it counts the 150-frame
+         * lead-in that LBA 0 sits after. */
+        list[count].lba = (mm * 60 + ss) * 75 + ff - 150;
+        memcpy(list[count].q, rec + 4, 10);
+        count++;
+    }
+    fclose(f);
+
+    if (count == 0) { free(list); return false; }
+
+    disc->sbi = list;
+    disc->sbi_count = count;
+    LOG_CDROM_INFO("[CDROM] SBI loaded: %s (%u patches, LBA %u..%u%s)",
+                   sbi_path, count, list[0].lba, list[count - 1].lba,
+                   skipped ? ", some records skipped" : "");
+    return true;
+}
+
+/* Where the patches live. An .sbi is named after the disc, and a dump renamed
+ * along the way (or one whose serial differs from the file's) still has to
+ * work, so the search widens by steps and logs which file it settled on. */
+static void sbi_autoload(CdromDisc *disc, const char *image_path) {
+    char candidate[1024];
+
+    const char *env = getenv("ZS1_SBI");
+    if (env && *env) {
+        if (cdrom_disc_load_sbi(disc, env)) return;
+        LOG_CDROM_WARN("[CDROM] ZS1_SBI=%s could not be read", env);
+        return;                       /* an explicit request is not second-guessed */
+    }
+
+    /* <image>.sbi, then the same path with one extension dropped at a time:
+     * "X.bin.ecm" tries "X.bin.ecm.sbi", "X.bin.sbi", "X.sbi". */
+    snprintf(candidate, sizeof(candidate), "%s.sbi", image_path);
+    if (cdrom_disc_load_sbi(disc, candidate)) return;
+
+    for (;;) {
+        size_t n = strlen(candidate);
+        /* strip the trailing ".sbi", then the extension before it */
+        if (n < 5) break;
+        candidate[n - 4] = '\0';
+        char *dot = strrchr(candidate, '.');
+        char *slash = strrchr(candidate, '/');
+        if (!dot || (slash && dot < slash)) break;
+        *dot = '\0';
+        if (strlen(candidate) + 5 >= sizeof(candidate)) break;
+        strcat(candidate, ".sbi");
+        if (cdrom_disc_load_sbi(disc, candidate)) return;
+    }
+
+    /* Last resort: exactly one .sbi beside the image. Redump names the file
+     * after the disc's serial, which is not always the name the dump carries —
+     * SLES_022.10.sbi next to a "Dino Crisis (E) (Track 1)" image, say. One
+     * candidate is unambiguous; several are not, and guessing between them
+     * would hand the drive the wrong disc's patches. */
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s", image_path);
+    char *slash = strrchr(dir, '/');
+    if (slash) *slash = '\0'; else snprintf(dir, sizeof(dir), ".");
+
+    DIR *d = opendir(dir);
+    if (!d) return;
+    char found[1024 + 260] = {0};
+    int hits = 0;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        size_t n = strlen(ent->d_name);
+        if (n > 4 && strcasecmp(ent->d_name + n - 4, ".sbi") == 0) {
+            hits++;
+            snprintf(found, sizeof(found), "%s/%s", dir, ent->d_name);
+        }
+    }
+    closedir(d);
+
+    if (hits == 1) {
+        LOG_CDROM_INFO("[CDROM] No .sbi named after the image; using the only one beside it");
+        cdrom_disc_load_sbi(disc, found);
+    } else if (hits > 1) {
+        LOG_CDROM_WARN("[CDROM] %d .sbi files beside the image and none named after it — "
+                       "set ZS1_SBI to pick one", hits);
+    }
+}
+
+/* The patched Q for this sector, or NULL. Entries are stored in the order the
+ * file lists them, which is ascending; a binary search keeps GetlocP cheap even
+ * on a disc with a few hundred patches. */
+static const SbiEntry *sbi_find(const CdromDisc *disc, uint32_t lba) {
+    if (!disc->sbi || disc->sbi_count == 0) return NULL;
+    uint32_t lo = 0, hi = disc->sbi_count - 1;
+    while (lo <= hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (disc->sbi[mid].lba == lba) return &disc->sbi[mid];
+        if (disc->sbi[mid].lba < lba) lo = mid + 1;
+        else { if (mid == 0) break; hi = mid - 1; }
+    }
+    return NULL;
+}
+
+/* =========================================================================
  * SubQ Generation
  * ========================================================================= */
 
+/* Whether this sector carries LibCrypt's deliberately wrong subchannel Q. The
+ * caller needs to know because the drive does not report such a sector at all:
+ * "the modified sectors have wrong CRCs (which means that the PSX cdrom
+ * controller will ignore them, and the GetlocP command will keep returning
+ * position data from the previous sector)" (cdromformat.md, CDROM Protection -
+ * LibCrypt). That repeat is the signal the protection reads. */
+bool cdrom_disc_sbi_covers(const CdromDisc *disc, uint32_t lba) {
+    return disc && sbi_find(disc, lba) != NULL;
+}
+
 SubQ cdrom_disc_get_subq(CdromDisc *disc, uint32_t lba) {
     SubQ q = {0};
+
+    /* A LibCrypt sector answers with what the pressed disc carries, not with
+     * what the address implies — that disagreement is the protection. The
+     * patch replaces the whole of Q, so it is applied before anything below
+     * computes a value that would be thrown away. */
+    const SbiEntry *patch = sbi_find(disc, lba);
+    if (patch) {
+        q.control_adr = patch->q[0];
+        q.track_bcd   = patch->q[1];
+        q.index_bcd   = patch->q[2];
+        q.rel_mm_bcd  = patch->q[3];
+        q.rel_ss_bcd  = patch->q[4];
+        q.rel_ff_bcd  = patch->q[5];
+        q.reserved    = patch->q[6];
+        q.abs_mm_bcd  = patch->q[7];
+        q.abs_ss_bcd  = patch->q[8];
+        q.abs_ff_bcd  = patch->q[9];
+        LOG_CDROM_DEBUG("[CDROM] SubQ patched at LBA %u", lba);
+        return q;
+    }
 
     /* Absolute MSF is the same in every case (add the 150-frame lead-in). */
     uint32_t abs_lba = lba + 150;
@@ -477,6 +673,9 @@ void cdrom_async_reader_init(CdromAsyncReader *r, CdromDisc *disc) {
     pthread_cond_init(&r->cond_req, NULL);
     pthread_cond_init(&r->cond_done, NULL);
     pthread_create(&r->thread, NULL, async_reader_thread, r);
+    /* Named so the Host HW thread list says which thread is which; the kernel
+     * truncates at 15 characters. */
+    pthread_setname_np(r->thread, "cdrom-read");
 }
 
 void cdrom_async_reader_shutdown(CdromAsyncReader *r) {

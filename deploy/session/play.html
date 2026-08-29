@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>ZoniStation One — session</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0b0b0d; color: #e8e8ea;
+               font: 14px/1.4 system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  iframe { flex: 1; border: 0; width: 100%; }
+  #bar { display: flex; gap: 14px; align-items: center; padding: 8px 12px;
+         background: #16161a; border-top: 1px solid #26262c; }
+  button { background: #2a2a33; color: inherit; border: 1px solid #3a3a45;
+           border-radius: 5px; padding: 5px 12px; cursor: pointer; font: inherit; }
+  button:hover { background: #34343f; }
+  #lag { font-variant-numeric: tabular-nums; color: #9a9aa4; }
+  audio { display: none; }
+</style>
+
+<iframe id="screen" src="vnc.html?autoconnect=1&resize=scale"></iframe>
+
+<div id="bar">
+  <button id="go">Enable audio</button>
+  <span id="lag">audio: off</span>
+  <span style="color:#6a6a74">
+    Audio and picture travel separately — the reading is how far behind the sound is.
+  </span>
+</div>
+
+<audio id="a" preload="none"></audio>
+
+<script>
+// The picture comes over VNC and the sound over a plain HTTP WebM stream, so
+// nothing synchronises the two for us. What dominates the gap is not the
+// encoder but the browser's own media buffer, which grows without bound on a
+// progressive stream: left alone it settles a second or more behind and stays
+// there for the rest of the session.
+//
+// So chase the live edge. Small drift is absorbed by playing slightly fast,
+// which is inaudible on speech and music alike at these rates; a large gap —
+// after a stall, a tab in the background, a reconnect — is closed by seeking,
+// because playing fast enough to recover a second would be audible.
+// The audio port is derived rather than fixed, so two sessions forwarded to
+// different local ports each reach their own stream: a session publishes noVNC
+// on N and audio on N+1, and kubectl port-forward preserves that pairing when
+// both are mapped together (6080:6080 6081:6081, 6090:6080 6091:6081, ...).
+// ?audio=<port> overrides it for any layout that does not follow the rule.
+const AUDIO_Q = new URLSearchParams(location.search).get('audio');
+const AUDIO_URL =
+    AUDIO_Q && !/^\d+$/.test(AUDIO_Q) ? location.origin + AUDIO_Q
+  : AUDIO_Q                            ? location.protocol + '//' + location.hostname + ':' + AUDIO_Q + '/'
+  : (location.port === '' || location.port === '80' || location.port === '443')
+      ? location.origin + '/audio'      // behind the Ingress: one port, a path
+      : location.protocol + '//' + location.hostname + ':' + (Number(location.port) + 1) + '/';
+const NUDGE_AT = 0.30;   // s behind: start playing 5% fast
+const SEEK_AT  = 0.60;   // s behind: give up and jump
+const TARGET   = 0.15;   // s of buffer to keep after a jump
+
+const a = document.getElementById('a');
+const go = document.getElementById('go');
+const lag = document.getElementById('lag');
+
+go.onclick = () => {
+  // A browser will not start audio without a gesture, which is why this is a
+  // button rather than autoplay.
+  // No cache-buster query: ffmpeg's own HTTP server does not serve a path with
+  // one the way a normal server would, and the stream is live in any case.
+  a.src = AUDIO_URL;
+  a.play().then(() => { go.textContent = 'Audio on'; go.disabled = true; })
+          .catch(e => { lag.textContent = 'audio failed: ' + e.message; });
+};
+
+setInterval(() => {
+  if (a.paused || !a.buffered.length) return;
+  const edge = a.buffered.end(a.buffered.length - 1);
+  const behind = edge - a.currentTime;
+  if (behind > SEEK_AT)      { a.currentTime = edge - TARGET; a.playbackRate = 1.0; }
+  else if (behind > NUDGE_AT) a.playbackRate = 1.05;
+  else                        a.playbackRate = 1.0;
+  lag.textContent = 'audio: ' + (behind * 1000).toFixed(0) + ' ms behind'
+                  + (a.playbackRate !== 1 ? ' (catching up)' : '');
+}, 400);
+
+// ffmpeg's http muxer serves one listener and exits when it goes; the pod
+// restarts it, so a dropped stream is recoverable by reconnecting.
+a.onerror = a.onended = () => {
+  go.disabled = false; go.textContent = 'Reconnect audio';
+  lag.textContent = 'audio: disconnected';
+};
+</script>

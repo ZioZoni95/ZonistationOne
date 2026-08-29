@@ -77,3 +77,44 @@ emulator keeps real time; with the log windows and inspectors open under WSL it 
 underruns follow. So new views must either read counters that exist anyway or do their work only while
 visible — the pattern the VRAM viewer already follows — and the panel set as a whole needs a measured
 per-frame budget rather than an assumed one.
+
+---
+
+## The gameplay shell (2026-08-20)
+
+The window now has two shells. `ui_direction.html` remains the target for the **debug workspace**;
+what follows is the second one, and what of it is not built.
+
+The gameplay shell exists because the workspace is the right interface for finding a bug and the
+wrong one for playing a game — nine view modes, a log dock and an inspector are noise when the
+question is "does this run". It shows the emulated screen, a HUD that fades after ~3 s idle, and a
+quick menu on `Esc`. Switching is continuous in both directions: the backquote key, Shift+F1, the
+*Gameplay* button on the machine bar, or the menu's *Debug workspace*; the machine keeps running
+across the switch, and `ZS1_UI=debug` opens straight into the workspace.
+
+It owns no machine state. `Esc` reaches it through `debug_ui_escape_pressed()`, which returns false
+in the workspace so the key still quits there, and the menu parks requests that `main.c` carries out
+— the same shape a Lua script's `emu.load_state()` already used.
+
+### What of it is not implemented
+
+Each of these is blocked on the machine, not on the interface. They are listed here so the next
+person starts from the blocker rather than from the panel.
+
+| Missing | What it needs first |
+|---|---|
+| Disc library — pick a title from `games/` | A scan and a launch path; the disc comes from `--game=` today |
+| Hot disc swap | The shell-open latch (status bit 4), the INT the guest is owed, and the region check. `cdrom_load_disc()` alone would change the image behind the guest's back |
+| Reset console | A `system_reset()` that re-initialises CPU and Interconnect against a live machine, reaching the drive, SPU RAM and the event queue. A savestate load restores, it does not restart |
+| Volume, scaling, crop, scanlines | Runtime setters in the renderer and the mixer. None exist; reverb is not a host preference at all but guest state in SPUCNT |
+
+*Reset console* was deliberately left out of the quick menu rather than bound to something that only
+looks like a reset. The settings pane shows what the machine reports and offers only the controls
+that exist: pad mode, save-state slots, the workspace, quit.
+
+### What the shell did change elsewhere
+
+The panels stopped carrying typed-in data — see `CLAUDE.md` for the detail. Host HW and the
+inspector's host block read `/proc`, `/sys`, `uname` and the live GL and SDL device strings through
+`src/core/host_info.c`; the pinned watches are Lua expressions through `lua_debug_eval_expr()`
+(phase 6 of the table above, now done); the Pipeline view's status words are real machine state.

@@ -169,11 +169,23 @@ void gpu_update_display_mapping(Gpu* gpu) {
      * below is firing on a 240-line mode; if out.y is 0 while the frames land at
      * y=8, the window and the upload disagree. */
     {
-        static uint32_t prev = 0xFFFFFFFFu, prev2 = 0xFFFFFFFFu;
-        uint32_t now  = ((uint32_t)gpu->crtc.display_vram_x << 16) | gpu->crtc.display_vram_y;
-        uint32_t now2 = ((uint32_t)disp_w << 16) | disp_h;
-        if (now != prev || now2 != prev2) {
-            prev = now; prev2 = now2;
+        /* A seen-set, not a single previous value. A double-buffered game flips
+         * the display address between two halves of VRAM every field — Crash 3
+         * alternates out x=0 and x=512 — so a one-slot gate is re-armed by the
+         * flip itself and the line comes back ~25 times a second. Holding the
+         * states already reported lets the pair log once each and then go quiet,
+         * while a genuinely new mapping still gets through. Same idiom as the
+         * GP0(E1)/GP0(E2) gates in gpu_commands.c. */
+        enum { DISPMAP_SEEN_MAX = 16 };
+        static uint64_t seen[DISPMAP_SEEN_MAX];
+        static int      seen_n = 0;
+        uint64_t key = ((uint64_t)gpu->crtc.display_vram_x << 48)
+                     | ((uint64_t)gpu->crtc.display_vram_y << 32)
+                     | ((uint64_t)disp_w << 16) | (uint64_t)disp_h;
+        bool known = false;
+        for (int i = 0; i < seen_n; i++) if (seen[i] == key) { known = true; break; }
+        if (!known && seen_n < DISPMAP_SEEN_MAX) {
+            seen[seen_n++] = key;
             LOG_GPU_INFO("[GPU] display map: win x1=%u x2=%u y1=%u y2=%u cyc=%u | "
                          "out x=%u y=%u w=%u h=%u | %s vres=%s %s %s",
                          x1, x2, y1, y2, cyc_per_pix,
@@ -571,7 +583,7 @@ uint32_t gpu_read_data(Gpu* gpu) {
         gpu->gp0_words_remaining--;
         if (gpu->gp0_words_remaining == 0) {
             gpu->gp0_mode = GP0_MODE_COMMAND;
-            LOG_GPU_INFO("[GPU] GP0(0xC0): VRAM→CPU transfer COMPLETE");
+            LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM→CPU transfer COMPLETE");
         }
         return (uint32_t)pixel1 | ((uint32_t)pixel2 << 16);
     }
@@ -674,6 +686,52 @@ void gpu_init_full(Gpu* gpu, Interconnect* inter) {
     gpu->inter = inter;
     gpu_reset_state(gpu);
     LOG_GPU_DEBUG("[GPU] GPU Initialized.");
+}
+
+/* Push everything the renderer keeps on our behalf back down to it.
+ *
+ * The ten renderer_set_* values are backend state, not Gpu state: a fresh
+ * backend starts at its own defaults, and the guest has no reason to re-send
+ * GP0(E2..E6) or GP1(05..08) just because the host swapped its graphics API.
+ * Without this, the first frame after a hot switch draws with a zero draw
+ * offset, a full-VRAM scissor and the mask flags cleared.
+ *
+ * Every value here is read from Gpu, which is the authority — the same
+ * expressions the GP0/GP1 handlers use. Per-primitive state (dither,
+ * semi-transparency, texture and raw-texture mode) is not here on purpose:
+ * gpu_commands.c sets all four immediately before each push, so the next
+ * primitive carries them anyway. */
+void gpu_reapply_renderer_state(Gpu* gpu) {
+    if (!gpu) return;
+
+    renderer_set_screen_scale(&gpu->renderer, VRAM_WIDTH, VRAM_HEIGHT);
+    renderer_set_draw_offset(&gpu->renderer, gpu->drawing_x_offset, gpu->drawing_y_offset);
+    renderer_set_drawing_area(&gpu->renderer,
+        gpu->drawing_area_left, gpu->drawing_area_top,
+        gpu->drawing_area_right, gpu->drawing_area_bottom);
+    renderer_set_texture_window(&gpu->renderer,
+        gpu->texture_window_x_mask,   gpu->texture_window_y_mask,
+        gpu->texture_window_x_offset, gpu->texture_window_y_offset);
+    renderer_set_mask_mode(&gpu->renderer, gpu->force_set_mask_bit);
+    renderer_set_mask_test(&gpu->renderer, gpu->preserve_masked_pixels);
+
+    renderer_set_display_region(&gpu->renderer,
+        gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+        gpu->crtc.display_width,  gpu->crtc.display_height);
+    renderer_set_display_depth24(&gpu->renderer, gpu->display_depth == D24Bits);
+    renderer_set_display_blank(&gpu->renderer, gpu->display_disabled);
+
+    LOG_GPU_INFO("[GPU] Renderer state re-applied: offset(%d,%d) area[%u..%u,%u..%u] "
+                 "texwin(%u,%u,%u,%u) mask(set=%d test=%d) display(%u,%u %ux%u) d24=%d blank=%d",
+                 gpu->drawing_x_offset, gpu->drawing_y_offset,
+                 gpu->drawing_area_left, gpu->drawing_area_right,
+                 gpu->drawing_area_top,  gpu->drawing_area_bottom,
+                 gpu->texture_window_x_mask, gpu->texture_window_y_mask,
+                 gpu->texture_window_x_offset, gpu->texture_window_y_offset,
+                 (int)gpu->force_set_mask_bit, (int)gpu->preserve_masked_pixels,
+                 gpu->crtc.display_vram_x, gpu->crtc.display_vram_y,
+                 gpu->crtc.display_width,  gpu->crtc.display_height,
+                 (int)(gpu->display_depth == D24Bits), (int)gpu->display_disabled);
 }
 
 void gpu_soft_reset(Gpu* gpu) {
