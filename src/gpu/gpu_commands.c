@@ -1328,12 +1328,23 @@ static void gp0_image_load(Gpu* gpu) {
      * Both lines at INFO so the comparison needs no DEBUG run — a DEBUG run
      * writes ~1.4M lines and cannot be read. */
     {
-        static uint32_t prev_rect = 0xFFFFFFFFu;
+        /* A seen-set, not a single previous rectangle. One slot is enough only
+         * while a game re-uses one destination; a double-buffered one alternates
+         * between two, and the alternation re-arms the gate every field. Dino
+         * Crisis flips between (0,0) and (0,256) at 320x240 and produced this
+         * line ~25 times a second, burying everything else in the session log
+         * and rotating it out entirely. Same fix as gpu.c's display-map gate. */
+        enum { UPLOAD_SEEN_MAX = 16 };
+        static uint32_t seen_rect[UPLOAD_SEEN_MAX];
+        static int      seen_rect_n = 0;
         if (gpu->vram_load_w >= 256 && gpu->vram_load_h >= 128) {
             uint32_t rect = ((uint32_t)gpu->vram_load_x << 22) | ((uint32_t)gpu->vram_load_y << 13) |
                             ((uint32_t)gpu->vram_load_w << 3)  | (gpu->vram_load_h >> 6);
-            if (rect != prev_rect) {
-                prev_rect = rect;
+            bool rect_known = false;
+            for (int i = 0; i < seen_rect_n; i++)
+                if (seen_rect[i] == rect) { rect_known = true; break; }
+            if (!rect_known && seen_rect_n < UPLOAD_SEEN_MAX) {
+                seen_rect[seen_rect_n++] = rect;
                 LOG_GPU_INFO("[GPU] frame upload -> (%u,%u) %ux%u",
                              gpu->vram_load_x, gpu->vram_load_y,
                              gpu->vram_load_w, gpu->vram_load_h);

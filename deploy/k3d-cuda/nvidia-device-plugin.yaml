@@ -1,0 +1,78 @@
+# RuntimeClass + device plugin for the cluster-zs1 nodes.
+#
+# k3s registers the "nvidia" containerd runtime by itself once
+# nvidia-container-runtime is on PATH inside the node image; this RuntimeClass
+# is what lets a pod ask for it.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+---
+# Time-slicing: one physical RTX 4060 advertised as 5 schedulable GPUs, which
+# is the session count this cluster is being sized for. There is no memory
+# isolation between the slices — a pod that exhausts VRAM takes the others
+# with it. Acceptable at this scale, not beyond it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nvidia-device-plugin-configs
+  namespace: kube-system
+data:
+  any: |-
+    version: v1
+    flags:
+      migStrategy: none
+    sharing:
+      timeSlicing:
+        resources:
+          - name: nvidia.com/gpu
+            replicas: 5
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      runtimeClassName: nvidia
+      priorityClassName: system-node-critical
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: nvidia-device-plugin-ctr
+          image: nvcr.io/nvidia/k8s-device-plugin:v0.17.1
+          env:
+            # Nodes without a usable GPU must not crashloop the DaemonSet.
+            - name: FAIL_ON_INIT_ERROR
+              value: "false"
+            - name: CONFIG_FILE
+              value: /config/any
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: configs
+              mountPath: /config
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: configs
+          configMap:
+            name: nvidia-device-plugin-configs
