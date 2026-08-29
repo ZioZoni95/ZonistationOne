@@ -93,6 +93,12 @@ identical percentiles, which is the check that a host optimisation has not moved
     host reaches over the Docker bridge; anti-affinity keeps two sessions off one node, since the
     ports are now the node's.
 
+  It is served over HTTPS on the tailnet through `tailscale serve`, with a real certificate and no
+  port forwarding — tailnet membership is WireGuard keys per device, which is a stronger front door
+  than the password behind it. The certificate needs the tailnet's HTTPS setting enabled *before*
+  `tailscaled` starts; enabled afterwards it keeps serving a self-signed one and the proxy falls back
+  to it without saying so, which reads as a TLS failure and is a stale cache.
+
   A browser opening a WebSocket does not attach the credentials already entered for the page, so the
   signalling socket is refused behind basic auth. Credentials in the URL are the one form a browser
   does send, and JavaScript cannot read the ones already typed — so the page asks once, and only

@@ -214,6 +214,31 @@ kubectl apply -f deploy/session/sessions.yaml       # two sessions, two differen
 kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
 ```
 
+### HTTPS, and reaching it from outside
+
+The sessions are published on the tailnet with `tailscale serve`, which terminates TLS with a real
+Let's Encrypt certificate and is reachable by tailnet members only — no port forwarding, no public
+exposure, and nothing to accept in the browser:
+
+```sh
+sudo tailscale serve --bg --https=443   http://acecombat.localhost:8081
+sudo tailscale serve --bg --https=8443  http://crash.localhost:8081
+sudo tailscale serve --bg --https=10000 http://dino.localhost:8081
+```
+
+Three ports because `tailscale serve` offers exactly three for HTTPS, and each proxies to
+`<game>.localhost:8081` so Traefik still routes by host and the rate-limit, headers and per-game auth
+middlewares stay in the path.
+
+**Enable HTTPS certificates in the tailnet first** (admin console, DNS page). Enabling them after
+`tailscaled` has started is not enough on its own: it keeps serving a self-signed certificate from
+before the change, and the proxy falls back to it silently rather than reporting anything. Run
+`sudo tailscale cert <machine>.<tailnet>.ts.net` once — that path provisions explicitly and prints
+the real error if something is wrong.
+
+Another person does not need your account: share the machine from the admin console and they join
+with their own free one, seeing that machine and nothing else in your tailnet.
+
 ### Starting and stopping
 
 ```sh
