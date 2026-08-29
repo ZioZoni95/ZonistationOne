@@ -99,8 +99,12 @@ ZS1_CPU=blocks       ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"
 - **`blocks`** — a run of instructions decoded once and kept, with the handler already resolved.
   Verified bit-identical to the interpreter over 700M instructions of `Ace Combat 2`; how much faster
   it is has not been measured yet.
-- **`jit`** — accepted, and currently gets the block cache it will sit on, because there is no code
-  emitter yet. It says so rather than pretending.
+- **`jit`** — the block's instructions compiled to native x86-64. Verified bit-identical to the
+  interpreter over the same 700M instructions. It folds what is genuinely constant inside a block —
+  `pc`, `next_pc`, `current_pc`, and the A0h/B0h/C0h vector test — and emits the cycle accounting,
+  the execution-trace ring and the breakpoint gate inline, calling out only where there is a branch
+  on machine state: the interrupt check, the operation's handler, the load-delay rotation and the
+  event dispatch.
 
 The machine bar carries a `CPU` chip naming the engine that actually started, and the Host HW panel's
 *Execution engine* card gives the block counters and the reason if the engine asked for was not the
@@ -365,7 +369,7 @@ means one transport carrying both, which is the WebRTC work.
 |---|---|---|
 | CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch delay, a real load delay (the delay-slot opcode reads the old value; a same-register write beats the load; an exception lands it), MULT/DIV and GTE stalls |
 | I-Cache | Working | 256 lines × 4 words, tag + per-word valid bits |
-| Execution engine | Working | Interpreter, and a block cache (`ZS1_CPU=blocks`) verified bit-identical to it over 700M instructions. The block cache is the recompiler's front end; no code is emitted yet |
+| Execution engine | Working | Three: the interpreter, a block cache (`ZS1_CPU=blocks`) and a recompiler emitting native x86-64 (`ZS1_CPU=jit`). Both are verified bit-identical to the interpreter over 700M instructions of `Ace Combat 2`. Speed is not measured yet |
 | RAM / BIOS ROM | Working | 2 MB + 1 KB scratchpad; SCPH-1001 and SCPH-7502 |
 | IRQ controller | Working | Edge-triggered I_STAT/I_MASK, every source wired |
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
@@ -495,6 +499,7 @@ button, not pause.
 src/cpu/      MIPS R3000A: decode, execute, exceptions, I-cache, BIOS syscall side-channel
                 cpu_exec.c     which engine runs the guest, and what the interface shows
                 cpu_blocks.c   the block cache — the recompiler's front end
+                cpu_rec_x64.c  the x86-64 emitter
 src/core/     bus, RAM, BIOS, DMA, timers, SIO, MDEC, event scheduler, savestates, Lua surface
                 golden_trace.c the execution fingerprint tools/golden_trace.sh compares
 src/gpu/      GP0/GP1 command handling, VRAM, and the renderer:

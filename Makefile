@@ -142,7 +142,7 @@ EMU_CPU_SRCS = \
     src/cpu/cpu_disasm.c src/cpu/cpu_init.c src/cpu/cpu_registers.c \
     src/cpu/cpu_bios.c src/cpu/cpu_exceptions.c src/cpu/cpu_icache.c \
     src/cpu/cpu_decode.c src/cpu/cpu_execution.c src/cpu/cpu_instructions.c \
-    src/cpu/cpu_exec.c src/cpu/cpu_blocks.c
+    src/cpu/cpu_exec.c src/cpu/cpu_blocks.c src/cpu/cpu_rec_x64.c
 
 # --- System Core ---
 EMU_CORE_SRCS = \

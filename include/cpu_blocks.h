@@ -75,6 +75,11 @@ typedef struct {
     uint32_t paddr;             /* physical address of the first instruction */
     uint16_t count;             /* instructions in the block; 0 means empty slot */
     uint16_t line_count;
+    /* Bumped whenever a reload changed an instruction. The recompiler bakes
+     * instruction words into its code as immediates, so "same address, same
+     * length" is not enough to reuse compiled code — this is what makes a
+     * rebuilt block unable to run through the old one. */
+    uint16_t version;
 
     /* One entry per distinct i-cache line the block spans, in execution order. */
     uint32_t line_paddr[REC_BLOCK_MAX_LINES];  /* line-aligned physical address */
@@ -86,6 +91,11 @@ typedef struct {
 
 /* Allocates the cache. Returns false if it could not, in which case the caller
  * must stay on the interpreter and say so through cpu_exec_set_active(). */
+/* Does this instruction end a block — a branch, a jump, SYSCALL or BREAK? The
+ * recompiler asks too: the instruction after one of these is a delay slot, and a
+ * delay slot's pc cannot be folded to a constant. */
+bool cpu_blocks_ends_block(uint32_t instruction);
+
 bool cpu_blocks_init(void);
 void cpu_blocks_shutdown(void);
 
@@ -96,11 +106,20 @@ RecBlock* cpu_blocks_lookup(Cpu* cpu, uint32_t vaddr, uint32_t paddr);
 /* Drops every block. For a reset, and for the guest flushing its i-cache. */
 void cpu_blocks_flush(void);
 
-/* Re-decode the ops backing one i-cache line after it was refilled. Returns
- * false when the new bytes would change the block's shape — a branch where there
- * was none, or the reverse — in which case the caller must drop the block and
- * let the interpreter take that instruction. Called from the block runner, which
- * owns the lazy replay. */
-bool cpu_blocks_reload_line(RecBlock* b, uint32_t line_index, const uint32_t* words);
+/* Re-decode the ops backing one i-cache line, reporting what it found:
+ *
+ *   REC_LINE_SAME     nothing changed; compiled code for this block is still good
+ *   REC_LINE_CHANGED  an instruction changed; the ops are updated and the version
+ *                     bumped, so an interpreted run carries on and a compiled one
+ *                     has to stop and be emitted again
+ *   REC_LINE_RESHAPED the change would alter the block's shape — a branch where
+ *                     there was none, or the reverse — so the block is no longer
+ *                     a description of anything and the caller must drop it
+ *
+ * Called from the block runner, which owns the lazy replay. */
+#define REC_LINE_SAME      0
+#define REC_LINE_CHANGED   1
+#define REC_LINE_RESHAPED  2
+int cpu_blocks_reload_line(RecBlock* b, uint32_t line_index, const uint32_t* words);
 
 #endif /* CPU_BLOCKS_H */

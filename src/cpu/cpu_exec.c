@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cpu_blocks.h"
+#include "cpu_rec.h"
 #include "log.h"
 
 static CpuExecStatus s_status = {
@@ -72,8 +73,16 @@ void cpu_exec_init(void) {
             else                   cpu_exec_set_active(CPU_EXEC_INTERPRETER, "block cache would not allocate");
             break;
         case CPU_EXEC_RECOMPILER:
-            if (cpu_blocks_init()) cpu_exec_set_active(CPU_EXEC_BLOCKS, "no code emitter yet — running its block cache");
-            else                   cpu_exec_set_active(CPU_EXEC_INTERPRETER, "block cache would not allocate");
+            /* The recompiler needs the block cache under it: block discovery and
+             * the i-cache revalidation are that file's, and the emitter only
+             * turns a RecBlock's ops into code. Either failing falls back one
+             * step and the interface says which. */
+            if (!cpu_blocks_init())
+                cpu_exec_set_active(CPU_EXEC_INTERPRETER, "block cache would not allocate");
+            else if (!cpu_rec_init())
+                cpu_exec_set_active(CPU_EXEC_BLOCKS, "no executable memory for the code cache");
+            else
+                cpu_exec_set_active(CPU_EXEC_RECOMPILER, NULL);
             break;
         default:
             cpu_exec_set_active(CPU_EXEC_INTERPRETER, NULL);

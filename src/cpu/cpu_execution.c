@@ -15,6 +15,7 @@
 #include "debugger.h"
 #include "golden_trace.h"
 #include "cpu_blocks.h"
+#include "cpu_rec.h"
 #include "cpu_exec.h"
 #include "log.h"
 
@@ -226,6 +227,75 @@ void cpu_run_next_instruction(Cpu* cpu) {
     (void)cpu_step_body(cpu, instruction, NULL);
 }
 
+
+/* --- the helpers the recompiler's emitted code calls ----------------------
+ *
+ * They live here, next to cpu_step_body(), for the same reason the interpreter
+ * and the block runner share that function: these are the parts of an
+ * instruction the emitter does not fold, and having them in one place is what
+ * stops three engines from drifting apart. Each returns non-zero when the block
+ * has to stop, matching what cpu_step_body() returns false for. */
+
+uint8_t cpu_rec_check_irq(Cpu* cpu, uint32_t instruction) {
+    return CheckPendingInterrupt(cpu, &instruction) ? 1u : 0u;
+}
+
+uint8_t cpu_rec_breakpoint(Cpu* cpu) {
+    if (!cpu->inter->debugger.step_skip_bp) {
+        debugger_check_breakpoint(&cpu->inter->debugger, cpu);
+        if (cpu->inter->debugger.paused) return 1u;
+    } else {
+        cpu->inter->debugger.step_skip_bp = false;
+    }
+    return 0u;
+}
+
+uint8_t cpu_rec_bios_vector(Cpu* cpu) {
+    bool hle = false;
+    if (cpu->current_pc == 0x000000A0)      hle = handle_a0_syscall(cpu);
+    else if (cpu->current_pc == 0x000000B0) handle_b0_syscall(cpu);
+    else                                    handle_c0_syscall(cpu);
+    if (!hle) return 0u;
+    /* Stands in for a whole BIOS call, so it counts as a completed opcode for
+     * the load pipeline too. */
+    cpu_retire_load_delay(cpu);
+    cpu->pc = cpu->regs[31];
+    cpu->next_pc = cpu->pc + 4;
+    cpu->branch_taken = true;
+    return 1u;
+}
+
+void cpu_rec_retire(Cpu* cpu) {
+    cpu_retire_load_delay(cpu);
+    cpu->regs[REG_ZERO] = 0;
+}
+
+void cpu_rec_events(Cpu* cpu) {
+    eventq_dispatch_due(cpu->inter);
+    uint32_t next = cpu->inter->evq_next_cycle;
+    uint32_t now  = cpu->inter->cpu_cycle_counter;
+    cpu->downcount = (next != UINT32_MAX && (int32_t)(next - now) > 0)
+                   ? (int32_t)(next - now) : 1;
+}
+
+
+/* Replay one i-cache line from inside compiled code, and say whether the code
+ * may carry on. Anything but "nothing changed" stops the block: the emitter
+ * bakes instruction words in as immediates, so an op that changed makes the code
+ * around it wrong even when the block still has the same shape. The outer path
+ * then rebuilds the block and emits it again. */
+uint8_t cpu_rec_revalidate_line(Cpu* cpu, RecBlock* b, uint32_t line_index) {
+    uint32_t words[ICACHE_LINE_WORDS];
+    cpu_icache_touch_line(cpu, b->line_paddr[line_index], b->line_word0[line_index], words, true);
+    int r = cpu_blocks_reload_line(b, line_index, words);
+    if (r == REC_LINE_RESHAPED) {
+        b->count = 0;
+        cpu_exec_status_mut()->blocks_invalidated++;
+        return 1u;
+    }
+    return (r == REC_LINE_CHANGED) ? 1u : 0u;
+}
+
 /* Run one cached block, or one instruction when there is no block to run.
  *
  * The i-cache lines behind the block are replayed here, each immediately before
@@ -269,7 +339,7 @@ static void cpu_run_block(Cpu* cpu) {
              * bytes are stable pays four word comparisons per cache line — about
              * one per instruction — and never touches the decode tables. */
             cpu_icache_touch_line(cpu, b->line_paddr[li], b->line_word0[li], words, true);
-            if (!cpu_blocks_reload_line(b, li, words)) {
+            if (cpu_blocks_reload_line(b, li, words) == REC_LINE_RESHAPED) {
                 b->count = 0;                     /* the code under it changed shape */
                 cpu_exec_status_mut()->blocks_invalidated++;
                 break;
@@ -325,6 +395,41 @@ static void cpu_run_block(Cpu* cpu) {
 /* What the frame loop runs: a block under the block engine, one instruction
  * under the interpreter. The debugger's single-step stays on
  * cpu_run_next_instruction, which is the point of it. */
+/* Run one block as native code.
+ *
+ * The i-cache replay and the revalidation are the block cache's and are done
+ * here before the code runs, unchanged — the emitter compiles a RecBlock's ops
+ * and has no business deciding whether they are still the right ones. A block
+ * whose shape changed is dropped and the interpreter takes the instruction, and
+ * because the compiled entry is keyed on the block's op count as well as its
+ * address, a rebuilt block cannot be run through stale code. */
+static void cpu_run_recompiled(Cpu* cpu) {
+    const uint32_t vaddr = cpu->pc;
+    if (vaddr & 3u) { cpu_run_next_instruction(cpu); return; }
+
+    RecBlock* b = cpu_blocks_lookup(cpu, vaddr, mask_region(vaddr));
+    if (!b) { cpu_run_next_instruction(cpu); return; }
+
+    /* Only the first line is replayed here. The rest are replayed by the emitted
+     * code, at each line boundary, immediately before the first instruction that
+     * lives in the line — the same laziness the interpreted runner has, and for
+     * the same reason: an instruction can write the memory a later line of its
+     * own block reads, and filling early would show the block the old bytes. */
+    uint32_t words[ICACHE_LINE_WORDS];
+    cpu_icache_touch_line(cpu, b->line_paddr[0], b->line_word0[0], words, true);
+    if (cpu_blocks_reload_line(b, 0, words) == REC_LINE_RESHAPED) {
+        b->count = 0;
+        cpu_exec_status_mut()->blocks_invalidated++;
+        cpu_run_next_instruction(cpu);
+        return;
+    }
+
+    RecEntry fn = cpu_rec_entry(b, vaddr);
+    if (!fn) { cpu_run_block(cpu); return; }
+
+    cpu_exec_status_mut()->instr_from_cache += fn(cpu);
+}
+
 void cpu_run_slice(Cpu* cpu) {
     static int verify_cached = -1;
     if (verify_cached < 0) {
@@ -335,11 +440,11 @@ void cpu_run_slice(Cpu* cpu) {
             LOG_CPU_INFO("[CPU] ZS1_BLOCKS_VERIFY — every cached instruction is "
                          "compared against a fetch; slow, and for diagnosis only");
     }
-    if (cpu_exec_status()->active == CPU_EXEC_INTERPRETER) {
-        cpu_run_next_instruction(cpu);
-        return;
+    switch (cpu_exec_status()->active) {
+        case CPU_EXEC_BLOCKS:     cpu_run_block(cpu);        break;
+        case CPU_EXEC_RECOMPILER: cpu_run_recompiled(cpu);   break;
+        default:                  cpu_run_next_instruction(cpu); break;
     }
-    cpu_run_block(cpu);
 }
 
 // Safe memory peek for trace output — no bus side effects, no exceptions.

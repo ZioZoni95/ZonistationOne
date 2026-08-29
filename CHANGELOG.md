@@ -94,6 +94,63 @@ comparing host file I/O. `ZS1_NO_INPUT=1` closes the other channel — a keypres
 stick's noise reaches the guest through the SIO, and a capture taken with the window focused sent
 this session hunting a block-cache defect that did not exist.
 
+#### A recompiler: native x86-64, verified bit-identical
+
+`ZS1_CPU=jit` compiles a block's instructions to x86-64 and runs that instead of
+walking a table. **Verified against the golden trace: 700M instructions of
+`Ace Combat 2`, bit-identical to the interpreter.**
+
+Hand-written encodings, not an assembler library — PCSX-Redux uses xbyak, which
+is C++ and a large dependency for a project whose rule is C99 with C++ confined
+to `debug_ui.cpp`, and the subset an interpreter body needs is small enough to
+encode directly. It sits on the block cache rather than beside it: block
+discovery and the i-cache revalidation are already verified and are not
+reimplemented, so the emitter only turns a `RecBlock`'s ops into code.
+
+What is folded at compile time, which is the whole reason it is faster than the
+block cache:
+
+- **`pc`, `next_pc` and `current_pc` become immediates.** They were a load and an
+  add per instruction.
+- **The A0h/B0h/C0h vector test is decided per instruction while compiling.**
+  Three comparisons per instruction leave every block that does not contain a
+  vector, which is all of them but three.
+
+Emitted inline with no call at all: clearing `exception_pending`, the
+execution-trace ring, the breakpoint gate, and the whole cycle accounting —
+stall, counter, retired, downcount and its comparison. Calls remain only where
+there is a branch on machine state the emitter cannot fold: the interrupt check,
+the operation's own handler, the load-delay rotation, and the event dispatch when
+the downcount runs out.
+
+Deferring the constant part of the cycle cost to the end of a block was the
+obvious folding and it is wrong here: handlers read `inter->cpu_cycle_counter`
+while they run — `muldiv_completion_tick` and `gte_completion_tick` are compared
+against it — so a counter held still for a block's length changes what MFHI and
+MFLO decide. The total would come out the same and the machine would not.
+
+**Three defects, all the same mistake: a constant folded that was not constant.**
+The first put the boot logo on a black screen and the other two were found by
+bisection rather than by reading the encodings again.
+
+- `pc = next_pc` **is not a constant in a delay slot.** The branch before it has
+  just written the target, so folding `pc + 4` there throws away the destination
+  of every jump in the guest.
+- **Virtual addresses were baked into code keyed by physical address.** The block
+  cache is indexed physically and rightly so, but `current_pc` and the vector test
+  are virtual; the BIOS kernel reaches the same routines through KSEG0 and KUSEG
+  both, and a block compiled for one ran with the other's `current_pc`.
+- **The straight-line check was missing.** A block can *begin* on a delay slot,
+  and once that has run the PC is the branch's target rather than the next address
+  along, so everything the block holds after it describes code that is not being
+  executed. `cpu_run_block()` notices through its `expect` comparison; compiled
+  code has the address baked in and cannot notice anything, so it is told.
+
+Bisection is what found the last one, and it was cheaper than more reading:
+`REC_BLOCK_MAX_OPS=1` came out identical, which cleared the per-instruction code
+in one run, and forcing the dynamic `pc` form then separated the folding from the
+line replay.
+
 #### A block cache, and the engine the interface now names
 
 `ZS1_CPU=interpreter|blocks|jit` picks how the guest's code is run. `blocks` decodes a run of

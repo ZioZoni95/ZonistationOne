@@ -56,7 +56,7 @@ void cpu_blocks_flush(void) {
  * Nothing else needs to. An instruction that *can* raise — a misaligned load, an
  * overflowing ADD — is handled at run time, where the runner abandons the block
  * the moment cpu->exception_pending is set. */
-static bool ends_block(uint32_t instruction) {
+bool cpu_blocks_ends_block(uint32_t instruction) {
     const uint32_t op = instruction >> 26;
     switch (op) {
         case 0x01:                          /* REGIMM: BLTZ/BGEZ/BLTZAL/BGEZAL */
@@ -92,12 +92,13 @@ static uint32_t peek_code(const Cpu* cpu, uint32_t paddr) {
     return ram_load32(cpu->inter->ram, paddr & (RAM_SIZE - 1));
 }
 
-bool cpu_blocks_reload_line(RecBlock* b, uint32_t line_index, const uint32_t* words) {
+int cpu_blocks_reload_line(RecBlock* b, uint32_t line_index, const uint32_t* words) {
     const uint32_t op0   = b->line_op0[line_index];
     const uint32_t word0 = b->line_word0[line_index];
     const uint32_t last  = (line_index + 1u < b->line_count)
                          ? b->line_op0[line_index + 1u] : b->count;
 
+    int result = REC_LINE_SAME;
     for (uint32_t i = op0, w = word0; i < last; i++, w++) {
         const uint32_t old = b->ops[i].instruction;
         const uint32_t nw  = words[w];
@@ -110,12 +111,14 @@ bool cpu_blocks_reload_line(RecBlock* b, uint32_t line_index, const uint32_t* wo
          * ops belong to code that is no longer there. Say so and let the caller
          * drop it; the interpreter takes that instruction and the block is built
          * again from what is there now. */
-        if (ends_block(nw) != ends_block(old)) return false;
+        if (cpu_blocks_ends_block(nw) != cpu_blocks_ends_block(old)) return REC_LINE_RESHAPED;
 
         b->ops[i].instruction = nw;
         b->ops[i].fn          = cpu_decode_handler(nw);
+        result = REC_LINE_CHANGED;
     }
-    return true;
+    if (result == REC_LINE_CHANGED) b->version++;
+    return result;
 }
 
 RecBlock* cpu_blocks_lookup(Cpu* cpu, uint32_t vaddr, uint32_t paddr) {
@@ -141,6 +144,7 @@ RecBlock* cpu_blocks_lookup(Cpu* cpu, uint32_t vaddr, uint32_t paddr) {
     b->paddr      = paddr;
     b->count      = 0;
     b->line_count = 0;
+    b->version++;          /* a rebuilt block is not the one that was compiled */
 
     uint32_t addr      = paddr;
     uint32_t last_line = UINT32_MAX;
@@ -167,7 +171,7 @@ RecBlock* cpu_blocks_lookup(Cpu* cpu, uint32_t vaddr, uint32_t paddr) {
         b->count              = (uint16_t)(i + 1);
 
         if (ending) break;                    /* that was the delay slot */
-        if (ends_block(instr)) ending = true;
+        if (cpu_blocks_ends_block(instr)) ending = true;
         addr += 4;
     }
 
