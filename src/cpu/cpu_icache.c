@@ -146,3 +146,37 @@ uint32_t cpu_icache_fetch(Cpu* cpu, uint32_t vaddr, bool count_cycles) {
     // Return the instruction data for the originally requested word index
     return line->data[word_index];
 }
+
+/* Bring one cache line up to date exactly as a fetch of `word_index` would, and
+ * report whether it had to fill. The line's four words are copied out either
+ * way, so the block cache can re-decode the ops behind a line that changed.
+ *
+ * Checking one word decides the whole run from it to the end of the line, and
+ * that is a property of the fill above rather than an assumption: a miss marks
+ * [word_index, 3] valid and [0, word_index) invalid, so a line's valid words are
+ * always a suffix. If valid[word_index] is set, every word after it is set too —
+ * which is why a block that enters a line at word_index and runs to its end can
+ * check once instead of once per instruction. */
+bool cpu_icache_touch_line(Cpu* cpu, uint32_t line_paddr, uint32_t word_index,
+                           uint32_t out_words[ICACHE_LINE_WORDS], bool count_cycles) {
+    const uint32_t tag        = line_paddr >> 12;
+    const uint32_t line_index = (line_paddr >> 4) & (ICACHE_NUM_LINES - 1);
+    ICacheLine* line = &cpu->icache[line_index];
+
+    bool filled = false;
+    if (line->tag != tag || !line->valid[word_index]) {
+        line->tag = tag;
+        for (uint32_t j = 0; j < word_index; ++j) line->valid[j] = false;
+        for (uint32_t j = word_index; j < ICACHE_LINE_WORDS; ++j) {
+            uint32_t w;
+            ICACHE_FETCH_NO_DATA_STALL(cpu, w = interconnect_load32(cpu->inter, line_paddr + j * 4));
+            line->data[j]  = w;
+            line->valid[j] = true;
+        }
+        charge_bios_rom_cycles(cpu, line_paddr + word_index * 4,
+                               ICACHE_LINE_WORDS - word_index, count_cycles);
+        filled = true;
+    }
+    for (uint32_t j = 0; j < ICACHE_LINE_WORDS; ++j) out_words[j] = line->data[j];
+    return filled;
+}

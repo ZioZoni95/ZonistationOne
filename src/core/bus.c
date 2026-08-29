@@ -28,10 +28,6 @@ const uint32_t REGION_MASK[8] = {
     0xffffffff, 0xffffffff                           // KSEG2 (no mask)
 };
 
-uint32_t mask_region(uint32_t addr) {
-    return addr & REGION_MASK[(addr >> 29) & 7];
-}
-
 // --- Forward declarations ---
 static void interconnect_perform_dma(Interconnect* inter, uint32_t channel_index);
 static uint32_t dma_get_transfer_size_words(DmaChannel* ch);

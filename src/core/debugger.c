@@ -68,7 +68,7 @@ bool debugger_remove_breakpoint(Debugger* dbg, uint32_t addr) {
     return false;
 }
 
-void debugger_check_breakpoint(Debugger* dbg, struct Cpu* cpu) {
+void debugger_breakpoint_slow(Debugger* dbg, struct Cpu* cpu) {
     if (dbg->paused) return;
     uint32_t current_pc = ((Cpu*)cpu)->current_pc;
     /* Exact "no" in one bit test; only a hash hit pays for the walk below. */
@@ -193,7 +193,7 @@ bool debugger_remove_write_watchpoint(Debugger* dbg, uint32_t addr) {
  * @param addr The starting memory address being read from.
  * @param size The size of the read access (1, 2, or 4 bytes).
  */
-void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
+void debugger_read_watchpoint_slow(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
     if (dbg->paused) return;
     /* A watched address inside [addr, addr+size) lies in one of at most two
      * words, so two bit tests decide the miss exactly. */
@@ -218,7 +218,7 @@ void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t add
  * @param addr The starting memory address being written to.
  * @param size The size of the write access (1, 2, or 4 bytes).
  */
-void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
+void debugger_write_watchpoint_slow(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size) {
     if (dbg->paused) return;
     /* A watched address inside [addr, addr+size) lies in one of at most two
      * words, so two bit tests decide the miss exactly. */

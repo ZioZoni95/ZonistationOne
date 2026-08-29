@@ -86,6 +86,27 @@ Three things trip people up, in order of how often:
    rejected and you are left sitting at the BIOS menu, which looks like a boot regression.
 3. **The game path needs `--game=`.** A bare positional path is taken as the BIOS path.
 
+### Execution engine
+
+`ZS1_CPU` picks how the guest's code is run.
+
+```sh
+ZS1_CPU=interpreter  ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"   # default
+ZS1_CPU=blocks       ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"
+```
+
+- **`interpreter`** — one instruction at a time. The reference every other engine is checked against.
+- **`blocks`** — a run of instructions decoded once and kept, with the handler already resolved.
+  Verified bit-identical to the interpreter over 700M instructions of `Ace Combat 2`; how much faster
+  it is has not been measured yet.
+- **`jit`** — accepted, and currently gets the block cache it will sit on, because there is no code
+  emitter yet. It says so rather than pretending.
+
+The machine bar carries a `CPU` chip naming the engine that actually started, and the Host HW panel's
+*Execution engine* card gives the block counters and the reason if the engine asked for was not the
+one that came up. Same rule as the GPU context: an engine that quietly fell back is exactly the thing
+that would otherwise be blamed on the emulator.
+
 ### Renderers
 
 Two backends, the same pixels. OpenGL 3.3 is the default; Vulkan 1.3 is there when the build found
@@ -344,6 +365,7 @@ means one transport carrying both, which is the WebRTC work.
 |---|---|---|
 | CPU (MIPS R3000A) | Working | All instructions, COP0, exceptions, branch delay, a real load delay (the delay-slot opcode reads the old value; a same-register write beats the load; an exception lands it), MULT/DIV and GTE stalls |
 | I-Cache | Working | 256 lines × 4 words, tag + per-word valid bits |
+| Execution engine | Working | Interpreter, and a block cache (`ZS1_CPU=blocks`) verified bit-identical to it over 700M instructions. The block cache is the recompiler's front end; no code is emitted yet |
 | RAM / BIOS ROM | Working | 2 MB + 1 KB scratchpad; SCPH-1001 and SCPH-7502 |
 | IRQ controller | Working | Edge-triggered I_STAT/I_MASK, every source wired |
 | Event scheduler | Working | Single authority; wrap-safe scheduling |
@@ -387,6 +409,32 @@ is the whole sample.
 
 All four are PAL and were run with `SCPH-7502`. Boot milestones from a 35-second run of each, on the
 emulated-field axis: `Execute !` at f804, f874 and f843 respectively, with no disc errors.
+
+---
+
+## Testing
+
+`tools/golden_trace.sh` is the only automated check this project has, and the first one it has ever
+had. It records a fingerprint of everything the CPU did — every instruction in order, plus the
+register file, HI/LO, the COP0 registers and both load-delay slots at intervals, with the emulated
+cycle count beside them — so that "did this change the machine?" is a diff rather than a judgement.
+
+```sh
+tools/golden_trace.sh record     # on a build you trust
+tools/golden_trace.sh verify     # after every CPU / bus / scheduler / timing change
+```
+
+A pass means the same instructions ran in the same order with the same register contents at the same
+emulated cycle, for that stretch of that disc. It is a proof of *no change*, which is what an
+optimisation needs — not a proof of correctness.
+
+Captures set `ZS1_CD_SYNC=1` and `ZS1_NO_INPUT=1`, and neither is optional. Without the first the
+drive answers on host file I/O and the same disc read lands at a different emulated cycle every run;
+without the second a keypress or a resting analog stick reaches the guest through the SIO. Both were
+found the hard way. `docs/GOLDEN_TRACE_2026-08-29.md` covers what the trace does not see — the
+renderer, the SPU's output, and anything past `ZS1_TRACE_STOP`.
+
+`docs/TESTING_PLAN_2026-08-20.md` remains the plan for the layers this does not cover.
 
 ---
 
@@ -445,7 +493,10 @@ button, not pause.
 
 ```
 src/cpu/      MIPS R3000A: decode, execute, exceptions, I-cache, BIOS syscall side-channel
+                cpu_exec.c     which engine runs the guest, and what the interface shows
+                cpu_blocks.c   the block cache — the recompiler's front end
 src/core/     bus, RAM, BIOS, DMA, timers, SIO, MDEC, event scheduler, savestates, Lua surface
+                golden_trace.c the execution fingerprint tools/golden_trace.sh compares
 src/gpu/      GP0/GP1 command handling, VRAM, and the renderer:
                 renderer.c     dispatch onto the live backend
                 renderer_gl.c  the OpenGL 3.3 backend
@@ -471,6 +522,9 @@ Design notes worth knowing before changing anything:
   GL name on one backend and a `VkDescriptorSet` on the other.
 - **The event scheduler is the single timing authority.** Nothing else may schedule work.
 - **No `malloc` in hot paths.** Structs are embedded, not heap-allocated.
+- **The interpreter is the reference.** Every other execution engine has to reproduce it exactly, and
+  `tools/golden_trace.sh verify` is how that is established rather than asserted. The two paths share
+  `cpu_step_body()` for the same reason: near-identical copies drift when somebody fixes one of them.
 
 Memory map, per-subsystem state and the open work queue: `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md`,
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md`, `docs/study/README.md`, and `docs/ui/` for the interface direction.

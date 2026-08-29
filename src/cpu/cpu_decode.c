@@ -95,6 +95,19 @@ static void op_special(Cpu* cpu, uint32_t instruction) {
     else   op_illegal(cpu, instruction);
 }
 
+/* The handler this instruction will run, with SPECIAL already resolved.
+ *
+ * The block cache calls this once per instruction when it builds a block, so the
+ * two-level walk below happens once instead of on every execution — that second
+ * dispatch was 2.8% of the emulation thread on its own. Kept here rather than in
+ * cpu_blocks.c because both tables are static to this file, which is what stops
+ * them drifting apart from decode_and_execute(). */
+cpu_handler_t cpu_decode_handler(uint32_t instruction) {
+    cpu_handler_t h = s_op_table[instruction >> 26];
+    if (h == op_special) h = s_special_table[instruction & 0x3F];
+    return h ? h : op_illegal;
+}
+
 void decode_and_execute(Cpu* cpu, uint32_t instruction) {
     cpu_handler_t h = s_op_table[instruction >> 26];
     if (h) h(cpu, instruction);

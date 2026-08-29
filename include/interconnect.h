@@ -228,7 +228,15 @@ void interconnect_set_cpu(Interconnect* inter, struct Cpu* cpu);
  * @param addr The 32-bit virtual address from the CPU.
  * @return The corresponding 32-bit physical address.
  */
-uint32_t mask_region(uint32_t addr);
+/* Defined here rather than in bus.c because it is called from every load, every
+ * store and every instruction fetch, and a cross-translation-unit call for two
+ * arithmetic operations showed up as 1.3% of all samples in a 70 s profile —
+ * more than op_lw. REGION_MASK stays in bus.c; only the indexing moves. */
+extern const uint32_t REGION_MASK[8];
+
+static inline uint32_t mask_region(uint32_t addr) {
+    return addr & REGION_MASK[(addr >> 29) & 7];
+}
 
 /**
  * @brief Reads a 32-bit word from the emulated system memory space.

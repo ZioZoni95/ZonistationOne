@@ -27,6 +27,7 @@
 #include "debugger.h"
 #include "debug_ui.h"
 #include "frame_events.h"
+#include "golden_trace.h"
 
 void system_init(Interconnect* inter, Cpu* cpu) {
     (void)cpu;
@@ -65,8 +66,9 @@ void system_run_frame(Interconnect* inter, Cpu* cpu) {
         /* Just run the CPU: cpu_run_next_instruction dispatches every due
          * scheduled event (VBlank, timers, CDROM, DMA, ...) via its downcount
          * check, and timers now catch up on-read/on-event — no manual stepping. */
-        cpu_run_next_instruction(cpu);
+        cpu_run_slice(cpu);
         if (dbg->paused) return;                       /* breakpoint hit mid-frame */
+        if (zs1_trace_done()) return;                  /* golden trace complete (trace build only) */
         if (inter->cpu_cycle_counter - start >= cap) break;  /* safety */
     }
 

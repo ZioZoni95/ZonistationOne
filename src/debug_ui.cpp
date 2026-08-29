@@ -35,6 +35,7 @@ extern "C" {
 #include "frame_events.h"
 #include "controller.h"
 #include "host_info.h"
+#include "cpu_exec.h"
 #include "mdec.h"
 }
 
@@ -1695,6 +1696,22 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     snprintf(pcbuf, sizeof(pcbuf), "0x%08X", cpu ? cpu->current_pc : 0);
     ImGui::SameLine(); chip("PC", pcbuf);
 
+    /* Which engine is running the guest. It changes what a measurement means and
+     * which failures are plausible, so it is on the bar rather than in a log
+     * line — the same reason the GPU context is. A fallback says so here: an
+     * engine that was asked for and did not start is exactly the thing that
+     * would otherwise be blamed on the emulator. */
+    {
+        const CpuExecStatus* ex = cpu_exec_status();
+        char cbuf[64];
+        if (ex->fallback_reason)
+            snprintf(cbuf, sizeof(cbuf), "%s (%s unavailable)",
+                     cpu_exec_mode_short(ex->active), cpu_exec_mode_short(ex->requested));
+        else
+            snprintf(cbuf, sizeof(cbuf), "%s", cpu_exec_mode_short(ex->active));
+        ImGui::SameLine(); chip("CPU", cbuf);
+    }
+
     // Host HW pills — read from the kernel and the GL context, not typed in.
     ImGui::SameLine(0, 14);
     chip("HOST CPU", host_short_cpu());
@@ -2995,6 +3012,36 @@ static void draw_host_hw_window(Interconnect* inter) {
     }
     ImGui::Dummy(ImVec2(0, 8));
 
+    /* The execution engine, with its counters. Zeroes under the interpreter are
+     * the honest reading, not a gap: nothing is cached and nothing is emitted. */
+    {
+        const CpuExecStatus* ex = cpu_exec_status();
+        card_header_icon("Execution engine", ex->fallback_reason ? ZS_CRIT : ZS_OK, draw_icon_cpu);
+        if (ImGui::BeginTable("hosthw_exec", 2, ImGuiTableFlags_SizingStretchProp)) {
+            kv("Running", cpu_exec_mode_name(ex->active), ex->fallback_reason ? ZS_CRIT : ZS_OK);
+            if (ex->fallback_reason) {
+                snprintf(buf, sizeof(buf), "%s — %s",
+                         cpu_exec_mode_name(ex->requested), ex->fallback_reason);
+                kv("Requested", buf, ZS_CRIT);
+            } else {
+                kv("Selected by", getenv("ZS1_CPU") ? "ZS1_CPU" : "default", ZS_FAINT);
+            }
+            if (ex->active != CPU_EXEC_INTERPRETER) {
+                snprintf(buf, sizeof(buf), "%u live, %u built, %u invalidated",
+                         ex->blocks_live, ex->blocks_built, ex->blocks_invalidated);
+                kv("Blocks", buf, ZS_DATA);
+                if (ex->code_bytes) {
+                    snprintf(buf, sizeof(buf), "%.1f KB emitted", ex->code_bytes / 1024.0);
+                    kv("Native code", buf, ZS_DATA);
+                }
+            } else {
+                kv("Blocks", "n/a — one instruction at a time", ZS_FAINT);
+            }
+            ImGui::EndTable();
+        }
+        ImGui::Dummy(ImVec2(0, 8));
+    }
+
     card_header_icon("Graphics context", ZS_DATA, draw_icon_gpu);
     if (ImGui::BeginTable("hosthw_gl", 2, ImGuiTableFlags_SizingStretchProp)) {
         kv("Renderer", h->gl_renderer, ZS_DATA);
@@ -3944,6 +3991,16 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                 snprintf(buf, sizeof(buf), "%.0f%% of one core, %.0f MB",
                          host->process_cpu_pct, host->rss_mb);
                 gp_row("Host cost", buf, ZS_TEXT);
+                {
+                    const CpuExecStatus* ex = cpu_exec_status();
+                    if (ex->fallback_reason)
+                        snprintf(buf, sizeof(buf), "%s — %s requested, %s",
+                                 cpu_exec_mode_name(ex->active),
+                                 cpu_exec_mode_name(ex->requested), ex->fallback_reason);
+                    else
+                        snprintf(buf, sizeof(buf), "%s", cpu_exec_mode_name(ex->active));
+                    gp_row("CPU engine", buf, ex->fallback_reason ? ZS_CRIT : ZS_TEXT);
+                }
                 ImGui::EndTable();
             }
             break;

@@ -33,7 +33,105 @@ identical percentiles, which is the check that a host optimisation has not moved
   "identifier uint32_t is undefined" errors in `include/cpu.h`, a header that
   `gcc -fsyntax-only` accepts on its own.
 
+#### Half the process was a busy-wait, and it was not the emulator
+
+A 70 s `perf record` of `Ace Combat 2` put **46.8% of all P-core cycles** in
+`gpu_thread_main -> X11_GL_SwapWindow -> __clock_gettime` — the NVIDIA driver spinning on a vblank it
+was about to sleep through. `__GL_YIELD=USLEEP` is the driver's own knob for it and is now set by
+`apply_gl_yield_preference()` in `main.c`, with `setenv` overwrite=0 so a value on the command line
+still wins.
+
+| | total process CPU over 60 s | `emu` per PAL field |
+|---|---|---|
+| before | 19.3 s | 3.710 ms |
+| after | **12.9 s** | 3.690 ms |
+
+It costs the emulation thread nothing — three interleaved runs each way, medians 3.710 ms against
+3.690 ms, inside a spread that put one baseline run at 4.170 ms. Frames are paced on the audio ring's
+depth, not on the swap, so a swap that returns later reaches nothing.
+
+#### Four things inlined, −12.4% of the emulation thread
+
+`emu` 3.710 ms → **3.250 ms** median of three, and the run-to-run spread collapsed with it
+(3.24-3.26 against 3.70-4.17). Verified by the golden trace below rather than by CPI: 700M
+instructions, identical fold.
+
+- **`mask_region`** was a cross-unit call for two arithmetic operations, on every load, every store
+  and every instruction fetch — 1.3% of all samples, more than `op_lw`.
+- **`cpu_reg` / `cpu_set_reg`** carried an `index >= 32` bounds check that is dead code: every index
+  comes from `instr_s/t/d`, masked `& 0x1F`, or a literal no larger than `REG_RA`. Checked by
+  enumerating every call site. The check was what kept them out of line under LTO, at 1.15% and 0.52%
+  for what is a load and a store.
+- **The three debugger hooks** were back to 4.19% + 1.85% + 0.60% — 6.6% of every cycle in the
+  process, still finding nothing, because the usual state of a run is that nothing is armed. The
+  membership filter that fixed this once is not enough: what is left to pay for is the call and the
+  filter's own cache line, cold precisely because nothing ever hits it. The exact "nobody armed
+  anything" answer is now inline on a counter that is already in cache; the filter and the list walk
+  stay out of line where they belong.
+
 ### Added
+
+#### The golden trace — the first automated check in this repository
+
+Every accuracy claim in `CLAUDE.md` was established by running a game and reading a log, and the
+LWL/LWR bug showed what that costs: months live, most of a day to find, and a defect invisible to a
+boot and to CPI because it was data-dependent. `tools/golden_trace.sh record` on a build you trust,
+`verify` after every change to the CPU, the bus, the event scheduler or the timing model.
+
+Two hashes, because they fail differently. **path** folds `(current_pc, instruction)` over every
+instruction executed and diverges on the first one that goes somewhere else; **state** folds the
+register file, HI/LO, the COP0 registers the machine uses and **both load-delay slots** at each
+checkpoint, which catches a wrong value on an otherwise identical path — the LWL/LWR shape. The
+emulated cycle count sits beside them, so a change to the timing model shows while both hashes still
+match. `docs/GOLDEN_TRACE_2026-08-29.md` has the rest, including what it does not cover.
+
+**The machine was not reproducible before it, and that is worth knowing on its own.**
+`cdrom_execute_drive()` comes back later when the async reader has not delivered
+(`cdrom_commands.c:822`), so a disc read lands at a different *emulated* cycle on every run. Measured
+on `Ace Combat 2` over 700M instructions: two runs are **identical** with `ZS1_CD_SYNC=1` and
+**diverge at 550M** without it. Anything comparing two runs of this emulator has to set it, or it is
+comparing host file I/O. `ZS1_NO_INPUT=1` closes the other channel — a keypress or a resting analog
+stick's noise reaches the guest through the SIO, and a capture taken with the window focused sent
+this session hunting a block-cache defect that did not exist.
+
+#### A block cache, and the engine the interface now names
+
+`ZS1_CPU=interpreter|blocks|jit` picks how the guest's code is run. `blocks` decodes a run of
+instructions once and keeps them with the handler already resolved — the two-level dispatch through
+`s_op_table`/`s_special_table` and the per-instruction i-cache tag lookup were 17.3% and 2.8% of the
+emulation thread. **Verified against the golden trace: 700M instructions, bit-identical to the
+interpreter.** Its speed is *not* measured yet, which is the next thing to do.
+
+This is the recompiler's front end, built and verified before anything emits x86-64, so that a defect
+in block discovery is not found through a code generator. `docs/DYNAREC_PLAN_2026-08-29.md` has the
+staging and names the hard part: the cycle model, not the code generation. PCSX-Redux charges
+`count * BIAS` once per block (`recompiler.cc:456`); that model does not survive here, because this
+emulator's per-instruction stall depends on the address.
+
+**There is no invalidation machinery, on purpose.** The interpreter does not read instructions from
+memory — it reads them from the i-cache, which on an R3000A does not snoop writes. So a block is valid
+exactly as long as its i-cache lines are, and re-entry replays those lines lazily, immediately before
+the first instruction living in each, and compares the block against what they now hold. The i-cache
+*is* the invalidation mechanism, as on the real machine, and self-modifying code behaves identically
+to the interpreter with no extra test on the store path. KSEG1 and the BIOS ROM stay on the
+interpreter for correctness: the first is uncached, and the second charges ~24 cycles a word
+interleaved with execution, which a block would have to reproduce exactly.
+
+The one real bug this turned up, caught by `ZS1_BLOCKS_VERIFY=1`: a block built while its line was
+invalid reads memory, the memory changes, some *other* fetch fills the line with the new bytes, and
+the block comes back to find its line valid and its own copy stale — still holding a `LUI` where there
+was now a `NOP`. Comparison is what is cheap here (four word comparisons per line) and decoding is
+not, so the compare is unconditional and the decode is not.
+
+- **The interface says which engine is running**, and why if it is not the one asked for. A `CPU`
+  chip on the machine bar, an *Execution engine* card in the Host HW panel with the block counters,
+  and a row in the quick menu's machine summary. Same rule as the GPU context: an engine that was
+  asked for and did not start is exactly the thing that would otherwise be blamed on the emulator.
+- **`scripts/engine_divergence.lua`** writes a per-field fingerprint of each subsystem separately —
+  CPU, IRQ, SR/Cause, the three timers, GPUSTAT, MDEC, SPU. Run it once per engine and diff: the
+  first differing line is the field, the first differing column is the subsystem. It settled in one
+  pass what the trace could only localise to a 50M-instruction interval.
+
 - **The emulator runs as a Kubernetes workload**, one pod per session, each holding a GPU, its own X
   server and its own memory cards. `deploy/k3d-cuda/` builds the cluster and `deploy/session/` builds
   the session image; both were verified against a local k3d cluster (1 server, 3 workers) on an

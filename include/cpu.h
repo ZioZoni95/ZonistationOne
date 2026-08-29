@@ -239,6 +239,10 @@ void cpu_init(Cpu* cpu, Interconnect* inter);
  */
 void cpu_run_next_instruction(Cpu* cpu);
 
+/* What the frame loop runs: one block under the block engine, one instruction
+ * under the interpreter (cpu_execution.c). */
+void cpu_run_slice(Cpu* cpu);
+
 // Dump last EXEC_TRACE_SIZE instructions to file (call on shutdown/crash).
 void cpu_dump_exec_trace(const Cpu* cpu, const char* path);
 
@@ -272,7 +276,32 @@ void handle_c0_syscall(Cpu* cpu);
  * @param index The index (0-31) of the register to read.
  * @return The 32-bit value of the register.
  */
-uint32_t cpu_reg(Cpu* cpu, RegisterIndex index);
+/* Inline, and without the `index >= 32` guard the out-of-line versions carried.
+ *
+ * That guard was dead code: every index reaching these comes from instr_s(),
+ * instr_t() or instr_d(), each of which masks with 0x1F, or from a literal no
+ * larger than REG_RA. It was not free — it kept both functions out of line under
+ * LTO, and the profile put them at 1.15% and 0.52% of all samples for what is a
+ * load and a store. Checked by enumerating every call site before removing it;
+ * if a caller is ever added that computes an index some other way, it has to
+ * mask it there, where the value comes from. */
+static inline uint32_t cpu_reg(const Cpu* cpu, RegisterIndex index) {
+    return cpu->regs[index];
+}
+
+static inline void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value) {
+    if (index != REG_ZERO) {
+        cpu->regs[index] = value;
+        /* A load in flight for this same register loses the race. Its data "isn't
+         * updated until the next opcode has completed"
+         * (psx-spx-docs/docs/cpuspecifications.md:172-174) — this write belongs to
+         * that next opcode, so it is the later one and stands. Without the cancel
+         * the load would land afterwards and quietly undo it. */
+        if (index == cpu->delay_load_reg) {
+            cpu->delay_load_reg = REG_ZERO;
+        }
+    }
+}
 
 /**
  * @brief Writes a value to a General Purpose Register (GPR).
@@ -282,7 +311,7 @@ uint32_t cpu_reg(Cpu* cpu, RegisterIndex index);
  * @param index The index (0-31) of the register to write.
  * @param value The 32-bit value to write.
  */
-void cpu_set_reg(Cpu* cpu, RegisterIndex index, uint32_t value);
+
 
 /**
  * @brief Lands any in-flight load immediately, for exception entry.
@@ -316,6 +345,14 @@ const char* disassemble_mips(uint32_t instruction, uint32_t pc);
 
 // --- Instruction dispatch handler type ---
 typedef void (*cpu_handler_t)(Cpu*, uint32_t);
+
+/* Resolve an instruction to its handler without running it (cpu_decode.c). */
+cpu_handler_t cpu_decode_handler(uint32_t instruction);
+
+/* Fill one i-cache line as a fetch of word_index would, copying its words out
+ * and reporting whether it missed. Used by the block cache (cpu_icache.c). */
+bool cpu_icache_touch_line(Cpu* cpu, uint32_t line_paddr, uint32_t word_index,
+                           uint32_t out_words[4], bool count_cycles);
 
 // --- Instruction Handler Prototypes (Internal linkage) ---
 // These functions implement the behavior of individual MIPS instructions.

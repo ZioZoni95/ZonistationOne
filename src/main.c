@@ -31,6 +31,8 @@
 #include "cdrom_audio.h"
 #include "log.h"
 #include "debug_ui.h"
+#include "golden_trace.h"
+#include "cpu_exec.h"
 #include "event_scheduler.h"
 #include "controller.h"
 #include "debugger.h"
@@ -123,6 +125,30 @@ static void apply_gpu_preference(void) {
     }
     /* Whether the request was honoured is only knowable from the GL strings, which
      * are logged once the context is up. Compare them, do not assume. */
+}
+
+/* Stop the GL driver spinning while it waits for vblank.
+ *
+ * Measured, because it does not look like anything from inside the emulator: a
+ * 70 s perf record of Ace Combat 2 put 46.8% of all P-core cycles in the GPU
+ * thread, and the call chain was gpu_thread_main -> X11_GL_SwapWindow ->
+ * __clock_gettime. That is the NVIDIA driver busy-waiting on the vblank it is
+ * about to sleep through anyway — a whole core burned doing nothing, on a
+ * machine whose emulation thread uses 18% of one.
+ *
+ * __GL_YIELD=USLEEP is the driver's own knob for it and costs nothing here:
+ * three interleaved runs each way put the emulation thread at a 3.710 ms median
+ * against 3.690 ms, which is inside the run-to-run spread (one baseline run read
+ * 4.170). Total process CPU over 60 s of the same gameplay went from 19.3 s to
+ * 12.9 s.
+ *
+ * Frames are not paced by the swap — main() paces on the audio ring's depth, or
+ * on the emulated refresh when there is no device — so a swap that returns a
+ * little later reaches nothing. setenv() with overwrite=0, so a value on the
+ * command line still wins, including __GL_YIELD="" for the driver's default
+ * spin if a session ever wants the latency back. */
+static void apply_gl_yield_preference(void) {
+    setenv("__GL_YIELD", "USLEEP", 0);
 }
 
 /* Which rendering backend to bring up.
@@ -260,6 +286,7 @@ static void destroy_gfx_window(SdlCtx* s) {
 
 static bool init_sdl(SdlCtx* out, GfxBackendType backend) {
     apply_gpu_preference();
+    apply_gl_yield_preference();
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         LOG_SYSTEM_ERROR("[SYSTEM] SDL_Init: %s", SDL_GetError());
@@ -580,6 +607,11 @@ int main(int argc, char* argv[]) {
     if (!parse_args(argc, argv, &args)) return 1;
 
     log_init();
+    /* After log_init(), not with the other environment reads before SDL: this one
+     * has nothing to set up before the GL context, and put earlier its lines —
+     * including the one saying an engine was asked for and did not start — were
+     * written before there was a log to write them to. */
+    cpu_exec_init();
     if (getenv("ZS1_LOG_STDERR")) log_set_stderr_quiet(false);
     if (getenv("ZS1_LOG_TRACE"))  log_set_level(LOG_LEVEL_TRACE);
     /* ZS1_LOG_LEVEL=silent|error|warn|info|debug|trace — the level is a real
@@ -706,6 +738,15 @@ int main(int argc, char* argv[]) {
         debug_ui_set_machine_info(bn, dn);
     }
 
+    /* Opens the golden trace if ZS1_TRACE names a file; a no-op otherwise, and
+     * compiled out entirely in a normal build. Here rather than earlier so the
+     * machine is fully built and the very first traced instruction is the first
+     * one the CPU runs. */
+    zs1_trace_init();
+
+    const bool s_no_input = getenv("ZS1_NO_INPUT") != NULL;
+    if (s_no_input) LOG_SYSTEM_INFO("[SYSTEM] ZS1_NO_INPUT — keyboard and pad are ignored");
+
     // --- Main loop ---
     bool quit = false;
     SDL_Event ev;
@@ -726,7 +767,19 @@ int main(int argc, char* argv[]) {
 
     while (!quit) {
         while (SDL_PollEvent(&ev)) {
-            controller_process_event(&gamepad, &ev);
+            /* ZS1_NO_INPUT seals the machine off from the keyboard and the pad.
+             *
+             * A golden-trace capture is only comparable against another one if
+             * nothing outside the emulator reaches the guest, and a keypress or
+             * a resting analog stick's noise does exactly that, through the SIO.
+             * This cost two runs and most of a diagnosis: a capture taken while
+             * somebody had the window focused diverged at 650M instructions and
+             * the same binary, left alone, matched — so the search went looking
+             * for a defect in the block cache that was not there.
+             *
+             * Window management still works, so a run can still be closed by
+             * hand; the harness notices a short trace and says so. */
+            if (!s_no_input) controller_process_event(&gamepad, &ev);
             debug_ui_process_event(&ev);
             if (ev.type == SDL_EVENT_QUIT) {
                 /* Say who ended the session: a window closed by the desktop and
@@ -890,6 +943,13 @@ int main(int argc, char* argv[]) {
 
         /* Run the machine for one video frame (or one debugger step). */
         system_run_frame(&inter, &cpu);
+        /* The golden trace ends the session itself, so a harness run needs no
+         * timeout and no window interaction, and always stops after exactly the
+         * same number of instructions. Compiled out in a normal build. */
+        if (zs1_trace_done()) {
+            LOG_SYSTEM_INFO("[SYSTEM] Quit: golden trace complete");
+            quit = true;
+        }
         if (s_prof) t1 = SDL_GetPerformanceCounter();
 
         /* Update machine-bar vitals from the counters we already hold. Wall
@@ -996,6 +1056,7 @@ int main(int argc, char* argv[]) {
     }
 
     // --- Cleanup ---
+    zs1_trace_finish();
     cpu_dump_exec_trace(&cpu, "logs/exec_trace.log");
     audio_shutdown();
     renderer_stop_gpu_thread(&inter.gpu.renderer);

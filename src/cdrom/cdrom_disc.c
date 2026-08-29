@@ -699,30 +699,65 @@ void cdrom_async_reader_queue(CdromAsyncReader *r, uint32_t lba) {
     pthread_mutex_unlock(&r->mutex);
 }
 
+/* ZS1_CD_SYNC makes the drive wait for the disc instead of coming back later.
+ *
+ * The PENDING path below is the one thing that makes a run irreproducible.
+ * Whether a sector has arrived by the time the drive looks for it depends on
+ * host file I/O, so the same read lands at a different *emulated* cycle on every
+ * run, and everything after it diverges. That is the right trade for playing a
+ * game — see the note at the PENDING caller in cdrom_commands.c for what
+ * blocking there cost — and the wrong one for comparing two builds instruction
+ * by instruction.
+ *
+ * So: off by default, nothing changes for a normal run; on for the golden-trace
+ * harness, where a stalled frame costs nothing and determinism is the whole
+ * point. Read once, because this sits inside the drive loop. */
+static bool cd_sync_mode(void) {
+    static int cached = -1;
+    if (cached < 0) {
+        const char *s = getenv("ZS1_CD_SYNC");
+        cached = (s && *s && *s != '0');
+        if (cached)
+            LOG_CDROM_INFO("[CDROM] ZS1_CD_SYNC — the drive waits for the disc "
+                           "(reproducible timing, stalled frames)");
+    }
+    return cached != 0;
+}
+
 CdromSectorStatus cdrom_async_reader_poll(CdromAsyncReader *r, uint8_t *out_sector,
                                           uint32_t want_lba) {
+    const bool sync = cd_sync_mode();
     pthread_mutex_lock(&r->mutex);
 
-    if (r->shutdown) { pthread_mutex_unlock(&r->mutex); return CDROM_SECTOR_FAILED; }
+    for (;;) {
+        if (r->shutdown) { pthread_mutex_unlock(&r->mutex); return CDROM_SECTOR_FAILED; }
 
-    if (r->sector_ready) {
-        if (r->ready_lba == want_lba) {
-            bool ok = r->read_ok;
-            if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
-            r->sector_ready = false;
-            pthread_mutex_unlock(&r->mutex);
-            return ok ? CDROM_SECTOR_READY : CDROM_SECTOR_FAILED;
+        if (r->sector_ready) {
+            if (r->ready_lba == want_lba) {
+                bool ok = r->read_ok;
+                if (ok) memcpy(out_sector, r->sector, CDROM_RAW_SECTOR);
+                r->sector_ready = false;
+                pthread_mutex_unlock(&r->mutex);
+                return ok ? CDROM_SECTOR_READY : CDROM_SECTOR_FAILED;
+            }
+            r->sector_ready = false;   /* a sector we no longer want */
         }
-        r->sector_ready = false;   /* a sector we no longer want */
-    }
 
-    /* Nothing in flight for what we want, so ask. Covers both a queue() that
-     * was overwritten by a later one and a caller that never queued. */
-    if (!r->busy && !r->has_request) {
-        r->requested_lba = want_lba;
-        r->has_request   = true;
-        pthread_cond_signal(&r->cond_req);
+        /* Nothing in flight for what we want, so ask. Covers both a queue() that
+         * was overwritten by a later one and a caller that never queued. */
+        if (!r->busy && !r->has_request) {
+            r->requested_lba = want_lba;
+            r->has_request   = true;
+            pthread_cond_signal(&r->cond_req);
+        }
+
+        if (!sync) {
+            pthread_mutex_unlock(&r->mutex);
+            return CDROM_SECTOR_PENDING;
+        }
+        /* Loop rather than return: the reader signals every completion, and the
+         * one it just finished may be a sector we asked for before the caller
+         * moved the head. */
+        pthread_cond_wait(&r->cond_done, &r->mutex);
     }
-    pthread_mutex_unlock(&r->mutex);
-    return CDROM_SECTOR_PENDING;
 }

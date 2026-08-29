@@ -71,9 +71,35 @@ bool debugger_remove_read_watchpoint(Debugger* dbg, uint32_t addr);
 bool debugger_add_write_watchpoint(Debugger* dbg, uint32_t addr);
 bool debugger_remove_write_watchpoint(Debugger* dbg, uint32_t addr);
 
-void debugger_check_breakpoint(Debugger* dbg, struct Cpu* cpu);
-void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size);
-void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size);
+/* The three hot checks: one per instruction, one per load, one per store.
+ *
+ * The membership filter below them turned the common answer into a load and a
+ * bit test, and that was worth 2.92% of samples when it landed. It is not
+ * enough. A 70 s profile now puts the three at 4.19%, 1.85% and 0.60% — 6.6% of
+ * every cycle in the process — and they are still finding nothing, because the
+ * usual state of a run is that no breakpoint and no watchpoint exists at all.
+ * What is left to pay for is the cross-unit call and the filter's own cache
+ * line, which is cold precisely because nothing ever hits it.
+ *
+ * So the exact "nobody armed anything" answer moves inline and reads a counter
+ * that is already in cache — the Debugger sits inside the Interconnect, which
+ * the loop touches every instruction anyway. The filter and the list walk stay
+ * out of line, where they belong: they only run once something is armed. */
+void debugger_breakpoint_slow(Debugger* dbg, struct Cpu* cpu);
+void debugger_read_watchpoint_slow(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size);
+void debugger_write_watchpoint_slow(Debugger* dbg, struct Cpu* cpu, uint32_t addr, uint32_t size);
+
+static inline void debugger_check_breakpoint(Debugger* dbg, struct Cpu* cpu) {
+    if (dbg->breakpoint_count != 0) debugger_breakpoint_slow(dbg, cpu);
+}
+static inline void debugger_check_read_watchpoint(Debugger* dbg, struct Cpu* cpu,
+                                                  uint32_t addr, uint32_t size) {
+    if (dbg->read_watchpoint_count != 0) debugger_read_watchpoint_slow(dbg, cpu, addr, size);
+}
+static inline void debugger_check_write_watchpoint(Debugger* dbg, struct Cpu* cpu,
+                                                   uint32_t addr, uint32_t size) {
+    if (dbg->write_watchpoint_count != 0) debugger_write_watchpoint_slow(dbg, cpu, addr, size);
+}
 void debugger_handle_break(Debugger* dbg, struct Cpu* cpu, const char* reason);
 
 #endif // DEBUGGER_H

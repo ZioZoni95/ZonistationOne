@@ -29,7 +29,12 @@ gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale),
 `ZS1_SBI=<path>` (the LibCrypt patch file for the mounted disc, overriding the automatic search),
 `ZS1_GFX=gl|vulkan` (which renderer starts; also changeable at runtime from Esc -> Video),
 `ZS1_VK_VALIDATE=1` (Vulkan validation layer), `ZS1_GFX_SWITCH_TEST=<n>` (flip the renderer every
-n fields — the leak check for the switch path).
+n fields — the leak check for the switch path), `ZS1_TRACE=<path>` + `ZS1_TRACE_EVERY=<n>` +
+`ZS1_TRACE_STOP=<n>` (the golden trace, below), `ZS1_CD_SYNC=1` (the drive waits for the disc instead
+of coming back later — required for a reproducible run, and only for that),
+`ZS1_CPU=interpreter|blocks|jit` (which execution engine runs the guest; the machine bar's CPU chip
+and the Host HW panel's *Execution engine* card say which one actually started, and why if it is not
+the one asked for).
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -38,6 +43,15 @@ rendering difference as an emulator bug.
 
 `ZS1_RAM_LOAD_STALL=<n>` overrides the per-load RAM cost (default 3). `0` restores the old flat
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
+
+**`__GL_YIELD=USLEEP` is set for you** (`apply_gl_yield_preference()`, `main.c`), and it is not
+cosmetic: a 70 s perf record of Ace Combat 2 put **46.8% of all P-core cycles in the process** inside
+`gpu_thread_main -> X11_GL_SwapWindow -> __clock_gettime` — the NVIDIA driver busy-waiting on a
+vblank it is about to sleep through. Total process CPU over 60 s of the same gameplay went 19.3 s ->
+12.9 s with it, and the emulation thread did not move (3.710 ms against 3.690 ms, median of three
+interleaved runs each way). Frames are paced on the audio ring's depth, not on the swap, so a swap
+that returns later reaches nothing. It is `setenv` with overwrite=0, so a value on the command line
+still wins.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
 
@@ -463,9 +477,24 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
 
-`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: what exists (nothing automated),
-the four layers proposed, and the order. Read it before adding a test, and before claiming a
-subsystem is verified.
+`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: the four layers proposed and the
+order. Read it before adding a test, and before claiming a subsystem is verified.
+
+**The golden trace is the first automated check this repository has** (2026-08-29,
+`tools/golden_trace.sh`, `src/core/golden_trace.c`, `docs/GOLDEN_TRACE_2026-08-29.md`). A run folds
+`(current_pc, instruction)` over every instruction executed and the register file, HI/LO, the COP0
+registers and **both load-delay slots** at each checkpoint, alongside the emulated cycle count.
+`record` on a build you trust, `verify` after every change to the CPU, the bus, the event scheduler
+or the timing model; a pass means the same instructions ran in the same order with the same register
+contents at the same emulated cycle. It exists because the LWL/LWR bug was invisible to a boot and to
+CPI, and it is the gate on the dynarec work in `docs/DYNAREC_PLAN_2026-08-29.md`.
+
+**The machine was not reproducible before it, and that is worth knowing on its own.**
+`cdrom_execute_drive()` comes back later when the async reader has not delivered
+(`cdrom_commands.c:822`), so a disc read lands at a different *emulated* cycle on every run. Measured:
+two runs of Ace Combat 2 over 700M instructions are **identical** with `ZS1_CD_SYNC=1` and **diverge
+at 550M** without it. Anything that compares two runs of this emulator — not just the trace — has to
+set it, or it is comparing host file I/O.
 
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative

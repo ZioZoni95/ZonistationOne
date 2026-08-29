@@ -8,10 +8,14 @@
 #include "cpu.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "interconnect.h"
 #include "event_scheduler.h"
 #include "gte.h"
 #include "debugger.h"
+#include "golden_trace.h"
+#include "cpu_blocks.h"
+#include "cpu_exec.h"
 #include "log.h"
 
 // ============================================================================
@@ -19,7 +23,7 @@
 // ============================================================================
 
 // Check for pending hardware interrupt - called once per instruction
-static inline bool CheckPendingInterrupt(Cpu* cpu) {
+static inline bool CheckPendingInterrupt(Cpu* cpu, const uint32_t* known_instr) {
     // Per PSX-SPX: interrupt pending if (I_STAT & I_MASK) != 0 AND SR.IE == 1
     uint16_t i_stat = cpu->inter->irq_status;
     uint16_t i_mask = cpu->inter->irq_mask;
@@ -40,7 +44,11 @@ static inline bool CheckPendingInterrupt(Cpu* cpu) {
     if (has_interrupt) {
         /* PSX-SPX: do not take IRQ if the next instruction is a GTE opcode (COP2 data op).
            Defer until the GTE instruction completes to avoid EPC pointing into a GTE op. */
-        uint32_t next_instr = cpu_icache_fetch(cpu, cpu->current_pc, false);
+        /* The block runner already holds this word, so it hands it over rather
+         * than paying a second lookup. Identical either way: the line is valid
+         * by the time the runner gets here, so the fetch would hit. */
+        uint32_t next_instr = known_instr ? *known_instr
+                                          : cpu_icache_fetch(cpu, cpu->current_pc, false);
         if ((next_instr & 0xFE000000) == 0x4A000000) return false;
         cpu_exception(cpu, EXCEPTION_INTERRUPT);
         return true;
@@ -88,42 +96,22 @@ void cpu_flush_load_delay(Cpu* cpu) {
     }
 }
 
-// Main execution cycle - called for each instruction
-void cpu_run_next_instruction(Cpu* cpu) {
-    // exception_pending is per-instruction state; clear it before running this step.
-    cpu->exception_pending = false;
-
-    /* --- 1. (was: commit the pending load here, before executing) ---
-     *
-     * Moved to cpu_retire_load_delay(), after the instruction executes. Landing
-     * it here made the loaded value visible to the very next opcode, which is
-     * precisely what the R3000A does not do: "The loaded data is NOT available
-     * to the next opcode, ie. the target register isn't updated until the next
-     * opcode has completed" (psx-spx-docs/docs/cpuspecifications.md:172-174).
-     * The delay slot was therefore not modelled at all, and the LWL/LWR code
-     * that merges with a load still in flight could never fire, because this
-     * cleared the slot before any following instruction could see it. */
-
-    // Establish current-instruction context before any potential interrupt exception.
-    // This matches R3000A behavior where IRQ is taken between instructions, and BD/EPC
-    // are derived from the instruction about to execute.
-    cpu->current_pc = cpu->pc;
-    cpu->in_delay_slot = cpu->branch_taken;
-
-    // --- 2. Check for pending interrupt ---
-    if (CheckPendingInterrupt(cpu)) {
-        return; // Exception raised, PC already updated
-    }
-
-    // --- 3. Fetch Instruction ---
-    
-    // Check PC alignment
-    if (cpu->current_pc % 4 != 0) {
-        cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
-        return;
-    }
-    
-    uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc, true);
+/* One instruction, from the branch-state update to the event dispatch.
+ *
+ * Shared by the interpreter and the block runner, and shared rather than copied
+ * on purpose: these two paths have to stay bit-identical, and the way that fails
+ * is somebody fixing one of two near-identical copies. The only thing the block
+ * runner supplies that the interpreter does not is `fn`, the handler already
+ * resolved at build time — passing NULL takes the two-level table walk instead.
+ *
+ * Returns false when straight-line execution has to stop: an exception, a
+ * debugger pause, or a BIOS call answered by HLE, which jumps to $ra. */
+static inline bool cpu_step_body(Cpu* cpu, uint32_t instruction, cpu_handler_t fn) {
+    /* The golden trace folds (current_pc, instruction) here, before anything
+     * can change either — and before the breakpoint check below, which can
+     * return early and would otherwise drop an instruction from the fold on a
+     * paused run only. */
+    zs1_trace_step(cpu, instruction);
 
     // Record into execution trace ring buffer (frozen after first crash dump)
     if (!cpu->exec_trace_frozen) {
@@ -133,20 +121,10 @@ void cpu_run_next_instruction(Cpu* cpu) {
         if (cpu->exec_trace_count < EXEC_TRACE_SIZE) cpu->exec_trace_count++;
     }
 
-    // --- 4. Update Branch State ---
+    // --- Update Branch State ---
     cpu->branch_taken = false;
-    
-    // Advance PC
     cpu->pc = cpu->next_pc;
     cpu->next_pc = cpu->pc + 4;
-    
-    /* --- 5. (was: commit the second register file into the first) ---
-     *
-     * Gone. Writes land in cpu->regs directly now, so there is nothing to
-     * commit; see the comment on Cpu::regs in cpu.h for why that is
-     * behaviour-preserving. What used to be here was
-     * `memcpy(cpu->regs, cpu->out_regs, sizeof(cpu->regs))` — 128 bytes per
-     * instruction, and the largest single constant on this path. */
 
     // --- Breakpoint check (before executing the instruction, so cpu->regs
     // reflects fully-settled state — a debugger callback that runs any earlier
@@ -154,7 +132,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // immediately preceding instruction just wrote). ---
     if (!cpu->inter->debugger.step_skip_bp) {
         debugger_check_breakpoint(&cpu->inter->debugger, cpu);
-        if (cpu->inter->debugger.paused) return;
+        if (cpu->inter->debugger.paused) return false;
     } else {
         cpu->inter->debugger.step_skip_bp = false;
     }
@@ -164,10 +142,7 @@ void cpu_run_next_instruction(Cpu* cpu) {
     // inside op_jr's own handler: the real calling convention sets $t1 (the
     // function-select register) in the JR's delay-slot instruction (e.g.
     // "jr $10 ; addiu $9,$0,0xA1", confirmed via disassembly trace), so $t1
-    // is only valid after that delay-slot instruction has committed — which
-    // happens via the regs commit just above, one cpu_run_next_instruction
-    // call after the JR itself. Intercepting inside op_jr would read $t1 one
-    // instruction too early (stale, misattributing calls in debug logs).
+    // is only valid after that delay-slot instruction has committed.
     if (cpu->current_pc == 0x000000A0 || cpu->current_pc == 0x000000B0 || cpu->current_pc == 0x000000C0) {
         bool hle = false;
         if (cpu->current_pc == 0x000000A0)
@@ -185,47 +160,186 @@ void cpu_run_next_instruction(Cpu* cpu) {
             cpu->pc = cpu->regs[31];  // $ra: return to caller, as if the call fully executed
             cpu->next_pc = cpu->pc + 4;
             cpu->branch_taken = true;
-            return;
+            return false;
         }
     }
 
-    // --- 6. Decode and Execute ---
-    decode_and_execute(cpu, instruction);
+    // --- Decode and Execute ---
+    if (fn) fn(cpu, instruction);
+    else    decode_and_execute(cpu, instruction);
     if (cpu->exception_pending) {
         /* cpu_exception() already drained the pipeline: the load completes
          * during handling (cpuspecifications.md:175-177), and this instruction
          * never completed, so there is nothing to rotate. */
-        return;
+        return false;
     }
 
-    // --- 7. Finalize ---
+    // --- Finalize ---
     /* The instruction has completed, so the previous one's load lands now and
      * this one's takes its place. Anything this instruction wrote to the same
      * register already cancelled the pending load inside cpu_set_reg. */
     cpu_retire_load_delay(cpu);
     cpu->regs[REG_ZERO] = 0;   /* cheap belt-and-braces; cpu_set_reg drops R0 writes */
 
-    // --- 8. Advance Cycle Counters ---
+    // --- Advance Cycle Counters ---
     // Base cost is one cycle, plus whatever this instruction's data access(es)
-    // owed. The bus accumulated that during execute (bus_charge_cpu_data_access);
-    // charging it here rather than inside the access keeps a single instruction's
-    // cost atomic, so an event scheduled mid-instruction cannot fire between an
-    // instruction's memory stall and its retirement.
+    // owed. The bus accumulated that during execute; charging it here rather
+    // than inside the access keeps a single instruction's cost atomic, so an
+    // event scheduled mid-instruction cannot fire between an instruction's
+    // memory stall and its retirement.
     uint32_t stall = cpu->inter->cpu_mem_stall_cycles;
     cpu->inter->cpu_mem_stall_cycles = 0;
     cpu->inter->cpu_cycle_counter += 1u + stall;
     cpu->inter->instructions_retired++;
     cpu->downcount -= (int32_t)(1u + stall);
 
-    // --- 9. Dispatch Events (event-scheduler downcount) ---
+    // --- Dispatch Events (event-scheduler downcount) ---
     if (cpu->downcount <= 0) {
         eventq_dispatch_due(cpu->inter);
-        // Recalculate downcount = cycles until next scheduled event
         uint32_t next = cpu->inter->evq_next_cycle;
         uint32_t now  = cpu->inter->cpu_cycle_counter;
         cpu->downcount = (next != UINT32_MAX && (int32_t)(next - now) > 0)
                        ? (int32_t)(next - now) : 1;
     }
+    return true;
+}
+
+// Main execution cycle - called for each instruction
+void cpu_run_next_instruction(Cpu* cpu) {
+    // exception_pending is per-instruction state; clear it before running this step.
+    cpu->exception_pending = false;
+
+    // Establish current-instruction context before any potential interrupt exception.
+    // This matches R3000A behavior where IRQ is taken between instructions, and BD/EPC
+    // are derived from the instruction about to execute.
+    cpu->current_pc = cpu->pc;
+    cpu->in_delay_slot = cpu->branch_taken;
+
+    if (CheckPendingInterrupt(cpu, NULL)) return;   // exception raised, PC already updated
+
+    if (cpu->current_pc % 4 != 0) {
+        cpu_exception(cpu, EXCEPTION_LOAD_ADDRESS_ERROR);
+        return;
+    }
+
+    uint32_t instruction = cpu_icache_fetch(cpu, cpu->current_pc, true);
+    (void)cpu_step_body(cpu, instruction, NULL);
+}
+
+/* Run one cached block, or one instruction when there is no block to run.
+ *
+ * The i-cache lines behind the block are replayed here, each immediately before
+ * the first instruction that lives in it — not all at entry. An instruction can
+ * write the memory a later line of its own block reads, and filling early would
+ * show the block the old bytes where the interpreter sees the new ones. A line
+ * that had to be filled hands its words back to the cache, which re-decodes the
+ * ops behind it; if that would change the block's shape the block is dropped and
+ * the interpreter takes the instruction. See cpu_blocks.h for why this is the
+ * whole of the invalidation story. */
+static bool s_blocks_verify;
+
+static void cpu_run_block(Cpu* cpu) {
+    const uint32_t vaddr = cpu->pc;
+    if (vaddr & 3u) { cpu_run_next_instruction(cpu); return; }
+
+    RecBlock* b = cpu_blocks_lookup(cpu, vaddr, mask_region(vaddr));
+    if (!b) { cpu_run_next_instruction(cpu); return; }
+
+    uint32_t words[ICACHE_LINE_WORDS];
+    uint32_t expect = vaddr;
+    uint32_t li  = 0;
+    uint32_t ran = 0;
+
+    for (uint32_t i = 0; i < b->count; i++) {
+        if (li < b->line_count && b->line_op0[li] == i) {
+            /* Revalidate on every entry, not only when the touch had to fill.
+             *
+             * "The line filled, so re-read it" is not enough, and the case it
+             * misses is the one that actually happens: a block is built while
+             * its line is invalid, so it reads memory; the memory then changes;
+             * some *other* fetch fills the line with the new bytes; and when
+             * this block comes back the line is valid, the touch reports no
+             * fill, and the block keeps serving what memory used to hold. Caught
+             * at pc=0x00000CF0 by ZS1_BLOCKS_VERIFY, where the block still had a
+             * LUI that had since become a NOP.
+             *
+             * So the words come back either way and the block is checked against
+             * them. It is cheap in the case that matters: reload_line compares
+             * first and only re-decodes what actually changed, so a block whose
+             * bytes are stable pays four word comparisons per cache line — about
+             * one per instruction — and never touches the decode tables. */
+            cpu_icache_touch_line(cpu, b->line_paddr[li], b->line_word0[li], words, true);
+            if (!cpu_blocks_reload_line(b, li, words)) {
+                b->count = 0;                     /* the code under it changed shape */
+                cpu_exec_status_mut()->blocks_invalidated++;
+                break;
+            }
+            li++;
+        }
+
+        cpu->exception_pending = false;
+        cpu->current_pc    = cpu->pc;
+        cpu->in_delay_slot = cpu->branch_taken;
+
+        /* Straight-line only. Anything that moved the PC elsewhere ends the
+         * block here and the next lookup starts from wherever it went. */
+        if (cpu->current_pc != expect) break;
+
+        /* ZS1_BLOCKS_VERIFY=1: does this block still hold what a fetch would
+         * return? That is the one assumption the whole design rests on — a
+         * block is valid exactly as long as its i-cache lines are — and it is
+         * cheaper to test it directly than to bisect a golden trace. The fetch
+         * hits, because the line was touched above, so this changes nothing
+         * beyond the time it takes. */
+        if (s_blocks_verify) {
+            const uint32_t want = cpu_icache_fetch(cpu, cpu->current_pc, false);
+            if (want != b->ops[i].instruction || cpu_decode_handler(want) != b->ops[i].fn) {
+                LOG_CPU_ERROR("[CPU] block mismatch at pc=0x%08X op %u/%u: "
+                              "block has 0x%08X, fetch says 0x%08X (block paddr 0x%08X)",
+                              cpu->current_pc, i, b->count,
+                              b->ops[i].instruction, want, b->paddr);
+                s_blocks_verify = false;   /* one report, not a flood */
+            }
+        }
+
+        if (CheckPendingInterrupt(cpu, &b->ops[i].instruction)) break;
+        if (!cpu_step_body(cpu, b->ops[i].instruction, b->ops[i].fn)) { ran++; break; }
+
+        ran++;
+        expect += 4;
+
+        /* The frame ends where VBlank says it ends, not at the end of whatever
+         * block happened to contain it. system_run_frame() tests this between
+         * slices, so without the test here a block would carry up to 31
+         * instructions past the boundary — the machine's state stays consistent
+         * either way, but the host work main() does between frames (submitting
+         * the field, polling input, pacing the audio ring) would land at a
+         * different instruction than the interpreter puts it at, and the two
+         * engines have to be indistinguishable. */
+        if (cpu->inter->frame_complete) break;
+    }
+
+    cpu_exec_status_mut()->instr_from_cache += ran;
+}
+
+/* What the frame loop runs: a block under the block engine, one instruction
+ * under the interpreter. The debugger's single-step stays on
+ * cpu_run_next_instruction, which is the point of it. */
+void cpu_run_slice(Cpu* cpu) {
+    static int verify_cached = -1;
+    if (verify_cached < 0) {
+        const char* v = getenv("ZS1_BLOCKS_VERIFY");
+        verify_cached = (v && *v && *v != '0');
+        s_blocks_verify = verify_cached != 0;
+        if (s_blocks_verify)
+            LOG_CPU_INFO("[CPU] ZS1_BLOCKS_VERIFY — every cached instruction is "
+                         "compared against a fetch; slow, and for diagnosis only");
+    }
+    if (cpu_exec_status()->active == CPU_EXEC_INTERPRETER) {
+        cpu_run_next_instruction(cpu);
+        return;
+    }
+    cpu_run_block(cpu);
 }
 
 // Safe memory peek for trace output — no bus side effects, no exceptions.
