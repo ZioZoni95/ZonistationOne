@@ -39,7 +39,8 @@ identical percentiles, which is the check that a host optimisation has not moved
   the session image; both were verified against a local k3d cluster (1 server, 3 workers) on an
   RTX 4060, booting `Ace Combat 2 (Europe)` and `Crash Bandicoot 3` side by side from a single
   `kubectl apply`. A session is selected entirely by environment — `ZS1_GAME` picks the disc,
-  `ZS1_SESSION` names the working directory — so two sessions differ only in their manifest.
+  `ZS1_SESSION` names the working directory — so two sessions differ only in their manifest. Three
+  run side by side: Ace Combat 2, Crash Bandicoot 3 and Dino Crisis, one per worker node.
 
   Nothing about the machine's content is in an image. The BIOS and the discs stay on the host, reach
   the nodes as bind mounts, and are exposed to one namespace by PersistentVolumes whose `claimRef` is
@@ -90,7 +91,7 @@ identical percentiles, which is the check that a host optimisation has not moved
     published on 8081, so it chose the port-forward route and dialled a port nothing served.
   - Every ICE candidate was a pod address (`10.44.x.x`) or link-local, and the media is UDP that no
     Ingress carries. `hostNetwork` moves the pipeline onto the node's own `172.19.0.x`, which the
-    host reaches over the Docker bridge; anti-affinity keeps two sessions off one node, since the
+    host reaches over the Docker bridge; anti-affinity keeps sessions off a shared node, since the
     ports are now the node's.
 
   It is served over HTTPS on the tailnet through `tailscale serve`, with a real certificate and no

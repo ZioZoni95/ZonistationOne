@@ -210,7 +210,7 @@ display and its own memory cards. It was built and verified against a local **k3
 kubectl apply -f deploy/k3d-cuda/zs1-storage.yaml   # namespace, disks, GPU budget
 docker build -f deploy/session/Dockerfile -t zs1/session:dev .
 k3d image import zs1/session:dev -c cluster-zs1     # node containerd cannot see the host's images
-kubectl apply -f deploy/session/sessions.yaml       # two sessions, two different discs
+kubectl apply -f deploy/session/sessions.yaml       # three sessions, three different discs
 kubectl port-forward -n zs1 svc/zs1-acecombat 6080:6080
 ```
 
@@ -257,7 +257,7 @@ holds it today.
 ### Watching a session
 
 Each session publishes three ports. Forward them together — the player page derives the audio port
-from the one it is served on (`N` -> `N+1`), so mapping them as a block is what lets two sessions run
+from the one it is served on (`N` -> `N+1`), so mapping them as a block is what lets several sessions run
 side by side:
 
 ```sh
