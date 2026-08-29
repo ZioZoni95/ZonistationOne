@@ -283,13 +283,23 @@ Two ways in, and they are not equivalent:
 
 ### Through the Ingress
 
-`deploy/session/ingress.yaml` publishes both sessions on one port with Traefik, one hostname each:
+`deploy/session/ingress.yaml` publishes the sessions on one port with Traefik, one hostname each,
+behind a rate limit, security headers and basic auth. Each session has its own credential, so one
+that leaks costs one session rather than all of them — create them before applying:
 
 ```sh
-kubectl create secret generic zs1-auth -n zs1 \
-  --from-literal=users="zs1:$(openssl passwd -apr1 "$(read -s -p 'password: ' p; echo "$p")")"
+for game in acecombat crash dino; do
+  read -rsp "password for $game: " pass; echo
+  kubectl create secret generic "zs1-auth-$game" -n zs1 \
+    --from-literal=users="$USER_NAME:$(openssl passwd -apr1 "$pass")"
+done
 kubectl apply -f deploy/session/ingress.yaml
 ```
+
+Set `USER_NAME` to whatever login you want; it is the same for every session and appears only in the
+secret. No credential is stored in this repository — a committed htpasswd hash is a committed
+credential — so they live in the cluster and in your password manager, nowhere else. `kubectl delete
+cluster` takes them with it and they have to be recreated.
 
 | | |
 |---|---|

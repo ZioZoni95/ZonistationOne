@@ -5,26 +5,10 @@
 # network. An Ingress removes that, so it carries basic auth: without the
 # middleware anyone who can route to the host can drive the emulated machine.
 #
-# The credential itself is NOT in this file and must not be: a committed
-# htpasswd hash is a committed credential. Create the secret separately, once:
-#
-#   P=$(openssl rand -base64 12 | tr -d "/+=" | head -c 14)
-#   kubectl create secret generic zs1-auth -n zs1 \
-#     --from-literal=users="zs1:$(openssl passwd -apr1 "$P")"
-#   echo "password: $P"
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: zs1-basicauth
-  namespace: zs1
-spec:
-  basicAuth:
-    secret: zs1-auth
-    realm: ZoniStation One
----
-# Rate limit. A single password in front of three live machines is worth
-# guessing at; this makes guessing at speed impractical. Applied to every route,
-# not only the auth challenge, since the challenge is what an attacker retries.
+# No credential is in this file and none may be: a committed htpasswd hash is a
+# committed credential. One secret per game, created out of band — see the
+# README. Losing them costs nothing but retyping; they exist only in the cluster
+# and in whatever the operator keeps them in.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
