@@ -132,6 +132,68 @@ static void emit_test_al_al(Emit* e) { e8(e, 0x84); e8(e, 0xC0); }
 /* inc r12d */
 static void emit_inc_r12d(Emit* e) { e8(e, 0x41); e8(e, 0xFF); e8(e, 0xC4); }
 
+/* mov ecx, dword [rbx+disp] */
+static void emit_mov_ecx_m32(Emit* e, uint32_t disp) { e8(e, 0x8B); modrm_bx(e, 1, disp); }
+/* <alu> eax, dword [rbx+disp] — opcode is the /r form's first byte */
+static void emit_alu_eax_m32(Emit* e, uint8_t opcode, uint32_t disp) {
+    e8(e, opcode); modrm_bx(e, 0, disp);
+}
+/* <alu> eax, imm32 — ext is the ModRM /digit */
+static void emit_alu_eax_imm32(Emit* e, uint8_t ext, uint32_t v) {
+    e8(e, 0x81); e8(e, (uint8_t)(0xC0 | (ext << 3))); e32(e, v);
+}
+/* mov eax, imm32 */
+static void emit_mov_eax_imm32(Emit* e, uint32_t v) { e8(e, 0xB8); e32(e, v); }
+/* not eax */
+static void emit_not_eax(Emit* e) { e8(e, 0xF7); e8(e, 0xD0); }
+/* test eax, eax — SF and ZF against zero, which is what a signed compare
+ * with 0 needs; OF is cleared, so jle/jg read exactly as after a cmp. */
+static void emit_test_eax_eax(Emit* e) { e8(e, 0x85); e8(e, 0xC0); }
+/* mov dword [rbx + rax*4 + disp], ecx — the register file indexed by a value
+ * only known at run time, which is the one place a GPR is not a fixed slot. */
+static void emit_mov_regs_rax_ecx(Emit* e, uint32_t disp) {
+    e8(e, 0x89); e8(e, 0x8C); e8(e, 0x83); e32(e, disp);
+}
+
+/* ModRM against an arbitrary base register (rax=0, rbx=3), disp32 form. */
+static void modrm_base(Emit* e, uint8_t reg, uint8_t base, uint32_t disp) {
+    e8(e, (uint8_t)(0x80 | ((reg & 7) << 3) | (base & 7)));
+    e32(e, disp);
+}
+/* movzx <reg32>, word [rax+disp] */
+static void emit_movzx_r32_m16_rax(Emit* e, uint8_t reg, uint32_t disp) {
+    e8(e, 0x0F); e8(e, 0xB7); modrm_base(e, reg, 0, disp);
+}
+/* test ecx, edx */
+static void emit_test_ecx_edx(Emit* e) { e8(e, 0x85); e8(e, 0xD1); }
+/* setne cl ; movzx ecx, cl */
+static void emit_setne_ecx(Emit* e) {
+    e8(e, 0x0F); e8(e, 0x95); e8(e, 0xC1);
+    e8(e, 0x0F); e8(e, 0xB6); e8(e, 0xC9);
+}
+/* shl ecx, imm8 */
+static void emit_shl_ecx_imm8(Emit* e, uint8_t n) { e8(e, 0xC1); e8(e, 0xE1); e8(e, n); }
+/* or eax, ecx */
+static void emit_or_eax_ecx(Emit* e) { e8(e, 0x09); e8(e, 0xC8); }
+/* test byte [rbx+disp], imm8 */
+static void emit_test_m8_imm(Emit* e, uint32_t disp, uint8_t v) {
+    e8(e, 0xF6); modrm_bx(e, 0, disp); e8(e, v);
+}
+/* shl/shr/sar eax, imm8 — ext 4, 5, 7 */
+static void emit_shift_eax_imm8(Emit* e, uint8_t ext, uint8_t n) {
+    e8(e, 0xC1); e8(e, (uint8_t)(0xC0 | (ext << 3))); e8(e, n);
+}
+/* shl/shr/sar eax, cl. x86 masks the count to 5 bits for a 32-bit operand and
+ * so does the R3000A, so the MIPS `& 0x1F` needs no code of its own. */
+static void emit_shift_eax_cl(Emit* e, uint8_t ext) {
+    e8(e, 0xD3); e8(e, (uint8_t)(0xC0 | (ext << 3)));
+}
+/* setcc al ; movzx eax, al — cc is the low nibble of the 0F 9x form */
+static void emit_setcc_eax(Emit* e, uint8_t cc) {
+    e8(e, 0x0F); e8(e, (uint8_t)(0x90 | cc)); e8(e, 0xC0);
+    e8(e, 0x0F); e8(e, 0xB6); e8(e, 0xC0);
+}
+
 /* Jcc rel32 with a patch site. cc is the low nibble of the 0F 8x form. */
 typedef struct { uint8_t* site; } Fixup;
 static Fixup emit_jcc(Emit* e, uint8_t cc) {
@@ -148,7 +210,10 @@ static void fixup_here(Emit* e, Fixup f) {
 
 #define CC_E   0x4
 #define CC_NE  0x5
+#define CC_B   0x2
+#define CC_L   0xC
 #define CC_LE  0xE
+#define CC_G   0xF
 
 /* --- helpers the emitted code calls ---------------------------------------
  *
@@ -177,6 +242,194 @@ uint8_t cpu_rec_revalidate_line(Cpu* cpu, RecBlock* b, uint32_t line_index);
 /* --- block compilation ---------------------------------------------------- */
 
 #define OFF(f) ((uint32_t)offsetof(Cpu, f))
+#define REG(i) (OFF(regs) + (uint32_t)(i) * 4u)
+
+/* --- the operations emitted in place of a call ----------------------------
+ *
+ * Every one of these reads one or two registers, computes, and writes one
+ * register. That shape is what makes them safe to emit: no memory access, no
+ * effect on pc or next_pc, and no path that can raise an exception. The
+ * dispatch is on the handler pointer the block cache already resolved, not on a
+ * second decode of the instruction word — a decode here could disagree with
+ * cpu_decode.c and emit the wrong operation, and `fn` is what the interpreter
+ * would actually have run.
+ *
+ * The destination register is a compile-time constant, so two tests that cost
+ * the interpreter something on every instruction cost nothing here: a write to
+ * $zero emits no code at all (which is what makes NOP free — it is SLL R0,R0,0),
+ * and the address of the destination is a fixed displacement.
+ * ------------------------------------------------------------------------- */
+
+/* cpu_set_reg(cpu, idx, eax) with idx known while compiling.
+ *
+ * The cancel is not optional. A load still in flight for this register loses to
+ * this write — "isn't updated until the next opcode has completed"
+ * (psx-spx-docs/docs/cpuspecifications.md:172-174) — and leaving it out lets the
+ * load land afterwards and quietly undo the result. */
+static void emit_set_reg_eax(Emit* e, uint32_t idx) {
+    if (idx == 0) return;                     /* writes to $zero are dropped */
+    emit_mov_m32_eax(e, REG(idx));
+    emit_cmp_m32_imm(e, OFF(delay_load_reg), idx);
+    Fixup skip = emit_jcc(e, CC_NE);
+    emit_mov_m32_imm(e, OFF(delay_load_reg), 0);
+    fixup_here(e, skip);
+}
+
+/* True when the operation was emitted and no call is needed. */
+static bool emit_native_op(Emit* e, uint32_t instr, cpu_handler_t fn,
+                           uint32_t pc, bool pc_is_known) {
+    const uint32_t rs = instr_s(instr), rt = instr_t(instr), rd = instr_d(instr);
+
+    /* Three shapes. `dst` is the register written, and a write to $zero means
+     * the whole operation is unobservable — the interpreter still computes it,
+     * but nothing can read the result and nothing else happens. */
+
+    /* rd = rs <op> rt */
+    uint8_t alu = 0; bool have_alu = false, nor_it = false;
+    if      (fn == op_addu) { alu = 0x03; have_alu = true; }   /* add */
+    else if (fn == op_subu) { alu = 0x2B; have_alu = true; }   /* sub */
+    else if (fn == op_and)  { alu = 0x23; have_alu = true; }   /* and */
+    else if (fn == op_or)   { alu = 0x0B; have_alu = true; }   /* or  */
+    else if (fn == op_xor)  { alu = 0x33; have_alu = true; }   /* xor */
+    else if (fn == op_nor)  { alu = 0x0B; have_alu = true; nor_it = true; }
+    if (have_alu) {
+        if (rd == 0) return true;
+        emit_mov_eax_m32(e, REG(rs));
+        emit_alu_eax_m32(e, alu, REG(rt));
+        if (nor_it) emit_not_eax(e);
+        emit_set_reg_eax(e, rd);
+        return true;
+    }
+
+    /* rd = (rs < rt), signed or unsigned */
+    if (fn == op_slt || fn == op_sltu) {
+        if (rd == 0) return true;
+        emit_mov_eax_m32(e, REG(rs));
+        emit_alu_eax_m32(e, 0x3B, REG(rt));                    /* cmp */
+        emit_setcc_eax(e, (fn == op_slt) ? CC_L : CC_B);
+        emit_set_reg_eax(e, rd);
+        return true;
+    }
+
+    /* rd = rt <shift> shamt */
+    uint8_t sh = 0xFF;
+    if      (fn == op_sll) sh = 4;
+    else if (fn == op_srl) sh = 5;
+    else if (fn == op_sra) sh = 7;
+    if (sh != 0xFF) {
+        if (rd == 0) return true;                              /* NOP lands here */
+        emit_mov_eax_m32(e, REG(rt));
+        uint32_t shamt = instr_shift(instr);
+        if (shamt) emit_shift_eax_imm8(e, sh, (uint8_t)shamt);
+        emit_set_reg_eax(e, rd);
+        return true;
+    }
+
+    /* rd = rt <shift> (rs & 31) */
+    if      (fn == op_sllv) sh = 4;
+    else if (fn == op_srlv) sh = 5;
+    else if (fn == op_srav) sh = 7;
+    if (sh != 0xFF) {
+        if (rd == 0) return true;
+        emit_mov_ecx_m32(e, REG(rs));
+        emit_mov_eax_m32(e, REG(rt));
+        emit_shift_eax_cl(e, sh);
+        emit_set_reg_eax(e, rd);
+        return true;
+    }
+
+    /* rt = rs <op> imm */
+    uint8_t ext = 0xFF; uint32_t imm = 0;
+    if      (fn == op_addiu) { ext = 0; imm = instr_imm_se(instr); }
+    else if (fn == op_andi)  { ext = 4; imm = instr_imm(instr);    }
+    else if (fn == op_ori)   { ext = 1; imm = instr_imm(instr);    }
+    else if (fn == op_xori)  { ext = 6; imm = instr_imm(instr);    }
+    if (ext != 0xFF) {
+        if (rt == 0) return true;
+        emit_mov_eax_m32(e, REG(rs));
+        emit_alu_eax_imm32(e, ext, imm);
+        emit_set_reg_eax(e, rt);
+        return true;
+    }
+
+    /* rt = (rs < imm), signed or unsigned. The immediate is sign-extended for
+     * both; only the comparison differs (DOCS/cpuspecifications.md). */
+    if (fn == op_slti || fn == op_sltiu) {
+        if (rt == 0) return true;
+        emit_mov_eax_m32(e, REG(rs));
+        emit_alu_eax_imm32(e, 7, instr_imm_se(instr));         /* cmp */
+        emit_setcc_eax(e, (fn == op_slti) ? CC_L : CC_B);
+        emit_set_reg_eax(e, rt);
+        return true;
+    }
+
+    /* rt = imm << 16 — one store, no read at all */
+    if (fn == op_lui) {
+        if (rt == 0) return true;
+        emit_mov_eax_imm32(e, instr_imm(instr) << 16);
+        emit_set_reg_eax(e, rt);
+        return true;
+    }
+
+    /* --- branches and jumps ---------------------------------------------
+     *
+     * A conditional branch's target is a constant here even when cpu->pc is not,
+     * and that is worth being precise about: cpu_branch() computes it from
+     * cpu->current_pc, which this instruction stored as an immediate a few bytes
+     * ago. The delay-slot hazard that broke the pc folding does not reach it.
+     *
+     * J and JAL are the opposite case. They read cpu->pc, so they are folded
+     * only where the pc fold itself was safe; elsewhere they go out to the
+     * handler, which reads the live value. Same for JALR's return address. */
+
+    const uint32_t br_target = pc + 4u + (instr_imm_se(instr) << 2);
+
+    uint8_t bcc = 0xFF; bool cmp_reg = false;
+    if      (fn == op_beq)  { bcc = CC_NE; cmp_reg = true; }   /* skip when != */
+    else if (fn == op_bne)  { bcc = CC_E;  cmp_reg = true; }
+    else if (fn == op_blez) { bcc = CC_G;  }                   /* skip when > 0 */
+    else if (fn == op_bgtz) { bcc = CC_LE; }
+    if (bcc != 0xFF) {
+        emit_mov_eax_m32(e, REG(rs));
+        if (cmp_reg) emit_alu_eax_m32(e, 0x3B, REG(rt));       /* cmp eax,[rt] */
+        else         emit_test_eax_eax(e);
+        Fixup skip = emit_jcc(e, bcc);
+        emit_mov_m32_imm(e, OFF(next_pc), br_target);
+        emit_mov_m8_imm(e, OFF(branch_taken), 1);
+        fixup_here(e, skip);
+        return true;
+    }
+
+    /* JR: the target is a register, so nothing here is constant except the
+     * absence of a call. JALR additionally writes a return address taken from
+     * cpu->pc, which pins it to the folded case. */
+    if (fn == op_jr || (fn == op_jalr && pc_is_known)) {
+        emit_mov_eax_m32(e, REG(rs));                          /* read rs first: */
+        emit_mov_m32_eax(e, OFF(cop0_tar));                    /* JALR may write  */
+        emit_mov_m32_eax(e, OFF(next_pc));                     /* rd == rs        */
+        if (fn == op_jalr) {
+            emit_mov_eax_imm32(e, pc + 8u);                    /* cpu->pc + 4     */
+            emit_set_reg_eax(e, rd);
+        }
+        emit_mov_m8_imm(e, OFF(branch_taken), 1);
+        return true;
+    }
+
+    if ((fn == op_j || fn == op_jal) && pc_is_known) {
+        /* cpu->pc is pc+4 here, and it is the top nibble that the target keeps. */
+        const uint32_t target = ((pc + 4u) & 0xF0000000u) | (instr_imm_jump(instr) << 2);
+        if (fn == op_jal) {
+            emit_mov_eax_imm32(e, pc + 8u);
+            emit_set_reg_eax(e, REG_RA);
+        }
+        emit_mov_m32_imm(e, OFF(next_pc), target);
+        emit_mov_m32_imm(e, OFF(cop0_tar), target);
+        emit_mov_m8_imm(e, OFF(branch_taken), 1);
+        return true;
+    }
+
+    return false;
+}
 
 static bool emit_instruction(Emit* e, const RecBlock* b, uint32_t i,
                              uint32_t pc, bool pc_is_known,
@@ -225,13 +478,45 @@ static bool emit_instruction(Emit* e, const RecBlock* b, uint32_t i,
     emit_movzx_eax_m8(e, OFF(branch_taken));
     emit_mov_m8_al(e, OFF(in_delay_slot));
 
-    /* if (cpu_rec_check_irq(cpu, instr)) stop; */
-    emit_mov_rdi_rbx(e);
-    emit_mov_esi_imm32(e, instr);
-    emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)&cpu_rec_check_irq);
-    emit_call_rax(e);
-    emit_test_al_al(e);
-    stops[(*nstop)++] = emit_jcc(e, CC_NE);
+    /* The interrupt check. It ran as a call on every instruction; what the call
+     * mostly did was the part that never fires.
+     *
+     * Cause bit 10 is *not* a latch — CheckPendingInterrupt() rewrites it from
+     * (I_STAT & I_MASK) every instruction whether an interrupt is taken or not —
+     * so that half cannot be skipped and is emitted branchlessly. The decision
+     * that follows is SR.IEc && ((SR & Cause) & 0xFF00), which is false almost
+     * always; only when it is true does this go out to the helper, which
+     * recomputes the same values (idempotent: same inputs, same answer) and then
+     * does the part worth a call — the "next instruction is a GTE op" deferral
+     * and the exception itself. */
+    {
+        const uint32_t stat_off = (uint32_t)offsetof(Interconnect, irq_status);
+        const uint32_t mask_off = (uint32_t)offsetof(Interconnect, irq_mask);
+        e8(e, 0x48); e8(e, 0x8B); modrm_bx(e, 0, OFF(inter));   /* mov rax,[rbx+inter] */
+        emit_movzx_r32_m16_rax(e, 1, stat_off);                 /* movzx ecx,[rax+stat] */
+        emit_movzx_r32_m16_rax(e, 2, mask_off);                 /* movzx edx,[rax+mask] */
+        emit_test_ecx_edx(e);
+        emit_setne_ecx(e);                                      /* ecx = pending ? 1:0 */
+        emit_shl_ecx_imm8(e, 10);                               /* ecx <<= 10          */
+        emit_mov_eax_m32(e, OFF(cause));
+        emit_alu_eax_imm32(e, 4, ~(uint32_t)(1u << 10));        /* and eax, ~IP2       */
+        emit_or_eax_ecx(e);
+        emit_mov_m32_eax(e, OFF(cause));
+
+        emit_alu_eax_m32(e, 0x23, OFF(sr));                     /* and eax, sr         */
+        emit_alu_eax_imm32(e, 4, 0xFF00u);                      /* and eax, 0xFF00     */
+        Fixup no_irq = emit_jcc(e, CC_E);
+        emit_test_m8_imm(e, OFF(sr), 1);                        /* SR.IEc              */
+        Fixup no_iec = emit_jcc(e, CC_E);
+        emit_mov_rdi_rbx(e);
+        emit_mov_esi_imm32(e, instr);
+        emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)&cpu_rec_check_irq);
+        emit_call_rax(e);
+        emit_test_al_al(e);
+        stops[(*nstop)++] = emit_jcc(e, CC_NE);
+        fixup_here(e, no_irq);
+        fixup_here(e, no_iec);
+    }
 
     /* if (zs1_trace_active) zs1_trace_fold(cpu, instr); */
     {
@@ -327,34 +612,57 @@ static bool emit_instruction(Emit* e, const RecBlock* b, uint32_t i,
         stops[(*nstop)++] = emit_jcc(e, CC_NE);
     }
 
-    /* The operation itself. */
-    emit_mov_rdi_rbx(e);
-    emit_mov_esi_imm32(e, instr);
-    emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)op->fn);
-    emit_call_rax(e);
+    /* The operation itself, emitted where it can be and called where it cannot.
+     *
+     * The exception check that follows a call is dead after a native operation
+     * and is left out: exception_pending was stored 0 at the top of this
+     * instruction, and everything between there and here either leaves the block
+     * outright (the interrupt check, the breakpoint walk, the BIOS vector) or
+     * cannot write it (the trace fold, the execution ring, the pc stores). The
+     * operations emit_native_op() accepts touch no memory and raise nothing. */
+    if (!emit_native_op(e, instr, op->fn, pc, pc_is_known)) {
+        emit_mov_rdi_rbx(e);
+        emit_mov_esi_imm32(e, instr);
+        emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)op->fn);
+        emit_call_rax(e);
 
-    /* if (exception_pending) stop; */
-    emit_cmp_m8_imm(e, OFF(exception_pending), 0);
-    stops[(*nstop)++] = emit_jcc(e, CC_NE);
+        /* if (exception_pending) stop; */
+        emit_cmp_m8_imm(e, OFF(exception_pending), 0);
+        stops[(*nstop)++] = emit_jcc(e, CC_NE);
+    }
 
-    /* Load-delay rotation and regs[0] = 0. */
-    emit_mov_rdi_rbx(e);
-    emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)&cpu_rec_retire);
-    emit_call_rax(e);
+    /* The load-delay rotation, inline. It ran as a call on every instruction —
+     * cpu_rec_retire() is six memory operations and a test, so the call and its
+     * argument setup were most of what it cost.
+     *
+     *   if (delay_load_reg) regs[delay_load_reg] = delay_load_value;
+     *   delay_load_reg = load_reg_idx; delay_load_value = load_value;
+     *   load_reg_idx = 0; regs[0] = 0;
+     *
+     * The rotation is what makes a delay-slot instruction read the register's
+     * old value, and it has to run after the operation rather than before —
+     * "isn't updated until the next opcode has completed"
+     * (psx-spx-docs/docs/cpuspecifications.md:172-174). */
+    {
+        emit_mov_eax_m32(e, OFF(delay_load_reg));
+        emit_test_eax_eax(e);
+        Fixup none = emit_jcc(e, CC_E);
+        emit_mov_ecx_m32(e, OFF(delay_load_value));
+        emit_mov_regs_rax_ecx(e, OFF(regs));
+        fixup_here(e, none);
+        emit_mov_eax_m32(e, OFF(load_reg_idx));
+        emit_mov_m32_eax(e, OFF(delay_load_reg));
+        emit_mov_eax_m32(e, OFF(load_value));
+        emit_mov_m32_eax(e, OFF(delay_load_value));
+        emit_mov_m32_imm(e, OFF(load_reg_idx), 0);
+        emit_mov_m32_imm(e, REG(0), 0);
+    }
 
     emit_inc_r12d(e);
     return !e->overflow;
 }
 
 /* --- the rest of the emitter --------------------------------------------- */
-
-/* ModRM against an arbitrary base register (rax=0, rbx=3), disp32 form. */
-static void modrm_base(Emit* e, uint8_t reg, uint8_t base, uint32_t disp) {
-    e8(e, (uint8_t)(0x80 | ((reg & 7) << 3) | (base & 7)));
-    e32(e, disp);
-}
-
-#define CC_G 0xF
 
 /* The cycle accounting, inline and exact.
  *

@@ -176,6 +176,50 @@ Bisection is what found the last one, and it was cheaper than more reading:
 in one run, and forcing the dynamic `pc` form then separated the folding from the
 line replay.
 
+#### The recompiler emits the operations, not calls to them
+
+The first version compiled the block's *frame* — the constants, the vector tests, the cycle
+accounting — and still left a `call` per MIPS operation. Twenty-nine of them are now machine code,
+and two of the per-instruction calls that were not operations at all are gone with them. Verified
+after each batch against all five references on all three engines: **bit-identical, 700M instructions
+each**.
+
+- **Twenty-one ALU operations**: `addu subu and or xor nor slt sltu`, the six shifts, and
+  `addiu andi ori xori slti sltiu lui`. One shape — read one or two registers, compute, write one —
+  and it is the shape that makes them safe to emit: no memory, no effect on `pc`, no path that can
+  raise. Three things the interpreter pays for on every instruction cost nothing here: the
+  destination is a fixed displacement rather than an index, a write to `$zero` emits no code at all
+  (which is what makes `NOP` free — it is `SLL R0,R0,0`), and the exception check after the call is
+  provably dead, so it is not emitted.
+- **Eight branches and jumps**: `beq bne blez bgtz jr jalr j jal`. Which target is constant is not
+  the intuitive answer. A conditional branch's is constant *even where `cpu->pc` is not*, because
+  `cpu_branch()` computes it from `current_pc`, which the instruction stored as an immediate a few
+  bytes earlier — the delay-slot hazard that produced the black screen does not reach it. `J` and
+  `JAL` are the opposite: they read `cpu->pc`, so they are folded only where the pc fold itself was
+  safe, and go out to the handler otherwise. `JALR` reads `rs` before writing `rd` because they can
+  be the same register.
+- **The load-delay rotation, inline.** `cpu_rec_retire()` was a call on every instruction executed,
+  for six memory operations and a test. It is the one place a GPR is not a fixed slot, so it needs
+  the indexed form `[rbx + rax*4 + regs]`.
+- **The interrupt check's fast path, inline.** Cause bit 10 is not a latch — it is rewritten from
+  `(I_STAT & I_MASK)` every instruction whether or not an interrupt is taken — so that half is
+  emitted branchlessly with `setne` and a shift. The decision that follows,
+  `SR.IEc && ((SR & Cause) & 0xFF00)`, is false almost always; only when it is true does the code go
+  out to the helper, which recomputes the same values (idempotent) and then does the part worth a
+  call: the deferral when the next instruction is a GTE op, and the exception.
+
+The dispatch is on the handler pointer the block cache already resolved, never on a second decode of
+the instruction word. A decode here could disagree with `cpu_decode.c` and emit a different operation
+than the interpreter would have run, and nothing downstream would notice.
+
+`cpu_set_reg()`'s cancel of an in-flight load aimed at the register being written is reproduced, not
+dropped. Omitting it lets the load land afterwards and quietly undo the result — the same
+data-dependent shape as the LWL/LWR defect, and just as invisible to a boot.
+
+Still **not measured**, and still the next thing to do. What remains called: the operation itself
+where it is not one of the twenty-nine, the event dispatch when the downcount runs out, an i-cache
+line replay at its boundary, and the three paths that leave the block anyway.
+
 #### A block cache, and the engine the interface now names
 
 `ZS1_CPU=interpreter|blocks|jit` picks how the guest's code is run. `blocks` decodes a run of
