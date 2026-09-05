@@ -745,7 +745,7 @@ int main(int argc, char* argv[]) {
     zs1_trace_init();
 
     const bool s_no_input = getenv("ZS1_NO_INPUT") != NULL;
-    if (s_no_input) LOG_SYSTEM_INFO("[SYSTEM] ZS1_NO_INPUT — keyboard and pad are ignored");
+    if (s_no_input) LOG_SYSTEM_INFO("[SYSTEM] ZS1_NO_INPUT — keyboard and pad are ignored, polled as well as evented");
 
     // --- Main loop ---
     bool quit = false;
@@ -914,15 +914,29 @@ int main(int argc, char* argv[]) {
             default:             controller_set_led(&gamepad, 0x00, 0x00, 0x00); break;
         }
 
-        sio_set_button_state(&inter.sio, controller_update(&gamepad));
-        // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
-        sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
-                             gamepad.right_x, gamepad.right_y);
-        // Rumble: M1/M2 levels captured from 42h reads → DS4 motors.
-        uint8_t rumble_m1, rumble_m2;
-        sio_get_rumble(&inter.sio, &rumble_m1, &rumble_m2);
-        controller_update_rumble(&gamepad, rumble_m1, rumble_m2);
-        inject_tty_keys(&inter);
+        /* ZS1_NO_INPUT has to stop the machine here as well, not only in the
+         * event loop above. controller_update() and inject_tty_keys() read the
+         * live keyboard with SDL_GetKeyboardState() and the pad with
+         * SDL_GetGamepadButton() — polls, not events — so dropping the events
+         * left both of them wide open: a key held down while a golden-trace
+         * capture ran arrived at the guest through SIO and the run diverged for
+         * a reason that had nothing to do with the code. 0xFFFF is the pad with
+         * nothing pressed (a bit is cleared per button) and 0 is a stick at
+         * rest, which sio maps to the 80h a resting stick reports. */
+        if (s_no_input) {
+            sio_set_button_state(&inter.sio, 0xFFFF);
+            sio_set_analog_state(&inter.sio, 0, 0, 0, 0);
+        } else {
+            sio_set_button_state(&inter.sio, controller_update(&gamepad));
+            // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
+            sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
+                                 gamepad.right_x, gamepad.right_y);
+            // Rumble: M1/M2 levels captured from 42h reads → DS4 motors.
+            uint8_t rumble_m1, rumble_m2;
+            sio_get_rumble(&inter.sio, &rumble_m1, &rumble_m2);
+            controller_update_rumble(&gamepad, rumble_m1, rumble_m2);
+            inject_tty_keys(&inter);
+        }
 
         /* Wait for GPU to finish the previous frame's rendering. */
         renderer_wait_frame_done(&inter.gpu.renderer);

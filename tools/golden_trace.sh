@@ -47,6 +47,13 @@ game_path() {
 }
 ALL="bios ace crash dino monsters"
 
+# Memory cards are guest state the guest reads back, and the working copies in
+# the repository root change every time anybody plays: a save written between a
+# record and a verify sends the guest down a different path and the trace
+# diverges for a reason that has nothing to do with the code. Each capture gets
+# an empty directory instead, so the guest always meets an unformatted card.
+MCDIR=$DIR/.memcard
+
 capture() {  # $1 game key, $2 output path
     local g=$1 out=$2 path
     path=$(game_path "$g") || { echo "unknown game '$g'"; return 1; }
@@ -54,11 +61,14 @@ capture() {  # $1 game key, $2 output path
         echo "  $g: SKIP (no image at $path)"
         return 2
     fi
+    rm -rf "$MCDIR" && mkdir -p "$MCDIR" || return 1
     if [ -n "$path" ]; then
-        ZS1_CD_SYNC=1 ZS1_NO_INPUT=1 ZS1_TRACE="$out" ZS1_TRACE_EVERY="$EVERY" ZS1_TRACE_STOP="$STOP" \
+        ZS1_CD_SYNC=1 ZS1_NO_INPUT=1 ZS1_MEMCARD_DIR="$MCDIR" \
+            ZS1_TRACE="$out" ZS1_TRACE_EVERY="$EVERY" ZS1_TRACE_STOP="$STOP" \
             timeout "$TIMEOUT" "$BIN" "$BIOS" --game="$path" >/dev/null 2>&1
     else
-        ZS1_CD_SYNC=1 ZS1_NO_INPUT=1 ZS1_TRACE="$out" ZS1_TRACE_EVERY="$EVERY" ZS1_TRACE_STOP="$STOP" \
+        ZS1_CD_SYNC=1 ZS1_NO_INPUT=1 ZS1_MEMCARD_DIR="$MCDIR" \
+            ZS1_TRACE="$out" ZS1_TRACE_EVERY="$EVERY" ZS1_TRACE_STOP="$STOP" \
             timeout "$TIMEOUT" "$BIN" "$BIOS" >/dev/null 2>&1
     fi
     local rc=$?

@@ -7,6 +7,7 @@
  */
 #include "interconnect.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include "log.h"
@@ -65,8 +66,25 @@ void interconnect_init(Interconnect* inter, Bios* bios, Ram* ram) {
     // Initialize SIO (Controller and Memory Card)
     sio_init(&inter->sio);
     sio_set_interconnect(&inter->sio, inter);  // wire back-pointer for deferred transfers
-    sio_load_memcard(&inter->sio.card_slot1, "memcard1.mcd");
-    sio_load_memcard(&inter->sio.card_slot2, "memcard2.mcd");
+    /* The cards are guest state the guest reads back: what is on them changes
+     * which path the BIOS shell and the game take at boot, so a run that shares
+     * the working directory's cards with every other run is not reproducible.
+     * ZS1_MEMCARD_DIR points both slots somewhere else; the golden trace gives
+     * each capture an empty directory, so the guest always meets a card it has
+     * to format and every run starts from the same place. */
+    {
+        const char* mc_dir = getenv("ZS1_MEMCARD_DIR");
+        char p1[256], p2[256];
+        if (mc_dir && *mc_dir) {
+            snprintf(p1, sizeof(p1), "%s/memcard1.mcd", mc_dir);
+            snprintf(p2, sizeof(p2), "%s/memcard2.mcd", mc_dir);
+        } else {
+            snprintf(p1, sizeof(p1), "memcard1.mcd");
+            snprintf(p2, sizeof(p2), "memcard2.mcd");
+        }
+        sio_load_memcard(&inter->sio.card_slot1, p1);
+        sio_load_memcard(&inter->sio.card_slot2, p2);
+    }
     mdec_init(&inter->mdec);
     // Initialize SPU
     spu_init(&inter->spu);

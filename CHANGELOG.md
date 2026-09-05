@@ -92,7 +92,14 @@ on `Ace Combat 2` over 700M instructions: two runs are **identical** with `ZS1_C
 **diverge at 550M** without it. Anything comparing two runs of this emulator has to set it, or it is
 comparing host file I/O. `ZS1_NO_INPUT=1` closes the other channel — a keypress or a resting analog
 stick's noise reaches the guest through the SIO, and a capture taken with the window focused sent
-this session hunting a block-cache defect that did not exist.
+this session hunting a block-cache defect that did not exist. It only half closed it until
+2026-09-05; see **Fixed** below.
+
+**Five references, not one**: `bios`, `ace`, `crash`, `dino`, `monsters`. They are not five copies of
+the same check — `bios` boots with no disc at all, `crash` and `dino` are `.bin.ecm` and run the
+decoder under real seek and streaming load, `dino` is additionally LibCrypt and takes the path where
+the protection keeps its state in COP0's breakpoint registers, and `monsters` is the MDEC-heavy one.
+All five verify bit-identical on all three engines over 700M instructions each.
 
 #### A recompiler: native x86-64, verified bit-identical
 
@@ -439,6 +446,20 @@ not, so the compare is unconditional and the decode is not.
   ~1.4M lines and cannot be.
 
 ### Fixed
+- **A reproducible run has to seal the polls, not just the events.** `ZS1_NO_INPUT` gated
+  `controller_process_event()` in the event loop and nothing else, but the pad is not read from
+  events: `controller_update()` reads `SDL_GetKeyboardState()` and `SDL_GetGamepadButton()` — polls —
+  and ran unconditionally every frame, as did `inject_tty_keys()`. A key merely *held down* while a
+  capture ran arrived at the guest through the SIO. The golden trace diverged about one run in four,
+  which is the worst failure shape available: the first reaction to `DIVERGED` is to suspect the
+  change under test, and this session nearly blamed a correct VRAM change for it. Under
+  `ZS1_NO_INPUT` the machine now sees `0xFFFF` (nothing pressed) and sticks at rest.
+- **The memory cards were shared with real play sessions.** `memcard1.mcd` in the repository root is
+  guest state the guest reads back, so a save written between a `record` and a `verify` sends the
+  guest down a different path and the trace diverges for a reason that has nothing to do with the
+  code. `ZS1_MEMCARD_DIR` points both slots elsewhere; the harness gives each capture an empty
+  directory, so the guest always meets a card it has to format. Anything recorded before these two
+  fixes is suspect and was re-recorded rather than trusted.
 - **The OpenGL backend's `impl` resolver called itself.** `R()` in `renderer_gl.c` read
   `return impl ? R(impl) : &s_gl_renderer;` where it meant `(GlRenderer*)impl` — unbounded recursion
   on every one of the ~120 forwarded calls. It ran correctly anyway, which is the interesting part:

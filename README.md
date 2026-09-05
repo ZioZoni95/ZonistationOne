@@ -216,6 +216,7 @@ swaps which physical button drives which bit if you prefer × to confirm everywh
 | `ZS1_TTY_TRACE=1` | Name the BIOS hook behind every captured TTY line |
 | `ZS1_PAD_MODE=digital\|analog\|stick` | Pad mode at boot (default `digital`, as on hardware) |
 | `ZS1_PAD_SWAP_XO=1` | Report the pad's bottom button as ○ and its right one as × |
+| `ZS1_MEMCARD_DIR=path` | Put both memory cards in this directory instead of the working directory — what a reproducible run needs, since the cards are guest state the guest reads back |
 
 `ZS1_GPU` sets the PRIME offload variables the driver stack already reads, before the GL context is
 created; setting them by hand works identically. The run always logs which driver it ended up on and
@@ -432,10 +433,26 @@ A pass means the same instructions ran in the same order with the same register 
 emulated cycle, for that stretch of that disc. It is a proof of *no change*, which is what an
 optimisation needs — not a proof of correctness.
 
-Captures set `ZS1_CD_SYNC=1` and `ZS1_NO_INPUT=1`, and neither is optional. Without the first the
-drive answers on host file I/O and the same disc read lands at a different emulated cycle every run;
-without the second a keypress or a resting analog stick reaches the guest through the SIO. Both were
-found the hard way. `docs/GOLDEN_TRACE_2026-08-29.md` covers what the trace does not see — the
+Five references, chosen because they are not five copies of the same check:
+
+| | what it exercises |
+|---|---|
+| `bios` | boot with no disc in the drive |
+| `ace` | a plain `.bin`, gameplay and memory-card traffic |
+| `crash` | a `.bin.ecm` — the decoder under real seek and streaming load |
+| `dino` | a `.bin.ecm` **and** LibCrypt, so the protection path that keeps its state in COP0's breakpoint registers |
+| `monsters` | the MDEC-heavy disc |
+
+All five verify bit-identical across `interpreter`, `blocks` and `jit`, 700M instructions each.
+
+**A capture has to be sealed off from the host, and that is harder than it sounds.** Three variables
+do it and none of them is optional. `ZS1_CD_SYNC=1`, or the drive answers on host file I/O and the
+same disc read lands at a different emulated cycle every run. `ZS1_NO_INPUT=1`, or a keypress reaches
+the guest through the SIO — note that this has to seal the *polls* and not only the event loop, since
+`controller_update()` reads the live keyboard and pad state directly. And `ZS1_MEMCARD_DIR`, pointed
+at an empty directory, because the memory cards in the repository root are guest state that whoever
+last played the game has already changed. Each of the three was found by a divergence that looked
+exactly like a CPU bug. `docs/GOLDEN_TRACE_2026-08-29.md` covers what the trace does not see — the
 renderer, the SPU's output, and anything past `ZS1_TRACE_STOP`.
 
 `docs/TESTING_PLAN_2026-08-20.md` remains the plan for the layers this does not cover.

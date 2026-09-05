@@ -107,3 +107,4 @@ src/gpu/shaders/*.spv.h
 
 # Per-session memory cards, savestates and frame dumps written by cluster runs.
 cluster-data/
+traces/.memcard/
