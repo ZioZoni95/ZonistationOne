@@ -1259,10 +1259,11 @@ void glr_get_pool_stats(GlRenderer* renderer, uint32_t* used, uint32_t* peak,
     if (skips)   *skips   = s_vram_pool_skips;
 }
 
-void glr_upload_vram(GlRenderer* renderer, const uint16_t* vram_data) {
-    if (!renderer->initialized) return;
+void glr_upload_vram(GlRenderer* renderer, const uint16_t* vram_data,
+                     uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    if (!renderer->initialized || w == 0 || h == 0) return;
     lua_debug_notify("vram_full_upload");
-    glr_record_vram_update(renderer, vram_data, 0, 0, 1024, 512, false);
+    glr_record_vram_update(renderer, vram_data, x, y, w, h, false);
 }
 
 void glr_upload_vram_rect(GlRenderer* renderer, const uint16_t* vram_data,
@@ -2551,7 +2552,10 @@ static void vt_set_dither_mode(GfxImpl impl, bool e)       { glr_set_dither_mode
 static void vt_set_mask_mode(GfxImpl impl, bool e)         { glr_set_mask_mode(R(impl), e); }
 static void vt_set_mask_test(GfxImpl impl, bool e)         { glr_set_mask_test(R(impl), e); }
 
-static void vt_upload_vram(GfxImpl impl, const uint16_t* d) { glr_upload_vram(R(impl), d); }
+static void vt_upload_vram(GfxImpl impl, const uint16_t* d,
+                           uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    glr_upload_vram(R(impl), d, x, y, w, h);
+}
 static void vt_upload_vram_rect(GfxImpl impl, const uint16_t* d,
                                 uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     glr_upload_vram_rect(R(impl), d, x, y, w, h);

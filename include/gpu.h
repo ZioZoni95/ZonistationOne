@@ -233,4 +233,10 @@ void gpu_clear_cmd_buf(Gpu* gpu);
 void gpu_push_cmd_word(Gpu* gpu, uint32_t word);
 void gpu_update_display_mapping(Gpu* gpu);
 
+/* The union of every rectangle written into gpu->vram.data since the last
+ * call, and true only when there was one. The sampling mirror is refreshed
+ * from this instead of from the whole 1024x512 array. Taking the rectangle
+ * clears it. */
+bool gpu_vram_take_dirty_rect(uint16_t* x, uint16_t* y, uint16_t* w, uint16_t* h);
+
 #endif // GPU_H

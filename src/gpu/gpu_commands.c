@@ -140,11 +140,62 @@ static void vram_write_masked(Gpu* gpu, uint32_t offset, uint16_t pixel) {
 }
 
 // ---------------------------------------------------------------------------
+// CPU-side VRAM dirty rectangle
+//
+// The sampling mirror used to be handed the whole 1024x512 array at the end of
+// every field: 1 MB copied into the staging pool on the emulation thread and
+// 1 MB uploaded on the GPU thread, whether or not the guest had written a
+// single pixel. Every write into gpu->vram.data happens in one of five places
+// -- the GP0(02) fill, the GP0(A0) load, the GP0(80) copy and the two readbacks
+// that pull rasterized pixels back -- and each of them knows the rectangle it
+// touched. Their union is what the mirror actually owes; a field that writes
+// nothing owes nothing.
+//
+// File-static rather than a member of Gpu on purpose: savestate.c derives both
+// of its Gpu spans from offsetof(Gpu, renderer), so a new field ahead of the
+// renderer would move that boundary and change the state format for a value
+// that is pure derived host state.
+// ---------------------------------------------------------------------------
+static uint16_t s_vram_dirty_x0, s_vram_dirty_y0;   // inclusive
+static uint16_t s_vram_dirty_x1, s_vram_dirty_y1;   // exclusive; x1==x0 means empty
+
+static void vram_mark_dirty(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (w == 0 || h == 0) return;
+    uint32_t x1 = x + w, y1 = y + h;
+    // A fill wraps at the VRAM edge without carrying into the other axis, so a
+    // rect that runs off the end has really touched the whole of that axis.
+    if (x1 > VRAM_WIDTH)  { x = 0; x1 = VRAM_WIDTH;  }
+    if (y1 > VRAM_HEIGHT) { y = 0; y1 = VRAM_HEIGHT; }
+    if (s_vram_dirty_x1 == s_vram_dirty_x0) {
+        s_vram_dirty_x0 = (uint16_t)x;  s_vram_dirty_y0 = (uint16_t)y;
+        s_vram_dirty_x1 = (uint16_t)x1; s_vram_dirty_y1 = (uint16_t)y1;
+        return;
+    }
+    if (x  < s_vram_dirty_x0) s_vram_dirty_x0 = (uint16_t)x;
+    if (y  < s_vram_dirty_y0) s_vram_dirty_y0 = (uint16_t)y;
+    if (x1 > s_vram_dirty_x1) s_vram_dirty_x1 = (uint16_t)x1;
+    if (y1 > s_vram_dirty_y1) s_vram_dirty_y1 = (uint16_t)y1;
+}
+
+bool gpu_vram_take_dirty_rect(uint16_t* x, uint16_t* y, uint16_t* w, uint16_t* h) {
+    if (s_vram_dirty_x1 == s_vram_dirty_x0) return false;
+    *x = s_vram_dirty_x0;
+    *y = s_vram_dirty_y0;
+    *w = (uint16_t)(s_vram_dirty_x1 - s_vram_dirty_x0);
+    *h = (uint16_t)(s_vram_dirty_y1 - s_vram_dirty_y0);
+    s_vram_dirty_x0 = s_vram_dirty_y0 = s_vram_dirty_x1 = s_vram_dirty_y1 = 0;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Helper: upload VRAM only when dirty
 // ---------------------------------------------------------------------------
 static inline void upload_vram_if_dirty(Gpu* gpu) {
     if (gpu->vram_dirty) {
-        renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data);
+        uint16_t x, y, w, h;
+        if (gpu_vram_take_dirty_rect(&x, &y, &w, &h))
+            renderer_upload_vram(&gpu->renderer, (const uint16_t*)gpu->vram.data,
+                                 x, y, w, h);
         gpu->vram_dirty = false;
     }
 }
@@ -365,6 +416,7 @@ static void gp0_fill_rectangle(Gpu* gpu) {
         }
     }
     gpu->vram_dirty = true;
+    vram_mark_dirty(x, y, w, h);
     lua_debug_notify("gp0_fill");
 }
 
@@ -1252,6 +1304,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
     /* Same reason as GP0(0xC0): the source rect may be something the
      * rasterizer drew, which the CPU-side VRAM has never seen. */
     renderer_read_vram_rect(&gpu->renderer, (uint16_t*)gpu->vram.data, src_x, src_y, w, h);
+    vram_mark_dirty(src_x, src_y, w, h);
 
     // Overlap-safe directional copy
     int16_t step_x = 1, step_y = 1;
@@ -1271,6 +1324,7 @@ static void gp0_copy_rectangle(Gpu* gpu) {
             vram_write_masked(gpu, doff, pixel);
         }
     }
+    vram_mark_dirty(dst_x, dst_y, w, h);
     renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
                               dst_x, dst_y, w, h);
     gpu->vram_dirty = false;
@@ -1397,6 +1451,7 @@ static void gp0_image_store(Gpu* gpu) {
      * here, and re-uploads them as textures — without this it reads zeros and
      * the objects vanish. */
     renderer_read_vram_rect(&gpu->renderer, (uint16_t*)gpu->vram.data, x, y, w, h);
+    vram_mark_dirty(x, y, w, h);
     LOG_GPU_DEBUG("[GPU] GP0(0xC0): VRAM->CPU START (%u,%u) %ux%u = %u words", x, y, w, h, words);
     LOG_VRAM_DEBUG("Copy rectangle from VRAM to CPU offset=(%u,%u), size=(%u,%u) [%u pixels, %u words] page=%u",
                    x, y, w, h, (uint32_t)w * h, words, x / 64);
@@ -1632,6 +1687,8 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
                              gpu->vram_load_w, gpu->vram_load_h, gpu->vram_load_count,
                              (unsigned)((uint32_t)gpu->vram_load_w * gpu->vram_load_h));
             }
+            vram_mark_dirty(gpu->vram_load_x, gpu->vram_load_y,
+                            gpu->vram_load_w, gpu->vram_load_h);
             renderer_upload_vram_rect(&gpu->renderer, (const uint16_t*)gpu->vram.data,
                                       gpu->vram_load_x, gpu->vram_load_y,
                                       gpu->vram_load_w, gpu->vram_load_h);

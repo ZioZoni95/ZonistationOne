@@ -182,11 +182,18 @@ void renderer_set_screen_scale(Renderer* renderer, uint16_t width, uint16_t heig
 void renderer_set_texture_window(Renderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
 
 /**
- * @brief Uploads VRAM data to the GPU texture (full 1024x512).
- * @param renderer Pointer to the Renderer instance.
- * @param vram_data Pointer to the VRAM data (1024x512 uint16_t).
+ * @brief Uploads a rectangle of VRAM into the sampling mirror only.
+ *
+ * The same staging path as renderer_upload_vram_rect(), without the flush of
+ * pending primitives and without stamping display_texture: this feeds what the
+ * fragment shader samples, not what is scanned out.
+ * @param renderer  Pointer to the Renderer instance.
+ * @param vram_data Pointer to the full 1024x512 VRAM buffer.
+ * @param x, y      Top-left of the region (VRAM coords).
+ * @param w, h      Width and height of the region.
  */
-void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data);
+void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data,
+                          uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 
 /**
  * @brief Uploads a rectangular sub-region of VRAM to the GPU texture.

@@ -137,7 +137,8 @@ typedef struct GfxBackend {
     void (*set_mask_test)(GfxImpl impl, bool enabled);
 
     /* --- VRAM --- */
-    void (*upload_vram)(GfxImpl impl, const uint16_t* data);
+    void (*upload_vram)(GfxImpl impl, const uint16_t* data,
+                        uint16_t x, uint16_t y, uint16_t w, uint16_t h);
     void (*upload_vram_rect)(GfxImpl impl, const uint16_t* data,
                              uint16_t x, uint16_t y, uint16_t w, uint16_t h);
     bool (*read_vram_rect)(GfxImpl impl, uint16_t* out,

@@ -207,9 +207,10 @@ void renderer_set_mask_test(Renderer* renderer, bool enabled) {
     renderer->vt->set_mask_test(early_impl(renderer), enabled);
 }
 
-void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data) {
+void renderer_upload_vram(Renderer* renderer, const uint16_t* vram_data,
+                          uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     if (!LIVE(renderer)) return;
-    renderer->vt->upload_vram(renderer->impl, vram_data);
+    renderer->vt->upload_vram(renderer->impl, vram_data, x, y, w, h);
 }
 void renderer_upload_vram_rect(Renderer* renderer, const uint16_t* vram_data,
                                uint16_t x, uint16_t y, uint16_t w, uint16_t h) {

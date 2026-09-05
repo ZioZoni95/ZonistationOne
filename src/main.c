@@ -992,10 +992,23 @@ int main(int argc, char* argv[]) {
         /* Build ImGui for this frame (SDL + widget code, no GL) */
         debug_ui_render(&cpu, &inter);
 
-        /* Full VRAM upload at end of frame — ensures vram_texture matches vram.data even when
-         * GP0(A0) sprite loads cleared vram_dirty (preventing upload_vram_if_dirty in draw cmds).
-         * Processed BEFORE draw batches in GPU thread so all sprite/CLUT data is current. */
-        renderer_upload_vram(&inter.gpu.renderer, (const uint16_t*)inter.gpu.vram.data);
+        /* Hand the sampling mirror what the CPU wrote into vram.data this field,
+         * so vram_texture matches it even where GP0(A0) cleared vram_dirty and
+         * kept upload_vram_if_dirty out of the draw commands. Processed BEFORE
+         * the draw batches on the GPU thread, so sprite and CLUT data is current.
+         *
+         * This used to push the whole 1024x512 array unconditionally — 1 MB into
+         * the staging pool here on the emulation thread and 1 MB uploaded on the
+         * GPU thread, every field, including the many fields where the guest
+         * wrote no VRAM at all. gpu_commands.c keeps the union of the rectangles
+         * it actually touched. */
+        {
+            uint16_t dx, dy, dw, dh;
+            if (gpu_vram_take_dirty_rect(&dx, &dy, &dw, &dh))
+                renderer_upload_vram(&inter.gpu.renderer,
+                                     (const uint16_t*)inter.gpu.vram.data,
+                                     dx, dy, dw, dh);
+        }
         if (s_prof) t2 = SDL_GetPerformanceCounter();
 
         /* The VRAM viewer is filled by a shader pass on the GPU thread now, from

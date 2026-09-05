@@ -136,7 +136,8 @@ void glr_set_raw_texture_mode(GlRenderer* renderer, bool enabled);
 void glr_set_screen_scale(GlRenderer* renderer, uint16_t width, uint16_t height);
 void glr_set_texture_window(GlRenderer* renderer, uint8_t mask_x, uint8_t mask_y, uint8_t offset_x, uint8_t offset_y);
 void glr_get_pool_stats(GlRenderer* renderer, uint32_t* used, uint32_t* peak, uint32_t* updates, uint32_t* skips);
-void glr_upload_vram(GlRenderer* renderer, const uint16_t* vram_data);
+void glr_upload_vram(GlRenderer* renderer, const uint16_t* vram_data,
+                     uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void glr_upload_vram_rect(GlRenderer* renderer, const uint16_t* vram_data, uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 void glr_draw(GlRenderer* renderer);
 void glr_blit_vram(GlRenderer* renderer, uint16_t vram_x, uint16_t vram_y, uint16_t width, uint16_t height);

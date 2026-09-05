@@ -69,6 +69,24 @@ instructions, identical fold.
   anything" answer is now inline on a counter that is already in cache; the filter and the list walk
   stay out of line where they belong.
 
+#### A megabyte of VRAM per field that nobody had written
+
+`main.c` handed the sampling mirror the whole 1024x512 array at the end of every field — 1 MB copied
+into the staging pool on the emulation thread and 1 MB uploaded on the GPU thread — whether or not
+the guest had written a single pixel. Every write into `gpu.vram.data` happens in one of five places
+(the GP0(02) fill, the GP0(A0) load, the GP0(80) copy and the two readbacks that pull rasterized
+pixels back), and each of them already knows the rectangle it touched. `gpu_commands.c` keeps their
+union and `renderer_upload_vram()` now takes it, so a field that writes nothing costs nothing and an
+FMV field costs its own frame rather than all of VRAM.
+
+**Not measured.** It is a structural removal, not a benchmarked one, and it is stated that way on
+purpose: the figures elsewhere in this section are medians of interleaved runs and this is not.
+
+The rectangle is a file-static in `gpu_commands.c` rather than a member of `Gpu`, which looks worse
+and is not: `savestate.c` derives both of its `Gpu` spans from `offsetof(Gpu, renderer)`, so a new
+field ahead of the renderer would move that boundary and change the state format for a value that is
+pure derived host state.
+
 ### Added
 
 #### The golden trace — the first automated check in this repository

@@ -1711,7 +1711,11 @@ static void vkvt_set_dither_mode(GfxImpl impl, bool e) { vkr_set_dither_mode(R(i
 static void vkvt_set_mask_mode(GfxImpl impl, bool e)   { vkr_set_mask_mode(R(impl), e); }
 static void vkvt_set_mask_test(GfxImpl impl, bool e)   { vkr_set_mask_test(R(impl), e); }
 
-static void vkvt_upload_vram(GfxImpl impl, const uint16_t* d) { vkr_upload_vram(R(impl), d); }
+static void vkvt_upload_vram(GfxImpl impl, const uint16_t* d,
+                             uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+    (void)x; (void)y; (void)w; (void)h;
+    vkr_upload_vram(R(impl), d);
+}
 static void vkvt_upload_vram_rect(GfxImpl impl, const uint16_t* d,
                                   uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
     vkr_upload_vram_rect(R(impl), d, x, y, w, h);
