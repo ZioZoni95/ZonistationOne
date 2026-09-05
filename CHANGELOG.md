@@ -179,9 +179,9 @@ line replay.
 #### The recompiler emits the operations, not calls to them
 
 The first version compiled the block's *frame* — the constants, the vector tests, the cycle
-accounting — and still left a `call` per MIPS operation. Twenty-nine of them are now machine code,
+accounting — and still left a `call` per MIPS operation. Forty-five of them are now machine code,
 and two of the per-instruction calls that were not operations at all are gone with them. Verified
-after each batch against all five references on all three engines: **bit-identical, 700M instructions
+after each of the six batches against all five references: **bit-identical, 700M instructions
 each**.
 
 - **Twenty-one ALU operations**: `addu subu and or xor nor slt sltu`, the six shifts, and
@@ -208,6 +208,35 @@ each**.
   out to the helper, which recomputes the same values (idempotent) and then does the part worth a
   call: the deferral when the next instruction is a GTE op, and the exception.
 
+- **Eight loads and stores**: `lw lh lhu lb lbu sw sh sb`. The bus call stays a call —
+  `interconnect_load32()` is a real dispatch and nothing here folds it — but everything around it is
+  emitted: the cache-isolation test, the address, the alignment check and the two stores that
+  schedule the delayed load, which is most of what `op_lw()` is. Two paths go out to the handler
+  instead, both rare and both awkward: a misaligned address, which sets BadVaddr and raises, and a
+  store with the cache isolated, which invalidates an i-cache line rather than storing. The handler
+  recomputes the address from the same registers and reaches the same place, so nothing is duplicated
+  in the emitter that could drift from it. The bus returns `uint8_t` and `uint16_t` and SysV leaves
+  the rest of the register undefined, so the widening after a load and the truncation before a store
+  are required rather than tidiness.
+- **The four REGIMM forms**: `bltz bgez bltzal bgezal`. Decoding bits 20 and 16 is not the second
+  decode the dispatch rule forbids — the handler has already been identified and this is the
+  selection `op_bxx()` makes itself. The link is unconditional, "even if branch not taken", and it
+  happens after the condition is evaluated because `$ra` may be the register being tested; the
+  condition is materialised in `cl` first, since writing `$ra` clobbers the flags.
+- **`mfhi mflo mthi mtlo`**: register moves behind the mul/div stall, which is the whole reason they
+  are not in the ALU group. The wait for a MULT or DIV still in flight is charged to the emulated
+  clock rather than skipped. The comparison is unsigned: `cpu_cycle_counter` is 32-bit and wraps
+  every ~127 s, and a signed test inverts across the wrap.
+
+What is still called is either genuinely complex or rare: the GTE operations, `mult`/`div` (MIPS
+defines division by zero and `INT_MIN / -1` exactly, and reproducing that is worth its own batch),
+`lwl`/`lwr`/`swl`/`swr` (the family that already hid a defect for months — it should be emitted only
+alongside a test that covers it alignment by alignment), and `syscall`, `break` and the COP0 moves.
+
+The per-block code budget went from 8 KB to 16 KB with this. An overflow is not a truncation:
+`compile_block()` returns NULL and the block falls back to the interpreted runner, which would have
+lost the recompiler on exactly the densest blocks.
+
 The dispatch is on the handler pointer the block cache already resolved, never on a second decode of
 the instruction word. A decode here could disagree with `cpu_decode.c` and emit a different operation
 than the interpreter would have run, and nothing downstream would notice.
@@ -216,9 +245,7 @@ than the interpreter would have run, and nothing downstream would notice.
 dropped. Omitting it lets the load land afterwards and quietly undo the result — the same
 data-dependent shape as the LWL/LWR defect, and just as invisible to a boot.
 
-Still **not measured**, and still the next thing to do. What remains called: the operation itself
-where it is not one of the twenty-nine, the event dispatch when the downcount runs out, an i-cache
-line replay at its boundary, and the three paths that leave the block anyway.
+Still **not measured**, and still the next thing to do.
 
 #### A block cache, and the engine the interface now names
 

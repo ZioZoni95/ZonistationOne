@@ -33,7 +33,12 @@
  * ------------------------------------------------------------------------- */
 
 #define REC_CODE_SIZE (16u * 1024u * 1024u)
-#define REC_MAX_BLOCK_BYTES 8192u
+/* A block is at most REC_BLOCK_MAX_OPS instructions and each one now emits
+ * its own operation rather than a call to it, so the frame plus a load or a
+ * store is the widest case. Overflow is not a truncation — compile_block()
+ * returns NULL and the block falls back to the interpreted runner — so this
+ * is sized to not happen rather than to be tight. */
+#define REC_MAX_BLOCK_BYTES 16384u
 
 static uint8_t* s_code;
 static uint32_t s_code_used;
@@ -179,6 +184,54 @@ static void emit_or_eax_ecx(Emit* e) { e8(e, 0x09); e8(e, 0xC8); }
 static void emit_test_m8_imm(Emit* e, uint32_t disp, uint8_t v) {
     e8(e, 0xF6); modrm_bx(e, 0, disp); e8(e, v);
 }
+/* test dword [rbx+disp], imm32 */
+static void emit_test_m32_imm(Emit* e, uint32_t disp, uint32_t v) {
+    e8(e, 0xF7); modrm_bx(e, 0, disp); e32(e, v);
+}
+/* test al, imm8 */
+static void emit_test_al_imm(Emit* e, uint8_t v) { e8(e, 0xA8); e8(e, v); }
+/* mov esi, eax */
+static void emit_mov_esi_eax(Emit* e) { e8(e, 0x89); e8(e, 0xC6); }
+/* mov rdi, qword [rbx+disp] */
+static void emit_mov_rdi_m64(Emit* e, uint32_t disp) {
+    e8(e, 0x48); e8(e, 0x8B); modrm_bx(e, 7, disp);
+}
+/* mov edx, dword [rbx+disp] */
+static void emit_mov_edx_m32(Emit* e, uint32_t disp) { e8(e, 0x8B); modrm_bx(e, 2, disp); }
+/* setcc cl ; movzx ecx, cl — a condition that has to survive code which
+ * clobbers the flags before it is used. */
+static void emit_setcc_ecx(Emit* e, uint8_t cc) {
+    e8(e, 0x0F); e8(e, (uint8_t)(0x90 | cc)); e8(e, 0xC1);
+    e8(e, 0x0F); e8(e, 0xB6); e8(e, 0xC9);
+}
+/* test cl, cl */
+static void emit_test_cl_cl(Emit* e) { e8(e, 0x84); e8(e, 0xC9); }
+/* cmp ecx, edx */
+static void emit_cmp_ecx_edx(Emit* e) { e8(e, 0x39); e8(e, 0xD1); }
+/* sub edx, ecx */
+static void emit_sub_edx_ecx(Emit* e) { e8(e, 0x29); e8(e, 0xCA); }
+/* Sign- or zero-extend the low 8 or 16 bits of eax into eax. The bus returns
+ * uint8_t and uint16_t, and SysV leaves the rest of the register undefined, so
+ * this is required and not a tidiness. */
+#define EXT_NONE 0
+#define EXT_S8   1
+#define EXT_U8   2
+#define EXT_S16  3
+#define EXT_U16  4
+static void emit_extend_eax(Emit* e, int kind) {
+    switch (kind) {
+        case EXT_S8:  e8(e, 0x0F); e8(e, 0xBE); e8(e, 0xC0); break;
+        case EXT_U8:  e8(e, 0x0F); e8(e, 0xB6); e8(e, 0xC0); break;
+        case EXT_S16: e8(e, 0x0F); e8(e, 0xBF); e8(e, 0xC0); break;
+        case EXT_U16: e8(e, 0x0F); e8(e, 0xB7); e8(e, 0xC0); break;
+        default: break;
+    }
+}
+/* movzx edx, dl / movzx edx, dx — the store helpers take uint8_t and uint16_t,
+ * so the argument is truncated here rather than trusted to be already clean. */
+static void emit_trunc_edx(Emit* e, int bits) {
+    e8(e, 0x0F); e8(e, bits == 8 ? 0xB6 : 0xB7); e8(e, 0xD2);
+}
 /* shl/shr/sar eax, imm8 — ext 4, 5, 7 */
 static void emit_shift_eax_imm8(Emit* e, uint8_t ext, uint8_t n) {
     e8(e, 0xC1); e8(e, (uint8_t)(0xC0 | (ext << 3))); e8(e, n);
@@ -207,12 +260,21 @@ static void fixup_here(Emit* e, Fixup f) {
     int32_t rel = (int32_t)(e->p - (f.site + 4));
     memcpy(f.site, &rel, 4);
 }
+/* jmp rel32, with a patch site */
+static Fixup emit_jmp(Emit* e) {
+    e8(e, 0xE9);
+    Fixup f = { e->p };
+    e32(e, 0);
+    return f;
+}
 
 #define CC_E   0x4
 #define CC_NE  0x5
 #define CC_B   0x2
 #define CC_L   0xC
 #define CC_LE  0xE
+#define CC_AE  0x3
+#define CC_GE  0xD
 #define CC_G   0xF
 
 /* --- helpers the emitted code calls ---------------------------------------
@@ -277,7 +339,8 @@ static void emit_set_reg_eax(Emit* e, uint32_t idx) {
 
 /* True when the operation was emitted and no call is needed. */
 static bool emit_native_op(Emit* e, uint32_t instr, cpu_handler_t fn,
-                           uint32_t pc, bool pc_is_known) {
+                           uint32_t pc, bool pc_is_known,
+                           Fixup* stops, uint32_t* nstop) {
     const uint32_t rs = instr_s(instr), rt = instr_t(instr), rd = instr_d(instr);
 
     /* Three shapes. `dst` is the register written, and a write to $zero means
@@ -425,6 +488,149 @@ static bool emit_native_op(Emit* e, uint32_t instr, cpu_handler_t fn,
         emit_mov_m32_imm(e, OFF(next_pc), target);
         emit_mov_m32_imm(e, OFF(cop0_tar), target);
         emit_mov_m8_imm(e, OFF(branch_taken), 1);
+        return true;
+    }
+
+    /* --- loads and stores ------------------------------------------------
+     *
+     * The bus call stays a call — interconnect_load32() is a real dispatch and
+     * nothing here can fold it. What is emitted is everything around it: the
+     * cache-isolation test, the address, the alignment check, and the two stores
+     * that schedule the delayed load. That is most of what op_lw() is.
+     *
+     * Two paths go out to the handler rather than being emitted, both rare and
+     * both awkward: a misaligned address, which has to set BadVaddr and raise;
+     * and a store with the cache isolated, which invalidates an i-cache line
+     * instead of storing. The handler recomputes the address from the same
+     * registers and reaches the same place, so nothing is duplicated in the
+     * emitter that could drift from it. */
+    {
+        int      ext   = -1;          /* how a loaded value is widened  */
+        uint8_t  amask = 0;           /* alignment the address must have */
+        const void* busfn = NULL;
+        bool is_load = true, is_store = false; int store_bits = 0;
+
+        if      (fn == op_lw)  { ext = EXT_NONE; amask = 3; busfn = (const void*)&interconnect_load32; }
+        else if (fn == op_lh)  { ext = EXT_S16;  amask = 1; busfn = (const void*)&interconnect_load16; }
+        else if (fn == op_lhu) { ext = EXT_U16;  amask = 1; busfn = (const void*)&interconnect_load16; }
+        else if (fn == op_lb)  { ext = EXT_S8;   amask = 0; busfn = (const void*)&interconnect_load8;  }
+        else if (fn == op_lbu) { ext = EXT_U8;   amask = 0; busfn = (const void*)&interconnect_load8;  }
+        else if (fn == op_sw)  { is_load = false; is_store = true; store_bits = 32; amask = 3;
+                                 busfn = (const void*)&interconnect_store32; }
+        else if (fn == op_sh)  { is_load = false; is_store = true; store_bits = 16; amask = 1;
+                                 busfn = (const void*)&interconnect_store16; }
+        else if (fn == op_sb)  { is_load = false; is_store = true; store_bits = 8;  amask = 0;
+                                 busfn = (const void*)&interconnect_store8; }
+
+        if (busfn) {
+            Fixup done[2]; uint32_t nd = 0;
+            Fixup slow[2]; uint32_t ns = 0;
+
+            if (is_load) {
+                /* Cache isolated: the load does not happen and nothing is
+                 * scheduled — not even a load of $zero. */
+                emit_test_m32_imm(e, OFF(sr), 0x10000u);
+                done[nd++] = emit_jcc(e, CC_NE);
+            }
+            emit_mov_eax_m32(e, REG(rs));
+            emit_alu_eax_imm32(e, 0, instr_imm_se(instr));    /* add eax, offset */
+            if (is_store) {
+                emit_test_m32_imm(e, OFF(sr), 0x10000u);
+                slow[ns++] = emit_jcc(e, CC_NE);
+            }
+            if (amask) {
+                emit_test_al_imm(e, amask);
+                slow[ns++] = emit_jcc(e, CC_NE);
+            }
+
+            emit_mov_esi_eax(e);                              /* address        */
+            emit_mov_rdi_m64(e, OFF(inter));
+            if (is_store) {
+                emit_mov_edx_m32(e, REG(rt));
+                if (store_bits != 32) emit_trunc_edx(e, store_bits);
+            }
+            emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)busfn);
+            emit_call_rax(e);
+            if (is_load) {
+                emit_extend_eax(e, ext);
+                emit_mov_m32_eax(e, OFF(load_value));
+                emit_mov_m32_imm(e, OFF(load_reg_idx), rt);
+            }
+
+            if (ns) {
+                done[nd++] = emit_jmp(e);
+                for (uint32_t k = 0; k < ns; k++) fixup_here(e, slow[k]);
+                emit_mov_rdi_rbx(e);
+                emit_mov_esi_imm32(e, instr);
+                emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)fn);
+                emit_call_rax(e);
+                emit_cmp_m8_imm(e, OFF(exception_pending), 0);
+                stops[(*nstop)++] = emit_jcc(e, CC_NE);
+            }
+            for (uint32_t k = 0; k < nd; k++) fixup_here(e, done[k]);
+            return true;
+        }
+    }
+
+    /* REGIMM: BLTZ, BGEZ and their linking forms, one handler and four
+     * operations chosen by bits 20 and 16. Decoding those two bits is not the
+     * second decode the dispatch rule forbids — the handler has already been
+     * identified, and this is the selection op_bxx() makes itself.
+     *
+     * The link is unconditional, "even if branch not taken", and it happens
+     * after the condition is evaluated: $ra may be the register being tested.
+     * That is why the condition is materialised in cl first — writing $ra
+     * clobbers the flags. */
+    if (fn == op_bxx && (((instr >> 20) & 1) == 0 || pc_is_known)) {
+        const bool is_bgez = ((instr >> 16) & 1) != 0;
+        const bool is_link = ((instr >> 20) & 1) != 0;
+        emit_mov_eax_m32(e, REG(rs));
+        emit_test_eax_eax(e);
+        emit_setcc_ecx(e, is_bgez ? CC_GE : CC_L);
+        if (is_link) {
+            emit_mov_eax_imm32(e, pc + 8u);                   /* cpu->pc + 4 */
+            emit_set_reg_eax(e, REG_RA);
+        }
+        emit_test_cl_cl(e);
+        Fixup skip = emit_jcc(e, CC_E);
+        emit_mov_m32_imm(e, OFF(next_pc), br_target);
+        emit_mov_m8_imm(e, OFF(branch_taken), 1);
+        fixup_here(e, skip);
+        return true;
+    }
+
+    /* MFHI, MFLO, MTHI and MTLO: a register move behind the mul/div stall.
+     *
+     * The stall is the whole reason these are not in the ALU group. All four
+     * wait for a MULT or DIV still in flight, and the wait is charged to the
+     * emulated clock rather than skipped:
+     *
+     *   if (inter->cpu_cycle_counter < muldiv_completion_tick) {
+     *       stall = tick - counter; counter += stall; downcount -= stall;
+     *   }
+     *
+     * Both operands are uint32_t, so the comparison is unsigned — cpu_cycle_counter
+     * wraps every ~127 s and a signed test would invert across the wrap. */
+    if (fn == op_mfhi || fn == op_mflo || fn == op_mthi || fn == op_mtlo) {
+        const uint32_t cyc_off = (uint32_t)offsetof(Interconnect, cpu_cycle_counter);
+        e8(e, 0x48); e8(e, 0x8B); modrm_bx(e, 0, OFF(inter));   /* mov rax,[rbx+inter] */
+        e8(e, 0x8B); modrm_base(e, 1, 0, cyc_off);              /* mov ecx,[rax+cycles] */
+        emit_mov_edx_m32(e, OFF(muldiv_completion_tick));
+        emit_cmp_ecx_edx(e);
+        Fixup ready = emit_jcc(e, CC_AE);
+        emit_sub_edx_ecx(e);                                    /* edx = stall          */
+        e8(e, 0x01); modrm_base(e, 2, 0, cyc_off);              /* add [rax+cycles],edx */
+        e8(e, 0x29); modrm_bx(e, 2, OFF(downcount));            /* sub [rbx+downcount],edx */
+        fixup_here(e, ready);
+
+        if (fn == op_mfhi || fn == op_mflo) {
+            if (rd == 0) return true;
+            emit_mov_eax_m32(e, (fn == op_mfhi) ? OFF(hi) : OFF(lo));
+            emit_set_reg_eax(e, rd);
+        } else {
+            emit_mov_eax_m32(e, REG(rs));
+            emit_mov_m32_eax(e, (fn == op_mthi) ? OFF(hi) : OFF(lo));
+        }
         return true;
     }
 
@@ -620,7 +826,7 @@ static bool emit_instruction(Emit* e, const RecBlock* b, uint32_t i,
      * outright (the interrupt check, the breakpoint walk, the BIOS vector) or
      * cannot write it (the trace fold, the execution ring, the pc stores). The
      * operations emit_native_op() accepts touch no memory and raise nothing. */
-    if (!emit_native_op(e, instr, op->fn, pc, pc_is_known)) {
+    if (!emit_native_op(e, instr, op->fn, pc, pc_is_known, stops, nstop)) {
         emit_mov_rdi_rbx(e);
         emit_mov_esi_imm32(e, instr);
         emit_mov_rax_imm64(e, (uint64_t)(uintptr_t)op->fn);
@@ -726,11 +932,13 @@ static RecEntry compile_block(const RecBlock* b, uint32_t vaddr) {
     Emit e = { s_code + s_code_used, s_code + s_code_used + REC_MAX_BLOCK_BYTES, false };
     uint8_t* start = e.p;
 
-    /* Six stops per instruction is the worst case: the interrupt check, a line
-     * revalidation, the breakpoint walk, a BIOS vector, the exception test and
-     * the frame boundary. Sized for all of them so a block is never truncated
-     * for want of room to record where it can leave. */
-    Fixup stops[REC_BLOCK_MAX_OPS * 6 + 8];
+    /* Seven stops per instruction is the worst case: the straight-line check, a
+     * line revalidation, the interrupt check, the breakpoint walk, a BIOS
+     * vector, the exception test — from the handler call or from a load or
+     * store's slow path, never both — and the frame boundary. Sized past all of
+     * them so a block is never truncated for want of room to record where it
+     * can leave. */
+    Fixup stops[REC_BLOCK_MAX_OPS * 8 + 8];
     uint32_t nstop = 0;
 
     /* Prologue. rbx and r12 are callee-saved, so they are pushed and restored;
