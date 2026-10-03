@@ -2,7 +2,7 @@
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![Open issues](https://img.shields.io/github/issues/ZioZoni95/ZonistationOne?label=open%20issues)](https://github.com/ZioZoni95/ZonistationOne/issues)
-[![Last commit](https://img.shields.io/github/last-commit/ZioZoni95/ZonistationOne/stable_branch)](https://github.com/ZioZoni95/ZonistationOne/commits/stable_branch)
+[![Last commit](https://img.shields.io/github/last-commit/ZioZoni95/ZonistationOne/master)](https://github.com/ZioZoni95/ZonistationOne/commits/master)
 
 [![C99](https://img.shields.io/badge/C-C99-00599C?logo=c&logoColor=white)](Makefile)
 [![SDL3](https://img.shields.io/badge/SDL-3.2-1f6feb)](https://www.libsdl.org/)

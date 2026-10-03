@@ -49,7 +49,7 @@ rendering difference as an emulator bug.
 `ZS1_RAM_LOAD_STALL=<n>` overrides the per-load RAM cost (default 3). `0` restores the old flat
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
-BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `stable_branch`. Compiler: `gcc -std=c99`.
+BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `master` (called `stable_branch` until 2026-10-03). Compiler: `gcc -std=c99`.
 
 ---
 
@@ -550,7 +550,7 @@ Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulat
 `duckstation_ref/` and `pcsx-redux/` as local untracked checkouts (`docs/REFERENCES.md` has the URLs
 and commits) — they are consulted for behaviour, never linked.
 
-**State as of 2026-08-04** (written on the `debug` branch, merged into `stable_branch` and deleted on 2026-10-03):
+**State as of 2026-08-04** (written on the `debug` branch, merged into the main branch (then `stable_branch`, now `master`) and deleted on 2026-10-03):
 
 - Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly.
 - The machine is an i9-14900HX with an Intel iGPU **and** an RTX 4060. Which one gets the GL context

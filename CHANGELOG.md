@@ -70,7 +70,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   they are local, untracked, optional material (over 1 GB with a build), so a clone does not carry
   them. Their URLs, commits and the licence rules are in the new `docs/REFERENCES.md`. Five branches
   already merged into `stable_branch` deleted.
-- `stable_branch` is protected by two rulesets: no deletion and no force-push for anyone, and a pull
+- **`stable_branch` renamed to `master`**, the default branch. GitHub keeps redirects for the old
+  name; clones update with `git branch -m stable_branch master && git fetch && git branch -u origin/master`.
+  The analysis documents of 2026-10-02 still say `stable_branch`, which was its name then.
+- The main branch is protected by two rulesets: no deletion and no force-push for anyone, and a pull
   request with one approval for everyone but the repository admin.
 
 ### 2026-10-02: follow-up of `docs/ANALISI_PERF_AUDIO_FMV_2026-10-02.md`

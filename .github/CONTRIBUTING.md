@@ -45,7 +45,7 @@ The build emits no warnings from this project's own sources. Keep it that way.
 
 ## Pull requests
 
-- Target `stable_branch`.
+- Target `master`.
 - Fill in the template, including the "Not verified" section. Saying what you could not run is
   expected and welcome.
 - Keep one topic per pull request, and split mechanical changes from behaviour changes.

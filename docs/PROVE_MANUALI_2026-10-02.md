@@ -106,7 +106,7 @@ EOF
 
 Sostituisci i `...` con i percorsi veri prima di andare avanti.
 
-**Binario della PR.** Se la PR è già stata unita, basta `stable_branch`. Altrimenti:
+**Binario della PR.** Se la PR è già stata unita, basta `master` (il branch si chiamava `stable_branch` fino al 2026-10-03). Altrimenti:
 
 ```bash
 source ~/zs1-prove/env.sh
