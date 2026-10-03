@@ -110,3 +110,6 @@ __pycache__/
 
 # Local reference checkout, see docs/REFERENCES.md (duckstation_ref/ is ignored above).
 pcsx-redux/
+
+# Per-machine assistant configuration and slash commands.
+.claude/
