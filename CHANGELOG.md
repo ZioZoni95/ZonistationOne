@@ -61,6 +61,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/CLUSTER.md` gains a section of traps found while bringing the cluster back up (an image built
   from a tree with objects from another gcc, an import while nodes are NotReady, and the address
   order above).
+- **README banners and an Issues section**: status badges (licence, open issues, last commit) and one
+  per component (C99, SDL3, OpenGL 3.3, Vulkan 1.3, Dear ImGui, Lua 5.4, Kubernetes, WebRTC), and how to
+  list, read and file issues from the web or with `gh`.
 - **Repository cleanup:** 71 finished one-off Lua probes moved to `scripts/archive/`, 17 screenshots
   no document refers to removed, `.vscode/` no longer tracked (`launch.json` carried an absolute home
   path). The two reference checkouts (`duckstation_ref/`, `pcsx-redux/`) are no longer git submodules:

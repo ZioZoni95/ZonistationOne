@@ -1,5 +1,18 @@
 # ZoniStation One
 
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Open issues](https://img.shields.io/github/issues/ZioZoni95/ZonistationOne?label=open%20issues)](https://github.com/ZioZoni95/ZonistationOne/issues)
+[![Last commit](https://img.shields.io/github/last-commit/ZioZoni95/ZonistationOne/stable_branch)](https://github.com/ZioZoni95/ZonistationOne/commits/stable_branch)
+
+[![C99](https://img.shields.io/badge/C-C99-00599C?logo=c&logoColor=white)](Makefile)
+[![SDL3](https://img.shields.io/badge/SDL-3.2-1f6feb)](https://www.libsdl.org/)
+[![OpenGL](https://img.shields.io/badge/OpenGL-3.3%20Core-5586A4?logo=opengl&logoColor=white)](src/gpu/renderer_gl.c)
+[![Vulkan](https://img.shields.io/badge/Vulkan-1.3-AC162C?logo=vulkan&logoColor=white)](src/gpu/vk)
+[![Dear ImGui](https://img.shields.io/badge/Dear%20ImGui-1.92-2b2b2b)](https://github.com/ocornut/imgui)
+[![Lua](https://img.shields.io/badge/Lua-5.4-000080?logo=lua&logoColor=white)](https://www.lua.org/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-k3d%20%2F%20k3s-326CE5?logo=kubernetes&logoColor=white)](docs/CLUSTER.md)
+[![WebRTC](https://img.shields.io/badge/WebRTC-GStreamer%20%2B%20NVENC-333333?logo=webrtc&logoColor=white)](docs/CLUSTER.md)
+
 A PlayStation 1 emulator written from scratch in C99, with two interchangeable renderers and a
 built-in debugger. Low-level: the real BIOS runs as-is, no syscall is faked, and games boot the way
 hardware boots them.
@@ -301,6 +314,25 @@ Where to read next:
 | `CHANGELOG.md`, `CLAUDE.md` | Every change with its source line; the working notes and traps |
 
 ---
+
+## Issues
+
+Open issues are listed at
+[github.com/ZioZoni95/ZonistationOne/issues](https://github.com/ZioZoni95/ZonistationOne/issues).
+The labels are `bug`, `enhancement`, `compatibility` (how a specific game runs), `documentation`,
+`question` and `good first issue`. From a terminal, with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh issue list                          # open issues
+gh issue list --label compatibility    # by label
+gh issue view 12 --comments            # one issue, with its discussion
+gh issue create --web                  # open the form to file a new one
+```
+
+A new issue starts from one of three forms: **Bug report** (steps, game, BIOS, renderer, host, logs),
+**Game compatibility report** (title, serial, image format, how far it gets) or **Feature request**.
+Please attach log lines from `logs/<Category>.log` and never a BIOS or disc image. Security problems
+go through the private report in [.github/SECURITY.md](.github/SECURITY.md), not a public issue.
 
 ## Contributing
 
