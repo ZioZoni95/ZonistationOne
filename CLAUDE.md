@@ -10,7 +10,8 @@ swapped while a game runs. Early development.
 ```bash
 make                    # build
 make clean && make      # clean build
-make test               # run cpu_minimal_test
+make test               # BROKEN — tests/ does not exist; see the traps at the end
+tools/golden_trace.sh verify   # the check that does exist: five discs, three engines
 ./ZoniStation_One roms/bios-ntsc.bin                          # BIOS menu
 ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"   # a disc
 ```
@@ -30,11 +31,18 @@ gameplay), `ZS1_UI_SCALE=<f>` (overrides the display-derived interface scale),
 `ZS1_GFX=gl|vulkan` (which renderer starts; also changeable at runtime from Esc -> Video),
 `ZS1_VK_VALIDATE=1` (Vulkan validation layer), `ZS1_GFX_SWITCH_TEST=<n>` (flip the renderer every
 n fields — the leak check for the switch path), `ZS1_TRACE=<path>` + `ZS1_TRACE_EVERY=<n>` +
-`ZS1_TRACE_STOP=<n>` (the golden trace, below), `ZS1_CD_SYNC=1` (the drive waits for the disc instead
-of coming back later — required for a reproducible run, and only for that),
+`ZS1_TRACE_STOP=<n>` (the golden trace, below),
 `ZS1_CPU=interpreter|blocks|jit` (which execution engine runs the guest; the machine bar's CPU chip
 and the Host HW panel's *Execution engine* card say which one actually started, and why if it is not
-the one asked for).
+the one asked for), `ZS1_BLOCKS_VERIFY=1` (compare every cached instruction against a real fetch —
+how the stale-block defect was pinned).
+
+**The three that make a run reproducible**, and they only make sense together:
+`ZS1_CD_SYNC=1` (the drive waits for the disc instead of coming back later),
+`ZS1_NO_INPUT=1` (the machine is sealed from the keyboard and the pad) and
+`ZS1_MEMCARD_DIR=<dir>` (both slots move out of the working directory). `tools/golden_trace.sh` sets
+all three. Each was added because a run diverged without it, and the second and third are the ones
+that look unnecessary until they bite — see the trap at the end of this file.
 
 `ZS1_GPU=nvidia|intel` picks the GPU on this hybrid machine — it sets the PRIME offload variables
 before the context is created, and the run logs which driver it got and whether the request was
@@ -104,7 +112,11 @@ at a scale taken from `SDL_GetWindowDisplayScale()` (or the window's pixel heigh
 src/main.c                     — host shell: SDL, GL context, audio device, threads, frame cap
 
 src/cpu/
-  cpu_execution.c              — main CPU loop (DuckStation-style downcount)
+  cpu_execution.c              — main CPU loop (DuckStation-style downcount); the three engines'
+                                 shared step body, and the helpers emitted code calls
+  cpu_exec.c                   — which engine runs, what it fell back to, and why (ZS1_CPU)
+  cpu_blocks.c                 — the block cache: decode once, keep the resolved handler
+  cpu_rec_x64.c                — the recompiler: hand-written x86-64, 45 operations emitted
   cpu_instructions.c           — MIPS R3000A instruction execute
   cpu_decode.c                 — instruction decode
   cpu_disasm.c                 — disassembler
@@ -112,7 +124,8 @@ src/cpu/
   cpu_registers.c              — register file helpers
   cpu_exceptions.c             — EXCEPTION_* handler, EPC/SR/Cause
   cpu_bios.c                   — A0/B0 syscall side-channel (LLE TTY capture)
-  cpu_icache.c                 — 256-line 4-word instruction cache
+  cpu_icache.c                 — 256-line 4-word instruction cache; also the block cache's
+                                 invalidation mechanism, as on the real machine
 
 src/core/
   interconnect.c               — init, CDROM event scheduling, TTY buffer
@@ -130,6 +143,9 @@ src/core/
   system.c                     — "run one frame": the machine's timing loop
   debugger.c                   — breakpoints, watchpoints, execution trace
   lua_debug.c                  — Lua scripting surface (emu.*) for live debugging
+  savestate.c                  — the whole machine, format v11; raw struct ranges, so read the
+                                 version comment before growing anything it covers
+  golden_trace.c               — the execution fingerprint tools/golden_trace.sh compares
 
 src/gpu/
   gpu.c                        — GPU init/reset/GP1/GPUSTAT, gpu_reapply_renderer_state()
@@ -163,11 +179,13 @@ src/spu/
   spu_irq.c                    — SPU IRQ logic
 
 src/utils/
-  log.c                        — 16-category / 6-level logger
+  log.c                        — 17-category / 6-level logger (LOG_CAT_COUNT, log.h:47)
   rxi_log.c                    — rxi log backend
 
 src/debug_ui.cpp               — ImGui debug UI (C++)
-tests/cpu_minimal_test.c       — minimal CPU integration test
+
+tools/golden_trace.sh          — record / verify / list; the only automated check here
+traces/*.trace                 — the five references (bios ace crash dino monsters)
 ```
 
 ---
@@ -255,13 +273,18 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 
 ## Known Working
 
+**The emulator is playable, as of 2026-09-05.** Four discs run and the only defect reported from
+actually playing them is the audio in `Monsters & Co.` Everything below is per-disc detail.
+
 - BIOS boot to menu (US and PAL), full 3D boot logo
 - `Ace Combat 2 (Europe)`: **full gameplay** — boot, FMV intro, textured menus, missions and
   memory-card saves, played through and stable
 - `Monsters & Co. (Italy)`: boots, plays its FMV intros, reaches the title screen and 3D engine
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
-  fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
-  Co. work" further down.
+  fix below). **The one game with a defect reported from playing it: the audio in its in-engine 3D
+  cutscenes** — see the audio entry under Known Broken. The five measured differences under "State of
+  the Monsters & Co. work" further down predate a good deal of later display and CDROM work and have
+  not been re-measured since.
 - `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
   (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
   image, so the ECM path is exercised under real seek and streaming load, not just at boot.
@@ -329,11 +352,16 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
     the change restores PC and cycle exactly and the machine runs on.
 - **Vulkan 1.3 is the second backend** (`src/gpu/vk/`, since 2026-08-25), and it is swapped **live**
   from the quick menu's *Video* entry. Things about it that cost time to learn:
-  - **`renderer_upload_vram()` is a no-op on Vulkan, on purpose.** GL records the whole-VRAM upload
-    `main.c` does every frame with `update_display=false`, so it feeds only the `GL_R16UI` mirror
+  - **`renderer_upload_vram()` is a no-op on Vulkan, on purpose.** GL records the upload `main.c`
+    does at the end of a field with `update_display=false`, so it feeds only the `GL_R16UI` mirror
     that non-`ARB_texture_barrier` drivers sample — never `vram_tex`. Vulkan has one VRAM image, so
     honouring that upload erased the rasteriser's work once a frame; the picture was "completely
     broken" and looked like a display bug. Only `upload_vram_rect()` and rasterisation write it.
+    Since 2026-09-05 it takes a rectangle rather than the whole 1024x512: every write into
+    `gpu.vram.data` happens in one of five places (the GP0(02) fill, the GP0(A0) load, the GP0(80)
+    copy and the two readbacks), each knows what it touched, and `gpu_commands.c` keeps the union —
+    so a field that writes nothing costs nothing. The rectangle is a file-static there rather than a
+    member of `Gpu` because `savestate.c` derives both `Gpu` spans from `offsetof(Gpu, renderer)`.
   - **`VK_EXT_fragment_shader_interlock` is an optimisation, not a prerequisite.** The feedback loop
     (the PS1 fragment shader samples the image it is also drawing to) is handled by a
     `vkCmdPipelineBarrier` between batches with the image permanently in `VK_IMAGE_LAYOUT_GENERAL`,
@@ -389,10 +417,43 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - GTE: all 22 ops with cycle costs charged to the CPU
 - I-Cache: 256-line 4-word with tag/valid bits
 - SPU: sample generation on the emulated clock (EVQ_SPU event + catch-up on register access)
-- **Savestates**: full machine, format **v6**. F5 saves, F8 loads, `emu.save_state`/`emu.load_state`
-  from Lua. Older states are refused: the SIOI section (SIO0 protocol state) arrived in v3, v4 moved
-  Cdrom fields, v5 added the pad's stick mode inside SIOI, v6 added the drive's response deadlines
-  inside the raw CDRH range.
+- **Savestates**: full machine, format **v11** (`ZS1_STATE_VERSION`, `savestate.c:42`). F5 saves, F8
+  loads, `emu.save_state`/`emu.load_state` from Lua. Older states are refused rather than migrated,
+  and the reason is the same every time: most sections are **raw byte ranges of a struct**, so a
+  field added anywhere in the middle shifts everything after it and an old state would load looking
+  plausible while the state was nonsense. `savestate.c:21-40` is the authoritative list of what each
+  version moved — v9 is the one worth knowing, where `Cpu` lost the second register file and every
+  field after the GPRs moved by 128 bytes. **Bump the version whenever a struct inside a raw range
+  grows**, and add the line to that comment; it is the only record.
+- **Three execution engines, all verified bit-identical** (`ZS1_CPU`, `src/cpu/cpu_exec.c`). Each
+  passes all five golden-trace references over 700M instructions:
+  - `interpreter` — the reference, and the only engine that runs KSEG1 and the BIOS ROM. The first
+    is uncached and the second charges ~24 cycles a word interleaved with execution, which a block
+    would have to reproduce exactly.
+  - `blocks` (`cpu_blocks.c`) — decodes a run of up to `REC_BLOCK_MAX_OPS` instructions once and
+    keeps them with the handler already resolved. **There is no invalidation machinery, on purpose**:
+    the interpreter reads instructions from the i-cache, which on an R3000A does not snoop writes, so
+    a block is valid exactly as long as its i-cache lines are. Re-entry replays those lines lazily,
+    immediately before the first instruction living in each. The i-cache *is* the invalidation
+    mechanism, as on the real machine, and self-modifying code needs no test on the store path.
+  - `jit` (`cpu_rec_x64.c`) — hand-written x86-64, no assembler library. **45 MIPS operations are
+    emitted; the rest are still a call to their C handler**: the GTE operations, `mult`/`div`,
+    `lwl`/`lwr`/`swl`/`swr` and the COP0 moves. (`emit_native_op()` tests 42 handler pointers, not
+    45 — `op_bxx` is the four REGIMM forms in one handler.) The load-delay rotation and the interrupt check's
+    fast path are emitted too — both used to be a call on every instruction.
+  Two rules for anything added to the emitter, both learned from defects: **dispatch on the handler
+  pointer the block cache resolved, never on a second decode of the instruction word** (a decode here
+  could disagree with `cpu_decode.c` and nothing downstream would notice), and **reproduce
+  `cpu_set_reg()`'s cancel of an in-flight load** aimed at the register being written — omitting it
+  lets the load land afterwards and quietly undo the result, which is the LWL/LWR shape again.
+  **Speed is still not measured for either `blocks` or `jit`.** Do not quote one.
+- **What the recompiler folds is what makes it worth having, and folding a non-constant is the one
+  way it goes wrong.** Three defects, all that mistake: `pc = next_pc` is *not* constant in a delay
+  slot; virtual addresses cannot be baked into code keyed by physical address (the BIOS kernel
+  reaches the same routines through KSEG0 and KUSEG both); and a block can *begin* on a delay slot,
+  so every instruction after the first needs the straight-line check `cpu_run_block()` makes with
+  `expect`. The first put the boot logo on a black screen. Bisection found the other two —
+  `REC_BLOCK_MAX_OPS=1` clears the per-instruction emitter in one run.
 - CPU memory timing: RAM data **loads** cost 3 cycles (1 documented from RAM_SIZE bit 7, 2
   calibrated); stores are free because the write buffer absorbs them. CPI lands ~1.6, tracked and
   printed by `ZS1_FRAME_PROFILE=1`. This is what stopped the BIOS printing `VSync: timeout` on
@@ -446,12 +507,14 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   quick menu shows what the machine reports and offers the controls that do exist — pad mode,
   savestate slots, the workspace, quit.
 
-- **Audio in `Dino Crisis (E)`'s in-engine 3D cutscenes: repeats across some scene changes, and runs
-  ahead of the scene.** Both reported 2026-08-21, both absent from the FMVs, neither measured. The
-  FMVs staying in step is the useful half of the observation: it puts the XA path and the output
-  device in the clear and points at the SPU's own clock. Do not quote a drift figure from a run with
-  logging or a probe on — see the trap below; a guest burning cycles in a retry loop and a host that
-  cannot keep up look identical here and need opposite fixes.
+- **Audio in in-engine 3D cutscenes: repeats across some scene changes, and runs ahead of the
+  scene.** Measured in `Dino Crisis (E)` 2026-08-21 — both symptoms absent from the FMVs, neither
+  quantified. **Reported again in `Monsters & Co.` on 2026-09-05**, where it is now the only defect
+  anyone hits while playing; whether it is the same defect is an assumption, not an observation, and
+  it is the first thing to settle. The FMVs staying in step is the useful half: it puts the XA path
+  and the output device in the clear and points at the SPU's own clock. Do not quote a drift figure
+  from a run with logging or a probe on — see the trap below; a guest burning cycles in a retry loop
+  and a host that cannot keep up look identical here and need opposite fixes.
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
   `scripts/spu_clip_probe.lua` reports the reverb network's in/out peaks and rail hits alongside the
@@ -480,21 +543,40 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 `docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: the four layers proposed and the
 order. Read it before adding a test, and before claiming a subsystem is verified.
 
-**The golden trace is the first automated check this repository has** (2026-08-29,
+**The golden trace is the only automated check this repository has** (2026-08-29,
 `tools/golden_trace.sh`, `src/core/golden_trace.c`, `docs/GOLDEN_TRACE_2026-08-29.md`). A run folds
 `(current_pc, instruction)` over every instruction executed and the register file, HI/LO, the COP0
 registers and **both load-delay slots** at each checkpoint, alongside the emulated cycle count.
 `record` on a build you trust, `verify` after every change to the CPU, the bus, the event scheduler
 or the timing model; a pass means the same instructions ran in the same order with the same register
 contents at the same emulated cycle. It exists because the LWL/LWR bug was invisible to a boot and to
-CPI, and it is the gate on the dynarec work in `docs/DYNAREC_PLAN_2026-08-29.md`.
+CPI, and it is the gate the three execution engines are held to.
 
-**The machine was not reproducible before it, and that is worth knowing on its own.**
-`cdrom_execute_drive()` comes back later when the async reader has not delivered
-(`cdrom_commands.c:822`), so a disc read lands at a different *emulated* cycle on every run. Measured:
-two runs of Ace Combat 2 over 700M instructions are **identical** with `ZS1_CD_SYNC=1` and **diverge
-at 550M** without it. Anything that compares two runs of this emulator — not just the trace — has to
-set it, or it is comparing host file I/O.
+**Five references, and they are not five copies of the same check** (`traces/`, all re-recorded
+2026-09-05): `bios` boots with no disc, `ace` is a plain `.bin` with gameplay and memory-card
+traffic, `crash` is a `.bin.ecm` that runs the decoder under real seek and streaming load, `dino` is
+`.bin.ecm` **and** LibCrypt so it takes the path where the protection keeps its state in COP0's
+breakpoint registers, and `monsters` is the MDEC-heavy disc. 700M instructions each. Any change to
+the CPU should be verified against all five on all three engines — that is 15 runs of about a minute,
+and it is the whole safety net.
+
+**The machine was not reproducible, and closing that took three separate fixes.** Each looked
+unnecessary until a divergence proved otherwise, and each divergence looked exactly like a CPU bug:
+
+1. `cdrom_execute_drive()` comes back later when the async reader has not delivered
+   (`cdrom_commands.c:822`), so a disc read lands at a different *emulated* cycle every run. Two runs
+   of Ace Combat 2 over 700M instructions are identical with `ZS1_CD_SYNC=1` and **diverge at 550M**
+   without it.
+2. `ZS1_NO_INPUT` gated only the event loop until 2026-09-05, and the pad is not read from events:
+   `controller_update()` reads `SDL_GetKeyboardState()` and `SDL_GetGamepadButton()` — **polls** —
+   and `inject_tty_keys()` does the same. A key merely held down while a capture ran reached the
+   guest through the SIO.
+3. The memory cards in the working directory are guest state the guest reads back, so a save written
+   between a `record` and a `verify` sends the guest somewhere else. `ZS1_MEMCARD_DIR` moves both
+   slots and the harness hands each capture an empty directory, so the guest always meets a card it
+   has to format.
+
+Anything that compares two runs of this emulator — not just the trace — needs all three.
 
 See `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` (per-subsystem state + work queue) and
 `docs/GPU_GAP_ANALYSIS_2026-07-15.md` (renderer deep dive) — both rewritten 2026-07-28 and authoritative
@@ -545,14 +627,28 @@ sudo cmake --install SDL/build && sudo ldconfig
 Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
 `duckstation_ref/` and `pcsx-redux/` as submodules — they are consulted for behaviour, never linked.
 
-**State as of 2026-08-04** (branch `debug`, pushed to `origin/debug`):
+**State as of 2026-09-05** (branch `feature/ottimizzazione_costi-computazionali`, 8 commits ahead of
+`stable_branch`, a fast-forward; not merged, not pushed):
 
-- Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly.
+- **The emulator is playable.** Four discs run; the only defect reported from playing them is **the
+  audio in `Monsters & Co.`'s in-engine 3D cutscenes**. The same shape was measured in `Dino Crisis`
+  on 2026-08-21 — repeats across scene changes, runs ahead of the scene, absent from the FMVs — but
+  nobody has established the two are the same defect. Still not quantified, and there is still no
+  savestate taken inside a speech scene to reproduce it from a fixed point.
 - The machine is an i9-14900HX with an Intel iGPU **and** an RTX 4060. Which one gets the GL context
-  changes rendering behaviour, so always check the startup log before judging a visual defect.
-- Host cost is ~3.7ms against a 20ms PAL field with the panels closed. There is roughly 5x headroom;
-  when something *feels* slow, it is the emulated machine's cycle budget, not the host. Check the CPI
-  in `ZS1_FRAME_PROFILE=1` before looking anywhere else.
+  changes rendering behaviour, so always check the startup log before judging a visual defect —
+  though in practice `ZS1_GPU=intel` never gets an Intel context on this box under GL.
+- Host cost was ~3.7 ms against a 20 ms PAL field with the panels closed, and a measured run of host
+  optimisations took the emulation thread to ~2.9 ms (LTO, four inlinings, and `__GL_YIELD=USLEEP`
+  for the driver's vblank busy-wait). There is roughly 6x headroom; when something *feels* slow, it
+  is the emulated machine's cycle budget, not the host. Check the CPI in `ZS1_FRAME_PROFILE=1`
+  before looking anywhere else. **The block cache and the recompiler have never been timed** — no
+  figure for either exists, and none should be quoted until one does.
+- **A release has one blocker, and it is not what the old note said.** The history carries no
+  `DOCS/`, no `guide.tex`, no BIOS and no disc image — verified. What it does carry is earlier
+  revisions of our own sources, from before the DuckStation-derived code was rewritten. See the
+  redistribution section below. Beyond that: there is no version string anywhere in the binary, and
+  `make test` fails.
 - Read `docs/study/README.md` first: the combined CDROM/SPU work queue, ordered by impact per unit of
   effort, plus what is already verified correct so it is not re-investigated. Item 9 (VSync) is done.
 - `docs/GAP_ANALYSIS_REFACTOR_2026-07-13.md` and `docs/GPU_GAP_ANALYSIS_2026-07-15.md` hold per-subsystem state.
@@ -572,9 +668,12 @@ pad**, and there is **no UI for controller state or button mapping** — the map
 `controller.c`. `docs/CONTROLLER_DS4_SUPPORT.md` and `docs/CONTROLLER_MAPPING_UI.md` are the design
 notes (untracked; commit them if they should travel).
 
-**State of the Monsters & Co. work, 2026-08-17.** Starting a new game no longer hangs (the GetlocL
-latch), but a 120 s run against a DuckStation Devel run of the same disc, both on the emulated-field
-axis, leaves five measured differences. Register writes, VRAM upload rectangles, MDEC macroblock
+**State of the Monsters & Co. work, 2026-08-17** — with the 2026-09-05 note that **audio is the only
+defect still reported from playing it**. The five differences below were measured against a
+DuckStation Devel run and are still the record of what to look at, but nobody has re-measured them
+since; treat item 3 in particular as possibly closed by later display work. Starting a new game no
+longer hangs (the GetlocL latch), and a 120 s run against that reference, both on the emulated-field
+axis, left five measured differences. Register writes, VRAM upload rectangles, MDEC macroblock
 counts and DMA volumes all match within the 2.7% field ratio, so the guest behaves the same and the
 divergence is in what we do with it:
 1. **CD command churn**: per field we issue 13x their `GetlocL`, 21x `Setloc`, 27x `SeekL`, 47x
@@ -595,6 +694,10 @@ matching their 442 data / 63 audio split. The reported "-30% drift and underruns
 **Next up, in order** (merged 2026-08-17 from both audits' findings and the display study; the two
 audit documents stay authoritative for the detail, this is only the sequence). Batches, not single
 items: everything inside a batch touches the same code and is verified by the same run.
+
+*Read this list knowing it was written before the CPU work of 2026-08-29 to 2026-09-05 and does not
+mention it. The queue below is still the right order for **accuracy**; the CPU queue is separate and
+is item H at the end.*
 
 **A. Free correctness — one-liners, no behaviour risk** (do first: they remove noise from every
 measurement after them)
@@ -666,6 +769,29 @@ measurement after them)
 24. Long tail, only if a title demands it: GTE input-latch pipeline, LibCrypt (needs a SubQ CRC
     model), sound map, DMA priorities and MADR/BCR writeback.
 
+**H. The CPU, which is its own queue** (added 2026-09-05; every item gated on
+`tools/golden_trace.sh verify` across all five references and all three engines)
+25. **Measure `blocks` and `jit`.** Neither has ever been timed. Everything below is being decided
+    without the one number that would order it, and that is the wrong way round.
+26. **Reduce the per-instruction frame**, which is the prerequisite for 27. Every instruction the
+    recompiler emits still keeps `cpu->regs[]` coherent at its boundary, because the trace fold, the
+    execution ring, the breakpoint gate and the load-delay rotation all read and write CPU state
+    directly.
+27. **Allocate registers.** PCSX-Redux keeps MIPS GPRs in eight host registers across instructions
+    (`DynaRec_x64/regAllocation.h` — `r12d r13d r14d r15d` non-volatile plus `r8d r9d r10d r11d` on
+    SysV) and writes back only when it must; we go through memory for every read and every write.
+    With the frame as it is, allocation would force a full spill per instruction and gain nothing —
+    hence 26 first. Redux is GPL-2.0-or-later, so its code **may** be used here provided the
+    attribution headers stay intact; that is the opposite of `duckstation_ref/`.
+28. **Propagate constants.** Redux tracks `isConst()` per GPR and emits nothing at all when both
+    operands are known (`instructions.cc`, `recADDU`), plus `inc`/`dec` for ±1 and three-operand
+    `lea`. Their `recDIV` writes `LO`/`HI` as immediates when both operands are constant and skips
+    the `INT_MIN / -1` check when the constant divisor is not `0xFFFFFFFF`.
+29. **The operations still called**, in rough order of what a profile would probably want: the GTE
+    ops, `mult`/`div` (MIPS defines division by zero and `INT_MIN / -1` exactly), then
+    `lwl`/`lwr`/`swl`/`swr` — and that family gets emitted only alongside a test that covers it
+    alignment by alignment, because it is the one that already hid a defect for months.
+
 **Redistribution, as of 2026-08-07**: `guide.tex`, `DOCS/`, `imgui.ini` and the two `.mcd` memory
 cards were removed from the index (the working copies stay — `.gitignore` covers them all). `DOCS/`
 was the important one: it is the psx-spx fork, whose own README states that "no copyright or license
@@ -673,11 +799,26 @@ have been properly acquired to republish and alter this document". Cite it exact
 paths resolve against a local clone that every checkout has to make (`README.md` §References gives
 the two commands).
 
-**Still open**: `guide.tex`, `DOCS/` and the DuckStation-derived code that was later rewritten remain
-in the *history*, and a public repository ships its history. Either release from a fresh repository
-with a single initial commit, or `git filter-repo` those blobs out and force-push. Not decided. A
-`git bundle` preserves all 165+ commits in one file either way — losing the history is separable
-from stopping distribution.
+**The history was rewritten, and it took. Verified 2026-09-05** by listing every path in every object
+reachable from every ref, local and remote-tracking, after a fresh `git fetch --all`: 601 distinct
+paths across 283 commits, and **no `DOCS/`, no `guide.tex`, no BIOS and no disc image** among them.
+A clone of this repository ships none of it. What a clone does carry is `memcard1.mcd`,
+`memcard2.mcd` and `imgui.ini` — the first two are somebody's own saves rather than a licence
+problem, and `git show 27f3293:memcard1.mcd` is on record as having recovered a real one.
+
+The old blobs survive **on this machine only**, unreachable from any ref and reachable only through
+the reflog (36 of those paths), until a `git gc` prunes them. `git rev-list --all --objects` is the
+question "what does a clone get"; adding `--reflog` is the question "what is still on this disk".
+They give different answers here and the difference is the whole point — do not read one for the
+other.
+
+**Still open, and it is the other half of the old note**: our *own* source files in the history. The
+DuckStation-derived code that was later rewritten lives in earlier revisions of paths like
+`src/cpu/cpu_instructions.c`, which are reachable and always will be — a path scan cannot see it
+because it is content, not a filename. The 2026-08-07 audit below covers the sources as they stand
+today, never their earlier revisions. Settling it means running that same shingle scan over
+historical blobs, and it is the one item that has to be closed before a public release rather than
+after.
 
 **Audited 2026-08-07** (`git log` for the commit): every tracked source in `src/` and `include/` was
 scanned against `duckstation_ref/` (1243 files) and `pcsx-redux/` (828 files) two ways — 12-token
@@ -688,6 +829,21 @@ interpolation tables in `cdrom_audio.c`, which are the constants printed at
 has to be there. Re-run before a release rather than trusting this line.
 
 **Traps that have each cost a session**:
+
+- **A broken gate is worse than no gate, and its failure looks exactly like your bug.** The golden
+  trace diverged about one run in four, and neither cause was in the machine: `ZS1_NO_INPUT` sealed
+  the event loop but not the *polls* (`controller_update()` reads `SDL_GetKeyboardState()` and
+  `SDL_GetGamepadButton()` directly, and `inject_tty_keys()` does the same), and the memory cards in
+  the working directory are the same ones a real play session writes. Both fixed 2026-09-05. The
+  expensive part was not the fix: it was that the first reaction to `DIVERGED` is always to suspect
+  the change under test, and a correct VRAM change was nearly blamed for it. When a run has to be
+  reproducible, ask of every host input *is it polled or evented* — sealing the event loop proves
+  nothing about the polls — and treat every file the emulator writes during a run (cards, `.mcd.bak`,
+  savestates) as part of that run's input.
+- **`git rev-list --all --objects` and `git rev-list --all --reflog --objects` answer different
+  questions.** The first is "what does a clone get", the second is "what is still on this disk".
+  Here they disagree by 36 paths, and reading one for the other gives a wrong answer in whichever
+  direction you were hoping for.
 
 - **A savestate load used to erase the memory cards.** The cards live inside `Sio`, `T_SIO` is a raw
   read of that struct, so loading a state replaced the live cards with whatever the state was written
@@ -728,12 +884,14 @@ has to be there. Re-run before a release rather than trusting this line.
   like it had no effect, which invalidated most of a session — including three "measurements" taken
   against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
   check the binary's mtime before checking the change.
-- `make test` is broken and was already broken before this: `tests/` is an empty directory, though
-  this file and the Makefile both reference `tests/cpu_minimal_test.c`. **There is no automated test
-  of any kind in this repository** — every accuracy claim here was established by running a game and
-  reading a log. That is the single largest structural gap, and `docs/TESTING_PLAN_2026-08-20.md`
-  is the plan for closing it, written the day after the LWL/LWR bug showed what it costs: months
-  live, most of a day to find, and sixteen assertions to have caught.
+- **`make test` fails, and `tests/` does not exist at all** — not an empty directory, absent. The
+  Makefile still has the target and it still points at `tests/cpu_minimal_test.c`. Either delete the
+  target or point it at `tools/golden_trace.sh verify`, which is the test this project actually has;
+  leaving it as it is means the first thing a new checkout tries is the one command guaranteed to
+  break. The golden trace is the *only* automated check here — every other accuracy claim in this
+  file was established by running a game and reading a log. `docs/TESTING_PLAN_2026-08-20.md` is the
+  plan for closing that, written the day after the LWL/LWR bug showed what it costs: months live,
+  most of a day to find, and sixteen assertions to have caught.
 - Never quote a speed figure measured with `ZS1_LOG_STDERR`, per-vblank Lua probes, or breakpoints
   active. The instrumentation costs more than what it measures; this produced a bogus "85-95% of real
   time" that was later withdrawn. It also applies to *diagnosing* slowness, not just quoting it: a
