@@ -46,17 +46,6 @@ backup/
 # directory that is itself excluded.
 screenshots/*
 Screenshot*.png
-!screenshots/Screenshot 2026-02-22 153306.png
-!screenshots/Screenshot 2026-05-02 212421.png
-!Screenshot 2026-07-14 191115.png
-!Screenshot 2026-07-18 115008.png
-!Screenshot 2026-07-18 115014.png
-!Screenshot 2026-07-18 125717.png
-!Screenshot 2026-07-18 125937.png
-!Screenshot 2026-07-23 214744.png
-!Screenshot 2026-07-26 230210.png
-!Screenshot 2026-07-27 215006.png
-!Screenshot 2026-07-30 192724.png
 !screenshots/2026-08-06-*.png
 !screenshots/2026-08-21-*.png
 
@@ -115,3 +104,6 @@ tests/hw/build/
 
 # Python bytecode (deploy/session/webrtc_server.py, tests/hw/elf2exe.py)
 __pycache__/
+
+# Editor settings are per machine (launch.json carries an absolute home path).
+.vscode/

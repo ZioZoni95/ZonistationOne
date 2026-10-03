@@ -41,6 +41,11 @@ sudo cmake --install SDL/build && sudo ldconfig
 Where SDL3 is packaged, `sudo apt install libsdl3-dev` replaces that block. The Makefile finds it
 through `pkg-config sdl3`. ImGui and Lua are vendored in `third_party/`.
 
+The two submodules (`pcsx-redux/`, `duckstation_ref/`) are reference material and are not needed to
+build. `duckstation_ref` is marked `update = none`, so a recursive clone skips it (it is over 1 GB);
+fetch it with `git submodule update --init --checkout duckstation_ref` only if you want to check what
+the hardware does against it. Nothing from it may be copied (see `.github/CONTRIBUTING.md`).
+
 **Vulkan is optional.** It needs `libvulkan-dev` and `glslang-tools` at compile time; without them
 `make` says which one it wanted and builds the OpenGL backend alone. `libvulkan.so` is never linked:
 the loader is opened at runtime, so the binary starts on a machine with no Vulkan driver.
