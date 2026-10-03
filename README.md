@@ -225,6 +225,25 @@ known defect in a tested game.
 
 ---
 
+## Cluster sessions
+
+`deploy/` runs one emulator per pod, streamed to a browser over WebRTC. Everything is in
+[docs/CLUSTER.md](docs/CLUSTER.md); the day-to-day commands are:
+
+```sh
+./deploy/session/start.sh                      # cluster, relay, sessions, and the URLs to open
+./deploy/session/stop.sh                       # stops everything, deletes nothing
+./deploy/session/set-password.sh acecombat     # new random basic-auth password for a session
+```
+
+Each session (`acecombat`, `crash`, `dino`) has its own password, so one that leaks costs one
+session. `set-password.sh` generates a random one, applies it, and prints it **once** on the terminal:
+copy it to your password manager at once, because only a hash is stored and it cannot be read back.
+`all` rotates every session, `--prompt` lets you type your own, `--dry-run` changes nothing. No
+password is ever stored in this repository.
+
+---
+
 ## Debug UI
 
 The window has two shells, switched with `` ` `` at any time while the machine keeps running.

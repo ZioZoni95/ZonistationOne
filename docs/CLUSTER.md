@@ -86,21 +86,33 @@ Two ways in, and they are not equivalent:
 
 `deploy/session/ingress.yaml` publishes the sessions on one port with Traefik, one hostname each,
 behind a rate limit, security headers and basic auth. Each session has its own credential, so one
-that leaks costs one session rather than all of them — create them before applying:
+that leaks costs one session rather than all of them. Create them before applying the Ingress, with
+`deploy/session/set-password.sh`:
 
 ```sh
-for game in acecombat crash dino; do
-  read -rsp "password for $game: " pass; echo
-  kubectl create secret generic "zs1-auth-$game" -n zs1 \
-    --from-literal=users="$USER_NAME:$(openssl passwd -apr1 "$pass")"
-done
+./deploy/session/set-password.sh all                 # a random 20-character password per session
 kubectl apply -f deploy/session/ingress.yaml
 ```
 
-Set `USER_NAME` to whatever login you want; it is the same for every session and appears only in the
-secret. No credential is stored in this repository — a committed htpasswd hash is a committed
-credential — so they live in the cluster and in your password manager, nowhere else. `kubectl delete
-cluster` takes them with it and they have to be recreated.
+The same script rotates a password later, whenever you like:
+
+```sh
+./deploy/session/set-password.sh acecombat           # one session, new random password
+./deploy/session/set-password.sh crash dino          # several
+./deploy/session/set-password.sh --prompt dino       # type your own (asked twice, not echoed)
+./deploy/session/set-password.sh --length 32 all     # longer; the minimum is 12
+./deploy/session/set-password.sh --dry-run all       # show what would happen, change nothing
+```
+
+The password is printed **once**, on the terminal, and goes nowhere else: not a file, not the shell
+history, not the process list. Copy it to your password manager straight away. Only an apr1 hash
+reaches the cluster, so a lost password cannot be read back, only replaced. Traefik picks up the new
+secret by itself, no pod restarts, and a viewer already connected keeps its stream until it reloads.
+
+The login is `zs1` for every session; `--user NAME` or `USER_NAME` changes it. No credential is stored
+in this repository (a committed htpasswd hash is a committed credential), so they live in the cluster
+and in your password manager, nowhere else. `k3d cluster delete` takes them with it and they have to
+be recreated with the same script.
 
 | | |
 |---|---|
