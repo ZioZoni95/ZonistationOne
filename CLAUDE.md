@@ -258,13 +258,16 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   memory-card saves, played through and stable
 - `Monsters & Co. (Italy)`: boots, plays its FMV intros, reaches the title screen and 3D engine
   (2026-08-10, after the DMA fix below), and **starts a new game** (2026-08-17, after the GetlocL
-  fix below). Gameplay still shows the five measured defects listed under "State of the Monsters &
-  Co. work" further down.
+  fix below). **2026-10-03:** plays with in-game audio, including the 3D engine (it was silent in
+  gameplay before the 2026-10-02 work; checked by hand on the PR branch, PAL BIOS, 100% realtime, no
+  errors or underruns). No defect is known today. The five differences under "State of the Monsters &
+  Co. work" further down are from 2026-08-17 and have not been re-measured, so read them as history.
 - `Crash Bandicoot 3 - Warped (E)` [SCES-01420], run from a **`.bin.ecm`**: **full gameplay**
   (2026-08-20, after the LWL/LWR fix below) — the first disc played start to finish from a compressed
   image, so the ECM path is exercised under real seek and streaming load, not just at boot.
 - `Dino Crisis (E)` [SLES-02207], from a **`.bin.ecm`** plus its `.sbi`: boots past the protection,
-  plays its opening screens and reaches the **main menu** (2026-08-21). The disc is **LibCrypt**, and getting there took four separate
+  plays its opening screens, reaches the **main menu** (2026-08-21) and plays on into the first
+  in-engine scenes (2026-10-03; some character voices arrive late there, see Known Broken). The disc is **LibCrypt**, and getting there took four separate
   fixes, none of them in the CDROM data path — see the four entries in `CHANGELOG.md` under this
   date. The one to remember: the protection keeps its own state in COP0's breakpoint registers,
   which is documented behaviour ("mis-used as general-purpose registers",
@@ -444,15 +447,25 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   quick menu shows what the machine reports and offers the controls that do exist — pad mode,
   savestate slots, the workspace, quit.
 
-- **Audio in `Dino Crisis (E)`'s in-engine 3D cutscenes: repeats across some scene changes, and runs
-  ahead of the scene.** Both reported 2026-08-21, both absent from the FMVs, neither measured. The
+- **The only game-level bug known today: in `Dino Crisis (E)`'s in-engine 3D cutscenes some character
+  voices arrive after the ambient sound** (reported 2026-10-03, right at the start of the game).
+  Measured from a savestate at the scene start: the voices are XA from the disc (`xa>0`, no SPU
+  streaming), `int1_audio=0` so the pending-INT stall fix holds, and the first wanted XA sector
+  arrives ~194 ms after `ReadS`, of which 127 ms is the disc's 19-sector channel interleave (file 1,
+  channel 19 wanted; Setloc 52990). That window does not explain a large delay; cause not found. The
+  `WARN XA sequence break` line there is a spurious diagnostic (a function-level `static` a savestate
+  load does not restore). Not yet compared with `stable_branch` or with a reference run.
+  Ace Combat 2, Crash Bandicoot 3 and Monsters & Co. have no known defect.
+  Older report, same title (2026-08-21): audio **repeats across some scene changes, and runs
+  ahead of the scene**, both absent from the FMVs, neither measured. The
   FMVs staying in step is the useful half of the observation: it puts the XA path and the output
   device in the clear and points at the SPU's own clock. Do not quote a drift figure from a run with
   logging or a probe on — see the trap below; a guest burning cycles in a retry loop and a host that
   cannot keep up look identical here and need opposite fixes.
   **2026-10-02:** the documented candidates are fixed (XA filter routing, the drive feeding XA under
   a pending INT, SPU IRQ address and loops, volume sweeps, Mute/ATV/AVOL; CHANGELOG of that date),
-  and none of it has been re-tested on the disc yet. `scripts/cutscene_audio_classify.lua`, run from
+  and the repeat and the drift have not been seen again since (2026-10-03), nor measured.
+  `scripts/cutscene_audio_classify.lua`, run from
   a savestate just before the cutscene, says which audio mechanism the scene uses.
 - **SPU pops during speech** — the open defect. Sounds like clipping, but the final mix peaks far
   below full scale (5869/6343 of 32767 observed), so any saturation is at an intermediate stage.
@@ -534,7 +547,7 @@ sudo cmake --install SDL/build && sudo ldconfig
 Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
 `duckstation_ref/` and `pcsx-redux/` as submodules — they are consulted for behaviour, never linked.
 
-**State as of 2026-08-04** (branch `debug`, pushed to `origin/debug`):
+**State as of 2026-08-04** (written on the `debug` branch, merged into `stable_branch` and deleted on 2026-10-03):
 
 - Boots the BIOS and `Ace Combat 2 (Europe)`; the FMV intro decodes and displays correctly.
 - The machine is an i9-14900HX with an Intel iGPU **and** an RTX 4060. Which one gets the GL context

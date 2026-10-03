@@ -183,7 +183,7 @@ host cost of ~3 ms on a 20 ms PAL field. Boot timing is compared with a referenc
 | Ace Combat 2 (Europe) | `SCES-00699` | `.bin` | **Full gameplay**: boot, FMV, menus, missions, memory-card saves |
 | Crash Bandicoot 3: Warped (Europe) | `SCES-01420` | `.bin.ecm` | **Full gameplay**, played start to finish from a compressed image |
 | Dino Crisis (Europe) | `SLES-02207` | `.bin.ecm` + `.sbi` | Past its **LibCrypt** protection, through the opening and into the first in-engine scenes. Some character voices arrive late (see below) |
-| Disney·Pixar Monsters & Co. (Italy) | `SCES-03765` | `.bin` | Boots, FMV intros, title, new game, 3D engine. **In-game audio works** (it was silent before the 2026-10-02 work). Four other measured defects are open, see below |
+| Disney·Pixar Monsters & Co. (Italy) | `SCES-03765` | `.bin` | **Plays**: boot, FMV intros, title, new game, 3D engine, with in-game audio (it was silent before the 2026-10-02 work) |
 
 All four are PAL, run with `SCPH-7502`.
 
@@ -199,17 +199,23 @@ All four are PAL, run with `SCPH-7502`.
   from a savestate (F5 just before the scene) says which audio mechanism a scene uses. The earlier
   reports of repeated sound at scene changes and of drift were targeted by the 2026-10-02 work and
   have not been re-observed or measured.
-- **Monsters & Co.**, measured 2026-08-17 before that work and not re-measured: too many CD commands
-  per field (a retry loop), 2.8 s of black where a Disney FMV should be, a sector rate of 130/s
-  against 150/s, and `CLUT out of VRAM bounds` on textured quads.
-- **SPU pops during speech.** The final mix peaks far below full scale, so any saturation is at an
-  intermediate stage. `scripts/spu_clip_probe.lua` separates saturation from a dropped sample.
-- **Display window comes from GP1(08) instead of GP1(06)**, so a PAL game with non-default centering
-  is shown at a width it never asked for, and screen shake does nothing. Display state is latched at
+That is the only game-level bug known today. Ace Combat 2, Crash Bandicoot 3 and Monsters & Co. play
+without a known defect.
+
+### Limits and unverified
+
+Gaps in the hardware model and things that were fixed without a way to confirm them here; none is a
+known defect in a tested game.
+
+- **SPU pops during speech** were reported earlier; the cause was never found and it has not been
+  reproduced from a fixed point. `scripts/spu_clip_probe.lua` separates saturation from a dropped
+  sample if it comes back.
+- **Display window comes from GP1(06) in size but its position is ignored**, so screen shake via
+  GP1(06)/(07) is invisible, and the overscan crop applies to NTSC only. Display state is latched at
   the end of the field, not per line. Details: `docs/GPU_DISPLAY_STUDY_2026-08-10.md`.
 - **Intel iGPU texture artefacts**: a fix is committed and unverified. This machine's context lands
   on the NVIDIA card, so it cannot be checked here.
-- Not implemented: multitap, DualShock 2 pressure sensing, texpage bit 11, BIOS ROM *data* read
+- **Not implemented:** multitap, DualShock 2 pressure sensing, texpage bit 11, BIOS ROM *data* read
   cost, per-scanline CRTC. The gameplay shell cannot start a disc, swap a disc or reset the console
   yet; the disc comes from `--game=`.
 - `WARN XA sequence break` in the CDROM log can be spurious: it compares against a function-level
