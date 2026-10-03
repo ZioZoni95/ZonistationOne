@@ -1,0 +1,42 @@
+name: Feature request
+description: Something the emulator, the interface or the tooling does not do yet
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want
+      description: The behaviour, in terms of what you can do afterwards.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The title or situation that needs it.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Emulation accuracy (CPU, GTE, GPU, SPU, CDROM, MDEC, DMA)
+        - Renderer (OpenGL or Vulkan)
+        - Gameplay shell or debug workspace
+        - Controllers and memory cards
+        - Savestates
+        - Build, tests or tooling
+        - Cluster deployment (`deploy/`)
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Hardware reference
+      description: For an accuracy request, the psx-spx file and line that describes the behaviour. Anything not backed by documentation or a measurement is harder to review.
+  - type: textarea
+    id: alt
+    attributes:
+      label: Alternatives considered

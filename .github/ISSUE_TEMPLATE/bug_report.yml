@@ -1,0 +1,80 @@
+name: Bug report
+description: The emulator crashes, hangs, or produces wrong picture, sound or input
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach BIOS images, disc images or copyrighted dumps. Name the title and its serial instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you saw or heard, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Exact steps from a cold start, or the point in the game and how to get there. A savestate path or description helps.
+      placeholder: |
+        1. ./ZoniStation_One roms/<bios> --game=<disc>
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game, serial and region
+      placeholder: "Dino Crisis (E) SLES-02207, .bin.ecm + .sbi"
+  - type: input
+    id: bios
+    attributes:
+      label: BIOS model and region
+      placeholder: "SCPH-7502 (PAL)"
+    validations:
+      required: true
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Renderer
+      options:
+        - OpenGL
+        - Vulkan
+        - Both
+        - Not related to graphics
+    validations:
+      required: true
+  - type: textarea
+    id: host
+    attributes:
+      label: Host
+      description: OS and session (X11 or Wayland), GPU, and the `GL driver in use` line from `logs/System.log`. On a hybrid laptop say which GPU got the context.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Version
+      description: Output of `git rev-parse --short HEAD` and the branch. Savestates from older versions are refused.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant lines from `logs/<Category>.log` (`System`, `CDROM`, `SPU`, `GPU`, ...). Every line carries the emulated clock (`[f1397 t 27.4809]`), so keep it. Do not quote a speed figure from a run with `ZS1_LOG_STDERR`, a Lua probe or debug logging on.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I ran a clean build (`make clean && make`)
+        - label: The BIOS region matches the disc region
+        - label: I passed the `.bin` or `.bin.ecm`, not the `.cue`, to `--game=`

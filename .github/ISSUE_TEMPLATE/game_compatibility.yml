@@ -1,0 +1,73 @@
+name: Game compatibility report
+description: How a specific title runs, working or not
+title: "[game] "
+labels: ["compatibility"]
+body:
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      placeholder: "Crash Bandicoot 3 - Warped (Europe)"
+    validations:
+      required: true
+  - type: input
+    id: serial
+    attributes:
+      label: Serial
+      placeholder: "SCES-01420"
+    validations:
+      required: true
+  - type: dropdown
+    id: image
+    attributes:
+      label: Image format
+      options:
+        - .bin
+        - .bin.ecm
+        - other
+    validations:
+      required: true
+  - type: dropdown
+    id: libcrypt
+    attributes:
+      label: LibCrypt disc
+      description: Needs an `.sbi` of the same pressing. The wrong file loads silently and hangs the game.
+      options:
+        - "No"
+        - "Yes, with the matching .sbi"
+        - "Yes, without an .sbi"
+        - "Don't know"
+    validations:
+      required: true
+  - type: dropdown
+    id: state
+    attributes:
+      label: How far it gets
+      options:
+        - Does not boot
+        - Boots, stops at the BIOS menu or a black screen
+        - Reaches the title or menus
+        - Playable with defects
+        - Played through
+    validations:
+      required: true
+  - type: textarea
+    id: defects
+    attributes:
+      label: Defects
+      description: Picture, sound, timing, input, saves. Say where it happens, and whether it also happens on another emulator if you know.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: BIOS, renderer and GPU
+      placeholder: "SCPH-7502, OpenGL, NVIDIA proprietary"
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Settings that changed anything
+      description: Any `ZS1_*` variable, pad mode, or renderer switch that made a difference.
+      render: text
