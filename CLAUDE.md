@@ -448,13 +448,15 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   savestate slots, the workspace, quit.
 
 - **The only game-level bug known today: in `Dino Crisis (E)`'s in-engine 3D cutscenes some character
-  voices arrive after the ambient sound** (reported 2026-10-03, right at the start of the game).
+  voices still arrive after the ambient sound** (reported 2026-10-03, right at the start of the game;
+  the 2026-10-02 work improved the scene, by the maintainer's own account, and this is the part that
+  is left).
   Measured from a savestate at the scene start: the voices are XA from the disc (`xa>0`, no SPU
   streaming), `int1_audio=0` so the pending-INT stall fix holds, and the first wanted XA sector
   arrives ~194 ms after `ReadS`, of which 127 ms is the disc's 19-sector channel interleave (file 1,
   channel 19 wanted; Setloc 52990). That window does not explain a large delay; cause not found. The
   `WARN XA sequence break` line there is a spurious diagnostic (a function-level `static` a savestate
-  load does not restore). Not yet compared with `stable_branch` or with a reference run.
+  load does not restore). Not compared with a reference emulator run yet.
   Ace Combat 2, Crash Bandicoot 3 and Monsters & Co. have no known defect.
   Older report, same title (2026-08-21): audio **repeats across some scene changes, and runs
   ahead of the scene**, both absent from the FMVs, neither measured. The

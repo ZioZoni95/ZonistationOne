@@ -191,8 +191,9 @@ All four are PAL, run with `SCPH-7502`.
 
 ## Known issues
 
-- **Dino Crisis: some character voices in the 3D cutscenes arrive after the ambient sound.** Seen
-  2026-10-03 right at the start of the game. The voices are XA from the disc and the stall on a pending
+- **Dino Crisis: some character voices in the 3D cutscenes still arrive after the ambient sound.**
+  The 2026-10-02 work (PR #3) improved it, and this is what is left. Seen 2026-10-03 right at the
+  start of the game. The voices are XA from the disc and the stall on a pending
   interrupt is fixed (`int1_audio` stays 0). In the window measured, the first wanted XA sector comes
   ~194 ms after `ReadS`, of which 127 ms is the disc's own 19-sector channel interleave, so that
   window does not explain a large delay. Cause not found. `scripts/cutscene_audio_classify.lua` run
