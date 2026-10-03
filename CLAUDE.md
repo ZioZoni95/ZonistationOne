@@ -231,8 +231,8 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 `THIRD-PARTY.md` is the inventory.
 
 - **Never copy code from `duckstation_ref/`.** DuckStation has been CC-BY-NC-ND-4.0 since
-  2024-09-01: no derivative works, no commercial use, incompatible with the GPL. The submodule is
-  there to answer "what does hardware do here" when `DOCS/` is ambiguous, and for nothing else.
+  2024-09-01: no derivative works, no commercial use, incompatible with the GPL. The local checkout
+  (untracked, see `docs/REFERENCES.md`) is there to answer "what does hardware do here" when `DOCS/` is ambiguous, and for nothing else.
   Describing its behaviour in a comment is fine; reproducing its structure or its code is not.
 - `pcsx-redux/` is GPL-2.0-or-later, so code from it *can* be used — with the attribution header kept
   intact, which is the licence condition being satisfied. Do not strip those headers.
@@ -547,7 +547,8 @@ sudo cmake --install SDL/build && sudo ldconfig
 ```
 
 Everything else (ImGui, Lua) is vendored in `third_party/`. The reference emulator clones live in
-`duckstation_ref/` and `pcsx-redux/` as submodules — they are consulted for behaviour, never linked.
+`duckstation_ref/` and `pcsx-redux/` as local untracked checkouts (`docs/REFERENCES.md` has the URLs
+and commits) — they are consulted for behaviour, never linked.
 
 **State as of 2026-08-04** (written on the `debug` branch, merged into `stable_branch` and deleted on 2026-10-03):
 
@@ -772,7 +773,7 @@ has to be there. Re-run before a release rather than trusting this line.
   not wall clock: our TTY lines carry the log's `[f… t…]` stamp, and a DuckStation run gets the same
   axis by counting its `Now in v-blank` lines. Ace Combat 2 lands within ~2% end to end this way.
   The AppImage is useless for this — a release build compiles `DEBUG_LOG`/`TRACE_LOG` out, so its
-  DMA/GPU/SPU channels are empty at any log level. Build the submodule with
+  DMA/GPU/SPU channels are empty at any log level. Build the `duckstation_ref` checkout with
   `-DCMAKE_BUILD_TYPE=Devel` (that is what defines `_DEVEL`) and it emits ~2.3M lines a minute.
 - Anything on the load/store path is the hottest code in the emulator. A chain of region tests added
   to `interconnect_load32` cost ~10% of host frame time by itself; it is now one comparison.

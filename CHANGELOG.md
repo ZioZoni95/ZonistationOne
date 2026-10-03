@@ -63,8 +63,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   order above).
 - **Repository cleanup:** 71 finished one-off Lua probes moved to `scripts/archive/`, 17 screenshots
   no document refers to removed, `.vscode/` no longer tracked (`launch.json` carried an absolute home
-  path), the `duckstation_ref` submodule marked `update = none` so a recursive clone does not fetch
-  over 1 GB of reference material. Five branches already merged into `stable_branch` deleted.
+  path). The two reference checkouts (`duckstation_ref/`, `pcsx-redux/`) are no longer git submodules:
+  they are local, untracked, optional material (over 1 GB with a build), so a clone does not carry
+  them. Their URLs, commits and the licence rules are in the new `docs/REFERENCES.md`. Five branches
+  already merged into `stable_branch` deleted.
 - `stable_branch` is protected by two rulesets: no deletion and no force-push for anyone, and a pull
   request with one approval for everyone but the repository admin.
 

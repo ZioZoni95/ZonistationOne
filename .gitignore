@@ -107,3 +107,6 @@ __pycache__/
 
 # Editor settings are per machine (launch.json carries an absolute home path).
 .vscode/
+
+# Local reference checkout, see docs/REFERENCES.md (duckstation_ref/ is ignored above).
+pcsx-redux/

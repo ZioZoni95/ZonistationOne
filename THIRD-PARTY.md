@@ -98,8 +98,8 @@ read it" should be visible rather than inferred.
 
 ## Reference clones
 
-`duckstation_ref/` and `pcsx-redux/` are git submodules: this repository records a URL and a commit
-hash, and distributes none of their content. They are consulted when the hardware documentation is
+`duckstation_ref/` and `pcsx-redux/` are local checkouts that this repository does not track: it
+records a URL and a commit hash in `docs/REFERENCES.md`, and distributes none of their content. They are consulted when the hardware documentation is
 ambiguous, and never linked or built into the emulator.
 
 **DuckStation is CC-BY-NC-ND-4.0** as of 2024-09-01. That licence forbids derivative works and

@@ -1,7 +1,0 @@
-[submodule "duckstation_ref"]
-	path = duckstation_ref
-	url = https://github.com/stenzek/duckstation.git
-	update = none
-[submodule "pcsx-redux"]
-	path = pcsx-redux
-	url = https://github.com/grumpycoders/pcsx-redux.git
