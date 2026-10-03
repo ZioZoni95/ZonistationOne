@@ -167,11 +167,15 @@ Each of these cost time on 2026-10-03; none is a code bug.
 - **Agents stay `NotReady` after `k3d cluster start`, with the old pods stuck `Terminating`.** The
   agent log says `Failed to start networking: ... failed to find interface with specified node ip`.
   Docker hands out the lowest free address in start order, so the agents come back on different IPs
-  than the ones they registered with. Compare `kubectl get nodes -o wide` with
-  `docker inspect` on each `k3d-cluster-zs1-agent-N`, stop the agents, start them one at a time in the
-  order that restores the registered addresses, then force-delete the stale pods
-  (`kubectl delete pod --force --grace-period=0`). Their data is hostPath, so nothing is lost.
-  `start.sh` waits for four `Ready` nodes and looks like a hang until this is fixed.
+  than the ones they registered with. **`start.sh` handles this now**: it starts the nodes one at a
+  time in the order of their registered addresses, restarts agents found on the wrong ones, force-
+  deletes the stale `Terminating` pods and, if nodes are still not Ready after 3 minutes, prints each
+  node's registered address next to its container's. `stop.sh` scales the sessions to zero first so
+  pods are not left `Terminating`. Always start the cluster with `start.sh`, not `k3d cluster start`.
+  If you ever have to do it by hand: compare `kubectl get nodes -o wide` with `docker inspect` on each
+  `k3d-cluster-zs1-agent-N`, stop the agents, start them one at a time in the order that restores the
+  registered addresses, then `kubectl delete pod --force --grace-period=0` the stale pods (their data
+  is hostPath, nothing is lost). The reasoning is at the top of `deploy/session/cluster-lib.sh`.
 - **`port-forward` is not enough for WebRTC.** The signalling and the page load, but the media path
   stays on "connecting". Use the Ingress (or the tailnet) with the session's basic-auth credential.
 - **The system Docker daemon must be running.** Docker Desktop's daemon has no NVIDIA passthrough;

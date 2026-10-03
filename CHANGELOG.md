@@ -7,6 +7,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-10-03: the 2026-10-02 work on real games, the cluster scripts, the repository
+
+#### Checked by hand (BIOS SCPH-7502, NVIDIA, PR #3 branch)
+- **Monsters & Co. (Italy) now has in-game audio**, the 3D engine included. It was silent in gameplay
+  before the 2026-10-02 work (maintainer's own earlier test); no defect is known today. The five
+  differences measured on 2026-08-17 have not been re-measured.
+- **Ace Combat 2** (90 s) and **Dino Crisis** (LibCrypt, `.bin.ecm` + `.sbi`): 100% of real time, no
+  errors, no underruns, SPU ring `drop=0`, CPI 1.59-1.64, host cost ~3.2-3.8 ms of a 20 ms field.
+  `make test` (9 programs) and `make hwtest` (16 checks, GL and Vulkan) pass.
+- **Dino Crisis 3D cutscenes: improved, one defect left**, some character voices still arrive after
+  the ambient sound. Measured from a savestate at the scene start: the voices are XA (`int1_audio=0`,
+  so the pending-INT stall fix holds), and the first wanted XA sector comes ~194 ms after `ReadS`,
+  127 ms of it the disc's own 19-sector channel interleave. That window does not explain a large
+  delay; cause not found. `scripts/cutscene_audio_classify.lua` run from the savestate is how it was
+  measured.
+- **Cluster audio** (Chrome, WebRTC): sounds right; the pod logged the new Opus settings and a single
+  drop event of 49 buffers at connection start.
+- Not run: Firefox and `play.html` in the cluster, the BIOS CD player with CD volume 0, Crash
+  Bandicoot 3 on this branch, a `stable_branch` A/B.
+
+#### Fixed: the cluster comes back up in a state that works (`deploy/session/`)
+- **`start.sh` starts the nodes in the order of the addresses they registered with.** A k3s agent
+  registers under its container's IP and its kubelet looks for that address on every start. Docker
+  gives the lowest free address at the moment a container starts and `k3d cluster start` starts the
+  agents in parallel, so after a restart they could come back swapped: `Failed to start networking:
+  ... failed to find interface with specified node ip`, nodes `NotReady`, pods `Terminating` for
+  ever, and `start.sh` waiting for four Ready nodes for ever. The registered addresses are read from
+  inside the server (`docker exec ... kubectl`), so no state file is needed, and agents already on the
+  wrong addresses are stopped and restarted in order. Reproduced on purpose (agents started in
+  reverse order) and repaired in one `start.sh`; a plain stop and start keeps every address.
+- **`start.sh` gives up with a diagnosis** after 3 minutes instead of waiting for ever: which node
+  registered which address and which one its container holds. It also force-deletes pods an earlier
+  stop left in `Terminating` (their data is hostPath) and scales the sessions back to one.
+- **`stop.sh` scales the sessions to zero and waits** before stopping the nodes, so the pods end
+  cleanly instead of being left in `Terminating` when the kubelet dies mid-delete.
+- The logic is in `deploy/session/cluster-lib.sh`, sourced by both.
+
+#### Added
+- **`deploy/session/set-password.sh`** creates and rotates the per-session basic-auth passwords:
+  random by default (letters and digits, 20 characters, minimum 12) or typed with `--prompt`; only the
+  apr1 hash reaches the cluster and the password is printed once on the terminal, never written to a
+  file or the process list; `--dry-run` changes nothing. README and `docs/CLUSTER.md` use it in place of
+  the hand-written loop.
+- **`.github/`**: issue forms (bug report, game compatibility, feature request), a pull request
+  template that asks for the hardware evidence, the checks and the licence constraints,
+  `CONTRIBUTING.md`, `SECURITY.md` and `CODEOWNERS`.
+
+#### Changed: documentation and repository
+- **README** goes from 509 to about 300 lines with the current state (savestate v12, the tests, the
+  two shells, the tested games, the one open game bug). The Kubernetes guide and the renderer and
+  controller details moved unchanged to `docs/CLUSTER.md` and `docs/RENDERERS_AND_CONTROLLERS.md`;
+  `docs/CLUSTER.md` gains a section of traps found while bringing the cluster back up (an image built
+  from a tree with objects from another gcc, an import while nodes are NotReady, and the address
+  order above).
+- **Repository cleanup:** 71 finished one-off Lua probes moved to `scripts/archive/`, 17 screenshots
+  no document refers to removed, `.vscode/` no longer tracked (`launch.json` carried an absolute home
+  path), the `duckstation_ref` submodule marked `update = none` so a recursive clone does not fetch
+  over 1 GB of reference material. Five branches already merged into `stable_branch` deleted.
+- `stable_branch` is protected by two rulesets: no deletion and no force-push for anyone, and a pull
+  request with one approval for everyone but the repository admin.
+
 ### 2026-10-02: follow-up of `docs/ANALISI_PERF_AUDIO_FMV_2026-10-02.md`
 
 Every item below rests on a psx-spx line (clone at commit `00d5dcb`, cited as `<path>:<line>`) or on
