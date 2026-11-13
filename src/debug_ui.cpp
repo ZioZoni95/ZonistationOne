@@ -362,6 +362,13 @@ static int    g_vit_aq        = 0;
 static int    g_vit_aq_target = 2048;
 static double g_vit_drift     = 0.0;
 
+/* The last ZS_FT_SAMPLES raw loop times, oldest at g_ft_head, for the gameplay
+ * HUD's frame-time graph. Raw on purpose: the smoothed figure hides exactly
+ * the hitches a graph is there to show. */
+#define ZS_FT_SAMPLES 120
+static float g_ft[ZS_FT_SAMPLES];
+static int   g_ft_head = 0;
+
 /* Fields the machine actually presented per real second.
  *
  * The rate was being read as 1000 / frame_ms of a single loop iteration, and
@@ -407,6 +414,8 @@ extern "C" void debug_ui_set_machine_info(const char* bios_name, const char* dis
 extern "C" void debug_ui_set_vitals(double frame_ms, double budget_ms,
                                     int audio_queue, int audio_target, double drift_pct) {
     g_vit_frame_ms  = frame_ms;
+    g_ft[g_ft_head] = (float)frame_ms;
+    g_ft_head = (g_ft_head + 1) % ZS_FT_SAMPLES;
     /* Smoothed for display: the pacing wait quantises a single iteration to the
      * millisecond, so the raw value is unreadable even when the mean is right. */
     g_vit_frame_ema = (g_vit_frame_ema <= 0.0) ? frame_ms : g_vit_frame_ema * 0.9 + frame_ms * 0.1;
@@ -1909,13 +1918,13 @@ static void draw_mode_rail() {
         ImVec2 icon_center = ImVec2(p0.x + 20.0f, p0.y + row_h * 0.5f);
         ImU32 icon_col = ImGui::GetColorU32(on ? g_modes[i].symbol_col : ZS_MUTED);
         switch (i) {
-            case MODE_PIPELINE: draw_ps_triangle(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_DISPLAY:  draw_ps_square(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_FRAME:    draw_ps_cross(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_CODE:     draw_ps_circle(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_MEMORY:   draw_ps_square(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_AUDIO:    draw_ps_circle(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_VRAM:     draw_ps_triangle(dl, icon_center, 5.5f, icon_col, 1.8f); break;
+            case MODE_PIPELINE: draw_icon_flow(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_DISPLAY:  draw_icon_screen(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_FRAME:    draw_icon_clock(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_CODE:     draw_icon_cpu(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_MEMORY:   draw_icon_ram(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_AUDIO:    draw_icon_wave(dl, icon_center, 5.5f, icon_col, 1.6f); break;
+            case MODE_VRAM:     draw_icon_gpu(dl, icon_center, 5.5f, icon_col, 1.6f); break;
             case MODE_HOST:     draw_ps_chip(dl, icon_center, 5.5f, icon_col, 1.8f); break;
             case MODE_SCRIPT:   draw_ps_terminal(dl, icon_center, 5.5f, icon_col, 1.8f); break;
             default: break;
@@ -3554,9 +3563,12 @@ extern "C" void debug_ui_process_event(SDL_Event* event) {
 // and everything it does show is read from the machine — there is no state here
 // that a game could contradict.
 //
-// Keys: Esc opens and closes the quick menu, F1 hands the window to the debug
-// workspace (Shift+F1 comes back), F5/F8 are the host's save and load, F12 is
-// the Analog button. ZS1_UI=debug boots into the workspace instead.
+// Keys: Esc opens the quick menu and steps back out of it, the backquote (or
+// F1) hands the window to the debug workspace, F5/F8 save and load the current
+// slot and F6/F7 change it, F2 cycles the overlay, F10 pauses, F11 is
+// fullscreen, F12 is the Analog button. On the pad, Select + Start opens the
+// menu and the D-pad, Cross and Circle drive it. ZS1_UI=debug boots into the
+// workspace instead.
 // ---------------------------------------------------------------------------
 
 static bool   g_gp_menu_open     = false;
@@ -3564,6 +3576,82 @@ static int    g_gp_menu_idx      = 0;
 static int    g_gp_slot          = 0;
 static double g_gp_last_input_t  = 0.0;
 static ImVec2 g_gp_last_mouse    = ImVec2(0, 0);
+
+/* Where the menu's focus is. The list on the left and the pane on the right
+ * are one navigation space driven by the same six inputs (up, down, left,
+ * right, confirm, back) whether they come from the keyboard or from the pad,
+ * so every control the mouse can reach has an index the other two can reach.
+ * The pane's buttons number themselves as they are drawn (g_gp_pane_next) and
+ * say how many sit on a row (g_gp_pane_cols). */
+static int g_gp_focus      = 0;      /* 0 = list, 1 = pane */
+static int g_gp_pane_idx   = 0;
+static int g_gp_pane_next  = 0;
+static int g_gp_pane_count = 0;
+static int g_gp_pane_cols  = 1;
+
+/* A destructive slot action asks twice: the first press arms it, the second
+ * within four seconds carries it out. */
+static int    g_gp_arm_kind = 0;     /* 0 none, 1 overwrite, 2 load */
+static int    g_gp_arm_slot = -1;
+static double g_gp_arm_t    = 0.0;
+
+enum { GP_HUD_AUTO = 0, GP_HUD_ALWAYS, GP_HUD_OFF, GP_HUD_COUNT };
+static int  g_gp_hud_mode = GP_HUD_AUTO;
+static bool g_gp_graph    = true;
+static const char* const g_gp_hud_names[GP_HUD_COUNT] = { "Auto-hide", "Always on", "Off" };
+
+/* True while the machine is paused because the menu is up, as opposed to
+ * paused by F10 or by the debugger — only the first is undone on close. */
+static bool g_gp_menu_paused = false;
+
+/* The pad word the host read this frame (active low, as the SIO sends it) and
+ * last frame's, for edges. g_pad_hold keeps the pad away from the game after
+ * the interface gives it back until every button has been let go, so the press
+ * that closed the menu is not also a press in the game. */
+static uint16_t g_pad_word = 0xFFFF;
+static uint16_t g_pad_prev = 0xFFFF;
+static bool     g_pad_hold = false;
+
+static bool g_req_fullscreen  = false;
+static bool g_ws_quit_confirm = false;
+
+struct GpNav { bool up, down, left, right, ok, back; };
+static GpNav g_nav = { false, false, false, false, false, false };
+
+static ImU32 gp_col(ImVec4 c, float a) { c.w *= a; return ImGui::GetColorU32(c); }
+
+/* The emblem: the four pad glyphs on a ring. Drawn, not loaded — there is no
+ * image asset in the tree, and the console maker's own logo is a registered
+ * mark that a GPL project has no licence to ship. To use an asset instead,
+ * this is the one function to replace. */
+static void draw_zs_emblem(ImDrawList* dl, ImVec2 c, float r, float a) {
+    float g  = r * 0.27f;
+    float d  = r * 0.54f;
+    float th = r * 0.085f; if (th < 1.3f) th = 1.3f;
+    dl->AddCircleFilled(c, r, IM_COL32(10, 13, 20, (int)(235 * a)), 48);
+    dl->AddCircle(c, r, gp_col(ZS_DATA, a * 0.75f), 48, th * 0.8f);
+    draw_ps_triangle(dl, ImVec2(c.x, c.y - d), g, gp_col(ZS_PS_GREEN, a), th);
+    draw_ps_circle  (dl, ImVec2(c.x + d, c.y), g, gp_col(ZS_PS_RED,   a), th);
+    draw_ps_cross   (dl, ImVec2(c.x, c.y + d), g, gp_col(ZS_PS_BLUE,  a), th);
+    draw_ps_square  (dl, ImVec2(c.x - d, c.y), g, gp_col(ZS_PS_PINK,  a), th);
+}
+
+/* A key cap and what it does. Returns the x after it. */
+static float gp_keycap(ImDrawList* dl, ImVec2 p, const char* key, const char* label, float a) {
+    ImFont* m = g_font_mono ? g_font_mono : ImGui::GetFont();
+    ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
+    float s  = g_ui_scale;
+    float fs = m->LegacySize * 0.90f;
+    float kw = m->CalcTextSizeA(fs, FLT_MAX, 0.0f, key).x + 12.0f * s;
+    float kh = fs + 6.0f * s;
+    dl->AddRectFilled(p, ImVec2(p.x + kw, p.y + kh), IM_COL32(26, 35, 52, (int)(235 * a)), 4.0f * s);
+    dl->AddRect(p, ImVec2(p.x + kw, p.y + kh), IM_COL32(62, 84, 120, (int)(255 * a)), 4.0f * s);
+    dl->AddText(m, fs, ImVec2(p.x + 6.0f * s, p.y + 3.0f * s), gp_col(ZS_TEXT, a), key);
+    float x = p.x + kw + 6.0f * s;
+    float ls = f->LegacySize * 0.88f;
+    dl->AddText(f, ls, ImVec2(x, p.y + (kh - ls) * 0.5f), gp_col(ZS_MUTED, a), label);
+    return x + f->CalcTextSizeA(ls, FLT_MAX, 0.0f, label).x + 16.0f * s;
+}
 
 /* One-shot requests for the host loop: the shell does not own the machine, it
  * asks. debug_ui_take_* hand them over and clear them. */
@@ -3652,75 +3740,136 @@ static void gp_request_state(bool save, int slot) {
 
 static void gp_draw_hud(Interconnect* inter, float alpha) {
     if (alpha <= 0.01f) return;
+    float s = g_ui_scale;
 
-    const HostInfo* host = host_info_get();
-    bool pal = inter && inter->gpu.vmode == Pal;
-    double hz = 0.0;
-    if (inter) {
-        uint32_t cpf = gpu_cycles_per_frame(&inter->gpu);
-        if (cpf) hz = (double)PSX_SYSCLK_HZ / (double)cpf;
-    }
-    /* Fields per real second, counted over half a second — not the reciprocal of
-     * one loop iteration, which reads 60+ on a PAL machine that is keeping
-     * exact 49.75 Hz time because the pacing wait quantises to the millisecond. */
+    bool   pal   = inter && inter->gpu.vmode == Pal;
+    double hz    = nominal_hz(inter);
+    /* Fields per real second, counted over half a second — see field_rate_hz(). */
     double fps   = field_rate_hz(inter);
     double speed = (hz > 0.1) ? (fps / hz) * 100.0 : 0.0;
+    ImVec4 scol  = speed >= 98.0 ? ZS_OK : (speed >= 90.0 ? ZS_WARN : ZS_CRIT);
 
     SioPadMode pad = inter ? sio_get_pad_mode(&inter->sio) : SIO_PAD_DIGITAL;
     ImVec4 led = (pad == SIO_PAD_ANALOG) ? ZS_CRIT : (pad == SIO_PAD_STICK) ? ZS_OK : ZS_FAINT;
 
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
-
-    char l1[48], l2[48], l3[48], l4[48];
-    snprintf(l1, sizeof(l1), "%.1f fps", fps);
-    snprintf(l2, sizeof(l2), "%.0f%%", speed);
-    snprintf(l3, sizeof(l3), "%.1f ms", g_vit_frame_ema);
-    snprintf(l4, sizeof(l4), "%s %.2f Hz", pal ? "PAL" : "NTSC", hz);
-
     ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
-    float fs = mono->LegacySize;
-    float pad_in = 10.0f * g_ui_scale;
-    float gap    = 18.0f * g_ui_scale;
+    ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
 
-    float w = pad_in * 2.0f;
-    const char* parts[4] = { l1, l2, l3, l4 };
-    for (int i = 0; i < 4; i++)
-        w += mono->CalcTextSizeA(fs, FLT_MAX, 0.0f, parts[i]).x + gap;
-    w += 22.0f * g_ui_scale;   /* the pad LED and its label */
+    /* --- top right: the performance block --- */
+    float w      = 244.0f * s;
+    float pad_in = 12.0f * s;
+    float big    = 30.0f * s;
+    float small  = mono->LegacySize * 0.92f;
+    float gh     = g_gp_graph ? 30.0f * s : 0.0f;
+    float h      = pad_in * 2.0f + big + 4.0f * s + small + (g_gp_graph ? gh + 9.0f * s : 0.0f);
 
-    float h = fs + pad_in * 2.0f;
-    ImVec2 p1 = ImVec2(vp->WorkPos.x + vp->WorkSize.x - 18.0f * g_ui_scale,
-                       vp->WorkPos.y + 18.0f * g_ui_scale + h);
+    ImVec2 p1 = ImVec2(vp->WorkPos.x + vp->WorkSize.x - 18.0f * s, vp->WorkPos.y + 18.0f * s + h);
     ImVec2 p0 = ImVec2(p1.x - w, p1.y - h);
+    dl->AddRectFilled(p0, p1, IM_COL32(8, 11, 18, (int)(215 * alpha)), 8.0f * s);
+    dl->AddRect(p0, p1, IM_COL32(40, 56, 82, (int)(255 * alpha)), 8.0f * s);
+    dl->AddRectFilled(ImVec2(p0.x, p0.y + 8.0f * s), ImVec2(p0.x + 3.0f * s, p1.y - 8.0f * s),
+                      gp_col(scol, alpha), 2.0f);
 
-    ImU32 bg    = IM_COL32(10, 13, 20, (int)(210 * alpha));
-    ImU32 line  = IM_COL32(40, 56, 82, (int)(255 * alpha));
-    dl->AddRectFilled(p0, p1, bg, 6.0f);
-    dl->AddRect(p0, p1, line, 6.0f);
-
-    float x = p0.x + pad_in;
+    float x = p0.x + pad_in + 2.0f * s;
     float y = p0.y + pad_in;
-    ImVec4 cols[4] = { ZS_TEXT, speed >= 98.0 ? ZS_OK : ZS_WARN, ZS_TEXT, ZS_DATA };
-    for (int i = 0; i < 4; i++) {
-        ImVec4 c = cols[i]; c.w = alpha;
-        dl->AddText(mono, fs, ImVec2(x, y), ImGui::GetColorU32(c), parts[i]);
-        x += mono->CalcTextSizeA(fs, FLT_MAX, 0.0f, parts[i]).x + gap;
-    }
-    ImVec4 lc = led; lc.w = alpha;
-    dl->AddCircleFilled(ImVec2(x + 5.0f * g_ui_scale, y + fs * 0.5f), 5.0f * g_ui_scale,
-                        ImGui::GetColorU32(lc), 12);
+    char b[64];
 
-    /* Bottom-left: what the keys do, on the same fade as the HUD. */
-    char hint[120];
-    snprintf(hint, sizeof(hint), "Esc  menu      F5 / F8  state      F12  %s      `  debug workspace",
-             inter ? sio_pad_mode_name(pad) : "pad");
-    ImVec4 hc = ZS_MUTED; hc.w = alpha * 0.9f;
-    dl->AddText(mono, fs * 0.95f,
-                ImVec2(vp->WorkPos.x + 20.0f * g_ui_scale,
-                       vp->WorkPos.y + vp->WorkSize.y - 20.0f * g_ui_scale - fs),
-                ImGui::GetColorU32(hc), hint);
-    (void)host;
+    snprintf(b, sizeof(b), "%.1f", fps);
+    dl->AddText(h1, big, ImVec2(x, y), gp_col(ZS_TEXT, alpha), b);
+    float fw = h1->CalcTextSizeA(big, FLT_MAX, 0.0f, b).x;
+    dl->AddText(mono, small, ImVec2(x + fw + 6.0f * s, y + big - small - 4.0f * s),
+                gp_col(ZS_FAINT, alpha), "FPS");
+
+    snprintf(b, sizeof(b), "%.0f%%", speed);
+    float sfs = big * 0.72f;
+    float sw  = h1->CalcTextSizeA(sfs, FLT_MAX, 0.0f, b).x;
+    dl->AddText(h1, sfs, ImVec2(p1.x - pad_in - sw, y + big - sfs - 2.0f * s), gp_col(scol, alpha), b);
+    y += big + 4.0f * s;
+
+    snprintf(b, sizeof(b), "%.1f ms  %s %.2f Hz", g_vit_frame_ema, pal ? "PAL" : "NTSC", hz);
+    dl->AddText(mono, small, ImVec2(x, y), gp_col(ZS_MUTED, alpha), b);
+    const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
+    float nw = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, pname).x;
+    dl->AddText(mono, small, ImVec2(p1.x - pad_in - nw, y), gp_col(ZS_MUTED, alpha), pname);
+    dl->AddCircleFilled(ImVec2(p1.x - pad_in - nw - 9.0f * s, y + small * 0.5f), 4.0f * s,
+                        gp_col(led, alpha), 12);
+    y += small + 9.0f * s;
+
+    /* Frame-time graph: one bar per host loop iteration against the field
+     * budget (the line at half height). A single iteration swings around the
+     * mean by design — the pacing wait quantises to the millisecond — so the
+     * warning colours start well above the budget, not at it. */
+    if (g_gp_graph && g_vit_budget_ms > 0.001) {
+        float gw = w - pad_in * 2.0f - 2.0f * s;
+        float bw = gw / (float)ZS_FT_SAMPLES;
+        float top = (float)(g_vit_budget_ms * 2.0);
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + gw, y + gh), IM_COL32(14, 19, 30, (int)(200 * alpha)), 3.0f);
+        for (int i = 0; i < ZS_FT_SAMPLES; i++) {
+            float v = g_ft[(g_ft_head + i) % ZS_FT_SAMPLES];
+            if (v <= 0.0f) continue;
+            float r = v / top; if (r > 1.0f) r = 1.0f;
+            double over = (double)v / g_vit_budget_ms;
+            ImVec4 c = over > 1.8 ? ZS_CRIT : (over > 1.35 ? ZS_WARN : ZS_DATA);
+            dl->AddRectFilled(ImVec2(x + bw * (float)i, y + gh * (1.0f - r)),
+                              ImVec2(x + bw * (float)(i + 1), y + gh), gp_col(c, alpha * 0.85f));
+        }
+        dl->AddLine(ImVec2(x, y + gh * 0.5f), ImVec2(x + gw, y + gh * 0.5f),
+                    IM_COL32(148, 163, 184, (int)(110 * alpha)), 1.0f);
+    }
+
+    /* --- top left: what is running --- */
+    {
+        float er = 17.0f * s;
+        ImVec2 c = ImVec2(vp->WorkPos.x + 20.0f * s + er, vp->WorkPos.y + 20.0f * s + er);
+        draw_zs_emblem(dl, c, er, alpha);
+        const char* title = (g_disc_name[0] && strcmp(g_disc_name, "n/a")) ? g_disc_name
+                                                                            : "No disc - BIOS shell";
+        float ts = h1->LegacySize;
+        dl->AddText(h1, ts, ImVec2(c.x + er + 10.0f * s + 1.0f, c.y - ts * 0.95f + 1.0f),
+                    IM_COL32(0, 0, 0, (int)(200 * alpha)), title);
+        dl->AddText(h1, ts, ImVec2(c.x + er + 10.0f * s, c.y - ts * 0.95f), gp_col(ZS_TEXT, alpha), title);
+        snprintf(b, sizeof(b), "ZONISTATION ONE   SLOT %d", g_gp_slot);
+        dl->AddText(mono, small, ImVec2(c.x + er + 10.0f * s, c.y + 3.0f * s), gp_col(ZS_DATA, alpha * 0.9f), b);
+    }
+
+    /* --- bottom left: what the keys do --- */
+    if (!g_gp_menu_open) {
+        ImVec2 p = ImVec2(vp->WorkPos.x + 20.0f * s,
+                          vp->WorkPos.y + vp->WorkSize.y - 20.0f * s - (mono->LegacySize * 0.90f + 6.0f * s));
+        p.x = gp_keycap(dl, p, "Esc", "Menu", alpha);
+        p.x = gp_keycap(dl, p, "F5", "Save", alpha);
+        p.x = gp_keycap(dl, p, "F8", "Load", alpha);
+        p.x = gp_keycap(dl, p, "F6 F7", "Slot", alpha);
+        p.x = gp_keycap(dl, p, "F10", "Pause", alpha);
+        p.x = gp_keycap(dl, p, "F11", "Fullscreen", alpha);
+        p.x = gp_keycap(dl, p, "F2", "HUD", alpha);
+        p.x = gp_keycap(dl, p, "`", "Debug", alpha);
+    }
+}
+
+/* The machine is stopped and the menu is not the reason: say so, and say how
+ * to start it again. Without this a pause taken in the workspace reads as a
+ * hang from the gameplay shell. */
+static void gp_draw_paused(void) {
+    float s = g_ui_scale;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImFont* h1 = g_font_h1 ? g_font_h1 : ImGui::GetFont();
+    float fs = h1->LegacySize * 1.15f;
+    const char* t = "PAUSED";
+    float tw = h1->CalcTextSizeA(fs, FLT_MAX, 0.0f, t).x;
+    float w = tw + 150.0f * s, h = fs + 18.0f * s;
+    ImVec2 p0 = ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + 22.0f * s);
+    ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+    dl->AddRectFilled(p0, p1, IM_COL32(8, 11, 18, 230), h * 0.5f);
+    dl->AddRect(p0, p1, gp_col(ZS_WARN, 0.9f), h * 0.5f, 0, 1.5f);
+    float bx = p0.x + 18.0f * s, by = p0.y + 9.0f * s;
+    dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + 4.0f * s, by + fs), gp_col(ZS_WARN, 1.0f));
+    dl->AddRectFilled(ImVec2(bx + 8.0f * s, by), ImVec2(bx + 12.0f * s, by + fs), gp_col(ZS_WARN, 1.0f));
+    dl->AddText(h1, fs, ImVec2(bx + 22.0f * s, by), gp_col(ZS_TEXT, 1.0f), t);
+    gp_keycap(dl, ImVec2(bx + 34.0f * s + tw, by + 1.0f * s), "F10", "Resume", 1.0f);
 }
 
 static void gp_draw_toasts(void) {
@@ -3772,199 +3921,405 @@ static void gp_draw_toasts(void) {
 
 struct GpMenuItem { const char* label; const char* key; bool danger; };
 
-/* Named, because the pane below and the keyboard handler both switch on the
- * index and a bare number breaks silently the moment an entry is inserted —
- * which is exactly what adding Video did. */
+/* Named, because the pane below and the navigation both switch on the index
+ * and a bare number breaks silently the moment an entry is inserted. */
 enum {
     GP_RESUME = 0, GP_SAVE, GP_LOAD, GP_PADS,
-    GP_MACHINE, GP_VIDEO, GP_WORKSPACE, GP_QUIT
+    GP_VIDEO, GP_MACHINE, GP_WORKSPACE, GP_QUIT
 };
 
 static const GpMenuItem g_gp_items[] = {
     { "Resume",           "Esc",  false },
     { "Save state",       "F5",   false },
     { "Load state",       "F8",   false },
-    { "Controllers",      "F12",  false },
+    { "Controllers",      "",     false },
+    { "Video & HUD",      "",     false },
     { "Machine",          "",     false },
-    { "Video",            "",     false },
-    { "Debug workspace",  "F1",   false },
+    { "Debug workspace",  "`",    false },
     { "Quit",             "",     true  },
 };
 static const int GP_ITEM_COUNT = (int)(sizeof(g_gp_items) / sizeof(g_gp_items[0]));
 
-static void gp_draw_slots(Interconnect* inter, bool save_mode) {
-    (void)inter;
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-    ImGui::TextWrapped(save_mode
-        ? "Writes the whole machine — CPU, RAM, VRAM, SPU RAM, the drive. Slot 0 is the one F5 and F8 use."
-        : "States are refused when their format is older than the build, rather than loaded into a struct that has moved.");
-    ImGui::PopStyleColor();
-    ImGui::Dummy(ImVec2(0, 6));
+static void gp_open_menu(void) {
+    g_gp_menu_open = true;
+    g_gp_menu_idx  = 0;
+    g_gp_focus     = 0;
+    g_gp_arm_kind  = 0;
+    gp_note_input();
+}
 
-    if (ImGui::BeginTable("gp_slots", 2, ImGuiTableFlags_SizingStretchSame)) {
-        for (int i = 0; i < 4; i++) {
-            ImGui::TableNextColumn();
-            ImGui::PushID(i);
-            char info[80];
-            bool exists = gp_slot_info(i, info, sizeof(info));
-            char label[128];
-            snprintf(label, sizeof(label), "Slot %d%s\n%s", i, i == 0 ? "  (F5 / F8)" : "",
-                     exists ? info : "empty");
-            ImVec4 col = exists ? (i == g_gp_slot ? ZS_DATA : ZS_TEXT) : ZS_FAINT;
-            ImGui::PushStyleColor(ImGuiCol_Text, col);
-            if (ImGui::Button(label, ImVec2(-FLT_MIN, 56.0f * g_ui_scale))) {
-                if (save_mode) {
-                    g_gp_slot = i;
-                    gp_request_state(true, i);
-                } else if (exists) {
-                    g_gp_slot = i;
-                    gp_request_state(false, i);
-                } else {
-                    gp_toast("Slot is empty", gp_slot_path(i), ZS_WARN);
-                }
+static void gp_close_menu(void) {
+    g_gp_menu_open = false;
+    g_gp_focus     = 0;
+    g_gp_arm_kind  = 0;
+    g_pad_hold     = true;
+    gp_note_input();
+}
+
+static bool gp_mouse_moved(void) {
+    ImVec2 d = ImGui::GetIO().MouseDelta;
+    return d.x != 0.0f || d.y != 0.0f;
+}
+
+/* A pane control. It takes the next index in the pane, shows the focus ring
+ * when the navigation is on it, and fires on a click or on confirm — one
+ * widget, so nothing in a pane is reachable by the mouse alone. A disabled
+ * control still takes focus (the cursor has to be able to cross it) and never
+ * fires. `on` marks the live choice of a group. */
+static bool gp_btn(const char* label, const char* sub, ImVec2 size, bool disabled, bool on, ImVec4 accent) {
+    float s = g_ui_scale;
+    int idx = g_gp_pane_next++;
+    if (size.x <= 0.0f) size.x = ImGui::GetContentRegionAvail().x;
+
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    ImVec2 p1 = ImVec2(p0.x + size.x, p0.y + size.y);
+    ImGui::PushID(idx);
+    bool clicked = ImGui::InvisibleButton("##gpb", size);
+    bool hov = ImGui::IsItemHovered();
+    ImGui::PopID();
+    if (hov && gp_mouse_moved()) { g_gp_focus = 1; g_gp_pane_idx = idx; }
+    bool focused = (g_gp_focus == 1 && g_gp_pane_idx == idx);
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    float a = disabled ? 0.45f : 1.0f;
+    dl->AddRectFilled(p0, p1, gp_col(on ? ZS_MODE_ON : ZS_PANEL2, focused ? 1.0f : 0.85f), 6.0f * s);
+    if (focused) {
+        dl->AddRectFilled(p0, p1, gp_col(accent, 0.10f), 6.0f * s);
+        dl->AddRect(p0, p1, gp_col(accent, 0.95f), 6.0f * s, 0, 1.6f * s);
+    } else {
+        dl->AddRect(p0, p1, gp_col(on ? accent : ZS_LINE, on ? 0.55f : 1.0f), 6.0f * s);
+    }
+    if (on) dl->AddRectFilled(ImVec2(p0.x + 4.0f * s, p0.y + 7.0f * s),
+                              ImVec2(p0.x + 7.0f * s, p1.y - 7.0f * s), gp_col(accent, 1.0f), 2.0f);
+
+    ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
+    ImFont* m = g_font_mono ? g_font_mono : f;
+    float fs = f->LegacySize, ss = m->LegacySize * 0.88f;
+    float th = fs + ((sub && sub[0]) ? ss + 3.0f * s : 0.0f);
+    float tx = p0.x + 16.0f * s, ty = p0.y + (size.y - th) * 0.5f;
+    dl->PushClipRect(p0, p1, true);
+    dl->AddText(f, fs, ImVec2(tx, ty), gp_col(on ? accent : ZS_TEXT, a), label);
+    if (sub && sub[0])
+        dl->AddText(m, ss, ImVec2(tx, ty + fs + 3.0f * s), gp_col(ZS_MUTED, a), sub);
+    dl->PopClipRect();
+
+    if (focused && g_nav.ok) clicked = true;
+    return clicked && !disabled;
+}
+
+static void gp_pane_text(const char* text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0, 6.0f * g_ui_scale));
+}
+
+static void gp_draw_slots(bool save_mode) {
+    float s = g_ui_scale;
+    g_gp_pane_cols = 2;
+    gp_pane_text(save_mode
+        ? "Writes the whole machine: CPU, RAM, VRAM, SPU RAM, the drive. F5 and F8 use the "
+          "highlighted slot; F6 and F7 change it. Overwriting asks twice."
+        : "Loading replaces the running session, so it asks twice. States written by an older "
+          "format are refused rather than loaded.");
+
+    double now = ImGui::GetTime();
+    if (g_gp_arm_kind && now - g_gp_arm_t > 4.0) g_gp_arm_kind = 0;
+
+    float gap = 10.0f * s;
+    float bw = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+    for (int i = 0; i < 4; i++) {
+        if (i % 2) ImGui::SameLine(0, gap);
+        char info[80];
+        bool exists = gp_slot_info(i, info, sizeof(info));
+        bool armed  = (g_gp_arm_kind == (save_mode ? 1 : 2)) && g_gp_arm_slot == i;
+        char label[48];
+        snprintf(label, sizeof(label), "Slot %d%s", i, i == g_gp_slot ? "   F5 / F8" : "");
+        const char* sub = armed ? (save_mode ? "Press again to overwrite" : "Press again to load")
+                                : (exists ? info : "empty");
+        if (gp_btn(label, sub, ImVec2(bw, 66.0f * s), !save_mode && !exists,
+                   i == g_gp_slot, armed ? ZS_WARN : ZS_DATA)) {
+            if (save_mode && (!exists || armed)) {
+                g_gp_slot = i; g_gp_arm_kind = 0;
+                gp_request_state(true, i);
+            } else if (!save_mode && armed) {
+                g_gp_slot = i;
+                gp_request_state(false, i);
+                gp_close_menu();
+            } else {
+                g_gp_arm_kind = save_mode ? 1 : 2;
+                g_gp_arm_slot = i;
+                g_gp_arm_t    = now;
             }
-            ImGui::PopStyleColor();
-            ImGui::PopID();
         }
-        ImGui::EndTable();
+        if (i % 2) ImGui::Dummy(ImVec2(0, 2.0f * s));
     }
 }
 
 static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
+    (void)cpu;
+    float s = g_ui_scale;
     ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
+    ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+    ImFont* ui   = g_font_ui ? g_font_ui : ImGui::GetFont();
 
-    ImVec2 size = ImVec2(vp->WorkSize.x * 0.72f, vp->WorkSize.y * 0.66f);
-    if (size.x > 1000.0f * g_ui_scale) size.x = 1000.0f * g_ui_scale;
-    if (size.y > 620.0f * g_ui_scale)  size.y = 620.0f * g_ui_scale;
+    ImVec2 size = ImVec2(vp->WorkSize.x * 0.80f, vp->WorkSize.y * 0.76f);
+    if (size.x > 1060.0f * s) size.x = 1060.0f * s;
+    if (size.y > 660.0f * s)  size.y = 660.0f * s;
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - size.x) * 0.5f,
                                    vp->WorkPos.y + (vp->WorkSize.y - size.y) * 0.5f));
     ImGui::SetNextWindowSize(size);
-    ImGui::SetNextWindowBgAlpha(0.98f);
 
-    if (!ImGui::Begin("##gp_menu", nullptr,
-                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking)) {
-        ImGui::End();
-        return;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f * s);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, COLA(0x0B, 0x0F, 0x18, 0.97f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ZS_LINE);
+    bool open = ImGui::Begin("##gp_menu", nullptr,
+                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(3);
+    if (!open) { ImGui::End(); return; }
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 w0 = ImGui::GetWindowPos();
+    ImVec2 w1 = ImVec2(w0.x + size.x, w0.y + size.y);
+    float hh = 70.0f * s, fh = 38.0f * s;
+    bool pal = inter && inter->gpu.vmode == Pal;
+    char buf[192];
+
+    /* Header: the emblem, what is running, and the state of the machine. */
+    dl->AddRectFilledMultiColor(ImVec2(w0.x + 1, w0.y + 1), ImVec2(w1.x - 1, w0.y + hh),
+        IM_COL32(0, 240, 255, 34), IM_COL32(255, 46, 126, 22),
+        IM_COL32(255, 46, 126, 4), IM_COL32(0, 240, 255, 6));
+    dl->AddLine(ImVec2(w0.x, w0.y + hh), ImVec2(w1.x, w0.y + hh), gp_col(ZS_LINE, 1.0f));
+    dl->AddRectFilled(ImVec2(w0.x + 18.0f * s, w0.y + hh - 2.0f), ImVec2(w0.x + 150.0f * s, w0.y + hh + 1.0f),
+                      gp_col(ZS_DATA, 1.0f));
+    draw_zs_emblem(dl, ImVec2(w0.x + 42.0f * s, w0.y + hh * 0.5f), 22.0f * s, 1.0f);
+    {
+        const char* title = (g_disc_name[0] && strcmp(g_disc_name, "n/a")) ? g_disc_name
+                                                                            : "No disc - BIOS shell";
+        float ts = h1->LegacySize * 1.25f;
+        float tx = w0.x + 78.0f * s;
+        dl->PushClipRect(ImVec2(tx, w0.y), ImVec2(w1.x - 190.0f * s, w0.y + hh), true);
+        dl->AddText(h1, ts, ImVec2(tx, w0.y + 13.0f * s), gp_col(ZS_TEXT, 1.0f), title);
+        snprintf(buf, sizeof(buf), "ZONISTATION ONE   %s   %s", pal ? "PAL" : "NTSC", g_bios_name);
+        dl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(tx, w0.y + 15.0f * s + ts),
+                    gp_col(ZS_FAINT, 1.0f), buf);
+        dl->PopClipRect();
+
+        const char* st = "MACHINE PAUSED";
+        float ss = mono->LegacySize * 0.9f;
+        float sw = mono->CalcTextSizeA(ss, FLT_MAX, 0.0f, st).x;
+        ImVec2 c0 = ImVec2(w1.x - 22.0f * s - sw - 20.0f * s, w0.y + hh * 0.5f - ss * 0.5f - 5.0f * s);
+        ImVec2 c1 = ImVec2(w1.x - 22.0f * s, c0.y + ss + 10.0f * s);
+        dl->AddRectFilled(c0, c1, gp_col(ZS_WARN, 0.12f), 4.0f * s);
+        dl->AddRect(c0, c1, gp_col(ZS_WARN, 0.7f), 4.0f * s);
+        dl->AddText(mono, ss, ImVec2(c0.x + 10.0f * s, c0.y + 5.0f * s), gp_col(ZS_WARN, 1.0f), st);
     }
 
-    /* Header: what is running, in the machine's own words. */
-    bool pal = inter && inter->gpu.vmode == Pal;
-    if (g_font_h1) ImGui::PushFont(g_font_h1);
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_TEXT);
-    ImGui::TextUnformatted(g_disc_name[0] && strcmp(g_disc_name, "n/a") ? g_disc_name : "No disc — BIOS shell");
-    ImGui::PopStyleColor();
-    if (g_font_h1) ImGui::PopFont();
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::Text("   %s   %s", pal ? "PAL" : "NTSC", g_bios_name);
-    ImGui::PopStyleColor();
-    ImGui::Separator();
-    ImGui::Dummy(ImVec2(0, 4));
+    /* --- the list --- */
+    bool list_ok = (g_gp_focus == 0 && g_nav.ok);
+    float list_w = 236.0f * s;
+    float body_h = size.y - hh - fh;
+    ImGui::SetCursorScreenPos(ImVec2(w0.x, w0.y + hh + 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f * s, 12.0f * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 3.0f * s));
+    ImGui::BeginChild("##gp_list", ImVec2(list_w, body_h - 1.0f), ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleVar(2);
+    {
+        ImDrawList* ldl = ImGui::GetWindowDrawList();
+        for (int i = 0; i < GP_ITEM_COUNT; i++) {
+            ImVec2 p0 = ImGui::GetCursorScreenPos();
+            float rw = ImGui::GetContentRegionAvail().x, rh = 38.0f * s;
+            ImVec2 p1 = ImVec2(p0.x + rw, p0.y + rh);
+            ImGui::PushID(i);
+            bool click = ImGui::InvisibleButton("##it", ImVec2(rw, rh));
+            bool hov = ImGui::IsItemHovered();
+            ImGui::PopID();
+            /* The pointer selects only when it moves: a cursor left resting on
+             * the list must not fight the arrow keys. */
+            if ((hov && gp_mouse_moved() && g_gp_menu_idx != i) || click) {
+                if (g_gp_menu_idx != i) g_gp_arm_kind = 0;
+                g_gp_menu_idx = i;
+                g_gp_focus = 0;
+            }
+            if (click) list_ok = true;
 
-    float list_w = 210.0f * g_ui_scale;
-    ImGui::BeginChild("##gp_list", ImVec2(list_w, 0), false);
-    for (int i = 0; i < GP_ITEM_COUNT; i++) {
-        bool sel = (i == g_gp_menu_idx);
-        ImVec4 col = sel ? ZS_TEXT : ZS_MUTED;
-        if (g_gp_items[i].danger && sel) col = ZS_CRIT;
-        ImGui::PushStyleColor(ImGuiCol_Text, col);
-        ImGui::PushStyleColor(ImGuiCol_Header, ZS_MODE_ON);
-        if (ImGui::Selectable(g_gp_items[i].label, sel, 0, ImVec2(0, 26.0f * g_ui_scale))) {
-            g_gp_menu_idx = i;
-            if (i == GP_RESUME) g_gp_menu_open = false;
-            if (i == GP_WORKSPACE) { g_shell = SHELL_DEBUG; g_gp_menu_open = false; }
-        }
-        if (ImGui::IsItemHovered()) g_gp_menu_idx = i;
-        ImGui::PopStyleColor(2);
-        if (g_gp_items[i].key[0]) {
-            ImGui::SameLine(list_w - 52.0f * g_ui_scale);
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-            ImGui::TextUnformatted(g_gp_items[i].key);
-            ImGui::PopStyleColor();
+            bool sel = (i == g_gp_menu_idx);
+            ImVec4 acc = g_gp_items[i].danger ? ZS_CRIT : ZS_DATA;
+            if (sel) {
+                float k = (g_gp_focus == 0) ? 1.0f : 0.45f;
+                ldl->AddRectFilledMultiColor(p0, p1, gp_col(acc, 0.26f * k), gp_col(acc, 0.03f * k),
+                                             gp_col(acc, 0.03f * k), gp_col(acc, 0.26f * k));
+                ldl->AddRectFilled(p0, ImVec2(p0.x + 3.0f * s, p1.y), gp_col(acc, k));
+            }
+            float fs = ui->LegacySize;
+            ldl->AddText(ui, fs, ImVec2(p0.x + 16.0f * s, p0.y + (rh - fs) * 0.5f),
+                         gp_col(sel ? (g_gp_items[i].danger ? ZS_CRIT : ZS_TEXT) : ZS_MUTED, 1.0f),
+                         g_gp_items[i].label);
+            if (g_gp_items[i].key[0]) {
+                float ks = mono->LegacySize * 0.88f;
+                float kw = mono->CalcTextSizeA(ks, FLT_MAX, 0.0f, g_gp_items[i].key).x;
+                ldl->AddText(mono, ks, ImVec2(p1.x - kw - 10.0f * s, p0.y + (rh - ks) * 0.5f),
+                             gp_col(ZS_FAINT, 1.0f), g_gp_items[i].key);
+            }
         }
     }
     ImGui::EndChild();
+    dl->AddLine(ImVec2(w0.x + list_w, w0.y + hh), ImVec2(w0.x + list_w, w1.y - fh), gp_col(ZS_LINE_SOFT, 1.0f));
 
-    ImGui::SameLine();
-    ImGui::BeginChild("##gp_pane", ImVec2(0, 0), false);
+    /* --- the pane --- */
+    ImGui::SetCursorScreenPos(ImVec2(w0.x + list_w + 1.0f, w0.y + hh + 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f * s, 16.0f * s));
+    ImGui::BeginChild("##gp_pane", ImVec2(size.x - list_w - 2.0f, body_h - 1.0f),
+                      ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoNav);
+    ImGui::PopStyleVar();
 
-    char buf[192];
+    g_gp_pane_next = 0;
+    g_gp_pane_cols = 1;
+    ImVec2 bsz = ImVec2(200.0f * s, 38.0f * s);
+
     switch (g_gp_menu_idx) {
-        case GP_RESUME: {  /* Resume — the session, from counters that already exist */
+        case GP_RESUME: {  /* the session, from counters that already exist */
             card_header_icon("This session", ZS_DATA, draw_icon_clock);
             if (ImGui::BeginTable("gp_sess", 2, ImGuiTableFlags_SizingStretchProp)) {
-                double speed = (g_vit_frame_ms > 0.001) ? (g_vit_budget_ms / g_vit_frame_ms) * 100.0 : 0.0;
-                snprintf(buf, sizeof(buf), "%.0f%%  (%.1f ms per field)", speed, g_vit_frame_ms);
+                double hz = nominal_hz(inter), fps = field_rate_hz(inter);
+                double speed = (hz > 0.1) ? (fps / hz) * 100.0 : 0.0;
+                snprintf(buf, sizeof(buf), "%.0f%%  (%.1f of %.2f fields/s)", speed, fps, hz);
                 gp_row("Speed", buf, speed >= 98.0 ? ZS_OK : ZS_WARN);
-                snprintf(buf, sizeof(buf), "%u", inter ? inter->cpu_cycle_counter : 0u);
-                gp_row("CPU cycles", buf, ZS_TEXT);
-                snprintf(buf, sizeof(buf), "0x%08X", cpu ? cpu->current_pc : 0u);
-                gp_row("PC", buf, ZS_TEXT);
+                int secs = (int)ImGui::GetTime();
+                snprintf(buf, sizeof(buf), "%d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60);
+                gp_row("Session", buf, ZS_TEXT);
+                snprintf(buf, sizeof(buf), "%.1f ms of %.1f ms", g_vit_frame_ema, g_vit_budget_ms);
+                gp_row("Field time", buf, ZS_TEXT);
                 snprintf(buf, sizeof(buf), "%u sectors read, %s",
                          inter ? inter->cdrom.sectors_read_total : 0u,
                          inter && inter->cdrom.double_speed ? "2x" : "1x");
                 gp_row("Disc", buf, ZS_TEXT);
-                snprintf(buf, sizeof(buf), "%d / %d samples, drift %+.2f%%",
-                         g_vit_aq, g_vit_aq_target, g_vit_drift);
+                snprintf(buf, sizeof(buf), "%d / %d samples queued", g_vit_aq, g_vit_aq_target);
                 gp_row("Audio", buf, ZS_AUDIO);
+                snprintf(buf, sizeof(buf), "Slot %d", g_gp_slot);
+                gp_row("Quick state", buf, ZS_DATA);
                 ImGui::EndTable();
             }
-            ImGui::Dummy(ImVec2(0, 10));
-            if (ImGui::Button("Resume", ImVec2(160.0f * g_ui_scale, 34.0f * g_ui_scale)))
-                g_gp_menu_open = false;
+            ImGui::Dummy(ImVec2(0, 10.0f * s));
+            gp_pane_text("The machine is paused while this menu is open and picks up where it "
+                         "stopped when it closes.");
             break;
         }
         case GP_SAVE:
             card_header_icon("Save state", ZS_OK, draw_icon_disc);
-            gp_draw_slots(inter, true);
+            gp_draw_slots(true);
             break;
         case GP_LOAD:
             card_header_icon("Load state", ZS_DATA, draw_icon_disc);
-            gp_draw_slots(inter, false);
+            gp_draw_slots(false);
             break;
-        case GP_PADS: {  /* Controllers */
-            card_header_icon("Controllers", ZS_PS_BLUE, draw_icon_pad);
+        case GP_PADS: {
+            card_header_icon("Controllers", ZS_DATA, draw_icon_pad);
+            g_gp_pane_cols = 3;
             SioPadMode mode = inter ? sio_get_pad_mode(&inter->sio) : SIO_PAD_DIGITAL;
             const char* names[3] = { "Digital", "Analog", "Stick" };
+            const char* subs[3]  = { "LED off", "LED red", "LED green" };
             SioPadMode modes[3]  = { SIO_PAD_DIGITAL, SIO_PAD_ANALOG, SIO_PAD_STICK };
+            float gap = 10.0f * s;
+            float bw = (ImGui::GetContentRegionAvail().x - gap * 2.0f) / 3.0f;
             for (int i = 0; i < 3; i++) {
-                bool on = (mode == modes[i]);
-                ImGui::PushStyleColor(ImGuiCol_Button, on ? ZS_MODE_ON : ZS_PANEL2);
-                ImGui::PushStyleColor(ImGuiCol_Text, on ? ZS_DATA : ZS_MUTED);
-                if (ImGui::Button(names[i], ImVec2(110.0f * g_ui_scale, 32.0f * g_ui_scale)) && inter) {
+                if (i) ImGui::SameLine(0, gap);
+                if (gp_btn(names[i], subs[i], ImVec2(bw, 56.0f * s), inter == nullptr,
+                           mode == modes[i], ZS_DATA) && inter) {
                     sio_set_pad_mode(&inter->sio, modes[i]);
                     gp_toast(sio_pad_mode_name(modes[i]), "pad mode", ZS_OK);
                 }
-                ImGui::PopStyleColor(2);
-                if (i < 2) ImGui::SameLine();
             }
-            ImGui::Dummy(ImVec2(0, 8));
-            if (ImGui::BeginTable("gp_pad", 2, ImGuiTableFlags_SizingStretchProp)) {
-                gp_row("Mode", inter ? sio_pad_mode_name(mode) : "-", ZS_TEXT);
-                gp_row("LED", mode == SIO_PAD_ANALOG ? "red" : mode == SIO_PAD_STICK ? "green" : "off",
-                       mode == SIO_PAD_ANALOG ? ZS_CRIT : mode == SIO_PAD_STICK ? ZS_OK : ZS_FAINT);
-                gp_row("Analog button", "F12, or the DS4 touchpad click", ZS_MUTED);
-                ImGui::EndTable();
-            }
-            ImGui::Dummy(ImVec2(0, 8));
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-            ImGui::TextWrapped("Digital is the boot mode, as on hardware: the BIOS shell's own pad "
-                               "driver does not cope with ID 73h and never finishes its init.");
-            ImGui::PopStyleColor();
-            ImGui::Dummy(ImVec2(0, 6));
-            if (ImGui::Button("Open the mapping editor", ImVec2(240.0f * g_ui_scale, 30.0f * g_ui_scale))) {
+            ImGui::Dummy(ImVec2(0, 6.0f * s));
+            if (gp_btn("Mapping editor", "opens in the debug workspace",
+                       ImVec2(bw * 2.0f + gap, 50.0f * s), false, false, ZS_DATA)) {
                 g_show_controller_mapping = true;
                 g_shell = SHELL_DEBUG;
-                g_gp_menu_open = false;
+                gp_close_menu();
             }
+            ImGui::Dummy(ImVec2(0, 8.0f * s));
+            gp_pane_text("Digital is the boot mode, as on hardware. F12 or the DS4 touchpad click "
+                         "is the Analog button. In this menu the pad navigates: D-pad to move, "
+                         "Cross to confirm, Circle to go back; Select + Start opens it from a game.");
+            break;
+        }
+        case GP_VIDEO: {
+            /* This reports what the machine says and offers the controls that
+             * exist. What cannot change under a running process is marked, not
+             * hidden — a GL device row that says "next launch" is worth more
+             * than a control that looks live and does nothing. */
+            const HostInfo* host = host_info_get();
+            card_header_icon("Video & HUD", ZS_DATA, draw_icon_screen);
+
+            if (ImGui::BeginTable("gp_video_now", 2, ImGuiTableFlags_SizingStretchProp)) {
+                gp_row("GPU", host->gl_renderer[0] ? host->gl_renderer : "unknown",
+                       host->gpu_request[0] && !host->gpu_request_honoured ? ZS_CRIT : ZS_TEXT);
+                snprintf(buf, sizeof(buf), "%ux%u  %s",
+                         inter ? inter->gpu.crtc.display_width  : 0,
+                         inter ? inter->gpu.crtc.display_height : 0,
+                         inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
+                gp_row("Output", buf, ZS_TEXT);
+                ImGui::EndTable();
+            }
+            ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+            micro_label("Renderer");
+            const char* vk_why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
+            struct { const char* label; GfxBackendType type; } backends[2] = {
+                { "OpenGL 3.3", GFX_BACKEND_GL33 },
+                { "Vulkan 1.3", GFX_BACKEND_VULKAN },
+            };
+            for (int i = 0; i < 2; i++) {
+                bool live    = (s_gfx_backend == (int)backends[i].type);
+                bool blocked = (backends[i].type == GFX_BACKEND_VULKAN) && vk_why;
+                if (i) ImGui::SameLine(0, 10.0f * s);
+                if (gp_btn(backends[i].label, live ? "running" : (blocked ? "unavailable" : "switch"),
+                           ImVec2(bsz.x, 50.0f * s), live || blocked || g_req_gfx, live, ZS_OK))
+                    gp_request_gfx(backends[i].type, -1, g_req_gfx_what.internal_scale);
+            }
+            if (vk_why) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+                ImGui::TextWrapped("Vulkan: %s", vk_why);
+                ImGui::PopStyleColor();
+            }
+
+            int ndev = 0;
+            const GfxDeviceInfo* devs = gfx_devices((GfxBackendType)s_gfx_backend, &ndev);
+            for (int i = 0; i < ndev; i++) {
+                bool live = (i == g_gfx_live_device);
+                if (gp_btn(devs[i].name, live ? "running" : (devs[i].live_switchable ? "switch" : "next launch"),
+                           ImVec2(0, 46.0f * s), live || !devs[i].live_switchable || g_req_gfx, live, ZS_OK))
+                    gp_request_gfx((GfxBackendType)s_gfx_backend, i, g_req_gfx_what.internal_scale);
+            }
+            if (g_req_gfx) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+                ImGui::TextUnformatted("Switching at the end of this frame...");
+                ImGui::PopStyleColor();
+            }
+            ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+            micro_label("Screen");
+            if (gp_btn("Fullscreen", "F11 or Alt+Enter", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
+                g_req_fullscreen = true;
+            snprintf(buf, sizeof(buf), "Overlay: %s", g_gp_hud_names[g_gp_hud_mode]);
+            if (gp_btn(buf, "F2 cycles auto-hide, always on, off", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
+                g_gp_hud_mode = (g_gp_hud_mode + 1) % GP_HUD_COUNT;
+            if (gp_btn(g_gp_graph ? "Frame-time graph: on" : "Frame-time graph: off",
+                       "one bar per field against the budget", ImVec2(0, 46.0f * s), false, g_gp_graph, ZS_DATA))
+                g_gp_graph = !g_gp_graph;
             break;
         }
         case GP_MACHINE: {
             const HostInfo* host = host_info_get();
             host_info_sample();
-            card_header_icon("Machine", ZS_OK, draw_icon_screen);
+            card_header_icon("Machine", ZS_OK, draw_icon_cpu);
             if (ImGui::BeginTable("gp_machine", 2, ImGuiTableFlags_SizingStretchProp)) {
                 gp_row("BIOS", g_bios_name, ZS_TEXT);
                 gp_row("Disc", g_disc_name, ZS_TEXT);
@@ -3974,8 +4329,10 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                          inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp",
                          inter && inter->gpu.display_disabled ? "(display off)" : "");
                 gp_row("Output", buf, ZS_DATA);
+                gp_row("Renderer", s_gfx_backend == GFX_BACKEND_VULKAN ? "Vulkan 1.3" : "OpenGL 3.3", ZS_DATA);
                 gp_row("GPU context", host->gl_renderer,
                        host->gpu_request[0] && !host->gpu_request_honoured ? ZS_CRIT : ZS_DATA);
+                gp_row("Driver", host->gl_version[0] ? host->gl_version : host->gl_driver, ZS_MUTED);
                 if (host->audio_freq > 0)
                     snprintf(buf, sizeof(buf), "%s  %d Hz  %.1f ms",
                              host->audio_driver, host->audio_freq, host_info_audio_latency_ms());
@@ -3989,189 +4346,143 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             }
             break;
         }
-        case GP_VIDEO: {
-            /* The house rule applies here as everywhere: this reports what the
-             * machine says and offers the controls that exist. What does not
-             * exist is marked, not hidden — a GL device row that says "next
-             * launch" is worth more than a control that looks live and does
-             * nothing, because the GLX vendor library is resolved at the first
-             * dlopen of libGL and cannot be changed under a running process. */
-            const HostInfo* host = host_info_get();
-            card_header_icon("Video", ZS_PS_BLUE, draw_icon_screen);
-
-            if (ImGui::BeginTable("gp_video_now", 2, ImGuiTableFlags_SizingStretchProp)) {
-                gp_row("Backend", s_gfx_backend == GFX_BACKEND_VULKAN
-                                  ? "Vulkan 1.3" : "OpenGL 3.3", ZS_DATA);
-                gp_row("GPU", host->gl_renderer[0] ? host->gl_renderer : "unknown", ZS_DATA);
-                gp_row("Driver", host->gl_version[0] ? host->gl_version : host->gl_driver, ZS_MUTED);
-                snprintf(buf, sizeof(buf), "%ux%u  %s",
-                         inter ? inter->gpu.crtc.display_width  : 0,
-                         inter ? inter->gpu.crtc.display_height : 0,
-                         inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
-                gp_row("Output", buf, ZS_TEXT);
-                ImGui::EndTable();
-            }
-            ImGui::Dummy(ImVec2(0, 8));
-
-            /* --- backend --- */
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-            ImGui::TextUnformatted("Backend");
-            ImGui::PopStyleColor();
-
-            const char* vk_why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
-            struct { const char* label; GfxBackendType type; } backends[2] = {
-                { "OpenGL 3.3", GFX_BACKEND_GL33 },
-                { "Vulkan 1.3", GFX_BACKEND_VULKAN },
-            };
-            for (int i = 0; i < 2; i++) {
-                bool live     = (s_gfx_backend == (int)backends[i].type);
-                bool blocked  = (backends[i].type == GFX_BACKEND_VULKAN) && vk_why;
-                if (i) ImGui::SameLine();
-                ImGui::BeginDisabled(live || blocked || g_req_gfx);
-                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_TEXT);
-                if (ImGui::Button(backends[i].label, ImVec2(160.0f * g_ui_scale, 32.0f * g_ui_scale)))
-                    gp_request_gfx(backends[i].type, -1, g_req_gfx_what.internal_scale);
-                ImGui::PopStyleColor();
-                ImGui::EndDisabled();
-                if (live) {
-                    ImGui::SameLine();
-                    ImGui::PushStyleColor(ImGuiCol_Text, ZS_OK);
-                    ImGui::TextUnformatted("running");
-                    ImGui::PopStyleColor();
-                }
-            }
-            if (vk_why) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
-                ImGui::TextWrapped("Vulkan: %s", vk_why);
-                ImGui::PopStyleColor();
-            }
-            ImGui::Dummy(ImVec2(0, 8));
-
-            /* --- device --- */
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-            ImGui::TextUnformatted("GPU");
-            ImGui::PopStyleColor();
-
-            int ndev = 0;
-            const GfxDeviceInfo* devs = gfx_devices((GfxBackendType)s_gfx_backend, &ndev);
-            if (ndev <= 0) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-                ImGui::TextUnformatted("No selectable device reported.");
-                ImGui::PopStyleColor();
-            }
-            for (int i = 0; i < ndev; i++) {
-                ImGui::PushID(1000 + i);
-                bool live = (i == g_gfx_live_device);
-                ImGui::BeginDisabled(live || !devs[i].live_switchable || g_req_gfx);
-                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_TEXT);
-                if (ImGui::Button(devs[i].name, ImVec2(340.0f * g_ui_scale, 30.0f * g_ui_scale)))
-                    gp_request_gfx((GfxBackendType)s_gfx_backend, i, g_req_gfx_what.internal_scale);
-                ImGui::PopStyleColor();
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Text, live ? ZS_OK : ZS_FAINT);
-                ImGui::TextUnformatted(live ? "running"
-                                       : devs[i].live_switchable ? "" : "next launch");
-                ImGui::PopStyleColor();
-                ImGui::PopID();
-            }
-            ImGui::Dummy(ImVec2(0, 8));
-
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-            ImGui::TextWrapped("Switching rebuilds the window and the device. VRAM is carried "
-                               "across as host memory, the drawing state is re-sent, and the "
-                               "machine keeps running — no reset, no save state. If the new "
-                               "backend fails to come up, the old one is put back.");
-            ImGui::PopStyleColor();
-
-            if (g_req_gfx) {
-                ImGui::Dummy(ImVec2(0, 6));
-                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
-                ImGui::TextUnformatted("Switching at the end of this frame...");
-                ImGui::PopStyleColor();
-            }
-            break;
-        }
         case GP_WORKSPACE:
-            card_header_icon("Debug workspace", ZS_PS_GREEN, draw_icon_cpu);
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-            ImGui::TextWrapped("The same window, the other shell: nine view modes, the pipeline, "
-                               "the frame inspector, disassembly, VRAM and the log dock. The machine "
-                               "keeps running across the switch.");
-            ImGui::PopStyleColor();
-            ImGui::Dummy(ImVec2(0, 10));
-            if (ImGui::Button("Open  (F1)", ImVec2(180.0f * g_ui_scale, 34.0f * g_ui_scale))) {
+            card_header_icon("Debug workspace", ZS_DATA, draw_icon_cpu);
+            gp_pane_text("The same window, the other shell: nine view modes, the pipeline, "
+                         "the frame inspector, disassembly, VRAM and the log dock. The backquote "
+                         "key switches from either side.");
+            if (gp_btn("Open the workspace", "the machine resumes", ImVec2(260.0f * s, 50.0f * s),
+                       false, false, ZS_DATA)) {
                 g_shell = SHELL_DEBUG;
-                g_gp_menu_open = false;
+                gp_close_menu();
             }
             break;
         case GP_QUIT:
             card_header_icon("Quit", ZS_CRIT, draw_icon_pin);
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-            ImGui::TextWrapped("The machine stops. Memory cards are written on the way out; "
-                               "save states are not taken automatically.");
-            ImGui::PopStyleColor();
-            ImGui::Dummy(ImVec2(0, 10));
-            ImGui::PushStyleColor(ImGuiCol_Text, ZS_CRIT);
-            if (ImGui::Button("Quit now", ImVec2(150.0f * g_ui_scale, 34.0f * g_ui_scale)))
+            g_gp_pane_cols = 2;
+            gp_pane_text("The machine stops. Memory cards are written on the way out; "
+                         "save states are not taken automatically.");
+            if (gp_btn("Cancel", "back to the game", ImVec2(bsz.x, 50.0f * s), false, false, ZS_DATA))
+                gp_close_menu();
+            ImGui::SameLine(0, 10.0f * s);
+            if (gp_btn("Quit now", "ends the session", ImVec2(bsz.x, 50.0f * s), false, false, ZS_CRIT))
                 g_req_quit = true;
-            ImGui::PopStyleColor();
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(120.0f * g_ui_scale, 34.0f * g_ui_scale))) {
-                g_gp_menu_idx = 0;
-                g_gp_menu_open = false;
-            }
             break;
         default: break;
     }
-
+    g_gp_pane_count = g_gp_pane_next;
     ImGui::EndChild();
+
+    /* --- footer: the same six inputs, named for both devices --- */
+    dl->AddLine(ImVec2(w0.x, w1.y - fh), ImVec2(w1.x, w1.y - fh), gp_col(ZS_LINE_SOFT, 1.0f));
+    {
+        ImVec2 p = ImVec2(w0.x + 18.0f * s, w1.y - fh + (fh - (mono->LegacySize * 0.90f + 6.0f * s)) * 0.5f);
+        p.x = gp_keycap(dl, p, "Arrows / D-pad", "Move", 1.0f);
+        p.x = gp_keycap(dl, p, "Enter / Cross", "Select", 1.0f);
+        p.x = gp_keycap(dl, p, "Esc / Circle", "Back", 1.0f);
+        p.x = gp_keycap(dl, p, "Start", "Resume", 1.0f);
+    }
     ImGui::End();
+
+    /* --- navigation, now that the pane has counted its controls --- */
+    if (!g_gp_menu_open) return;   /* a control above closed the menu */
+    if (g_gp_focus == 1 && g_gp_pane_count == 0) g_gp_focus = 0;
+    if (g_gp_focus == 0) {
+        if (g_nav.down) { g_gp_menu_idx = (g_gp_menu_idx + 1) % GP_ITEM_COUNT; g_gp_arm_kind = 0; }
+        if (g_nav.up)   { g_gp_menu_idx = (g_gp_menu_idx + GP_ITEM_COUNT - 1) % GP_ITEM_COUNT; g_gp_arm_kind = 0; }
+        if (g_nav.back) { gp_close_menu(); return; }
+        if (!g_nav.up && !g_nav.down) {
+            if (list_ok && g_gp_menu_idx == GP_RESUME) { gp_close_menu(); return; }
+            if (list_ok && g_gp_menu_idx == GP_WORKSPACE) { g_shell = SHELL_DEBUG; gp_close_menu(); return; }
+            if ((list_ok || g_nav.right) && g_gp_pane_count > 0) {
+                g_gp_focus = 1;
+                g_gp_pane_idx = 0;   /* Quit lands on Cancel, not on Quit now */
+            }
+        }
+    } else {
+        int cols = g_gp_pane_cols > 0 ? g_gp_pane_cols : 1;
+        int i = g_gp_pane_idx;
+        if (i >= g_gp_pane_count) i = g_gp_pane_count - 1;
+        if (g_nav.back) { g_gp_focus = 0; g_gp_arm_kind = 0; }
+        else if (g_nav.left)  { if (i % cols == 0) { g_gp_focus = 0; g_gp_arm_kind = 0; } else i--; }
+        else if (g_nav.right) { if (i % cols != cols - 1 && i + 1 < g_gp_pane_count) i++; }
+        else if (g_nav.up)    { if (i - cols >= 0) i -= cols; }
+        else if (g_nav.down)  { i = (i + cols < g_gp_pane_count) ? i + cols : g_gp_pane_count - 1; }
+        g_gp_pane_idx = i;
+    }
 }
 
 // --- the shell ----------------------------------------------------------------
 
-/* Keys the gameplay shell owns. Escape arrives through debug_ui_escape_pressed()
- * instead, because the host loop has to know whether the press was consumed or
- * means "quit". */
+/* The menu stops the machine and gives it back on the way out. Run every
+ * frame in both shells, because leaving for the workspace closes the menu
+ * without going through the gameplay shell again. */
+static void gp_sync_pause(Interconnect* inter) {
+    if (!inter) return;
+    Debugger* dbg = &inter->debugger;
+    bool want = g_gp_menu_open && g_shell == SHELL_GAMEPLAY;
+    if (want && !dbg->paused) { dbg->paused = true; g_gp_menu_paused = true; }
+    else if (!want && g_gp_menu_paused) { dbg->paused = false; g_gp_menu_paused = false; }
+}
+
+/* Keys and pad for the gameplay shell, read once per frame before anything is
+ * drawn so the menu sees this frame's input. Escape arrives through
+ * debug_ui_escape_pressed() and F5/F8 through debug_ui_quick_state(), because
+ * the host loop sees the event first. */
 static void gp_handle_keys(Interconnect* inter) {
     ImGuiIO& io = ImGui::GetIO();
+    memset(&g_nav, 0, sizeof(g_nav));
+    uint16_t pressed = (uint16_t)(g_pad_prev & (uint16_t)~g_pad_word);
+    uint16_t down    = (uint16_t)~g_pad_word;
+    g_pad_prev = g_pad_word;
     if (io.WantTextInput) return;
 
-    if (ImGui::IsKeyPressed(ImGuiKey_F1) || ImGui::IsKeyPressed(ImGuiKey_GraveAccent)) {
+    if ((ImGui::IsKeyPressed(ImGuiKey_F1, false) && !io.KeyShift) ||
+        ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false)) {
         g_shell = SHELL_DEBUG;
-        g_gp_menu_open = false;
+        if (g_gp_menu_open) gp_close_menu();
         return;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_F12) && inter) {
+    if (ImGui::IsKeyPressed(ImGuiKey_F11, false)) { g_req_fullscreen = true; gp_note_input(); }
+    if (ImGui::IsKeyPressed(ImGuiKey_F2, false)) {
+        g_gp_hud_mode = (g_gp_hud_mode + 1) % GP_HUD_COUNT;
+        gp_toast(g_gp_hud_names[g_gp_hud_mode], "overlay", ZS_DATA);
+        gp_note_input();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_F6, false) || ImGui::IsKeyPressed(ImGuiKey_F7, false)) {
+        int step = ImGui::IsKeyPressed(ImGuiKey_F7, false) ? 1 : 3;
+        g_gp_slot = (g_gp_slot + step) % 4;
+        char info[80], name[24];
+        snprintf(name, sizeof(name), "Slot %d", g_gp_slot);
+        gp_toast(name, gp_slot_info(g_gp_slot, info, sizeof(info)) ? info : "empty", ZS_DATA);
+        gp_note_input();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_F12, false) && inter) {
         /* The host also cycles the pad on F12; this only reports what it did. */
         gp_toast(sio_pad_mode_name(sio_get_pad_mode(&inter->sio)), "pad mode", ZS_OK);
         gp_note_input();
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_F5)) { gp_note_input(); }
-    if (ImGui::IsKeyPressed(ImGuiKey_F8)) { gp_note_input(); }
 
     if (!g_gp_menu_open) {
-        /* Any key wakes the overlay, the way a console does. */
-        for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++)
-            if (ImGui::IsKeyPressed((ImGuiKey)k)) { gp_note_input(); break; }
+        if (inter && (ImGui::IsKeyPressed(ImGuiKey_F10, false) || ImGui::IsKeyPressed(ImGuiKey_Pause, false))) {
+            inter->debugger.paused = !inter->debugger.paused;
+            gp_note_input();
+        }
+        /* Select + Start: both held, one of them just pressed. */
+        if ((down & 0x0009) == 0x0009 && (pressed & 0x0009)) gp_open_menu();
         return;
     }
 
-    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-        g_gp_menu_idx = (g_gp_menu_idx + 1) % GP_ITEM_COUNT;
-    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-        g_gp_menu_idx = (g_gp_menu_idx + GP_ITEM_COUNT - 1) % GP_ITEM_COUNT;
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) {
-        switch (g_gp_menu_idx) {
-            case GP_RESUME:    g_gp_menu_open = false; break;
-            case GP_SAVE:      gp_request_state(true,  g_gp_slot); break;
-            case GP_LOAD:      gp_request_state(false, g_gp_slot); break;
-            case GP_WORKSPACE: g_shell = SHELL_DEBUG; g_gp_menu_open = false; break;
-            case GP_QUIT:      g_req_quit = true; break;
-            default: break;
-        }
-    }
+    const uint16_t PAD_START = 1u << 3, PAD_UP = 1u << 4, PAD_RIGHT = 1u << 5, PAD_DOWN = 1u << 6,
+                   PAD_LEFT = 1u << 7, PAD_CIRCLE = 1u << 13, PAD_CROSS = 1u << 14;
+    g_nav.up    = ImGui::IsKeyPressed(ImGuiKey_UpArrow)    || (pressed & PAD_UP);
+    g_nav.down  = ImGui::IsKeyPressed(ImGuiKey_DownArrow)  || (pressed & PAD_DOWN);
+    g_nav.left  = ImGui::IsKeyPressed(ImGuiKey_LeftArrow)  || (pressed & PAD_LEFT);
+    g_nav.right = ImGui::IsKeyPressed(ImGuiKey_RightArrow) || (pressed & PAD_RIGHT);
+    g_nav.ok    = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
+                  (pressed & PAD_CROSS);
+    g_nav.back  = ImGui::IsKeyPressed(ImGuiKey_Backspace, false) || (pressed & PAD_CIRCLE);
+    if (pressed & PAD_START) { gp_close_menu(); memset(&g_nav, 0, sizeof(g_nav)); }
     gp_note_input();
 }
 
@@ -4187,7 +4498,7 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
     ImGui::Begin("##GameplayShell", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
                  ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
-                 ImGuiWindowFlags_NoSavedSettings);
+                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
 
     GfxTexHandle tex_id = inter ? renderer_get_display_texture(&inter->gpu.renderer) : 0;
     draw_scanout(tex_id, inter, ImGui::GetContentRegionAvail());
@@ -4199,27 +4510,35 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
     if (g_gp_menu_open) {
         ImVec2 a = ImGui::GetWindowPos();
         ImVec2 b = ImVec2(a.x + ImGui::GetWindowWidth(), a.y + ImGui::GetWindowHeight());
-        ImGui::GetWindowDrawList()->AddRectFilled(a, b, IM_COL32(4, 6, 10, 170));
+        ImGui::GetWindowDrawList()->AddRectFilled(a, b, IM_COL32(4, 6, 10, 185));
     }
 
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(3);
 
-    /* The HUD fades out after a few idle seconds and comes back on any input,
-     * the way a console overlay does. The menu holds it on. */
+    /* The overlay comes back for the pointer and for the shell's own keys, and
+     * fades after a few idle seconds. Game keys do not wake it: someone playing
+     * on the keyboard would otherwise never see it go. */
     ImVec2 mouse = ImGui::GetIO().MousePos;
     if (fabsf(mouse.x - g_gp_last_mouse.x) > 1.0f || fabsf(mouse.y - g_gp_last_mouse.y) > 1.0f) {
         g_gp_last_mouse = mouse;
         gp_note_input();
     }
     double idle = ImGui::GetTime() - g_gp_last_input_t;
-    float alpha = g_gp_menu_open ? 1.0f
-                : (idle < 3.2) ? 1.0f
-                : (idle < 3.9) ? (float)(1.0 - (idle - 3.2) / 0.7)
-                : 0.0f;
+    float wake = (idle < 3.2) ? 1.0f
+               : (idle < 3.9) ? (float)(1.0 - (idle - 3.2) / 0.7)
+               : 0.0f;
+    float alpha = g_gp_menu_open ? 0.0f
+                : g_gp_hud_mode == GP_HUD_ALWAYS ? 1.0f
+                : g_gp_hud_mode == GP_HUD_OFF    ? 0.0f
+                : wake;
+
+    /* An idle pointer over the picture goes away with the overlay. */
+    if (!g_gp_menu_open && wake <= 0.0f) ImGui::SetMouseCursor(ImGuiMouseCursor_None);
 
     gp_draw_hud(inter, alpha);
+    if (inter && inter->debugger.paused && !g_gp_menu_open) gp_draw_paused();
     gp_draw_toasts();
 
     if (g_gp_menu_open) gp_draw_menu(cpu, inter);
@@ -4238,12 +4557,16 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
      * overlay and nothing else — no dockspace, no rail, no log dock, so none of
      * the panels cost anything while it is up. */
     if (g_shell == SHELL_GAMEPLAY) {
-        draw_gameplay_shell(cpu, inter);
         gp_handle_keys(inter);
+        gp_sync_pause(inter);
+        if (g_shell == SHELL_GAMEPLAY) draw_gameplay_shell(cpu, inter);
         vram_view_publish_hidden(inter);
         ImGui::Render();
         return;
     }
+
+    gp_sync_pause(inter);
+    g_pad_prev = g_pad_word;   /* no stale edge when the gameplay shell returns */
 
     // Mode drives which windows are live this frame (the rail replaced the
     // scattered floating panels). The screen is up in every mode.
@@ -4371,7 +4694,9 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             g_shell = SHELL_GAMEPLAY;
             gp_note_input();
         } else {
-            for (int i = 0; i < MODE_COUNT; i++)
+            /* Shift+F5 / Shift+F8 are the savestate keys here (the host loop
+             * takes them), so a shifted function key is not a mode change. */
+            for (int i = 0; i < MODE_COUNT && !ImGui::GetIO().KeyShift; i++)
                 if (ImGui::IsKeyPressed(mode_keys[i]) && g_mode != i) {
                     g_mode = i; g_layout_dirty = true;
                 }
@@ -4386,6 +4711,46 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
                 g_step_pending = true;
         }
     }
+
+    /* Escape asks before it ends the session. It used to quit outright, which
+     * is also what cancelling a text field or closing a popup did. */
+    if (g_ws_quit_confirm) {
+        ImGuiViewport* qvp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(qvp->WorkPos.x + qvp->WorkSize.x * 0.5f,
+                                       qvp->WorkPos.y + qvp->WorkSize.y * 0.5f),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowFocus();
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f * g_ui_scale, 18.0f * g_ui_scale));
+        ImGui::Begin("##ws_quit", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+        if (g_font_h1) ImGui::PushFont(g_font_h1);
+        ImGui::TextUnformatted("Quit ZoniStation One?");
+        if (g_font_h1) ImGui::PopFont();
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+        ImGui::TextUnformatted("Memory cards are written on the way out; no save state is taken.");
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 8.0f * g_ui_scale));
+        ImVec2 qb = ImVec2(150.0f * g_ui_scale, 34.0f * g_ui_scale);
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_CRIT);
+        if (ImGui::Button("Quit  (Enter)", qb) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+            ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) {
+            g_req_quit = true;
+            g_ws_quit_confirm = false;
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel  (Esc)", qb)) g_ws_quit_confirm = false;
+        ImGui::SameLine();
+        if (ImGui::Button("Back to the game", qb)) { g_ws_quit_confirm = false; g_shell = SHELL_GAMEPLAY; }
+        ImGui::End();
+        ImGui::PopStyleVar();
+    }
+
+    /* Savestate and renderer results are reported here too, not only in the
+     * gameplay shell. */
+    gp_draw_toasts();
 
     vram_view_publish_hidden(inter);
     ImGui::Render();
@@ -4427,11 +4792,60 @@ extern "C" void debug_ui_shutdown(void) {
  * request as it hands it over. */
 
 extern "C" bool debug_ui_escape_pressed(void) {
-    if (g_shell != SHELL_GAMEPLAY) return false;   /* the workspace lets Esc quit */
-    g_gp_menu_open = !g_gp_menu_open;
-    if (g_gp_menu_open) g_gp_menu_idx = 0;
-    g_gp_last_input_t = ImGui::GetTime();
+    if (g_shell == SHELL_GAMEPLAY) {
+        /* One step back each press: pane -> list -> closed. */
+        if (!g_gp_menu_open)       gp_open_menu();
+        else if (g_gp_focus == 1) { g_gp_focus = 0; g_gp_arm_kind = 0; }
+        else                       gp_close_menu();
+        g_gp_last_input_t = ImGui::GetTime();
+        return true;
+    }
+    /* The workspace: Escape belongs to whatever ImGui has open first — a text
+     * field being edited, a popup — and only then asks about quitting. */
+    if (g_ws_quit_confirm) { g_ws_quit_confirm = false; return true; }
+    if (ImGui::GetIO().WantTextInput ||
+        ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        return true;
+    g_ws_quit_confirm = true;
     return true;
+}
+
+/* True while the keyboard is the interface's and not the machine's: a text
+ * field has it, or a menu or a confirmation is up. */
+extern "C" bool debug_ui_keyboard_captured(void) {
+    return ImGui::GetIO().WantTextInput || g_ws_quit_confirm ||
+           (g_shell == SHELL_GAMEPLAY && g_gp_menu_open);
+}
+
+/* The pad word on its way to the SIO. The interface keeps a copy for its own
+ * navigation and hands the game "nothing pressed" while it holds the input,
+ * and afterwards until every button is released. */
+extern "C" uint16_t debug_ui_filter_pad(uint16_t buttons) {
+    g_pad_word = buttons;
+    if (debug_ui_keyboard_captured()) { g_pad_hold = true; return 0xFFFF; }
+    if (g_pad_hold) {
+        if (buttons == 0xFFFF) g_pad_hold = false;
+        return 0xFFFF;
+    }
+    return buttons;
+}
+
+/* F5 / F8 from the host loop. In the gameplay shell they act on the current
+ * slot; in the workspace plain F5 and F8 are the Memory and Host HW modes, so
+ * the savestate keys there are Shift+F5 and Shift+F8. Returns false when the
+ * key was not a savestate request. */
+extern "C" bool debug_ui_quick_state(bool save, bool shift) {
+    if (ImGui::GetIO().WantTextInput || g_ws_quit_confirm) return false;
+    if (g_shell == SHELL_DEBUG && !shift) return false;
+    gp_request_state(save, g_gp_slot);
+    gp_note_input();
+    return true;
+}
+
+extern "C" bool debug_ui_take_fullscreen_request(void) {
+    bool f = g_req_fullscreen;
+    g_req_fullscreen = false;
+    return f;
 }
 
 extern "C" bool debug_ui_take_quit_request(void) {

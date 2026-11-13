@@ -7,6 +7,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-13: input ownership, and the gameplay shell rebuilt
+
+Not run: this was written on a machine with no SDL3, GLEW, BIOS or display. `src/debug_ui.cpp`
+compiles warning-free against the SDL 3.2.24 headers and `src/main.c` was syntax-checked with a stub
+`GL/glew.h`; nothing was linked or looked at on screen. The first session with a display owes it a
+pass over the menu with keyboard, mouse and a pad.
+
+#### Fixed
+- **F5 and F8 did two things in the debug workspace**: the host saved or loaded slot 0 while the same
+  key switched to the Memory or Host HW mode. The interface now decides (`debug_ui_quick_state`):
+  the plain keys are savestate keys in the gameplay shell only, `Shift+F5`/`Shift+F8` in the workspace.
+- **Escape ended the session from the workspace**, including when it was pressed to cancel a text
+  field or close a popup. It now belongs to ImGui first and then opens a confirmation.
+- **The keyboard reached the game while typing**: the pad and the TTY injection read raw key state, so
+  the Lua console and the log filters pressed pad buttons. `debug_ui_keyboard_captured()` and
+  `debug_ui_filter_pad()` gate both, and F12.
+- **"State loaded" was shown for a load that was refused**: both call sites passed `true` instead of
+  `load_state_guarded()`'s result.
+- **A pause taken in the workspace looked like a hang in the gameplay shell**: there was no indicator
+  and F10 was not handled there. Both added.
+- Savestate and renderer-switch toasts were drawn in the gameplay shell only.
+- The gameplay HUD never faded for someone playing on the keyboard, because any key woke it.
+
+#### Changed
+- **Quick menu**: redrawn, pauses the machine while open, and is fully reachable from the keyboard
+  and from the pad (it was mouse-only past the left-hand list). Overwriting a slot and loading from
+  the menu take two presses; Quit lands on Cancel. The pointer selects only when it moves.
+- **HUD**: larger fps and speed figures, a frame-time graph against the field budget, key caps, the
+  running title and the current slot; `F2` cycles auto-hide / always on / off; the idle pointer hides.
+- `F6`/`F7` change the quick-save slot (F5/F8 used slot 0 only), `F11` and a menu entry toggle
+  fullscreen, Select + Start opens the menu from the pad.
+- The emblem is drawn from the four pad glyphs. The console maker's logo is a registered mark and is
+  not reproduced.
+- The mode rail has one icon per mode instead of three shapes shared between nine.
+
 ### 2026-10-03: the 2026-10-02 work on real games, the cluster scripts, the repository
 
 #### Checked by hand (BIOS SCPH-7502, NVIDIA, PR #3 branch)

@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "gpu_backend.h"
 
@@ -51,6 +52,20 @@ void debug_ui_set_vitals(double frame_ms, double budget_ms,
  * debug_ui_escape_pressed() returns true when the gameplay shell consumed the
  * key (it opened or closed its menu). False means Escape still means quit. */
 bool debug_ui_escape_pressed(void);
+
+/* Who has the input. debug_ui_keyboard_captured() is true while a text field,
+ * the quick menu or a confirmation holds the keyboard, and the host must not
+ * act on game or TTY keys. debug_ui_filter_pad() takes the pad word the host
+ * just read (active low) and returns what the SIO should see: the same word,
+ * or 0xFFFF while the interface is using the pad to navigate. */
+bool     debug_ui_keyboard_captured(void);
+uint16_t debug_ui_filter_pad(uint16_t buttons);
+
+/* F5 / F8. The interface decides whether the key is a savestate request in
+ * the shell that is up (and which slot it means) and parks it for
+ * debug_ui_take_state_request(); false means the key was something else. */
+bool debug_ui_quick_state(bool save, bool shift);
+bool debug_ui_take_fullscreen_request(void);
 bool debug_ui_take_quit_request(void);
 bool debug_ui_take_state_request(bool* out_save, char* path, size_t path_size);
 void debug_ui_notify_state_result(bool save, bool ok, const char* path);
