@@ -61,12 +61,23 @@ quick menu's *Debug workspace*. `ZS1_UI=debug` opens straight into the workspace
 running across a switch.
 
 - **Gameplay shell** — the emulated screen and nothing else. A HUD (fps, speed, host frame ms,
-  region and refresh, the pad's LED) fades out after ~3 s idle and returns on any input. `Esc` opens
-  a quick menu: session counters, save/load into four slots (slot 0 is the one F5/F8 use), pad mode,
-  a machine summary, the workspace, and quit. Nothing here polls the core — the shell asks and
-  `main.c` carries the request out (`debug_ui_take_state_request`, `debug_ui_take_quit_request`);
-  `Esc` reaches it through `debug_ui_escape_pressed()`, which returns false in the workspace so the
-  key still quits there.
+  region and refresh, the pad's LED, a frame-time graph) fades out after ~3 s and returns for the
+  pointer and for the shell's own keys — not for game keys; `F2` cycles it auto-hide / always on /
+  off. `Esc` opens a quick menu and steps back out of it (pane -> list -> closed): session figures,
+  save/load into four slots, pad mode, renderer, fullscreen, overlay, a machine summary, the
+  workspace, and quit. **The menu pauses the machine** and is driven by one set of six inputs from
+  the keyboard (arrows, Enter, Esc/Backspace) or the pad (D-pad, Cross, Circle; Select + Start opens
+  it, Start closes it). Overwriting a slot and loading from the menu ask twice. `F5`/`F8` act on the
+  *current* slot and `F6`/`F7` change it; `F10` pauses, `F11` is fullscreen. Nothing here polls the
+  core — the shell asks and `main.c` carries the request out (`debug_ui_take_state_request`,
+  `debug_ui_take_quit_request`, `debug_ui_take_fullscreen_request`).
+- **Who has the input** is decided in one place: `debug_ui_keyboard_captured()` is true while a text
+  field, the quick menu or a confirmation holds it, and `debug_ui_filter_pad()` hands the SIO
+  "nothing pressed" meanwhile (and until every button is released afterwards). Before 2026-11-13
+  typing in the Lua console pressed pad buttons in the game. `Esc` never quits by itself: in the
+  workspace it first belongs to an open text field or popup, then asks for confirmation. Plain
+  `F5`/`F8` in the workspace are the Memory and Host HW modes, so the savestate keys there are
+  `Shift+F5`/`Shift+F8`.
 - **Debug workspace** — the nine view modes, the log dock and the inspector, unchanged.
 
 **Nothing on either shell is typed in.** The Host HW panel and the inspector's host block read

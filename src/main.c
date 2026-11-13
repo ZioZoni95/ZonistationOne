@@ -805,11 +805,11 @@ int main(int argc, char* argv[]) {
             /* Escape belongs to the gameplay shell when that shell is up — it
              * opens and closes the quick menu there. It still quits from the
              * debug workspace, where there is no menu to open. */
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE) {
-                if (!debug_ui_escape_pressed()) {
-                    LOG_SYSTEM_INFO("[SYSTEM] Quit: Escape in the debug workspace");
-                    quit = true;
-                }
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE && !ev.key.repeat) {
+                /* Never quits by itself any more: the gameplay shell opens its
+                 * menu, the workspace cancels what ImGui has open or asks for
+                 * confirmation, and the quit comes back as a request below. */
+                (void)debug_ui_escape_pressed();
             }
             /* Alt+Enter toggles borderless desktop fullscreen. SDL3 folded
              * FULLSCREEN_DESKTOP into a bool: a window with no display mode set
@@ -819,21 +819,19 @@ int main(int argc, char* argv[]) {
                 bool fs = (SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN) != 0;
                 SDL_SetWindowFullscreen(sdl.win, !fs);
             }
-            /* F5 saves, F8 loads. Handled here rather than in the debug UI so
-             * they work with every panel closed, which is when the emulator is
-             * actually fast enough to reach the state worth capturing. */
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F5 && !ev.key.repeat) {
-                bool ok = savestate_save(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
-                debug_ui_notify_state_result(true, ok, SAVESTATE_DEFAULT_PATH);
-            }
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F8 && !ev.key.repeat) {
-                load_state_guarded(SAVESTATE_DEFAULT_PATH, &cpu, &inter);
-                debug_ui_notify_state_result(false, true, SAVESTATE_DEFAULT_PATH);
+            /* F5 saves, F8 loads — the current slot in the gameplay shell,
+             * Shift+F5 / Shift+F8 in the workspace, where the plain keys pick
+             * the Memory and Host HW modes. The interface decides and parks the
+             * request; it is carried out just below with every other one. */
+            else if (ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat &&
+                     (ev.key.key == SDLK_F5 || ev.key.key == SDLK_F8)) {
+                (void)debug_ui_quick_state(ev.key.key == SDLK_F5, (ev.key.mod & SDL_KMOD_SHIFT) != 0);
             }
             /* F12 is the Analog button for players without a touchpad pad.
              * F1..F9 pick the debug UI mode, F10/F11 pause and step; F12 is the
              * only function key left unclaimed. */
-            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F12 && !ev.key.repeat) {
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_F12 && !ev.key.repeat &&
+                     !debug_ui_keyboard_captured()) {
                 sio_cycle_pad_mode(&inter.sio);
             }
         }
@@ -849,10 +847,13 @@ int main(int argc, char* argv[]) {
                 if (want_save) {
                     ok = savestate_save(state_path, &cpu, &inter);
                 } else {
-                    load_state_guarded(state_path, &cpu, &inter);
-                    ok = true;
+                    ok = load_state_guarded(state_path, &cpu, &inter);
                 }
                 debug_ui_notify_state_result(want_save, ok, state_path);
+            }
+            if (debug_ui_take_fullscreen_request()) {
+                bool fs = (SDL_GetWindowFlags(sdl.win) & SDL_WINDOW_FULLSCREEN) != 0;
+                SDL_SetWindowFullscreen(sdl.win, !fs);
             }
             if (debug_ui_take_quit_request()) {
                 LOG_SYSTEM_INFO("[SYSTEM] Quit: requested from the quick menu");
@@ -929,7 +930,10 @@ int main(int argc, char* argv[]) {
             default:             controller_set_led(&gamepad, 0x00, 0x00, 0x00); break;
         }
 
-        sio_set_button_state(&inter.sio, controller_update(&gamepad));
+        /* The interface gets the word first: it navigates the quick menu with
+         * it, and the game sees nothing pressed while a menu or a text field
+         * has the input. */
+        sio_set_button_state(&inter.sio, debug_ui_filter_pad(controller_update(&gamepad)));
         // Feed the sticks (raw -32768..32767) into the SIO analog bytes.
         sio_set_analog_state(&inter.sio, gamepad.left_x, gamepad.left_y,
                              gamepad.right_x, gamepad.right_y);
@@ -937,7 +941,7 @@ int main(int argc, char* argv[]) {
         uint8_t rumble_m1, rumble_m2;
         sio_get_rumble(&inter.sio, &rumble_m1, &rumble_m2);
         controller_update_rumble(&gamepad, rumble_m1, rumble_m2);
-        inject_tty_keys(&inter);
+        if (!debug_ui_keyboard_captured()) inject_tty_keys(&inter);
 
         /* Host-side frame pacing budget follows the GPU's video mode. */
         cycles_per_frame = gpu_cycles_per_frame(&inter.gpu);
