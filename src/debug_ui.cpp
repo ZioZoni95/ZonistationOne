@@ -2468,10 +2468,15 @@ static void draw_pipeline_view(Interconnect* inter) {
     static uint32_t s_last_ev = 0;
     static double   s_last_ev_t = -100.0;
     uint32_t ev_now = spu ? spu->underrun_events : 0;
-    if (ev_now != s_last_ev) { s_last_ev = ev_now; s_last_ev_t = t; }
-    bool recent_underrun = (t - s_last_ev_t) < 5.0;
-    const char* mx_status = !spu ? "ABSENT" : (recent_underrun ? "UNDERRUN" : starving ? "LOW" : "LIVE");
-    ImVec4 mx_col = !spu ? ZS_FAINT : (recent_underrun ? ZS_CRIT : starving ? ZS_WARN : ZS_OK);
+    const bool halted = inter && inter->debugger.paused;
+    /* A stopped machine feeds the ring nothing, so the device callback runs dry
+     * on every pass (1683 events in a short pause). That is the pause, not a
+     * fault: re-baseline while halted so only underruns after resume count. */
+    if (halted) { s_last_ev = ev_now; s_last_ev_t = -100.0; }
+    else if (ev_now != s_last_ev) { s_last_ev = ev_now; s_last_ev_t = t; }
+    bool recent_underrun = !halted && (t - s_last_ev_t) < 5.0;
+    const char* mx_status = !spu ? "ABSENT" : halted ? "PAUSED" : (recent_underrun ? "UNDERRUN" : starving ? "LOW" : "LIVE");
+    ImVec4 mx_col = !spu ? ZS_FAINT : halted ? ZS_FAINT : (recent_underrun ? ZS_CRIT : starving ? ZS_WARN : ZS_OK);
     snprintf(mxv, sizeof(mxv), "%d / %d", ring_used, g_vit_aq_target);
     snprintf(mx_s1, sizeof(mx_s1), "%u underruns, %u dropped",
              spu ? spu->underrun_events : 0, spu ? spu->dropped_samples : 0);
@@ -2968,20 +2973,37 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
     auto P = [&](float x, float y) { return ImVec2(o.x + x * scale, o.y + y * scale); };
     auto S = [&](float v) { return v * scale; };
 
-    const ImU32 shell_hi = IM_COL32(52, 62, 84, 255);
     const ImU32 shell_lo = IM_COL32(26, 33, 48, 255);
     const ImU32 edge     = IM_COL32(70, 86, 118, 255);
     const ImU32 well     = IM_COL32(16, 21, 32, 255);
     const ImU32 text_col = ImGui::GetColorU32(ZS_MUTED);
 
-    /* --- shell: two grips under a body, all capsules so the outline reads as
-     * one moulded piece rather than three rectangles. --- */
-    dl->AddRectFilled(P(96, 168), P(168, 306), shell_lo, S(34));
-    dl->AddRectFilled(P(302, 168), P(374, 306), shell_lo, S(34));
-    dl->AddRectFilledMultiColor(P(64, 54), P(406, 196), shell_hi, shell_hi, shell_lo, shell_lo);
-    dl->AddRect(P(64, 54), P(406, 196), edge, S(28), 0, S(1.5f));
-    dl->AddRect(P(96, 168), P(168, 306), edge, S(34), 0, S(1.5f));
-    dl->AddRect(P(302, 168), P(374, 306), edge, S(34), 0, S(1.5f));
+    /* --- shell: one moulded silhouette ---
+     *
+     * Three rounded rectangles gave hard joins where the grips met the body and
+     * a blocky outline. The shell is now a pill for the body and two splayed
+     * capsules for the grips. Every shape is drawn twice - first all of them
+     * grown by the border width in the edge colour, then all of them in the
+     * fill colour - so the outline follows the union of the shapes and there
+     * is no line across the joins. */
+    auto capsule = [&](ImVec2 a, ImVec2 b, float r, ImU32 col) {
+        float th = atan2f(b.y - a.y, b.x - a.x);
+        dl->PathArcTo(b, r, th - IM_PI * 0.5f, th + IM_PI * 0.5f, 32);
+        dl->PathArcTo(a, r, th + IM_PI * 0.5f, th + IM_PI * 1.5f, 32);
+        dl->PathFillConvex(col);
+    };
+    const ImVec2 body_a = P(136, 125), body_b = P(334, 125);
+    const ImVec2 lg_a = P(138, 168), lg_b = P(120, 268);
+    const ImVec2 rg_a = P(332, 168), rg_b = P(350, 268);
+    const float  body_r = S(71), grip_r = S(37), bw = S(1.8f);
+    capsule(lg_a, lg_b, grip_r + bw, edge);
+    capsule(rg_a, rg_b, grip_r + bw, edge);
+    capsule(body_a, body_b, body_r + bw, edge);
+    capsule(lg_a, lg_b, grip_r, shell_lo);
+    capsule(rg_a, rg_b, grip_r, shell_lo);
+    capsule(body_a, body_b, body_r, IM_COL32(40, 50, 70, 255));
+    /* A soft highlight along the top of the body, so it reads as a surface. */
+    capsule(ImVec2(body_a.x, body_a.y - S(24)), ImVec2(body_b.x, body_b.y - S(24)), S(40), IM_COL32(255, 255, 255, 10));
 
     /* Shoulders. L2/R2 sit above L1/R1 on the far edge, as on the pad. */
     struct { int idx; float x0, x1, y0, y1; const char* tag; } shoulders[4] = {
@@ -2999,8 +3021,9 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
     for (int i = 0; i < 4; i++) {
         ImVec2 a = P(shoulders[i].x0, shoulders[i].y0), b = P(shoulders[i].x1, shoulders[i].y1);
         bool on = pressed(shoulders[i].idx);
-        dl->AddRectFilled(a, b, on ? ImGui::GetColorU32(ZS_DATA) : well, S(6));
-        dl->AddRect(a, b, edge, S(6));
+        float pill = (b.y - a.y) * 0.5f;
+        dl->AddRectFilled(a, b, on ? ImGui::GetColorU32(ZS_DATA) : well, pill);
+        dl->AddRect(a, b, edge, pill, 0, S(1.2f));
         ImVec2 ts = ImGui::CalcTextSize(shoulders[i].tag);
         /* Left-aligned: the bound key takes the right end of the bar. */
         dl->AddText(ImVec2(a.x + S(8), (a.y + b.y) * 0.5f - ts.y * 0.5f),
@@ -3018,11 +3041,11 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
         { 5, ImVec2(dc.x + thick, dc.y - thick), ImVec2(dc.x + arm,   dc.y + thick) },  /* RIGHT */
     };
     dl->AddRectFilled(ImVec2(dc.x - arm - S(4), dc.y - arm - S(4)),
-                      ImVec2(dc.x + arm + S(4), dc.y + arm + S(4)), well, S(10));
+                      ImVec2(dc.x + arm + S(4), dc.y + arm + S(4)), well, S(18));
     for (int i = 0; i < 4; i++) {
         bool on = pressed(dpad[i].idx);
-        dl->AddRectFilled(dpad[i].a, dpad[i].b, on ? ImGui::GetColorU32(ZS_DATA) : IM_COL32(38, 47, 66, 255), S(3));
-        dl->AddRect(dpad[i].a, dpad[i].b, edge, S(3));
+        dl->AddRectFilled(dpad[i].a, dpad[i].b, on ? ImGui::GetColorU32(ZS_DATA) : IM_COL32(38, 47, 66, 255), S(6));
+        dl->AddRect(dpad[i].a, dpad[i].b, edge, S(6), 0, S(1.2f));
         zones.push_back({ dpad[i].idx, false, dpad[i].a, dpad[i].b });
     }
 
@@ -3038,8 +3061,8 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
     for (int i = 0; i < 4; i++) {
         bool on = pressed(face[i].idx);
         ImU32 fill = on ? ImGui::GetColorU32(face[i].col) : well;
-        dl->AddCircleFilled(face[i].c, br, fill, 24);
-        dl->AddCircle(face[i].c, br, edge, 24, S(1.5f));
+        dl->AddCircleFilled(face[i].c, br, fill, 48);
+        dl->AddCircle(face[i].c, br, edge, 48, S(1.5f));
         ImU32 gl = on ? IM_COL32(10, 14, 20, 255) : ImGui::GetColorU32(face[i].col);
         switch (face[i].glyph) {
             case 0: draw_ps_triangle(dl, face[i].c, br * 0.55f, gl, S(2.0f)); break;
@@ -3085,13 +3108,13 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
         ImVec2 c = P(sticks[i].cx, 196);
         float r = S(28);
         bool on = pressed(sticks[i].idx);
-        dl->AddCircleFilled(c, r, well, 28);
-        dl->AddCircle(c, r, edge, 28, S(1.5f));
+        dl->AddCircleFilled(c, r, well, 56);
+        dl->AddCircle(c, r, edge, 56, S(1.5f));
         float dx = (float)sticks[i].x / 32768.0f * r * 0.55f;
         float dy = (float)sticks[i].y / 32768.0f * r * 0.55f;
         ImVec2 cap = ImVec2(c.x + dx, c.y + dy);
-        dl->AddCircleFilled(cap, r * 0.6f, on ? ImGui::GetColorU32(ZS_DATA) : IM_COL32(44, 55, 76, 255), 24);
-        dl->AddCircle(cap, r * 0.6f, edge, 24, S(1.0f));
+        dl->AddCircleFilled(cap, r * 0.6f, on ? ImGui::GetColorU32(ZS_DATA) : IM_COL32(44, 55, 76, 255), 48);
+        dl->AddCircle(cap, r * 0.6f, edge, 48, S(1.0f));
         ImVec2 ts = ImGui::CalcTextSize(sticks[i].tag);
         dl->AddText(ImVec2(c.x - ts.x * 0.5f, c.y + r + S(3)), text_col, sticks[i].tag);
         zones.push_back({ sticks[i].idx, true, c, ImVec2(r, r) });
@@ -3137,11 +3160,11 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
                 case 6:  at = ImVec2(c.x - ts.x * 0.5f, z.b.y + S(5)); break;              /* d-pad down  */
                 case 7:  at = ImVec2(z.a.x - ts.x - S(8), c.y - ts.y * 0.5f); break;       /* d-pad left  */
                 case 5:  at = ImVec2(z.b.x + S(8), c.y - ts.y * 0.5f); break;              /* d-pad right */
-                case 12: at = ImVec2(c.x - ts.x * 0.5f, c.y - ext.y - ts.y - S(5)); break; /* triangle    */
+                case 12: at = ImVec2(c.x + ext.x + S(8), c.y - ts.y * 0.5f); break;        /* triangle    */
                 case 14: at = ImVec2(c.x - ts.x * 0.5f, c.y + ext.y + S(5)); break;        /* cross       */
-                case 15: at = ImVec2(c.x - ext.x - ts.x - S(8), c.y - ts.y * 0.5f); break; /* square      */
+                case 15: at = ImVec2(c.x - ts.x * 0.5f, c.y + ext.y + S(5)); break;        /* square      */
                 case 13: at = ImVec2(c.x + ext.x + S(8), c.y - ts.y * 0.5f); break;        /* circle      */
-                case 0: case 3: at = ImVec2(c.x - ts.x * 0.5f, z.b.y + S(15)); break;      /* select/start*/
+                case 0: case 3: at = ImVec2(c.x - ts.x * 0.5f, z.a.y - ts.y - S(5)); break;/* select/start*/
                 case 1: case 2: at = ImVec2(c.x - ts.x * 0.5f, c.y + ext.y + S(15)); break;/* L3/R3       */
                 default: at = ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f); break;         /* shoulders   */
             }
@@ -3178,7 +3201,14 @@ static void draw_controller_mapping_window() {
     ImGui::SetNextWindowSize(ImVec2(1040.0f * g_ui_scale, 600.0f * g_ui_scale), ImGuiCond_FirstUseEver);
     /* A size saved in imgui.ini from the old two-column layout would clip the
      * bindings table; the window cannot be made narrower than it needs. */
-    ImGui::SetNextWindowSizeConstraints(ImVec2(960.0f * g_ui_scale, 520.0f * g_ui_scale),
+    {
+        /* Centred each time it opens: a position saved in imgui.ini put it over
+         * the mode rail, hiding the rail's labels while the window was up. */
+        ImGuiViewport* cv = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(cv->WorkPos.x + cv->WorkSize.x * 0.5f, cv->WorkPos.y + cv->WorkSize.y * 0.5f),
+                                ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    }
+    ImGui::SetNextWindowSizeConstraints(ImVec2(1040.0f * g_ui_scale, 560.0f * g_ui_scale),
                                         ImVec2(FLT_MAX, FLT_MAX));
     if (!ImGui::Begin("Controller", &g_show_controller_mapping, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
@@ -3233,7 +3263,6 @@ static void draw_controller_mapping_window() {
                 ctrl->key_map[12] = SDL_SCANCODE_W;     ctrl->key_map[13] = SDL_SCANCODE_D;
                 ctrl->key_map[14] = SDL_SCANCODE_S;     ctrl->key_map[15] = SDL_SCANCODE_A;
             }
-            ImGui::SameLine();
             ImGui::Checkbox("Swap Cross / Circle", &ctrl->swap_cross_circle);
 
             /* Two controls on one key is almost never what was meant. */
@@ -3251,7 +3280,7 @@ static void draw_controller_mapping_window() {
                 ImGui::PopStyleColor();
             } else {
                 ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-                ImGui::TextUnformatted("Click a control on the pad, or a key below, then press the new key.");
+                ImGui::TextWrapped("Click a control on the pad, or a key below, then press the new key.");
                 ImGui::PopStyleColor();
             }
             ImGui::Dummy(ImVec2(0, 2.0f * g_ui_scale));
