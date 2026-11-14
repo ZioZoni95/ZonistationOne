@@ -984,13 +984,26 @@ int main(int argc, char* argv[]) {
             double   budget_ms = (double)cycles_per_frame * 1000.0 / (double)PSX_SYSCLK_HZ;
             uint32_t cur_samples = inter.spu.total_samples_generated;
             uint32_t produced = cur_samples - vit_prev_samples;
-            double   drift = 0.0;
-            double   wall_s = frame_ms / 1000.0;
-            if (wall_s > 0.0005) {
-                double expected = 44100.0 * wall_s;   /* device consumption rate */
-                if (expected > 1.0) drift = ((double)produced / expected - 1.0) * 100.0;
+            /* Production against the device rate over a half-second window, not
+             * per loop iteration: one iteration's wall time is quantised by the
+             * pacing wait, so its ratio swung by 10-25% around a mean that a
+             * 30 s probe shows is exact (50 fields -> 44289..44354 samples for
+             * 44100 per second expected). That noise was the "drift" shown. */
+            static double drift_win_wall = 0.0;
+            static double drift_win_smp  = 0.0;
+            if (inter.debugger.paused) {
+                /* A stopped machine produces nothing; that is not drift. */
+                drift_win_wall = 0.0; drift_win_smp = 0.0; vit_drift_ema = 0.0;
+            } else {
+                drift_win_wall += frame_ms / 1000.0;
+                drift_win_smp  += (double)produced;
             }
-            vit_drift_ema = vit_drift_ema * 0.9 + drift * 0.1;
+            if (drift_win_wall >= 0.5) {
+                double drift = (drift_win_smp / (44100.0 * drift_win_wall) - 1.0) * 100.0;
+                vit_drift_ema = vit_drift_ema * 0.5 + drift * 0.5;
+                drift_win_wall = 0.0;
+                drift_win_smp  = 0.0;
+            }
             debug_ui_set_vitals(frame_ms, budget_ms, spu_ring_used(&inter.spu),
                                 SPU_RING_TARGET_SAMPLES, vit_drift_ema);
             vit_prev = vit_now;
