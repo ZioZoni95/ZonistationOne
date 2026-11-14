@@ -114,6 +114,27 @@ static bool peek_bytes(uint32_t vaddr, uint32_t size, uint32_t* out) {
     return true;
 }
 
+/* Scrittura diretta (RAM e scratchpad soli; il BIOS resta in sola lettura). Little-endian.
+ * Non passa dal bus: non genera eventi, non scatta watchpoint di scrittura, non invalida la
+ * I-cache della CPU. Pensata per scrivere DATI (flag, contatori) da una sonda, non codice. */
+static bool poke_bytes(uint32_t vaddr, uint32_t size, uint32_t value) {
+    uint32_t phys = vaddr & 0x1FFFFFFF;
+    uint8_t* p = NULL;
+
+    if (phys < RAM_SIZE) {
+        if (phys + size > RAM_SIZE) return false;
+        p = &g_inter->ram->data[phys];
+    } else if (phys >= 0x1F800000 && phys < 0x1F800400) {
+        uint32_t off = phys - 0x1F800000;
+        if (off + size > SCRATCHPAD_SIZE) return false;
+        p = &g_inter->scratchpad[off];
+    } else {
+        return false;
+    }
+    for (uint32_t i = 0; i < size; i++) p[i] = (uint8_t)(value >> (8 * i));
+    return true;
+}
+
 /* ---- emu.* bindings ------------------------------------------------------ */
 
 static int l_emu_log(lua_State* L) {
@@ -194,6 +215,32 @@ static int l_emu_read_u32(lua_State* L) {
     if (!peek_bytes(addr, 4, &v)) return luaL_error(L, "read_u32: address 0x%08x out of range", addr);
     lua_pushinteger(L, (lua_Integer)v);
     return 1;
+}
+
+/* luaL_error usa lua_pushfstring, che non conosce %08x: si formatta prima. */
+static int lua_write_error(lua_State* L, const char* fn, uint32_t addr) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "%s: address 0x%08x not writable (RAM/scratchpad only)", fn, addr);
+    return luaL_error(L, "%s", msg);
+}
+
+static int l_emu_write_u8(lua_State* L) {
+    uint32_t addr = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t v = (uint32_t)luaL_checkinteger(L, 2);
+    if (!poke_bytes(addr, 1, v & 0xFF)) return lua_write_error(L, "write_u8", addr);
+    return 0;
+}
+static int l_emu_write_u16(lua_State* L) {
+    uint32_t addr = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t v = (uint32_t)luaL_checkinteger(L, 2);
+    if (!poke_bytes(addr, 2, v & 0xFFFF)) return lua_write_error(L, "write_u16", addr);
+    return 0;
+}
+static int l_emu_write_u32(lua_State* L) {
+    uint32_t addr = (uint32_t)luaL_checkinteger(L, 1);
+    uint32_t v = (uint32_t)luaL_checkinteger(L, 2);
+    if (!poke_bytes(addr, 4, v)) return lua_write_error(L, "write_u32", addr);
+    return 0;
 }
 
 static int l_emu_add_breakpoint(lua_State* L) {
@@ -910,6 +957,9 @@ static const luaL_Reg s_emu_funcs[] = {
     {"read_u8",           l_emu_read_u8},
     {"read_u16",          l_emu_read_u16},
     {"read_u32",          l_emu_read_u32},
+    {"write_u8",          l_emu_write_u8},
+    {"write_u16",         l_emu_write_u16},
+    {"write_u32",         l_emu_write_u32},
     {"add_breakpoint",    l_emu_add_breakpoint},
     {"remove_breakpoint", l_emu_remove_breakpoint},
     {"add_write_watch",   l_emu_add_write_watch},

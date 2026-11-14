@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-14: Lua `emu.write_u8/u16/u32` (branch `feature/lua-memory-write`)
+
+A probe can now write guest memory, to force game state (a stage number, a flag) from a script, for
+example to jump straight to a mission. Writes go straight to RAM (KUSEG/KSEG0/KSEG1 aliases) or the
+scratchpad, little-endian; the BIOS and every I/O address are refused with a Lua error. They bypass
+the bus: no write watchpoint fires and the CPU I-cache is not invalidated, so write data, not code.
+Checked with a Lua probe on Ace Combat 2 (PAL): 32-bit, 8/16-bit and scratchpad round trips, BIOS and
+beyond-RAM writes rejected. `make test` and `make hwtest` were not run for this change.
+
 ### 2026-11-14: themes, layout fixes in both shells, pipeline and controller windows
 
 Looked at on screen: the gameplay shell and every debug view mode were captured with the new
