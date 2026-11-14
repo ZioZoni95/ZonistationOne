@@ -7,6 +7,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-14: themes, layout fixes in both shells, pipeline and controller windows
+
+Looked at on screen: the gameplay shell and every debug view mode were captured with the new
+`ZS1_UI_TOUR` and read, BIOS-only, PAL BIOS, OpenGL on the Intel iGPU under XWayland. The last small
+edit to the controller window (shoulder tags left-aligned, a minimum window width) was built but not
+looked at. Vulkan was not run.
+
+#### Added
+- **Themes**: Neon (the original), Amber, Terminal, Violet and Graphite. A theme is the thirteen
+  neutral and accent tokens; every ImGui style colour is derived from them (`zs_mix`), so a theme
+  changes at run time without touching the display scale. Severity colours and the PlayStation-logo
+  hues are not part of a theme. Pick one in the quick menu (Video & HUD) or the workspace's Menu
+  popup; it is saved in `zs1_theme.txt` (git-ignored) and `ZS1_THEME=<name|0-4>` overrides it.
+- **`ZS1_UI_TOUR=<dir>`**: walks the interface by itself (HUD, every quick-menu page, every view mode,
+  the controller window) and saves a PPM of the composed window for each, read back by the GPU thread
+  after ImGui has drawn. `ZS1_UI_TOUR_WARM=<frames>` sets the wait before it starts. OpenGL only. A
+  host-side screen grab is not available on a Wayland session, which is why it exists.
+- **Scanout column** in the PS1 Display panel: size, depth, mode, VRAM origin, lines and field, shown
+  in the width the 4:3 picture leaves empty (and only when the panel is tall enough for it).
+
+#### Changed
+- **Pipeline view** is two lanes (Video, Audio) of short stage cards joined by arrows that light only
+  while both ends are active, each lane with a verdict chip (`IDLE`, `FLOWING`, `ATTENTION`,
+  `FAULT`). A card keeps a name, a number and one line; the register-level detail moved to the
+  tooltip. It was eight equal cards of six text items each.
+- **Controller window**: Bindings is the first tab and always visible; the bound key is drawn on each
+  control of the pad; two controls on one key are flagged; each row has an unbind button; pad mode and
+  the device readout moved to their own tabs. The window has a minimum width.
+- **Workspace stage split** is per mode (40% picture for Pipeline and Frame, 34% Audio and Host,
+  28% Code, Memory, Script and VRAM). The disassembler showed five lines before.
+- The Audio stage of the Pipeline view reports `UNDERRUN` only for an underrun in the last five
+  seconds. The lifetime counter held it at fault for the whole session after one start-up underrun.
+
+#### Fixed
+- **HUD** second line ("19.3 ms PAL 49.75 Hz" and the pad mode) overprinted itself; the block now
+  sizes to its text. The key-hint strip has a plate behind it: over a bright picture its labels were
+  unreadable.
+- **Paused menu** reported "Speed 0%" and an empty audio queue in warning colours; it now says paused.
+- **Machine bar** ran past the right edge of a narrow window and sat flush against the window's top
+  and left; chips are dropped by priority (host pills first) and the bar is padded.
+- **Mode rail** showed an empty dock tab above "VIEW MODES".
+- **Pinned watches** were cut off at the inspector's edge; tiles clip their text and stack when the
+  inspector is narrow.
+- **Frame view** axis and the "budget" label were clipped; rows now shrink to fit the panel.
+- **Drift readout** was a ratio over one loop iteration, whose wall time is quantised by the pacing
+  wait, so it swung by 10-25% around an exact mean (44289..44354 samples per 50 fields against 44100
+  per second). It is now taken over half a second and is 0 while the machine is paused.
+
+#### Measured, not changed
+- Underruns on a BIOS-only run: 13 events in 30 s in the gameplay shell, all in one burst that
+  coincides with a 100 ms host stall between frames; 4 in 30 s in the debug shell, all at start-up.
+  The one-callback underrun at start-up is the audible click: the device starts before the SPU has
+  filled the ring. Not fixed.
+
 ### 2026-11-13: input ownership, and the gameplay shell rebuilt
 
 Not run: this was written on a machine with no SDL3, GLEW, BIOS or display. `src/debug_ui.cpp`
