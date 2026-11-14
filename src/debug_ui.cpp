@@ -2182,52 +2182,132 @@ static double probe_rate(RateProbe* p, uint32_t cur, double t) {
 // Pipeline view: CD -> XA -> MDEC -> DMA -> VRAM/scanout on one row, live rates.
 // Rates come from real counters where they exist; a stage not yet instrumented
 // shows "n/a" rather than a fabricated number.
-static void pipe_node_card(const char* title, ImVec4 dot, const char* status, ImVec4 status_col,
-                           const char* val_str, const char* unit_str,
-                           const char* sub1, const char* sub2) {
-    ImGui::BeginGroup();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 p0 = ImGui::GetCursorScreenPos();
-    float w = ImGui::GetContentRegionAvail().x;
-    float h = 104.0f * g_ui_scale;
-    ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+/* One stage of a pipeline lane. The card used to carry a title, a bracketed
+ * status, a big number and two lines of prose, eight times over, all the same
+ * size; nothing said which of them mattered. A stage is now a name, a number,
+ * and one line - the status word and a short detail - and the rest sits in a
+ * tooltip. Colour carries the state: grey is idle, the lane's accent is
+ * flowing, amber and red are the only things that should draw the eye. */
+struct PipeStage {
+    const char* name;
+    const char* status;
+    ImVec4      col;        /* ZS_FAINT idle, ZS_OK flowing, ZS_WARN / ZS_CRIT attention */
+    const char* value;
+    const char* unit;
+    const char* detail;     /* shown on the card */
+    const char* more;       /* tooltip only */
+};
 
-    // Multi-color linear gradient card background
-    dl->AddRectFilledMultiColor(p0, p1,
-        IM_COL32(24, 34, 52, 240), IM_COL32(14, 19, 30, 240),
-        IM_COL32(14, 19, 30, 240), IM_COL32(24, 34, 52, 240));
-    dl->AddRect(p0, p1, IM_COL32(42, 60, 90, 255), 6.0f);
-    dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + 3.0f), ImGui::GetColorU32(dot), 3.0f);
+static int pipe_level(const ImVec4& c) {
+    if (c.x == ZS_CRIT.x && c.y == ZS_CRIT.y && c.z == ZS_CRIT.z) return 3;
+    if (c.x == ZS_WARN.x && c.y == ZS_WARN.y && c.z == ZS_WARN.z) return 2;
+    if (c.x == ZS_FAINT.x && c.y == ZS_FAINT.y && c.z == ZS_FAINT.z) return 0;
+    return 1;
+}
 
-    ImGui::Dummy(ImVec2(0, 4.0f));
-    ImGui::Indent(8.0f);
+static void pipe_lane(const char* title, const char* sub, ImVec4 accent, ZsIconFn icon,
+                      const PipeStage* st, int n) {
+    const float s = g_ui_scale;
+    int worst = 0; bool any_active = false;
+    for (int i = 0; i < n; i++) {
+        int l = pipe_level(st[i].col);
+        if (l > worst) worst = l;
+        if (l == 1) any_active = true;
+    }
+    const char* verdict = worst == 3 ? "FAULT" : worst == 2 ? "ATTENTION" : any_active ? "FLOWING" : "IDLE";
+    ImVec4 vcol = worst == 3 ? ZS_CRIT : worst == 2 ? ZS_WARN : any_active ? accent : ZS_FAINT;
 
-    // Header: Title + Status Badge
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_TEXT);
-    ImGui::TextUnformatted(title);
-    ImGui::PopStyleColor();
+    /* Lane header: what the lane is, then its verdict as one chip. */
+    card_header_icon(title, accent, icon);
     ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, status_col);
-    ImGui::Text("[%s]", status);
+    ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+    ImGui::TextUnformatted(sub);
     ImGui::PopStyleColor();
+    {
+        ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+        float tw = mono->CalcTextSizeA(mono->LegacySize * 0.9f, FLT_MAX, 0.0f, verdict).x + 18.0f * s;
+        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - tw);
+        ImVec2 c0 = ImGui::GetCursorScreenPos();
+        ImDrawList* hdl = ImGui::GetWindowDrawList();
+        hdl->AddRectFilled(c0, ImVec2(c0.x + tw, c0.y + mono->LegacySize + 4.0f * s),
+                           ImGui::GetColorU32(ImVec4(vcol.x, vcol.y, vcol.z, 0.16f)), 4.0f * s);
+        hdl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(c0.x + 9.0f * s, c0.y + 2.0f * s),
+                     ImGui::GetColorU32(vcol), verdict);
+        ImGui::Dummy(ImVec2(tw, mono->LegacySize + 4.0f * s));
+    }
+    ImGui::Dummy(ImVec2(0, 2.0f * s));
 
-    // Primary metric — the one number the card exists for, set larger than the
-    // rest of the card so a row of five reads at a glance.
-    if (g_font_h1) ImGui::PushFont(g_font_h1);
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_TEXT);
-    ImGui::Text("%s %s", val_str, unit_str);
-    ImGui::PopStyleColor();
-    if (g_font_h1) ImGui::PopFont();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+    ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
+    ImVec2 o  = ImGui::GetCursorScreenPos();
+    float  W  = ImGui::GetContentRegionAvail().x;
+    float  gap = 30.0f * s, H = 84.0f * s;
+    float  nw = (W - gap * (float)(n - 1)) / (float)n;
+    if (nw < 96.0f * s) nw = 96.0f * s;
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool win_hot = ImGui::IsWindowHovered();
 
-    // Subtitle Metadata
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
-    if (sub1 && sub1[0]) ImGui::TextUnformatted(sub1);
-    if (sub2 && sub2[0]) ImGui::TextUnformatted(sub2);
-    ImGui::PopStyleColor();
+    for (int i = 0; i < n; i++) {
+        const PipeStage& g = st[i];
+        int lvl = pipe_level(g.col);
+        ImVec2 a(o.x + (nw + gap) * (float)i, o.y), b(a.x + nw, a.y + H);
 
-    ImGui::Unindent(8.0f);
-    ImGui::Dummy(ImVec2(0, 4.0f));
-    ImGui::EndGroup();
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(zs_mix(ZS_PANEL, ZS_PANEL2, 0.45f)), 7.0f * s);
+        ImVec4 edge = lvl >= 2 ? g.col : ZS_LINE;
+        dl->AddRect(a, b, ImGui::GetColorU32(ImVec4(edge.x, edge.y, edge.z, lvl >= 2 ? 0.85f : 1.0f)), 7.0f * s);
+        /* The accent bar is lit only while the stage is doing something. */
+        if (lvl >= 1) dl->AddRectFilled(ImVec2(a.x + 1, a.y + 8.0f * s), ImVec2(a.x + 4.0f * s, b.y - 8.0f * s),
+                                        ImGui::GetColorU32(lvl >= 2 ? g.col : accent), 2.0f);
+
+        dl->PushClipRect(ImVec2(a.x + 2, a.y), ImVec2(b.x - 4.0f * s, b.y), true);
+        float x = a.x + 14.0f * s, y = a.y + 8.0f * s;
+        dl->AddCircleFilled(ImVec2(x + 3.0f * s, y + ImGui::GetTextLineHeight() * 0.5f), 3.5f * s,
+                            ImGui::GetColorU32(lvl == 0 ? ZS_FAINT : (lvl == 1 ? accent : g.col)), 12);
+        dl->AddText(ImVec2(x + 14.0f * s, y), ImGui::GetColorU32(ZS_MUTED), g.name);
+
+        float vy = y + ImGui::GetTextLineHeight() + 1.0f * s;
+        ImVec4 vc = lvl == 0 ? ZS_FAINT : ZS_TEXT;
+        dl->AddText(h1, h1->LegacySize, ImVec2(x, vy), ImGui::GetColorU32(vc), g.value);
+        if (g.unit && g.unit[0]) {
+            float vw = h1->CalcTextSizeA(h1->LegacySize, FLT_MAX, 0.0f, g.value).x;
+            dl->AddText(mono, mono->LegacySize * 0.85f,
+                        ImVec2(x + vw + 6.0f * s, vy + h1->LegacySize - mono->LegacySize * 0.85f - 2.0f * s),
+                        ImGui::GetColorU32(ZS_FAINT), g.unit);
+        }
+
+        float ly = b.y - mono->LegacySize * 0.85f - 8.0f * s;
+        float sw = mono->CalcTextSizeA(mono->LegacySize * 0.85f, FLT_MAX, 0.0f, g.status).x;
+        dl->AddText(mono, mono->LegacySize * 0.85f, ImVec2(x, ly),
+                    ImGui::GetColorU32(lvl == 0 ? ZS_FAINT : (lvl == 1 ? accent : g.col)), g.status);
+        dl->AddText(mono, mono->LegacySize * 0.85f, ImVec2(x + sw + 8.0f * s, ly),
+                    ImGui::GetColorU32(ZS_FAINT), g.detail);
+        dl->PopClipRect();
+
+        /* The connector to the next stage lights only when this one is feeding
+         * it, so a break in the chain shows where the data stops. */
+        if (i + 1 < n) {
+            float my = a.y + H * 0.5f, x0 = b.x + 5.0f * s, x1 = b.x + gap - 5.0f * s;
+            bool live = lvl >= 1 && pipe_level(st[i + 1].col) >= 1;
+            ImU32 lc = ImGui::GetColorU32(live ? accent : ZS_LINE);
+            dl->AddLine(ImVec2(x0, my), ImVec2(x1, my), lc, 1.6f * s);
+            dl->AddTriangleFilled(ImVec2(x1, my), ImVec2(x1 - 6.0f * s, my - 4.0f * s),
+                                  ImVec2(x1 - 6.0f * s, my + 4.0f * s), lc);
+        }
+
+        if (win_hot && mouse.x >= a.x && mouse.x <= b.x && mouse.y >= a.y && mouse.y <= b.y) {
+            dl->AddRect(a, b, ImGui::GetColorU32(accent), 7.0f * s, 0, 1.5f);
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted(g.name);
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_MUTED);
+            ImGui::Text("%s  %s %s", g.status, g.value, g.unit ? g.unit : "");
+            if (g.detail && g.detail[0]) ImGui::TextUnformatted(g.detail);
+            if (g.more && g.more[0]) ImGui::TextUnformatted(g.more);
+            ImGui::PopStyleColor();
+            ImGui::EndTooltip();
+        }
+    }
+    ImGui::Dummy(ImVec2(W, H + 4.0f * s));
 }
 
 static const char* drive_state_name(DriveState st) {
@@ -2380,47 +2460,65 @@ static void draw_pipeline_view(Interconnect* inter) {
 
     int ring_used = spu ? spu_ring_used(spu) : 0;
     bool starving = ring_used < g_vit_aq_target / 4;
-    const char* mx_status = !spu ? "ABSENT" : (spu->underrun_events ? "UNDERRUN" : starving ? "LOW" : "LIVE");
-    ImVec4 mx_col = !spu ? ZS_FAINT : (spu->underrun_events ? ZS_CRIT : starving ? ZS_WARN : ZS_OK);
+    /* The lifetime counter never goes back down, so a single start-up underrun
+     * (the first audio callback fires before the SPU has filled the ring, and
+     * a pause drains it too) would have held this stage at FAULT for the whole
+     * session. Only an underrun in the last five seconds counts as one now;
+     * the total stays on the card. */
+    static uint32_t s_last_ev = 0;
+    static double   s_last_ev_t = -100.0;
+    uint32_t ev_now = spu ? spu->underrun_events : 0;
+    if (ev_now != s_last_ev) { s_last_ev = ev_now; s_last_ev_t = t; }
+    bool recent_underrun = (t - s_last_ev_t) < 5.0;
+    const char* mx_status = !spu ? "ABSENT" : (recent_underrun ? "UNDERRUN" : starving ? "LOW" : "LIVE");
+    ImVec4 mx_col = !spu ? ZS_FAINT : (recent_underrun ? ZS_CRIT : starving ? ZS_WARN : ZS_OK);
     snprintf(mxv, sizeof(mxv), "%d / %d", ring_used, g_vit_aq_target);
     snprintf(mx_s1, sizeof(mx_s1), "%u underruns, %u dropped",
              spu ? spu->underrun_events : 0, spu ? spu->dropped_samples : 0);
     snprintf(mx_s2, sizeof(mx_s2), "drift %+.2f%%", g_vit_drift);
 
-    card_header_icon("Video path: CD -> MDEC -> DMA -> GPU -> scanout", ZS_DATA, draw_icon_flow);
-    if (ImGui::BeginTable("##pipe_video", 5, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        pipe_node_card("1. CD-ROM drive", ZS_DATA, cd_status, cd_col, cdr, "sect/s", cd_s1, cd_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("2. MDEC decoder", ZS_DATA, md_status, md_col, mdr, "mblk/s", md_s1, md_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("3. DMA ch2 (GPU)", ZS_DATA, dm_status, dm_col, dmr, "up/s", dm_s1, dm_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("4. GPU rasterizer", ZS_DATA, gp_status, gp_col, gpv, "", gp_s1, gp_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("5. VRAM and display", ZS_OK, vr_status, vr_col, vrv, "", vr_s1, vr_s2);
-        ImGui::EndTable();
-    }
+    /* Short cards, long tooltips: the card keeps what is worth reading at a
+     * glance, the hover has the register-level detail. */
+    char cd_d[48], md_d[48], dm_d[48], gp_d[48], vr_d[48], xa_d[48], sp_d[48], mx_d[48];
+    snprintf(cd_d, sizeof(cd_d), "%s", cd && cd->double_speed ? "2x" : "1x");
+    snprintf(md_d, sizeof(md_d), "%s", mdec ? depth_name[mdec->output_depth & 3] : "-");
+    snprintf(dm_d, sizeof(dm_d), "%s", ch2 ? dma_sync_name(ch2->sync) : "-");
+    snprintf(gp_d, sizeof(gp_d), "batches/frame");
+    snprintf(vr_d, sizeof(vr_d), "%s", gpu && gpu->display_depth == D24Bits ? "24bpp" : "15bpp");
+    snprintf(xa_d, sizeof(xa_d), "fifo %u", cd ? cd->audio_fifo.count : 0);
+    snprintf(sp_d, sizeof(sp_d), "reverb %s", reverb_on ? "on" : "off");
+    snprintf(mx_d, sizeof(mx_d), "%u underruns", spu ? spu->underrun_events : 0);
 
-    ImGui::Dummy(ImVec2(0, 10));
+    char cd_m[160], md_m[160], dm_m[160], gp_m[160], vr_m[160], xa_m[160], sp_m[160], mx_m[160];
+    snprintf(cd_m, sizeof(cd_m), "%s\n%s", cd_s1, cd_s2);
+    snprintf(md_m, sizeof(md_m), "%s\n%s", md_s1, md_s2);
+    snprintf(dm_m, sizeof(dm_m), "%s\n%s", dm_s1, dm_s2);
+    snprintf(gp_m, sizeof(gp_m), "%s\n%s", gp_s1, gp_s2);
+    snprintf(vr_m, sizeof(vr_m), "%s\n%s", vr_s1, vr_s2);
+    snprintf(xa_m, sizeof(xa_m), "%s\n%s", xa_s1, xa_s2);
+    snprintf(sp_m, sizeof(sp_m), "%s\n%s", sp_s1, sp_s2);
+    snprintf(mx_m, sizeof(mx_m), "%s\n%s", mx_s1, mx_s2);
 
-    card_header_icon("Audio path: XA -> SPU -> device", ZS_AUDIO, draw_icon_wave);
-    if (ImGui::BeginTable("##pipe_audio", 3, ImGuiTableFlags_SizingStretchSame)) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        pipe_node_card("1. XA ADPCM", ZS_AUDIO, xa_status, xa_col, xar, "smp/s", xa_s1, xa_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("2. SPU voices", ZS_AUDIO, sp_status, sp_col, spv, "", sp_s1, sp_s2);
-        ImGui::TableNextColumn();
-        pipe_node_card("3. Mixer and output", ZS_OK, mx_status, mx_col, mxv, "smp", mx_s1, mx_s2);
-        ImGui::EndTable();
-    }
+    const PipeStage video[5] = {
+        { "CD-ROM",  cd_status, cd_col, cdr, "sect/s", cd_d, cd_m },
+        { "MDEC",    md_status, md_col, mdr, "mblk/s", md_d, md_m },
+        { "DMA 2",   dm_status, dm_col, dmr, "up/s",   dm_d, dm_m },
+        { "GPU",     gp_status, gp_col, gpv, "",       gp_d, gp_m },
+        { "Display", vr_status, vr_col, vrv, "",       vr_d, vr_m },
+    };
+    const PipeStage audio[3] = {
+        { "XA ADPCM", xa_status, xa_col, xar, "smp/s", xa_d, xa_m },
+        { "SPU",      sp_status, sp_col, spv, "voices", sp_d, sp_m },
+        { "Output",   mx_status, mx_col, mxv, "smp",   mx_d, mx_m },
+    };
+    pipe_lane("Video", "CD  >  MDEC  >  DMA  >  GPU  >  screen", ZS_DATA, draw_icon_flow, video, 5);
+    ImGui::Dummy(ImVec2(0, 10.0f * g_ui_scale));
+    pipe_lane("Audio", "XA  >  SPU  >  device", ZS_AUDIO, draw_icon_wave, audio, 3);
 
     ImGui::Dummy(ImVec2(0, 8));
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextWrapped("Per-frame counts come from the frame event ring, recorded only while this "
-                       "view is open. Rates are sampled over half a second.");
+    ImGui::TextWrapped("Hover a stage for its registers. Grey is idle, the lane colour is flowing, "
+                       "amber and red need attention. Rates are sampled over half a second.");
     ImGui::PopStyleColor();
 }
 
@@ -2832,6 +2930,15 @@ static void gp_row(const char* k, const char* v, ImVec4 col) {
 
 /* Rebind state, shared by the drawing and the list below it. */
 static int  s_rebind_index      = -1;
+
+/* A scancode name short enough to sit on the drawing: "Left Shift" -> "LShift". */
+static void key_short_name(int sc, char* out, size_t n) {
+    const char* nm = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "";
+    if (!nm || !nm[0]) { snprintf(out, n, "-"); return; }
+    if (strncmp(nm, "Left ", 5) == 0)       snprintf(out, n, "L%.5s", nm + 5);
+    else if (strncmp(nm, "Right ", 6) == 0) snprintf(out, n, "R%.5s", nm + 6);
+    else                                    snprintf(out, n, "%.6s", nm);
+}
 static bool s_open_rebind_popup = false;
 static bool s_waiting_key_up    = true;
 
@@ -2895,7 +3002,8 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
         dl->AddRectFilled(a, b, on ? ImGui::GetColorU32(ZS_DATA) : well, S(6));
         dl->AddRect(a, b, edge, S(6));
         ImVec2 ts = ImGui::CalcTextSize(shoulders[i].tag);
-        dl->AddText(ImVec2((a.x + b.x) * 0.5f - ts.x * 0.5f, (a.y + b.y) * 0.5f - ts.y * 0.5f),
+        /* Left-aligned: the bound key takes the right end of the bar. */
+        dl->AddText(ImVec2(a.x + S(8), (a.y + b.y) * 0.5f - ts.y * 0.5f),
                     on ? IM_COL32(8, 16, 22, 255) : text_col, shoulders[i].tag);
         zones.push_back({ shoulders[i].idx, false, a, b });
     }
@@ -3006,6 +3114,49 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
                          col, S(5), 0, S(2.0f));
     }
 
+    /* The key bound to each control, drawn beside it. The pad used to be a
+     * picture you had to hover to learn anything from; now the whole layout
+     * reads at a glance, and a rebind in progress shows on the control. */
+    {
+        ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+        const float fs = mono->LegacySize * 0.80f;
+        for (size_t i = 0; i < zones.size(); i++) {
+            const PadZone& z = zones[i];
+            int sc = ctrl->key_map[z.idx];
+            char lab[16];
+            if (z.idx == s_rebind_index) snprintf(lab, sizeof(lab), "...");
+            else key_short_name(sc, lab, sizeof(lab));
+            ImVec2 ts = mono->CalcTextSizeA(fs, FLT_MAX, 0.0f, lab);
+            ImVec2 c, ext;
+            if (z.circle) { c = z.a; ext = ImVec2(z.b.x, z.b.x); }
+            else { c = ImVec2((z.a.x + z.b.x) * 0.5f, (z.a.y + z.b.y) * 0.5f);
+                   ext = ImVec2((z.b.x - z.a.x) * 0.5f, (z.b.y - z.a.y) * 0.5f); }
+            ImVec2 at;
+            switch (z.idx) {
+                case 4:  at = ImVec2(c.x - ts.x * 0.5f, z.a.y - ts.y - S(5)); break;       /* d-pad up    */
+                case 6:  at = ImVec2(c.x - ts.x * 0.5f, z.b.y + S(5)); break;              /* d-pad down  */
+                case 7:  at = ImVec2(z.a.x - ts.x - S(8), c.y - ts.y * 0.5f); break;       /* d-pad left  */
+                case 5:  at = ImVec2(z.b.x + S(8), c.y - ts.y * 0.5f); break;              /* d-pad right */
+                case 12: at = ImVec2(c.x - ts.x * 0.5f, c.y - ext.y - ts.y - S(5)); break; /* triangle    */
+                case 14: at = ImVec2(c.x - ts.x * 0.5f, c.y + ext.y + S(5)); break;        /* cross       */
+                case 15: at = ImVec2(c.x - ext.x - ts.x - S(8), c.y - ts.y * 0.5f); break; /* square      */
+                case 13: at = ImVec2(c.x + ext.x + S(8), c.y - ts.y * 0.5f); break;        /* circle      */
+                case 0: case 3: at = ImVec2(c.x - ts.x * 0.5f, z.b.y + S(15)); break;      /* select/start*/
+                case 1: case 2: at = ImVec2(c.x - ts.x * 0.5f, c.y + ext.y + S(15)); break;/* L3/R3       */
+                default: at = ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f); break;         /* shoulders   */
+            }
+            bool active = (z.idx == s_rebind_index);
+            if (z.idx >= 8 && z.idx <= 11) {
+                /* Shoulder: the key sits on the right edge of the bar, clear of the tag. */
+                at = ImVec2(z.b.x - ts.x - S(6), c.y - ts.y * 0.5f);
+            }
+            ImVec2 p0(at.x - S(3), at.y - S(1)), p1(at.x + ts.x + S(3), at.y + ts.y + S(1));
+            dl->AddRectFilled(p0, p1, active ? ImGui::GetColorU32(ImVec4(ZS_WARN.x, ZS_WARN.y, ZS_WARN.z, 0.30f))
+                                             : IM_COL32(8, 11, 18, 170), S(3));
+            dl->AddText(mono, fs, at, ImGui::GetColorU32(active ? ZS_WARN : ZS_TEXT), lab);
+        }
+    }
+
     if (hovered >= 0) {
         int sc = ctrl->key_map[hovered];
         const char* kn = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "unbound";
@@ -3024,7 +3175,11 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
 static void draw_controller_mapping_window() {
     if (!g_show_controller_mapping) return;
 
-    ImGui::SetNextWindowSize(ImVec2(980.0f * g_ui_scale, 640.0f * g_ui_scale), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(1040.0f * g_ui_scale, 600.0f * g_ui_scale), ImGuiCond_FirstUseEver);
+    /* A size saved in imgui.ini from the old two-column layout would clip the
+     * bindings table; the window cannot be made narrower than it needs. */
+    ImGui::SetNextWindowSizeConstraints(ImVec2(960.0f * g_ui_scale, 520.0f * g_ui_scale),
+                                        ImVec2(FLT_MAX, FLT_MAX));
     if (!ImGui::Begin("Controller", &g_show_controller_mapping, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
@@ -3045,125 +3200,163 @@ static void draw_controller_mapping_window() {
     /* --- left column: the pad --- */
     ImGui::BeginGroup();
     card_header_icon("Pad", ZS_PS_BLUE, draw_icon_pad);
-    draw_dualshock(ctrl, state, mode, g_ui_scale * 1.2f);
+    draw_dualshock(ctrl, state, mode, g_ui_scale * 1.0f);
 
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextWrapped("Lit controls are pressed right now. Click one to bind a key to it.");
+    ImGui::TextWrapped("Lit controls are pressed right now. The key on each one is its binding; "
+                       "click a control to change it.");
     ImGui::PopStyleColor();
     ImGui::EndGroup();
 
     ImGui::SameLine(0, 18.0f * g_ui_scale);
 
-    /* --- right column: what the game sees, then the bindings --- */
+    /* --- right column: tabs. Bindings is first because it is what this window
+     * is for; the device readout and the pad mode are one click away instead of
+     * stacked above it, which pushed the bindings off the bottom. --- */
     ImGui::BeginGroup();
-
-    card_header_icon("Device", ZS_OK, draw_icon_gpu);
-    const char* dev_name = ctrl->gc ? SDL_GetGamepadName(ctrl->gc) : "keyboard";
-    if (ImGui::BeginTable("padinfo", 2, ImGuiTableFlags_SizingStretchProp)) {
-        gp_row("Host device", dev_name, ctrl->gc ? ZS_OK : ZS_MUTED);
-        gp_row("Light bar", ctrl->gc ? (ctrl->gc_has_led ? "addressable" : "no hidraw access") : "-",
-               ctrl->gc && ctrl->gc_has_led ? ZS_OK : ZS_FAINT);
-        char b[64];
-        snprintf(b, sizeof(b), "0x%04X", state);
-        gp_row("Pad word", b, ZS_DATA);
-        snprintf(b, sizeof(b), "%6d, %6d", ctrl->left_x, ctrl->left_y);
-        gp_row("Left stick", b, ZS_TEXT);
-        snprintf(b, sizeof(b), "%6d, %6d", ctrl->right_x, ctrl->right_y);
-        gp_row("Right stick", b, ZS_TEXT);
-        uint8_t m1 = 0, m2 = 0;
-        sio_get_rumble(nullptr, &m1, &m2);
-        snprintf(b, sizeof(b), "large %3u, small %s", m1, m2 ? "on" : "off");
-        gp_row("Rumble", b, (m1 || m2) ? ZS_WARN : ZS_FAINT);
-        ImGui::EndTable();
-    }
-
-    ImGui::Dummy(ImVec2(0, 8));
-    card_header_icon("Emulated pad mode", ZS_DATA, draw_icon_pad);
-    const char* names[3] = { "Digital", "Analog", "Stick" };
-    SioPadMode modes[3]  = { SIO_PAD_DIGITAL, SIO_PAD_ANALOG, SIO_PAD_STICK };
-    for (int i = 0; i < 3; i++) {
-        bool on = (mode == modes[i]);
-        ImGui::PushStyleColor(ImGuiCol_Button, on ? ZS_MODE_ON : ZS_PANEL2);
-        ImGui::PushStyleColor(ImGuiCol_Text, on ? ZS_DATA : ZS_MUTED);
-        if (ImGui::Button(names[i], ImVec2(96.0f * g_ui_scale, 30.0f * g_ui_scale)))
-            sio_set_pad_mode(nullptr, modes[i]);
-        ImGui::PopStyleColor(2);
-        if (i < 2) ImGui::SameLine();
-    }
-    ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextWrapped("Digital is the power-on state, as on hardware. Analog and stick append "
-                       "adc0-3 to a 42h read; stick mode is the LED-green flight mode a few "
-                       "titles ask for by name.");
-    ImGui::PopStyleColor();
-    ImGui::Checkbox("Swap Cross / Circle", &ctrl->swap_cross_circle);
-
-    ImGui::Dummy(ImVec2(0, 8));
-    card_header_icon("Keyboard bindings", ZS_WARN, draw_icon_threads);
-    if (ImGui::SmallButton("WASD + EZXC")) {
-        ctrl->key_map[0]  = SDL_SCANCODE_TAB;
-        ctrl->key_map[3]  = SDL_SCANCODE_SPACE;
-        ctrl->key_map[4]  = SDL_SCANCODE_W;
-        ctrl->key_map[5]  = SDL_SCANCODE_D;
-        ctrl->key_map[6]  = SDL_SCANCODE_S;
-        ctrl->key_map[7]  = SDL_SCANCODE_A;
-        ctrl->key_map[8]  = SDL_SCANCODE_LSHIFT;
-        ctrl->key_map[9]  = SDL_SCANCODE_LCTRL;
-        ctrl->key_map[10] = SDL_SCANCODE_Q;
-        ctrl->key_map[11] = SDL_SCANCODE_R;
-        ctrl->key_map[12] = SDL_SCANCODE_E;
-        ctrl->key_map[13] = SDL_SCANCODE_C;
-        ctrl->key_map[14] = SDL_SCANCODE_Z;
-        ctrl->key_map[15] = SDL_SCANCODE_X;
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Arrows + WASD")) {
-        ctrl->key_map[4]  = SDL_SCANCODE_UP;
-        ctrl->key_map[5]  = SDL_SCANCODE_RIGHT;
-        ctrl->key_map[6]  = SDL_SCANCODE_DOWN;
-        ctrl->key_map[7]  = SDL_SCANCODE_LEFT;
-        ctrl->key_map[12] = SDL_SCANCODE_W;
-        ctrl->key_map[13] = SDL_SCANCODE_D;
-        ctrl->key_map[14] = SDL_SCANCODE_S;
-        ctrl->key_map[15] = SDL_SCANCODE_A;
-    }
-
-    /* The list is the fallback, not the interface: the pad above is where a
-     * binding is changed. It stays available for a button the drawing has no
-     * room to label. */
-    if (ImGui::CollapsingHeader("All bindings") &&
-        ImGui::BeginTable("keymaptable", 3,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
-                          ImGuiTableFlags_ScrollY,
-                          ImVec2(0, 210.0f * g_ui_scale))) {
-        ImGui::TableSetupColumn("Button");
-        ImGui::TableSetupColumn("Key");
-        ImGui::TableSetupColumn("");
-        ImGui::TableHeadersRow();
-        for (int i = 0; i < 16; i++) {
-            bool down = ((state & (1u << i)) == 0);
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::PushStyleColor(ImGuiCol_Text, down ? g_psx_button_info[i].col : ZS_MUTED);
-            ImGui::TextUnformatted(g_psx_button_info[i].name);
-            ImGui::PopStyleColor();
-            ImGui::TableNextColumn();
-            int sc = ctrl->key_map[i];
-            const char* kn = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "unbound";
-            if (g_font_mono) ImGui::PushFont(g_font_mono);
-            ImGui::PushStyleColor(ImGuiCol_Text, sc > 0 ? ZS_TEXT : ZS_FAINT);
-            ImGui::TextUnformatted(kn);
-            ImGui::PopStyleColor();
-            if (g_font_mono) ImGui::PopFont();
-            ImGui::TableNextColumn();
-            ImGui::PushID(i);
-            if (ImGui::SmallButton(s_rebind_index == i ? "press a key" : "rebind")) {
-                s_rebind_index = i;
-                s_open_rebind_popup = true;
-                s_waiting_key_up = true;
+    if (ImGui::BeginTabBar("##padtabs")) {
+        if (ImGui::BeginTabItem("Bindings")) {
+            /* Presets and clear, as buttons, with the duplicate warning beside them. */
+            if (ImGui::Button("WASD + EZXC")) {
+                ctrl->key_map[0]  = SDL_SCANCODE_TAB;   ctrl->key_map[3]  = SDL_SCANCODE_SPACE;
+                ctrl->key_map[4]  = SDL_SCANCODE_W;     ctrl->key_map[5]  = SDL_SCANCODE_D;
+                ctrl->key_map[6]  = SDL_SCANCODE_S;     ctrl->key_map[7]  = SDL_SCANCODE_A;
+                ctrl->key_map[8]  = SDL_SCANCODE_LSHIFT; ctrl->key_map[9] = SDL_SCANCODE_LCTRL;
+                ctrl->key_map[10] = SDL_SCANCODE_Q;     ctrl->key_map[11] = SDL_SCANCODE_R;
+                ctrl->key_map[12] = SDL_SCANCODE_E;     ctrl->key_map[13] = SDL_SCANCODE_C;
+                ctrl->key_map[14] = SDL_SCANCODE_Z;     ctrl->key_map[15] = SDL_SCANCODE_X;
             }
-            ImGui::PopID();
+            ImGui::SameLine();
+            if (ImGui::Button("Arrows + WASD")) {
+                ctrl->key_map[4]  = SDL_SCANCODE_UP;    ctrl->key_map[5]  = SDL_SCANCODE_RIGHT;
+                ctrl->key_map[6]  = SDL_SCANCODE_DOWN;  ctrl->key_map[7]  = SDL_SCANCODE_LEFT;
+                ctrl->key_map[12] = SDL_SCANCODE_W;     ctrl->key_map[13] = SDL_SCANCODE_D;
+                ctrl->key_map[14] = SDL_SCANCODE_S;     ctrl->key_map[15] = SDL_SCANCODE_A;
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("Swap Cross / Circle", &ctrl->swap_cross_circle);
+
+            /* Two controls on one key is almost never what was meant. */
+            bool dup[16] = {false};
+            int ndup = 0;
+            for (int i = 0; i < 16; i++)
+                for (int j = i + 1; j < 16; j++)
+                    if (ctrl->key_map[i] > 0 && ctrl->key_map[i] == ctrl->key_map[j]) {
+                        if (!dup[i]) ndup++;
+                        dup[i] = dup[j] = true;
+                    }
+            if (ndup) {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+                ImGui::TextWrapped("%d controls share a key with another one (marked in amber).", ndup);
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+                ImGui::TextUnformatted("Click a control on the pad, or a key below, then press the new key.");
+                ImGui::PopStyleColor();
+            }
+            ImGui::Dummy(ImVec2(0, 2.0f * g_ui_scale));
+
+            if (ImGui::BeginTable("keymaptable", 3,
+                                  ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
+                                  ImGuiTableFlags_ScrollY,
+                                  ImVec2(0, ImGui::GetContentRegionAvail().y - 4.0f))) {
+                ImGui::TableSetupColumn("Control", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+                ImGui::TableSetupColumn("Key",     ImGuiTableColumnFlags_WidthStretch, 1.3f);
+                ImGui::TableSetupColumn("",        ImGuiTableColumnFlags_WidthFixed, 34.0f * g_ui_scale);
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableHeadersRow();
+                for (int i = 0; i < 16; i++) {
+                    bool down = ((state & (1u << i)) == 0);
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    {
+                        /* A drawn dot, not a glyph: the UI face has no U+25CF. */
+                        ImVec2 dp = ImGui::GetCursorScreenPos();
+                        float  r  = 4.0f * g_ui_scale;
+                        ImVec2 dc(dp.x + r + 1.0f, dp.y + ImGui::GetTextLineHeight() * 0.5f);
+                        ImDrawList* rdl = ImGui::GetWindowDrawList();
+                        if (down) rdl->AddCircleFilled(dc, r, ImGui::GetColorU32(g_psx_button_info[i].col), 12);
+                        else      rdl->AddCircle(dc, r, ImGui::GetColorU32(ZS_FAINT), 12, 1.2f);
+                        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 2.0f * r + 8.0f * g_ui_scale);
+                        ImGui::PushStyleColor(ImGuiCol_Text, down ? g_psx_button_info[i].col : ZS_MUTED);
+                        ImGui::TextUnformatted(g_psx_button_info[i].name);
+                        ImGui::PopStyleColor();
+                    }
+
+                    ImGui::TableNextColumn();
+                    int sc = ctrl->key_map[i];
+                    const char* kn = (sc > 0 && sc < SDL_SCANCODE_COUNT) ? SDL_GetScancodeName((SDL_Scancode)sc) : "unbound";
+                    bool waiting = (s_rebind_index == i);
+                    ImGui::PushID(i);
+                    ImGui::PushStyleColor(ImGuiCol_Text, waiting ? ZS_WARN : dup[i] ? ZS_WARN : sc > 0 ? ZS_TEXT : ZS_FAINT);
+                    if (g_font_mono) ImGui::PushFont(g_font_mono);
+                    /* The key itself is the button: one click, then the key. */
+                    if (ImGui::Selectable(waiting ? "press a key..." : kn, waiting,
+                                          ImGuiSelectableFlags_None, ImVec2(0, 0))) {
+                        s_rebind_index = i;
+                        s_open_rebind_popup = true;
+                        s_waiting_key_up = true;
+                    }
+                    if (g_font_mono) ImGui::PopFont();
+                    ImGui::PopStyleColor();
+
+                    ImGui::TableNextColumn();
+                    if (sc > 0 && ImGui::SmallButton("x")) ctrl->key_map[i] = 0;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Unbind");
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            ImGui::EndTabItem();
         }
-        ImGui::EndTable();
+
+        if (ImGui::BeginTabItem("Pad mode")) {
+            ImGui::Dummy(ImVec2(0, 4));
+            const char* names[3] = { "Digital", "Analog", "Stick" };
+            const char* subs[3]  = { "LED off - power-on state", "LED red - sticks", "LED green - flight mode" };
+            SioPadMode modes[3]  = { SIO_PAD_DIGITAL, SIO_PAD_ANALOG, SIO_PAD_STICK };
+            for (int i = 0; i < 3; i++) {
+                bool on = (mode == modes[i]);
+                ImGui::PushStyleColor(ImGuiCol_Button, on ? ZS_MODE_ON : ZS_PANEL2);
+                ImGui::PushStyleColor(ImGuiCol_Text, on ? ZS_DATA : ZS_MUTED);
+                if (ImGui::Button(names[i], ImVec2(110.0f * g_ui_scale, 34.0f * g_ui_scale)))
+                    sio_set_pad_mode(nullptr, modes[i]);
+                ImGui::PopStyleColor(2);
+                if (i < 2) ImGui::SameLine();
+            }
+            ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+            ImGui::TextUnformatted(subs[mode == SIO_PAD_ANALOG ? 1 : mode == SIO_PAD_STICK ? 2 : 0]);
+            ImGui::Dummy(ImVec2(0, 6));
+            ImGui::TextWrapped("Digital is the power-on state, as on hardware. Analog and stick append "
+                               "adc0-3 to a 42h read; stick mode is the LED-green flight mode a few "
+                               "titles ask for by name. F12 or the DS4 touchpad click cycles the mode.");
+            ImGui::PopStyleColor();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Device")) {
+            ImGui::Dummy(ImVec2(0, 4));
+            const char* dev_name = ctrl->gc ? SDL_GetGamepadName(ctrl->gc) : "keyboard";
+            if (ImGui::BeginTable("padinfo", 2, ImGuiTableFlags_SizingStretchProp)) {
+                gp_row("Host device", dev_name, ctrl->gc ? ZS_OK : ZS_MUTED);
+                gp_row("Light bar", ctrl->gc ? (ctrl->gc_has_led ? "addressable" : "no hidraw access") : "-",
+                       ctrl->gc && ctrl->gc_has_led ? ZS_OK : ZS_FAINT);
+                char b[64];
+                snprintf(b, sizeof(b), "0x%04X", state);
+                gp_row("Pad word", b, ZS_DATA);
+                snprintf(b, sizeof(b), "%6d, %6d", ctrl->left_x, ctrl->left_y);
+                gp_row("Left stick", b, ZS_TEXT);
+                snprintf(b, sizeof(b), "%6d, %6d", ctrl->right_x, ctrl->right_y);
+                gp_row("Right stick", b, ZS_TEXT);
+                uint8_t m1 = 0, m2 = 0;
+                sio_get_rumble(nullptr, &m1, &m2);
+                snprintf(b, sizeof(b), "large %3u, small %s", m1, m2 ? "on" : "off");
+                gp_row("Rumble", b, (m1 || m2) ? ZS_WARN : ZS_FAINT);
+                ImGui::EndTable();
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
     ImGui::EndGroup();
 
