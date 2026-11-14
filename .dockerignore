@@ -19,5 +19,5 @@ screenshots
 *.bin
 *.ecm
 ZoniStation_One
-*.o
-*.d
+**/*.o
+**/*.d
