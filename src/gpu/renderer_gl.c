@@ -2478,6 +2478,29 @@ static int gpu_thread_main(void* userdata) {
             imgui_render_draw_data(s_frame[ri].imgui_draw_data);
         }
 
+        {
+            /* ZS1_UI_TOUR: save the composed window as a PPM (see debug_ui.cpp). */
+            extern int debug_ui_shot_take(char* out, size_t n);
+            char shot_path[320];
+            if (debug_ui_shot_take(shot_path, sizeof(shot_path))) {
+                int sw, sh;
+                SDL_GetWindowSizeInPixels(window, &sw, &sh);
+                unsigned char* px = (unsigned char*)malloc((size_t)sw * sh * 3);
+                if (px) {
+                    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+                    glReadBuffer(GL_BACK);
+                    glReadPixels(0, 0, sw, sh, GL_RGB, GL_UNSIGNED_BYTE, px);
+                    FILE* f = fopen(shot_path, "wb");
+                    if (f) {
+                        fprintf(f, "P6\n%d %d\n255\n", sw, sh);
+                        for (int y = sh - 1; y >= 0; y--) fwrite(px + (size_t)y * sw * 3, 1, (size_t)sw * 3, f);
+                        fclose(f);
+                    }
+                    free(px);
+                }
+            }
+        }
+
         SDL_GL_SwapWindow(window);
 
         /* Reset read slot for reuse */

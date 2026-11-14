@@ -14,6 +14,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <atomic>
 #include <map>
 #include <deque>
 #include <cstdio>
@@ -54,22 +55,22 @@ extern "C" const char* disassemble_mips(uint32_t instruction, uint32_t pc);
 #define COL(r,g,b)  ImVec4((r)/255.0f, (g)/255.0f, (b)/255.0f, 1.0f)
 #define COLA(r,g,b,a) ImVec4((r)/255.0f, (g)/255.0f, (b)/255.0f, (a))
 
-static const ImVec4 ZS_GROUND    = COL(0x0A, 0x0D, 0x14);   // Deep Obsidian
-static const ImVec4 ZS_PANEL     = COL(0x13, 0x19, 0x26);   // Sleek Translucent Slate
-static const ImVec4 ZS_PANEL2    = COL(0x1A, 0x23, 0x34);   // Cyber Slate
-static const ImVec4 ZS_LINE      = COL(0x28, 0x36, 0x4F);   // High-contrast neon slate border
-static const ImVec4 ZS_LINE_SOFT = COL(0x1E, 0x28, 0x3C);
-static const ImVec4 ZS_TEXT      = COL(0xF1, 0xF5, 0xF9);   // Ultra-crisp White
-static const ImVec4 ZS_MUTED     = COL(0x94, 0xA3, 0xB8);   // Cool slate gray
-static const ImVec4 ZS_FAINT     = COL(0x64, 0x74, 0x8B);
-static const ImVec4 ZS_DATA      = COL(0x00, 0xF0, 0xFF);   // Neon Cyan
-static const ImVec4 ZS_AUDIO     = COL(0xFF, 0x2E, 0x7E);   // Neon Rose
+static ImVec4 ZS_GROUND    = COL(0x0A, 0x0D, 0x14);   // Deep Obsidian
+static ImVec4 ZS_PANEL     = COL(0x13, 0x19, 0x26);   // Sleek Translucent Slate
+static ImVec4 ZS_PANEL2    = COL(0x1A, 0x23, 0x34);   // Cyber Slate
+static ImVec4 ZS_LINE      = COL(0x28, 0x36, 0x4F);   // High-contrast neon slate border
+static ImVec4 ZS_LINE_SOFT = COL(0x1E, 0x28, 0x3C);
+static ImVec4 ZS_TEXT      = COL(0xF1, 0xF5, 0xF9);   // Ultra-crisp White
+static ImVec4 ZS_MUTED     = COL(0x94, 0xA3, 0xB8);   // Cool slate gray
+static ImVec4 ZS_FAINT     = COL(0x64, 0x74, 0x8B);
+static ImVec4 ZS_DATA      = COL(0x00, 0xF0, 0xFF);   // Neon Cyan
+static ImVec4 ZS_AUDIO     = COL(0xFF, 0x2E, 0x7E);   // Neon Rose
 static const ImVec4 ZS_OK        = COL(0x10, 0xB9, 0x81);   // Emerald Green
 static const ImVec4 ZS_WARN      = COL(0xF5, 0x9E, 0x0B);   // Amber Gold
 static const ImVec4 ZS_CRIT      = COL(0xEF, 0x44, 0x44);   // Vibrant Red
-static const ImVec4 ZS_RAIL_BG   = COL(0x0F, 0x14, 0x20);
-static const ImVec4 ZS_DOCK_BG   = COL(0x0D, 0x11, 0x1C);
-static const ImVec4 ZS_MODE_ON   = COL(0x1E, 0x2A, 0x3E);
+static ImVec4 ZS_RAIL_BG   = COL(0x0F, 0x14, 0x20);
+static ImVec4 ZS_DOCK_BG   = COL(0x0D, 0x11, 0x1C);
+static ImVec4 ZS_MODE_ON   = COL(0x1E, 0x2A, 0x3E);
 
 /* Which of the two shells owns the window this frame. Declared up here because
  * debug_ui_init picks it from ZS1_UI before the shell's own code appears. */
@@ -87,6 +88,97 @@ static ImFont* g_font_ui   = nullptr;
 static ImFont* g_font_mono = nullptr;
 static ImFont* g_font_h1   = nullptr;
 static float   g_ui_scale  = 1.0f;
+
+/* --- themes ---------------------------------------------------------------
+ *
+ * A theme is the thirteen neutral and accent tokens above. Severity colours
+ * (ok / warn / crit) and the four PlayStation-logo hues are deliberately not
+ * part of it: severity must read the same in every theme, and the logo hues
+ * identify the view modes. The ImGui style colours are derived from the tokens
+ * (zs_mix), so a theme is a handful of numbers, not a second style sheet. */
+struct ZsTheme {
+    const char* name;
+    const char* blurb;
+    ImVec4 ground, panel, panel2, line, line_soft, text, muted, faint, data, audio, rail_bg, dock_bg, mode_on;
+};
+
+static const ZsTheme g_themes[] = {
+    { "Neon", "cyan and rose on obsidian - the original",
+      COL(0x0A,0x0D,0x14), COL(0x13,0x19,0x26), COL(0x1A,0x23,0x34), COL(0x28,0x36,0x4F), COL(0x1E,0x28,0x3C),
+      COL(0xF1,0xF5,0xF9), COL(0x94,0xA3,0xB8), COL(0x64,0x74,0x8B), COL(0x00,0xF0,0xFF), COL(0xFF,0x2E,0x7E),
+      COL(0x0F,0x14,0x20), COL(0x0D,0x11,0x1C), COL(0x1E,0x2A,0x3E) },
+    { "Amber", "the Sony boot diamond: warm gold on brown-black",
+      COL(0x0E,0x0A,0x07), COL(0x1B,0x14,0x0E), COL(0x26,0x1C,0x13), COL(0x4A,0x36,0x20), COL(0x33,0x25,0x16),
+      COL(0xF7,0xEC,0xDC), COL(0xB3,0x9A,0x7A), COL(0x7D,0x68,0x50), COL(0xFF,0xB0,0x20), COL(0xFF,0x5A,0x3C),
+      COL(0x14,0x0F,0x0A), COL(0x11,0x0C,0x08), COL(0x2C,0x20,0x14) },
+    { "Terminal", "phosphor green, for long debugging sessions",
+      COL(0x06,0x0C,0x08), COL(0x0D,0x17,0x11), COL(0x13,0x21,0x18), COL(0x24,0x40,0x2F), COL(0x19,0x2D,0x21),
+      COL(0xE4,0xF6,0xE9), COL(0x8F,0xB5,0x9B), COL(0x5E,0x7F,0x6B), COL(0x39,0xFF,0x88), COL(0xFF,0xB4,0x54),
+      COL(0x0A,0x12,0x0D), COL(0x08,0x0F,0x0B), COL(0x1A,0x2E,0x22) },
+    { "Violet", "soft indigo with a lilac accent",
+      COL(0x0C,0x0A,0x14), COL(0x16,0x13,0x25), COL(0x1F,0x1A,0x33), COL(0x3A,0x31,0x59), COL(0x28,0x22,0x40),
+      COL(0xF1,0xEE,0xFA), COL(0xA5,0x9D,0xC4), COL(0x71,0x69,0x8F), COL(0xB7,0x9C,0xFF), COL(0xFF,0x6F,0xB5),
+      COL(0x11,0x0E,0x1C), COL(0x0E,0x0C,0x18), COL(0x26,0x20,0x3D) },
+    { "Graphite", "neutral grey, almost no colour of its own",
+      COL(0x0B,0x0B,0x0D), COL(0x17,0x17,0x1B), COL(0x20,0x20,0x26), COL(0x38,0x38,0x42), COL(0x27,0x27,0x2F),
+      COL(0xF2,0xF2,0xF4), COL(0xA0,0xA0,0xAC), COL(0x6E,0x6E,0x7A), COL(0x7D,0xD3,0xFC), COL(0xF4,0x72,0xB6),
+      COL(0x12,0x12,0x16), COL(0x0F,0x0F,0x12), COL(0x2A,0x2A,0x32) },
+};
+static const int ZS_THEME_COUNT = (int)(sizeof(g_themes) / sizeof(g_themes[0]));
+static int g_theme = 0;
+
+static ImVec4 zs_mix(const ImVec4& a, const ImVec4& b, float t, float alpha = 1.0f) {
+    return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, alpha);
+}
+
+static void apply_theme_colors();
+
+/* Where the choice is kept between runs: a one-word file next to imgui.ini,
+ * which is also written to the working directory. ZS1_THEME overrides it. */
+static const char* const ZS_THEME_FILE = "zs1_theme.txt";
+
+static void theme_save(void) {
+    FILE* f = fopen(ZS_THEME_FILE, "w");
+    if (!f) return;
+    fprintf(f, "%s\n", g_themes[g_theme].name);
+    fclose(f);
+}
+
+static int theme_find(const char* name) {
+    if (!name || !name[0]) return -1;
+    for (int i = 0; i < ZS_THEME_COUNT; i++)
+        if (strcasecmp(name, g_themes[i].name) == 0) return i;
+    char* end = nullptr;
+    long v = strtol(name, &end, 10);
+    if (end && *end == '\0' && v >= 0 && v < ZS_THEME_COUNT) return (int)v;
+    return -1;
+}
+
+static void theme_set(int idx, bool persist) {
+    if (idx < 0 || idx >= ZS_THEME_COUNT) return;
+    g_theme = idx;
+    const ZsTheme& t = g_themes[idx];
+    ZS_GROUND = t.ground; ZS_PANEL = t.panel; ZS_PANEL2 = t.panel2; ZS_LINE = t.line;
+    ZS_LINE_SOFT = t.line_soft; ZS_TEXT = t.text; ZS_MUTED = t.muted; ZS_FAINT = t.faint;
+    ZS_DATA = t.data; ZS_AUDIO = t.audio; ZS_RAIL_BG = t.rail_bg; ZS_DOCK_BG = t.dock_bg;
+    ZS_MODE_ON = t.mode_on;
+    if (ImGui::GetCurrentContext()) apply_theme_colors();
+    if (persist) theme_save();
+}
+
+static void theme_load_initial(void) {
+    int idx = -1;
+    if (const char* e = getenv("ZS1_THEME")) idx = theme_find(e);
+    if (idx < 0) {
+        char buf[64] = {0};
+        if (FILE* f = fopen(ZS_THEME_FILE, "r")) {
+            if (fgets(buf, sizeof(buf), f)) buf[strcspn(buf, "\r\n")] = '\0';
+            fclose(f);
+            idx = theme_find(buf);
+        }
+    }
+    theme_set(idx < 0 ? 0 : idx, false);
+}
 
 static void apply_zonistation_style() {
     ImGuiStyle& s = ImGui::GetStyle();
@@ -112,21 +204,29 @@ static void apply_zonistation_style() {
     s.ScrollbarSize     = 12.0f;
     s.WindowMenuButtonPosition = ImGuiDir_None;
 
+    apply_theme_colors();
+}
+
+/* Everything colour-related in ImGui's style, derived from the theme's tokens.
+ * Kept apart from the sizes so a theme can change at runtime without undoing
+ * the display scale that ScaleAllSizes applied after startup. */
+static void apply_theme_colors() {
+    ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
     c[ImGuiCol_Text]                 = ZS_TEXT;
     c[ImGuiCol_TextDisabled]         = ZS_FAINT;
     c[ImGuiCol_WindowBg]             = ZS_PANEL;
-    c[ImGuiCol_ChildBg]             = COLA(0x11, 0x17, 0x24, 0.95f);
+    c[ImGuiCol_ChildBg]              = zs_mix(ZS_GROUND, ZS_PANEL, 0.90f, 0.95f);
     c[ImGuiCol_PopupBg]              = ZS_PANEL2;
     c[ImGuiCol_Border]               = ZS_LINE;
     c[ImGuiCol_BorderShadow]         = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_FrameBg]              = COLA(0x10, 0x16, 0x22, 1.0f);
-    c[ImGuiCol_FrameBgHovered]       = COLA(0x1F, 0x2B, 0x40, 1.0f);
+    c[ImGuiCol_FrameBg]              = zs_mix(ZS_GROUND, ZS_PANEL, 0.70f);
+    c[ImGuiCol_FrameBgHovered]       = zs_mix(ZS_PANEL2, ZS_LINE, 0.70f);
     c[ImGuiCol_FrameBgActive]        = ZS_LINE;
     c[ImGuiCol_TitleBg]              = ZS_GROUND;
-    c[ImGuiCol_TitleBgActive]        = COLA(0x1C, 0x27, 0x3C, 1.0f);
+    c[ImGuiCol_TitleBgActive]        = zs_mix(ZS_PANEL2, ZS_LINE, 0.30f);
     c[ImGuiCol_TitleBgCollapsed]     = ZS_GROUND;
-    c[ImGuiCol_MenuBarBg]            = COLA(0x14, 0x1B, 0x28, 1.0f);
+    c[ImGuiCol_MenuBarBg]            = ZS_PANEL;
     c[ImGuiCol_ScrollbarBg]          = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_ScrollbarGrab]        = ZS_LINE;
     c[ImGuiCol_ScrollbarGrabHovered] = ZS_MUTED;
@@ -134,11 +234,11 @@ static void apply_zonistation_style() {
     c[ImGuiCol_CheckMark]            = ZS_DATA;
     c[ImGuiCol_SliderGrab]           = ZS_DATA;
     c[ImGuiCol_SliderGrabActive]     = ZS_DATA;
-    c[ImGuiCol_Button]               = COLA(0x1F, 0x2A, 0x3E, 1.0f);
-    c[ImGuiCol_ButtonHovered]        = COLA(0x2B, 0x3B, 0x58, 1.0f);
+    c[ImGuiCol_Button]               = zs_mix(ZS_PANEL2, ZS_LINE, 0.50f);
+    c[ImGuiCol_ButtonHovered]        = zs_mix(ZS_LINE, ZS_MUTED, 0.15f);
     c[ImGuiCol_ButtonActive]         = ZS_LINE;
-    c[ImGuiCol_Header]               = COLA(0x20, 0x2D, 0x42, 1.0f);
-    c[ImGuiCol_HeaderHovered]        = COLA(0x2C, 0x3D, 0x5B, 1.0f);
+    c[ImGuiCol_Header]               = zs_mix(ZS_PANEL2, ZS_LINE, 0.55f);
+    c[ImGuiCol_HeaderHovered]        = zs_mix(ZS_LINE, ZS_MUTED, 0.20f);
     c[ImGuiCol_HeaderActive]         = ZS_LINE;
     c[ImGuiCol_Separator]            = ZS_LINE;
     c[ImGuiCol_SeparatorHovered]     = ZS_DATA;
@@ -146,14 +246,14 @@ static void apply_zonistation_style() {
     c[ImGuiCol_ResizeGrip]           = ZS_LINE;
     c[ImGuiCol_ResizeGripHovered]    = ZS_MUTED;
     c[ImGuiCol_ResizeGripActive]     = ZS_DATA;
-    c[ImGuiCol_Tab]                  = COLA(0x11, 0x17, 0x24, 1.0f);
-    c[ImGuiCol_TabHovered]           = COLA(0x25, 0x35, 0x50, 1.0f);
-    c[ImGuiCol_TabActive]            = COLA(0x20, 0x2D, 0x44, 1.0f);
-    c[ImGuiCol_TabUnfocused]         = COLA(0x0E, 0x13, 0x1E, 1.0f);
-    c[ImGuiCol_TabUnfocusedActive]   = COLA(0x17, 0x22, 0x34, 1.0f);
-    c[ImGuiCol_DockingPreview]       = COLA(0x00, 0xF0, 0xFF, 0.35f);
+    c[ImGuiCol_Tab]                  = zs_mix(ZS_GROUND, ZS_PANEL, 0.90f);
+    c[ImGuiCol_TabHovered]           = zs_mix(ZS_LINE, ZS_MUTED, 0.10f);
+    c[ImGuiCol_TabActive]            = zs_mix(ZS_PANEL2, ZS_LINE, 0.60f);
+    c[ImGuiCol_TabUnfocused]         = zs_mix(ZS_GROUND, ZS_PANEL, 0.50f);
+    c[ImGuiCol_TabUnfocusedActive]   = zs_mix(ZS_PANEL, ZS_PANEL2, 0.70f);
+    c[ImGuiCol_DockingPreview]       = ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.35f);
     c[ImGuiCol_DockingEmptyBg]       = ZS_GROUND;
-    c[ImGuiCol_TableHeaderBg]        = COLA(0x16, 0x1F, 0x2E, 1.0f);
+    c[ImGuiCol_TableHeaderBg]        = zs_mix(ZS_PANEL, ZS_PANEL2, 0.50f);
     c[ImGuiCol_TableBorderStrong]    = ZS_LINE;
     c[ImGuiCol_TableBorderLight]     = ZS_LINE_SOFT;
     c[ImGuiCol_TableRowBg]           = ImVec4(0, 0, 0, 0);
@@ -451,7 +551,7 @@ static const ModeDef g_modes[MODE_COUNT] = {
     { "Audio",    "F6", true,  "CIR", ZS_PS_PINK  },
     { "VRAM",     "F7", false, "TRI", ZS_PS_GREEN },
     { "Host HW",  "F8", false, "SYS", ZS_PS_YELLOW},
-    { "Script",   "F9", false, "CMD", ZS_TEXT      },
+    { "Script",   "F9", false, "CMD", COL(0xF1, 0xF5, 0xF9) },
 };
 
 static int  g_mode        = MODE_PIPELINE;
@@ -1613,6 +1713,40 @@ static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 av
     }
 }
 
+static void gp_row(const char* k, const char* v, ImVec4 col);
+
+/* The scanout is 4:3 and the panel is wide, so most of its width was black
+ * letterbox. When there is room for it the spare width carries the numbers
+ * that describe what is being scanned out, which the Display mode used to make
+ * you read off the Pipeline cards. */
+static void draw_display_info(Interconnect* inter, ImVec2 size) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, COLA(0x0F, 0x14, 0x1F, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * g_ui_scale, 10.0f * g_ui_scale));
+    ImGui::BeginChild("##dispinfo", size, ImGuiChildFlags_AlwaysUseWindowPadding);
+    micro_label("Scanout");
+    if (inter && ImGui::BeginTable("dispinfo_t", 2, ImGuiTableFlags_SizingStretchProp)) {
+        char b[64];
+        const Gpu& g = inter->gpu;
+        snprintf(b, sizeof(b), "%ux%u%s", g.crtc.display_width, g.crtc.display_height,
+                 g.interlaced ? " i" : "");
+        gp_row("Size", b, ZS_TEXT);
+        snprintf(b, sizeof(b), "%s", g.display_depth == D24Bits ? "24 bpp" : "15 bpp");
+        gp_row("Depth", b, ZS_TEXT);
+        snprintf(b, sizeof(b), "%s  %.2f Hz", g.vmode == Pal ? "PAL" : "NTSC", nominal_hz(inter));
+        gp_row("Mode", b, ZS_TEXT);
+        snprintf(b, sizeof(b), "%u, %u", g.display_vram_x_start, g.display_vram_y_start);
+        gp_row("VRAM origin", b, ZS_DATA);
+        snprintf(b, sizeof(b), "%u - %u", g.display_line_start, g.display_line_end);
+        gp_row("Lines", b, ZS_DATA);
+        snprintf(b, sizeof(b), "%u", inter->field_count);
+        gp_row("Field", b, ZS_FAINT);
+        ImGui::EndTable();
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+}
+
 static void draw_ps1_display(GfxTexHandle texture_id, Interconnect* inter) {
     if (!g_show_display) return;
 
@@ -1620,7 +1754,22 @@ static void draw_ps1_display(GfxTexHandle texture_id, Interconnect* inter) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     if (ImGui::Begin("PS1 Display", &g_show_display,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-        draw_scanout(texture_id, inter, ImGui::GetContentRegionAvail());
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        const float side_w = 260.0f * g_ui_scale;
+        const float need_w = avail.y * (4.0f / 3.0f) + side_w + 24.0f * g_ui_scale;
+        if (avail.x >= need_w && avail.y >= 230.0f * g_ui_scale) {   /* six rows need ~230 px */
+            /* The picture takes the left part at its 4:3 width; the info
+             * column takes the rest, capped so it does not stretch. */
+            float pic_w = avail.y * (4.0f / 3.0f);
+            float info_w = avail.x - pic_w;
+            if (info_w > side_w * 1.6f) info_w = side_w * 1.6f;
+            ImVec2 origin = ImGui::GetCursorPos();
+            draw_scanout(texture_id, inter, ImVec2(avail.x - info_w, avail.y));
+            ImGui::SetCursorPos(ImVec2(origin.x + avail.x - info_w, origin.y));
+            draw_display_info(inter, ImVec2(info_w, avail.y));
+        } else {
+            draw_scanout(texture_id, inter, avail);
+        }
     }
     ImGui::End();
     ImGui::PopStyleVar();
@@ -1649,6 +1798,14 @@ static void vital(const char* label, const char* value, ImVec4 vcol,
     dl->AddRectFilled(p, ImVec2(p.x + w * frac, p.y + h), ImGui::GetColorU32(barcol), 2.0f);
     ImGui::Dummy(ImVec2(w, h + 2.0f));
     ImGui::EndGroup();
+}
+
+/* Width a chip will take, so the machine bar can decide what fits before it
+ * draws instead of running off the right edge of the window. */
+static float chip_width(const char* label, const char* value) {
+    char buf[160];
+    snprintf(buf, sizeof(buf), "%s  %s", label, value);
+    return ImGui::CalcTextSize(buf).x + ImGui::GetStyle().FramePadding.x * 2.0f;
 }
 
 static void chip(const char* label, const char* value) {
@@ -1703,17 +1860,19 @@ static const char* host_short_gpu(void) {
 }
 
 static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, COLA(0x15, 0x1B, 0x27, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, zs_mix(ZS_GROUND, ZS_PANEL, 0.85f));
     ImGui::BeginChild("##MachineBar", ImVec2(0, 52), false, ImGuiWindowFlags_NoScrollbar);
 
     // Multi-color linear gradient background across top header
     ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 p1 = ImVec2(p0.x + ImGui::GetContentRegionAvail().x, p0.y + 52.0f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilledMultiColor(p0, p1,
-        IM_COL32(30, 42, 62, 255), IM_COL32(16, 22, 34, 255),
-        IM_COL32(16, 22, 34, 255), IM_COL32(30, 42, 62, 255));
-    dl->AddLine(ImVec2(p0.x, p1.y - 1.0f), ImVec2(p1.x, p1.y - 1.0f), IM_COL32(42, 58, 84, 255), 1.0f);
+    {
+        ImU32 hi = ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.45f));
+        ImU32 lo = ImGui::GetColorU32(zs_mix(ZS_GROUND, ZS_PANEL, 0.60f));
+        dl->AddRectFilledMultiColor(p0, p1, hi, lo, lo, hi);
+    }
+    dl->AddLine(ImVec2(p0.x, p1.y - 1.0f), ImVec2(p1.x, p1.y - 1.0f), ImGui::GetColorU32(ZS_LINE), 1.0f);
 
     // Brand + video-mode subtitle
     bool pal = inter && inter->gpu.vmode == Pal;
@@ -1722,6 +1881,10 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
         uint32_t cpf = gpu_cycles_per_frame(&inter->gpu);
         if (cpf) hz = (double)PSX_SYSCLK_HZ / (double)cpf;
     }
+    /* The dock host has zero window padding, so without this the brand sat flush
+     * against the window's left edge, and the chips against its top. */
+    ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + 12.0f * g_ui_scale,
+                               ImGui::GetCursorPosY() + 9.0f * g_ui_scale));
     ImGui::AlignTextToFramePadding();
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_TEXT);
     ImGui::TextUnformatted("ZoniStation One [PSX]");
@@ -1731,23 +1894,42 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     ImGui::Text("%s  %.2f Hz", pal ? "PAL" : "NTSC", hz);
     ImGui::PopStyleColor();
 
-    // Chips
-    ImGui::SameLine(0, 18);
-    chip("BIOS", g_bios_name);
-    ImGui::SameLine(); chip("DISC", g_disc_name);
+    /* What fits is decided from measurements, in priority order: the controls
+     * and the vitals are what the bar is for, then BIOS/disc/PC, and the host
+     * pills go first when the window is narrow. Before this the row was drawn
+     * unconditionally and the vitals were pushed past the right edge. */
+    const float sp      = ImGui::GetStyle().ItemSpacing.x;
+    const float win_w   = ImGui::GetWindowWidth();
+    const float ctl_w   = 4.0f * 120.0f * g_ui_scale;     /* pause/run, menu, controls, gameplay */
+    const float vit_w   = 5.0f * 96.0f * g_ui_scale;
     char pcbuf[16];
     snprintf(pcbuf, sizeof(pcbuf), "0x%08X", cpu ? cpu->current_pc : 0);
-    ImGui::SameLine(); chip("PC", pcbuf);
+    float used  = ImGui::GetCursorPosX() + ImGui::CalcTextSize("ZoniStation One [PSX]").x +
+                  ImGui::CalcTextSize("PAL  50.00 Hz").x + sp + 18.0f;
+    float room  = win_w - used - ctl_w - vit_w - 16.0f;
+    float w_bios = chip_width("BIOS", g_bios_name) + sp;
+    float w_disc = chip_width("DISC", g_disc_name) + sp;
+    float w_pc   = chip_width("PC", pcbuf) + sp;
+    float w_hcpu = chip_width("HOST CPU", host_short_cpu()) + sp;
+    float w_hgpu = chip_width("HOST GPU", host_short_gpu()) + sp;
+    bool show_bios = room >= w_bios;                          if (show_bios) room -= w_bios;
+    bool show_pc   = room >= w_pc;                            if (show_pc)   room -= w_pc;
+    bool show_disc = room >= w_disc;                          if (show_disc) room -= w_disc;
+    bool show_hcpu = room >= w_hcpu + 14.0f;                  if (show_hcpu) room -= w_hcpu + 14.0f;
+    bool show_hgpu = show_hcpu && room >= w_hgpu;             if (show_hgpu) room -= w_hgpu;
 
+    bool first = true;
+    auto next = [&](float gap) { if (first) ImGui::SameLine(0, 18); else ImGui::SameLine(0, gap); first = false; };
+    if (show_bios) { next(sp); chip("BIOS", g_bios_name); }
+    if (show_disc) { next(sp); chip("DISC", g_disc_name); }
+    if (show_pc)   { next(sp); chip("PC", pcbuf); }
     // Host HW pills — read from the kernel and the GL context, not typed in.
-    ImGui::SameLine(0, 14);
-    chip("HOST CPU", host_short_cpu());
-    ImGui::SameLine();
-    chip("HOST GPU", host_short_gpu());
+    if (show_hcpu) { next(14); chip("HOST CPU", host_short_cpu()); }
+    if (show_hgpu) { next(sp); chip("HOST GPU", host_short_gpu()); }
 
     // Controls: direct Play / Pause / Step buttons + popup
     Debugger* dbg = inter ? &inter->debugger : nullptr;
-    ImGui::SameLine(0, 12);
+    if (first) ImGui::SameLine(0, 18); else ImGui::SameLine(0, 12);
 
     auto draw_icon_btn = [](const char* label, const char* btn_id, void(*icon_fn)(ImDrawList*, ImVec2, float, ImU32), ImVec4 btn_col) -> bool {
         ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -1819,6 +2001,10 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
         if (ImGui::RadioButton("Debug",  level == LOG_LEVEL_DEBUG))  log_set_level(LOG_LEVEL_DEBUG);
         if (ImGui::RadioButton("Trace",  level == LOG_LEVEL_TRACE))  log_set_level(LOG_LEVEL_TRACE);
         ImGui::Separator();
+        micro_label("Theme");
+        for (int i = 0; i < ZS_THEME_COUNT; i++)
+            if (ImGui::RadioButton(g_themes[i].name, g_theme == i)) theme_set(i, true);
+        ImGui::Separator();
         micro_label("Logs");
         if (ImGui::MenuItem("Open all"))  for (auto& c : g_log_components) c.is_open = true;
         if (ImGui::MenuItem("Close all")) for (auto& c : g_log_components) c.is_open = false;
@@ -1871,6 +2057,11 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
 // ---------------------------------------------------------------------------
 
 static void draw_mode_rail() {
+    /* The rail is the only window in its dock node, so its tab was an empty
+     * stub above "VIEW MODES". Let the node hide the tab bar for it. */
+    ImGuiWindowClass rail_class;
+    rail_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_NoUndocking;
+    ImGui::SetNextWindowClass(&rail_class);
     if (!ImGui::Begin("##Rail", nullptr,
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
                       ImGuiWindowFlags_NoScrollWithMouse)) { ImGui::End(); return; }
@@ -1901,10 +2092,10 @@ static void draw_mode_rail() {
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
         if (on) {
-            dl->AddRectFilledMultiColor(p0, p1,
-                IM_COL32(32, 46, 68, 255), IM_COL32(18, 26, 40, 255),
-                IM_COL32(18, 26, 40, 255), IM_COL32(32, 46, 68, 255));
-            dl->AddRect(p0, p1, IM_COL32(0, 240, 255, 180), 4.0f, 0, 1.0f);
+            ImU32 hi = ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.55f));
+            ImU32 lo = ImGui::GetColorU32(zs_mix(ZS_GROUND, ZS_PANEL2, 0.60f));
+            dl->AddRectFilledMultiColor(p0, p1, hi, lo, lo, hi);
+            dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.70f)), 4.0f, 0, 1.0f);
             dl->AddRectFilled(ImVec2(p0.x + 2.0f, p0.y + 4.0f),
                               ImVec2(p0.x + 5.0f, p0.y + row_h - 4.0f),
                               ImGui::GetColorU32(g_modes[i].symbol_col), 2.0f);
@@ -2310,7 +2501,13 @@ static void draw_frame_view(Interconnect* inter) {
     const float LABEL_W = 130.0f * g_ui_scale;
     const float COUNT_W = 70.0f  * g_ui_scale;
     const float PAY_W   = 120.0f * g_ui_scale;
-    const float ROW_H   = 26.0f  * g_ui_scale;
+    /* The rows give way before the view scrolls: whatever height the dock gives
+     * this panel, minus the axis and the two footer lines, is shared among the
+     * rows down to a floor. Below the floor it scrolls, as before. */
+    float row_room = ImGui::GetContentRegionAvail().y - 24.0f * g_ui_scale - ImGui::GetTextLineHeightWithSpacing() * 4.0f;
+    float ROW_H = row_room / (float)NROWS;
+    if (ROW_H > 26.0f * g_ui_scale) ROW_H = 26.0f * g_ui_scale;
+    if (ROW_H < 18.0f * g_ui_scale) ROW_H = 18.0f * g_ui_scale;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 mouse = ImGui::GetIO().MousePos;
     bool hovering = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
@@ -2394,7 +2591,12 @@ static void draw_frame_view(Interconnect* inter) {
             float bx = p.x + track_w * ((float)budget / (float)span);
             dl->AddLine(ImVec2(bx, first_row_y), ImVec2(bx, p.y + 4.0f * g_ui_scale),
                         ImGui::GetColorU32(ZS_CRIT), 1.5f * g_ui_scale);
-            dl->AddText(ImVec2(bx + 4.0f * g_ui_scale, first_row_y - 2.0f * g_ui_scale),
+            /* The label goes on whichever side of the line has room: it used to
+             * run off the right edge of the track when the line sat near it. */
+            float bw = ImGui::CalcTextSize("budget").x;
+            float bx_text = (bx + 4.0f * g_ui_scale + bw <= p.x + track_w) ? bx + 4.0f * g_ui_scale
+                                                                            : bx - 4.0f * g_ui_scale - bw;
+            dl->AddText(ImVec2(bx_text, first_row_y - 2.0f * g_ui_scale),
                         ImGui::GetColorU32(ZS_CRIT), "budget");
         }
         ImGui::Dummy(ImVec2(track_w, 24.0f * g_ui_scale));
@@ -3174,7 +3376,10 @@ static void draw_pinned_watches(void) {
 
     const ImVec4 tile_cols[4] = { ZS_DATA, ZS_AUDIO, ZS_OK, ZS_WARN };
 
-    if (ImGui::BeginTable("watchtiles", 2, ImGuiTableFlags_SizingStretchSame)) {
+    /* Two tiles a row only when each gets room for an expression and a 64-bit
+     * value; in a narrow inspector they stack instead of running off the edge. */
+    int tile_cols_n = ImGui::GetContentRegionAvail().x >= 520.0f * g_ui_scale ? 2 : 1;
+    if (ImGui::BeginTable("watchtiles", tile_cols_n, ImGuiTableFlags_SizingStretchSame)) {
         for (int i = 0; i < g_watch_count; i++) {
             PinnedWatch& w = g_watches[i];
             ImGui::TableNextColumn();
@@ -3193,11 +3398,15 @@ static void draw_pinned_watches(void) {
             dl->AddRect(p0, p1, IM_COL32(40, 56, 82, 255), 6.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + 3.0f, p1.y), ImGui::GetColorU32(col), 3.0f);
 
+            /* Text is clipped to the tile: a long expression or value is cut at
+             * the tile's edge (the tooltip has the whole of it). */
+            dl->PushClipRect(ImVec2(p0.x + 4.0f, p0.y), ImVec2(p1.x - 4.0f, p1.y), true);
             dl->AddText(ImVec2(p0.x + 10.0f, p0.y + 5.0f), ImGui::GetColorU32(ZS_MUTED), w.expr);
             ImFont* vf = g_font_mono ? g_font_mono : ImGui::GetFont();
             dl->AddText(vf, vf->LegacySize,
                         ImVec2(p0.x + 10.0f, p0.y + 5.0f + ImGui::GetTextLineHeight()),
                         ImGui::GetColorU32(col), w.val[0] ? w.val : "-");
+            dl->PopClipRect();
 
             /* The whole tile is the hit box: click to edit, right-click to drop. */
             ImGui::InvisibleButton("##tile", ImVec2(wdt, hgt));
@@ -3247,7 +3456,7 @@ static void draw_pinned_watches(void) {
         ImGui::SameLine();
     }
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::Text("evaluated every %d frames, only while visible", WATCH_EVAL_INTERVAL);
+    ImGui::TextWrapped("evaluated every %d frames, only while visible", WATCH_EVAL_INTERVAL);
     ImGui::PopStyleColor();
 }
 
@@ -3384,7 +3593,16 @@ static void rebuild_layout(ImGuiID dockspace_id) {
         ImGui::DockBuilderDockWindow("PS1 Display", root);
     } else {
         ImGuiID stage_bottom;
-        ImGuiID stage_top = ImGui::DockBuilderSplitNode(root, ImGuiDir_Up, 0.52f, nullptr, &stage_bottom);
+        /* The picture gets what the mode can spare: the overview modes keep it
+         * large, the ones whose body is the work (disassembly, hex, console,
+         * VRAM) give most of the height to the body. */
+        float top_ratio = 0.40f;
+        switch (g_mode) {
+            case MODE_CODE: case MODE_MEMORY: case MODE_SCRIPT: case MODE_VRAM: top_ratio = 0.28f; break;
+            case MODE_AUDIO: case MODE_HOST: top_ratio = 0.34f; break;
+            default: break;
+        }
+        ImGuiID stage_top = ImGui::DockBuilderSplitNode(root, ImGuiDir_Up, top_ratio, nullptr, &stage_bottom);
         ImGui::DockBuilderDockWindow("PS1 Display", stage_top);
         if (body) ImGui::DockBuilderDockWindow(body, stage_bottom);
     }
@@ -3517,6 +3735,7 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend)
         else if (strcmp(want, "gameplay") == 0 || strcmp(want, "game") == 0) g_shell = SHELL_GAMEPLAY;
     }
 
+    theme_load_initial();
     apply_zonistation_style();
     ImGui::GetStyle().ScaleAllSizes(ui_scale);
 
@@ -3758,10 +3977,18 @@ static void gp_draw_hud(Interconnect* inter, float alpha) {
     ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
 
     /* --- top right: the performance block --- */
-    float w      = 244.0f * s;
     float pad_in = 12.0f * s;
     float big    = 30.0f * s;
     float small  = mono->LegacySize * 0.92f;
+    /* The second line carries the field time and region on the left and the pad
+     * mode on the right; the block is as wide as both need, not a fixed 244. */
+    char  line2[64];
+    snprintf(line2, sizeof(line2), "%.1f ms  %s %.2f Hz", g_vit_frame_ema, pal ? "PAL" : "NTSC", hz);
+    const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
+    float line2_w = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, line2).x;
+    float pname_w = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, pname).x;
+    float w = pad_in * 2.0f + 2.0f * s + line2_w + 22.0f * s + pname_w + 12.0f * s;
+    if (w < 244.0f * s) w = 244.0f * s;
     float gh     = g_gp_graph ? 30.0f * s : 0.0f;
     float h      = pad_in * 2.0f + big + 4.0f * s + small + (g_gp_graph ? gh + 9.0f * s : 0.0f);
 
@@ -3788,10 +4015,8 @@ static void gp_draw_hud(Interconnect* inter, float alpha) {
     dl->AddText(h1, sfs, ImVec2(p1.x - pad_in - sw, y + big - sfs - 2.0f * s), gp_col(scol, alpha), b);
     y += big + 4.0f * s;
 
-    snprintf(b, sizeof(b), "%.1f ms  %s %.2f Hz", g_vit_frame_ema, pal ? "PAL" : "NTSC", hz);
-    dl->AddText(mono, small, ImVec2(x, y), gp_col(ZS_MUTED, alpha), b);
-    const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
-    float nw = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, pname).x;
+    dl->AddText(mono, small, ImVec2(x, y), gp_col(ZS_MUTED, alpha), line2);
+    float nw = pname_w;
     dl->AddText(mono, small, ImVec2(p1.x - pad_in - nw, y), gp_col(ZS_MUTED, alpha), pname);
     dl->AddCircleFilled(ImVec2(p1.x - pad_in - nw - 9.0f * s, y + small * 0.5f), 4.0f * s,
                         gp_col(led, alpha), 12);
@@ -3838,6 +4063,21 @@ static void gp_draw_hud(Interconnect* inter, float alpha) {
     if (!g_gp_menu_open) {
         ImVec2 p = ImVec2(vp->WorkPos.x + 20.0f * s,
                           vp->WorkPos.y + vp->WorkSize.y - 20.0f * s - (mono->LegacySize * 0.90f + 6.0f * s));
+        /* A plate behind the strip: over a bright picture (a white logo, a menu
+         * screen) the muted labels vanished. The plate is sized from the same
+         * measurements the keycaps use, so it cannot drift from them. */
+        {
+            static const char* const cap_keys[8]   = { "Esc", "F5", "F8", "F6 F7", "F10", "F11", "F2", "`" };
+            static const char* const cap_labels[8] = { "Menu", "Save", "Load", "Slot", "Pause", "Fullscreen", "HUD", "Debug" };
+            ImFont* uif = g_font_ui ? g_font_ui : ImGui::GetFont();
+            float fsz = mono->LegacySize * 0.90f, lsz = uif->LegacySize * 0.88f, tot = 0.0f;
+            for (int i = 0; i < 8; i++)
+                tot += mono->CalcTextSizeA(fsz, FLT_MAX, 0.0f, cap_keys[i]).x + 12.0f * s + 6.0f * s +
+                       uif->CalcTextSizeA(lsz, FLT_MAX, 0.0f, cap_labels[i]).x + 16.0f * s;
+            dl->AddRectFilled(ImVec2(p.x - 10.0f * s, p.y - 7.0f * s),
+                              ImVec2(p.x + tot - 6.0f * s, p.y + fsz + 6.0f * s + 7.0f * s),
+                              IM_COL32(6, 9, 15, (int)(190 * alpha)), 8.0f * s);
+        }
         p.x = gp_keycap(dl, p, "Esc", "Menu", alpha);
         p.x = gp_keycap(dl, p, "F5", "Save", alpha);
         p.x = gp_keycap(dl, p, "F8", "Load", alpha);
@@ -4093,8 +4333,8 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
 
     /* Header: the emblem, what is running, and the state of the machine. */
     dl->AddRectFilledMultiColor(ImVec2(w0.x + 1, w0.y + 1), ImVec2(w1.x - 1, w0.y + hh),
-        IM_COL32(0, 240, 255, 34), IM_COL32(255, 46, 126, 22),
-        IM_COL32(255, 46, 126, 4), IM_COL32(0, 240, 255, 6));
+        gp_col(ZS_DATA, 0.13f), gp_col(ZS_AUDIO, 0.09f),
+        gp_col(ZS_AUDIO, 0.02f), gp_col(ZS_DATA, 0.02f));
     dl->AddLine(ImVec2(w0.x, w0.y + hh), ImVec2(w1.x, w0.y + hh), gp_col(ZS_LINE, 1.0f));
     dl->AddRectFilled(ImVec2(w0.x + 18.0f * s, w0.y + hh - 2.0f), ImVec2(w0.x + 150.0f * s, w0.y + hh + 1.0f),
                       gp_col(ZS_DATA, 1.0f));
@@ -4190,8 +4430,13 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             if (ImGui::BeginTable("gp_sess", 2, ImGuiTableFlags_SizingStretchProp)) {
                 double hz = nominal_hz(inter), fps = field_rate_hz(inter);
                 double speed = (hz > 0.1) ? (fps / hz) * 100.0 : 0.0;
-                snprintf(buf, sizeof(buf), "%.0f%%  (%.1f of %.2f fields/s)", speed, fps, hz);
-                gp_row("Speed", buf, speed >= 98.0 ? ZS_OK : ZS_WARN);
+                /* The menu stops the machine, so a rate and a drained audio queue
+                 * are the expected state here, not a fault: say so in the
+                 * quiet colour instead of the warning one. */
+                bool halted = inter && inter->debugger.paused;
+                if (halted) snprintf(buf, sizeof(buf), "paused  (%.2f fields/s nominal)", hz);
+                else        snprintf(buf, sizeof(buf), "%.0f%%  (%.1f of %.2f fields/s)", speed, fps, hz);
+                gp_row("Speed", buf, halted ? ZS_MUTED : (speed >= 98.0 ? ZS_OK : ZS_WARN));
                 int secs = (int)ImGui::GetTime();
                 snprintf(buf, sizeof(buf), "%d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60);
                 gp_row("Session", buf, ZS_TEXT);
@@ -4201,8 +4446,9 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                          inter ? inter->cdrom.sectors_read_total : 0u,
                          inter && inter->cdrom.double_speed ? "2x" : "1x");
                 gp_row("Disc", buf, ZS_TEXT);
-                snprintf(buf, sizeof(buf), "%d / %d samples queued", g_vit_aq, g_vit_aq_target);
-                gp_row("Audio", buf, ZS_AUDIO);
+                if (halted) snprintf(buf, sizeof(buf), "paused  (%d samples queued)", g_vit_aq);
+                else        snprintf(buf, sizeof(buf), "%d / %d samples queued", g_vit_aq, g_vit_aq_target);
+                gp_row("Audio", buf, halted ? ZS_MUTED : ZS_AUDIO);
                 snprintf(buf, sizeof(buf), "Slot %d", g_gp_slot);
                 gp_row("Quick state", buf, ZS_DATA);
                 ImGui::EndTable();
@@ -4267,6 +4513,22 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                          inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
                 gp_row("Output", buf, ZS_TEXT);
                 ImGui::EndTable();
+            }
+            ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+            micro_label("Theme");
+            {
+                /* One row of five: the choice is visible without scrolling. */
+                float gap = 8.0f * s;
+                float tw = (ImGui::GetContentRegionAvail().x - gap * (float)(ZS_THEME_COUNT - 1)) / (float)ZS_THEME_COUNT;
+                for (int i = 0; i < ZS_THEME_COUNT; i++) {
+                    if (i) ImGui::SameLine(0, gap);
+                    if (gp_btn(g_themes[i].name, g_theme == i ? "active" : "", ImVec2(tw, 50.0f * s), false,
+                               g_theme == i, g_themes[i].data)) {
+                        theme_set(i, true);
+                        gp_toast(g_themes[i].name, g_themes[i].blurb, g_themes[i].data);
+                    }
+                }
             }
             ImGui::Dummy(ImVec2(0, 6.0f * s));
 
@@ -4544,6 +4806,79 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
     if (g_gp_menu_open) gp_draw_menu(cpu, inter);
 }
 
+/* --- UI tour: a developer tool, not a feature ---------------------------------
+ *
+ * ZS1_UI_TOUR=<dir> walks the interface by itself - the gameplay HUD, every
+ * page of the quick menu, every view mode of the workspace, the controller
+ * window - and saves a PPM of what the window showed for each. It exists
+ * because a host-side screen grab is not available on every session (a Wayland
+ * compositor refuses to hand out the root window), and a layout bug is found
+ * by looking at the picture, not by reading the code. The GPU thread does the
+ * read-back, after ImGui has drawn and before the swap, so the picture is the
+ * composed window and not a re-render. OpenGL only. */
+static std::atomic<bool> g_shot_pending(false);
+static char              g_shot_path[320];
+static std::atomic<int>  g_shot_done(0);
+
+extern "C" int debug_ui_shot_take(char* out, size_t n) {
+    if (!g_shot_pending.load(std::memory_order_acquire)) return 0;
+    snprintf(out, n, "%s", g_shot_path);
+    g_shot_pending.store(false, std::memory_order_release);
+    g_shot_done.fetch_add(1);
+    return 1;
+}
+
+static void ui_tour_tick(void) {
+    static const char* dir = getenv("ZS1_UI_TOUR");
+    if (!dir || !dir[0]) return;
+    static int  frame = 0, step = 0, settle = 0, shots_seen = 0;
+    static bool waiting = false;
+    static int  warm = -1;
+    if (warm < 0) { const char* w = getenv("ZS1_UI_TOUR_WARM"); warm = w ? atoi(w) : 900; }
+    frame++;
+    if (frame < warm) return;
+
+    /* Step table: 1 HUD + 8 menu pages + 9 view modes + controller window. */
+    const int total = 1 + GP_ITEM_COUNT + MODE_COUNT + 1;
+    if (waiting) {
+        if (g_shot_done.load() > shots_seen) { shots_seen = g_shot_done.load(); waiting = false; step++; settle = 0; }
+        return;
+    }
+    if (step >= total) { g_req_quit = true; return; }
+
+    char name[64];
+    if (step == 0) {
+        g_shell = SHELL_GAMEPLAY; g_gp_menu_open = false; g_gp_hud_mode = GP_HUD_ALWAYS;
+        gp_note_input();
+        snprintf(name, sizeof(name), "gp_hud");
+    } else if (step <= GP_ITEM_COUNT) {
+        int i = step - 1;
+        g_shell = SHELL_GAMEPLAY;
+        if (!g_gp_menu_open) gp_open_menu();
+        g_gp_menu_idx = i;
+        snprintf(name, sizeof(name), "gp_menu_%d_%s", i, g_gp_items[i].label);
+    } else if (step <= GP_ITEM_COUNT + MODE_COUNT) {
+        int m = step - 1 - GP_ITEM_COUNT;
+        if (g_gp_menu_open) gp_close_menu();
+        g_shell = SHELL_DEBUG;
+        if (g_mode != m) { g_mode = m; g_layout_dirty = true; }
+        g_show_controller_mapping = false;
+        snprintf(name, sizeof(name), "dbg_%d_%s", m, g_modes[m].name);
+    } else {
+        g_shell = SHELL_DEBUG; g_mode = MODE_PIPELINE;
+        g_show_controller_mapping = true;
+        snprintf(name, sizeof(name), "dbg_controllers");
+    }
+    for (char* c = name; *c; c++) if (*c == ' ' || *c == '&') *c = '_';
+
+    /* Let the new state draw for a while - the dock layout needs a few frames
+     * to rebuild, and the HUD and menu fade in. */
+    if (++settle < 25) return;
+    snprintf(g_shot_path, sizeof(g_shot_path), "%s/%s.ppm", dir, name);
+    g_shot_pending.store(true, std::memory_order_release);
+    waiting = true;
+}
+
 extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     Cpu* cpu = (Cpu*)cpu_ptr;
     Interconnect* inter = (Interconnect*)interconnect_ptr;
@@ -4552,6 +4887,7 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     g_vram_viewer_drawn = false;
+    ui_tour_tick();
 
     /* Two shells, one window. The gameplay shell draws the screen and its
      * overlay and nothing else — no dockspace, no rail, no log dock, so none of
