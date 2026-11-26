@@ -231,6 +231,7 @@ static void apply_zonistation_style() {
     s.GrabMinSize       = 10.0f;
     s.ScrollbarSize     = 12.0f;
     s.WindowMenuButtonPosition = ImGuiDir_None;
+    s.DockingSeparatorSize = 8.0f;   /* the gap between two panels: they read as separate cards */
 
     apply_theme_colors();
 }
@@ -311,6 +312,17 @@ static void micro_label(const char* text) {
     ImGui::TextUnformatted(spaced ? up : plain);
     ImGui::PopStyleColor();
     if (g_font_h1) ImGui::PopFont();
+}
+
+/* Begin() for one of the workspace's panels. Each sits alone in its dock node, so it
+ * is a card and has no tab: NoTabBar also takes away the small dock-menu triangle
+ * that AutoHideTabBar leaves in the corner. The log windows do not use this; they
+ * share a node and keep their tabs. */
+static bool ws_begin(const char* name, bool* open = nullptr, ImGuiWindowFlags flags = 0) {
+    ImGuiWindowClass card_class;
+    card_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoTabBar;
+    ImGui::SetNextWindowClass(&card_class);
+    return ImGui::Begin(name, open, flags);
 }
 
 // ---------------------------------------------------------------------------
@@ -962,7 +974,7 @@ static void draw_registers_window(Cpu* cpu) {
     if (!g_show_registers) return;
 
     ImGui::SetNextWindowSize(ImVec2(280, 540), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("CPU Registers", &g_show_registers)) { ImGui::End(); return; }
+    if (!ws_begin("CPU Registers", &g_show_registers)) { ImGui::End(); return; }
 
     if (!cpu) { ImGui::TextDisabled("No CPU instance."); ImGui::End(); return; }
 
@@ -1014,7 +1026,7 @@ static void draw_breakpoints_window(Interconnect* inter) {
     if (!g_show_breakpoints) return;
 
     ImGui::SetNextWindowSize(ImVec2(380, 280), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Breakpoints", &g_show_breakpoints)) { ImGui::End(); return; }
+    if (!ws_begin("Breakpoints", &g_show_breakpoints)) { ImGui::End(); return; }
 
     Debugger* dbg = &inter->debugger;
 
@@ -1088,7 +1100,7 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
     if (!g_show_disasm) return;
 
     ImGui::SetNextWindowSize(ImVec2(480, 560), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Disassembly", &g_show_disasm)) { ImGui::End(); return; }
+    if (!ws_begin("Disassembly", &g_show_disasm)) { ImGui::End(); return; }
 
     if (!cpu || !inter) { ImGui::TextDisabled("Not initialized"); ImGui::End(); return; }
 
@@ -1307,7 +1319,7 @@ static void draw_spu_debug_window(Spu* spu) {
     if (!g_show_spu || !spu) return;
 
     ImGui::SetNextWindowSize(ImVec2(540, 620), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("SPU Debug", &g_show_spu)) { ImGui::End(); return; }
+    if (!ws_begin("SPU Debug", &g_show_spu)) { ImGui::End(); return; }
 
     card_header("SPU 24-Voice Synthesizer Engine", ZS_AUDIO);
 
@@ -1414,7 +1426,7 @@ static void draw_lua_console_window(void) {
     if (!g_show_lua_console) return;
 
     ImGui::SetNextWindowSize(ImVec2(640, 520), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Lua Console", &g_show_lua_console)) { ImGui::End(); return; }
+    if (!ws_begin("Lua Console", &g_show_lua_console)) { ImGui::End(); return; }
 
     static char path_buf[256] = "scripts/mdec_handoff.lua";
     ImGui::SetNextItemWidth(-140.0f);
@@ -1490,7 +1502,7 @@ static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
     GfxTexHandle tex = renderer_get_vram_viewer_texture(renderer);
 
     ImGui::SetNextWindowSize(ImVec2(1060, 620), ImGuiCond_FirstUseEver);
-    if (ImGui::Begin("VRAM Viewer", &g_show_vram_viewer)) {
+    if (ws_begin("VRAM Viewer", &g_show_vram_viewer)) {
         card_header("PSX VRAM 1MB Framebuffer (1024x512)", ZS_DATA);
         // --- Toolbar -------------------------------------------------------
         const char* modes[] = { "4 bpp (CLUT)", "8 bpp (CLUT)", "16 bpp", "24 bpp" };
@@ -1812,7 +1824,7 @@ static void draw_ps1_display(GfxTexHandle texture_id, Interconnect* inter) {
 
     ImGui::SetNextWindowSize(ImVec2(640, 480), ImGuiCond_FirstUseEver);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    if (ImGui::Begin("PS1 Display", &g_show_display,
+    if (ws_begin("PS1 Display", &g_show_display,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImVec2 avail = ImGui::GetContentRegionAvail();
         const float side_w = 260.0f * g_ui_scale;
@@ -2130,91 +2142,85 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
 // Mode rail — Pipeline / Display / Frame / Code / Memory / Audio / VRAM / Script
 // ---------------------------------------------------------------------------
 
-/* The rail goes to icons alone below this window width: at 1280 it took 140 px,
- * cut its own heading and let "Host HW" touch its key. */
-static bool ws_rail_compact(void) {
-    return ImGui::GetMainViewport()->WorkSize.x < 1500.0f * g_ui_scale;
+static void draw_mode_icon(ImDrawList* dl, int i, ImVec2 c, float r, ImU32 col, float th) {
+    switch (i) {
+        case MODE_PIPELINE: draw_icon_flow(dl, c, r, col, th); break;
+        case MODE_DISPLAY:  draw_icon_screen(dl, c, r, col, th); break;
+        case MODE_FRAME:    draw_icon_clock(dl, c, r, col, th); break;
+        case MODE_CODE:     draw_icon_cpu(dl, c, r, col, th); break;
+        case MODE_MEMORY:   draw_icon_ram(dl, c, r, col, th); break;
+        case MODE_AUDIO:    draw_icon_wave(dl, c, r, col, th); break;
+        case MODE_VRAM:     draw_icon_gpu(dl, c, r, col, th); break;
+        case MODE_HOST:     draw_ps_chip(dl, c, r, col, th + 0.2f); break;
+        case MODE_SCRIPT:   draw_ps_terminal(dl, c, r, col, th + 0.2f); break;
+        default: break;
+    }
 }
 
-static void draw_mode_rail() {
-    /* The rail is the only window in its dock node, so its tab was an empty
-     * stub above "VIEW MODES". Let the node hide the tab bar for it. */
-    ImGuiWindowClass rail_class;
-    rail_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_NoUndocking;
-    ImGui::SetNextWindowClass(&rail_class);
-    if (!ImGui::Begin("##Rail", nullptr,
-                      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
-                      ImGuiWindowFlags_NoScrollWithMouse)) { ImGui::End(); return; }
-
+/* The view modes as a row of pills under the machine bar, in one rounded container:
+ * the live mode is a raised pill with its logo-hue icon, the others are quiet. It
+ * replaces the left rail, which took 140 px of a 1280-wide window and cut its own
+ * labels. Below the width where the names fit it keeps the icons and puts the name
+ * and key in a tooltip. */
+static void draw_mode_bar(void) {
     const float s = g_ui_scale;
-    const bool compact = ImGui::GetWindowWidth() < 112.0f * s;
-    if (compact) ImGui::Dummy(ImVec2(0, 6.0f * s));
-    else { micro_label("Modes"); ImGui::Dummy(ImVec2(0, 4.0f * s)); }
+    const float h = 54.0f * s;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    ImGui::BeginChild("##ModeBar", ImVec2(0, h), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImFont* ui = g_font_ui ? g_font_ui : ImGui::GetFont();
+    const ImVec2 o = ImGui::GetCursorScreenPos();
+    const float W = ImGui::GetContentRegionAvail().x;
 
-    for (int i = 0; i < MODE_COUNT; i++) {
-        bool on = (g_mode == i);
-        ImVec2 p0 = ImGui::GetCursorScreenPos();
-        float row_w = ImGui::GetContentRegionAvail().x;
-        float row_h = 34.0f * s;
-        ImVec2 p1 = ImVec2(p0.x + row_w, p0.y + row_h);
-
-        ImGui::PushID(i);
-        ImGuiID id = ImGui::GetID("mode_item");
-        ImRect bb(p0, p1);
-        ImGui::ItemSize(bb);
-        bool hovered = false, held = false;
-        if (ImGui::ItemAdd(bb, id)) {
-            bool clicked = ImGui::ButtonBehavior(bb, id, &hovered, &held);
-            if (clicked && g_mode != i) {
-                g_mode = i;
-                g_layout_dirty = true;
-            }
+    const float fs = ui->LegacySize, ph = 36.0f * s, inset = 4.0f * s, gap = 2.0f * s;
+    const float pad_x = 14.0f * s, icon_w = 18.0f * s, icon_gap = 8.0f * s;
+    float widths[MODE_COUNT], total = 0.0f;
+    for (int pass = 0; pass < 2; pass++) {
+        const bool icons_only = (pass == 1);
+        total = inset * 2.0f - gap;
+        for (int i = 0; i < MODE_COUNT; i++) {
+            widths[i] = icons_only ? icon_w + pad_x * 1.2f
+                                   : pad_x * 2.0f + icon_w + icon_gap + ui->CalcTextSizeA(fs, FLT_MAX, 0.0f, g_modes[i].name).x;
+            total += widths[i] + gap;
         }
-
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        /* One filled pill for the live mode, a faint one under the pointer. The
-         * mode's own logo hue stays on its icon. */
-        if (on) {
-            dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.17f)), 11.0f * s);
-            dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.55f)), 11.0f * s, 0, 1.0f);
-        } else if (hovered) {
-            dl->AddRectFilled(p0, p1, ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.4f)), 11.0f * s);
-        }
-
-        ImVec2 icon_center = compact ? ImVec2((p0.x + p1.x) * 0.5f, p0.y + row_h * 0.5f)
-                                     : ImVec2(p0.x + 20.0f * s, p0.y + row_h * 0.5f);
-        ImU32 icon_col = ImGui::GetColorU32(on ? g_modes[i].symbol_col : ZS_MUTED);
-        const float ir = 6.0f * s, it = 1.7f;
-        switch (i) {
-            case MODE_PIPELINE: draw_icon_flow(dl, icon_center, ir, icon_col, it); break;
-            case MODE_DISPLAY:  draw_icon_screen(dl, icon_center, ir, icon_col, it); break;
-            case MODE_FRAME:    draw_icon_clock(dl, icon_center, ir, icon_col, it); break;
-            case MODE_CODE:     draw_icon_cpu(dl, icon_center, ir, icon_col, it); break;
-            case MODE_MEMORY:   draw_icon_ram(dl, icon_center, ir, icon_col, it); break;
-            case MODE_AUDIO:    draw_icon_wave(dl, icon_center, ir, icon_col, it); break;
-            case MODE_VRAM:     draw_icon_gpu(dl, icon_center, ir, icon_col, it); break;
-            case MODE_HOST:     draw_ps_chip(dl, icon_center, ir, icon_col, it + 0.2f); break;
-            case MODE_SCRIPT:   draw_ps_terminal(dl, icon_center, ir, icon_col, it + 0.2f); break;
-            default: break;
-        }
-
-        if (compact) {
-            if (hovered) ImGui::SetTooltip("%s   %s", g_modes[i].name, g_modes[i].key);
-        } else {
-            float text_y = p0.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f;
-            dl->AddText(ImVec2(p0.x + 40.0f * s, text_y), ImGui::GetColorU32(on ? ZS_TEXT : ZS_MUTED), g_modes[i].name);
-            ImFont* mf = g_font_mono ? g_font_mono : ImGui::GetFont();
-            float ks = mf->LegacySize * 0.92f;
-            float kw = mf->CalcTextSizeA(ks, FLT_MAX, 0.0f, g_modes[i].key).x;
-            dl->AddText(mf, ks, ImVec2(p1.x - kw - 12.0f * s, p0.y + (row_h - ks) * 0.5f),
-                        ImGui::GetColorU32(ZS_FAINT), g_modes[i].key);
-        }
-
-        ImGui::PopID();
-        ImGui::Dummy(ImVec2(0, 2.0f * s));
+        if (total <= W - 28.0f * s) break;
     }
+    const bool icons_only = widths[0] < 60.0f * s;
 
-    ImGui::End();
+    const float cy = o.y + h * 0.5f;
+    const ImVec2 c0 = ImVec2(o.x + 14.0f * s, cy - ph * 0.5f - inset);
+    const ImVec2 c1 = ImVec2(c0.x + total, cy + ph * 0.5f + inset);
+    dl->AddRectFilled(c0, c1, ImGui::GetColorU32(zs_mix(ZS_GROUND, ZS_PANEL2, 0.55f)), (ph + inset * 2.0f) * 0.5f);
+    dl->AddRect(c0, c1, ImGui::GetColorU32(ZS_LINE), (ph + inset * 2.0f) * 0.5f);
+
+    float x = c0.x + inset;
+    for (int i = 0; i < MODE_COUNT; i++) {
+        const bool on = (g_mode == i);
+        const ImVec2 a(x, cy - ph * 0.5f), b(x + widths[i], cy + ph * 0.5f);
+        ImGui::SetCursorScreenPos(a);
+        ImGui::PushID(i);
+        if (ImGui::InvisibleButton("##mode", ImVec2(widths[i], ph)) && g_mode != i) { g_mode = i; g_layout_dirty = true; }
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+
+        if (on) {
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(ZS_PANEL), ph * 0.5f);
+            dl->AddRect(a, b, ImGui::GetColorU32(ZS_LINE), ph * 0.5f);
+        } else if (hov) {
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(ImVec4(ZS_TEXT.x, ZS_TEXT.y, ZS_TEXT.z, 0.06f)), ph * 0.5f);
+        }
+        const float ix = icons_only ? (a.x + b.x) * 0.5f : a.x + pad_x + icon_w * 0.5f;
+        draw_mode_icon(dl, i, ImVec2(ix, cy), 6.5f * s,
+                       ImGui::GetColorU32(on ? g_modes[i].symbol_col : ZS_MUTED), 1.7f);
+        if (!icons_only)
+            dl->AddText(ui, fs, ImVec2(a.x + pad_x + icon_w + icon_gap, cy - fs * 0.5f),
+                        ImGui::GetColorU32(on ? ZS_TEXT : ZS_MUTED), g_modes[i].name);
+        else if (hov)
+            ImGui::SetTooltip("%s   %s", g_modes[i].name, g_modes[i].key);
+        x += widths[i] + gap;
+    }
+    ImGui::EndChild();
 }
 
 // ---------------------------------------------------------------------------
@@ -2286,6 +2292,23 @@ static int pipe_level(const ImVec4& c) {
     if (c.x == ZS_FAINT.x && c.y == ZS_FAINT.y && c.z == ZS_FAINT.z) return 0;
     return 1;
 }
+
+/* A card inside a panel: raised surface, hairline border, large radius, room to
+ * breathe. The two pipeline lanes are cards on the panel's ground, as in the design
+ * study, not two sections of one flat window. */
+static void ws_card_begin(const char* id) {
+    const float s = g_ui_scale;
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ZS_PANEL);
+    ImGui::PushStyleColor(ImGuiCol_Border, ZS_LINE);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 16.0f * s);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * s, 14.0f * s));
+    ImGui::BeginChild(id, ImVec2(0, 0),
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(2);
+}
+static void ws_card_end(void) { ImGui::EndChild(); }
 
 static void pipe_lane(const char* title, const char* sub, ImVec4 accent, ZsIconFn icon,
                       const PipeStage* st, int n) {
@@ -2615,9 +2638,13 @@ static void draw_pipeline_view(Interconnect* inter) {
         { "SPU",      sp_status, sp_col, spv, "voices", sp_d, sp_m },
         { "Output",   mx_status, mx_col, mxv, "smp",   mx_d, mx_m },
     };
+    ws_card_begin("##lane_video");
     pipe_lane("Video", "CD  >  MDEC  >  DMA  >  GPU  >  screen", ZS_DATA, draw_icon_flow, video, 5);
-    ImGui::Dummy(ImVec2(0, 10.0f * g_ui_scale));
+    ws_card_end();
+    ImGui::Dummy(ImVec2(0, 4.0f * g_ui_scale));
+    ws_card_begin("##lane_audio");
     pipe_lane("Audio", "XA  >  SPU  >  device", ZS_AUDIO, draw_icon_wave, audio, 3);
+    ws_card_end();
 
     ImGui::Dummy(ImVec2(0, 8));
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
@@ -3530,7 +3557,7 @@ static void draw_controller_mapping_window() {
 
 static void draw_host_hw_window(Interconnect* inter) {
     (void)inter;
-    if (!ImGui::Begin("Host HW", nullptr)) { ImGui::End(); return; }
+    if (!ws_begin("Host HW", nullptr)) { ImGui::End(); return; }
 
     /* Everything on this panel is read from the kernel every half second.
      * It used to be a list of typed-in strings, which is worse than no panel:
@@ -3785,7 +3812,7 @@ static void draw_pinned_watches(void) {
 
 // Contextual inspector (Pipeline / Script modes): VRAM diff status + audio + watches.
 static void draw_inspector_window(Interconnect* inter) {
-    if (!ImGui::Begin("Inspector", nullptr)) { ImGui::End(); return; }
+    if (!ws_begin("Inspector", nullptr)) { ImGui::End(); return; }
 
     /* The host block is the short form of the Host HW panel: which GPU has the
      * context, what the process is costing, and nothing that has to be kept in
@@ -3969,9 +3996,6 @@ static void rebuild_layout(ImGuiID dockspace_id) {
      * INFO most of the time and took a quarter of the screen. */
     ImGuiID bottom = 0;
     if (g_log_dock_open) bottom = ImGui::DockBuilderSplitNode(root, ImGuiDir_Down, 0.22f, nullptr, &root);
-    const float vw = ImGui::GetMainViewport()->Size.x;
-    const float rail_ratio = ws_rail_compact() ? (68.0f * g_ui_scale) / (vw > 1.0f ? vw : 1280.0f) : 0.11f;
-    ImGuiID rail   = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left, rail_ratio, nullptr, &root);
 
     // Windows this mode wants in body (stage) and inspector.
     const char* body = nullptr;   // main mode window under the screen
@@ -3994,9 +4018,21 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     }
 
     ImGuiID inspector = 0;
+    if (g_mode == MODE_PIPELINE) {
+        /* The picture and the host figures down the left, the pipeline's two lanes
+         * as cards on the right. */
+        ImGuiID left_col = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left, 0.30f, nullptr, &root);
+        ImGuiID left_bottom;
+        ImGuiID left_top = ImGui::DockBuilderSplitNode(left_col, ImGuiDir_Up, 0.46f, nullptr, &left_bottom);
+        ImGui::DockBuilderDockWindow("PS1 Display", left_top);
+        ImGui::DockBuilderDockWindow("Inspector", left_bottom);
+        ImGui::DockBuilderDockWindow("Pipeline", root);
+        insp = nullptr;
+        body = nullptr;
+        full_display = false;
+        goto layout_done;
+    }
     if (insp) inspector = ImGui::DockBuilderSplitNode(root, ImGuiDir_Right, 0.26f, nullptr, &root);
-
-    ImGui::DockBuilderDockWindow("##Rail", rail);
 
     if (full_display) {
         ImGui::DockBuilderDockWindow("PS1 Display", root);
@@ -4018,6 +4054,7 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     if (insp)  ImGui::DockBuilderDockWindow(insp, inspector);
     if (insp2) ImGui::DockBuilderDockWindow(insp2, inspector);
 
+layout_done:
     // Logs tabbed along the bottom, every mode, while the dock is open.
     if (g_log_dock_open)
         for (auto& comp : g_log_components)
@@ -5739,23 +5776,19 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     draw_machine_bar(cpu, inter);
 
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
-    /* The window width decides whether the rail is icons or labels; crossing the
-     * threshold (a resize, a maximise) rebuilds the layout once. */
-    {
-        static int s_rail_class = -1;
-        const int cls = ws_rail_compact() ? 1 : 0;
-        if (cls != s_rail_class) { s_rail_class = cls; g_layout_dirty = true; }
-    }
+    draw_mode_bar();
+
     const float log_strip_h = 40.0f * g_ui_scale;
     /* The strip and the item spacing above and below the dockspace come out of its
      * height, or the host window overflows by a few pixels and grows a scrollbar. */
+    const float dock_margin = 14.0f * g_ui_scale;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + dock_margin);
     ImGui::DockSpace(dockspace_id,
-                     ImVec2(0.0f, ImGui::GetContentRegionAvail().y - log_strip_h - ImGui::GetStyle().ItemSpacing.y * 2.0f),
-                     ImGuiDockNodeFlags_None);
+                     ImVec2(ImGui::GetContentRegionAvail().x - dock_margin,
+                            ImGui::GetContentRegionAvail().y - log_strip_h - ImGui::GetStyle().ItemSpacing.y * 2.0f),
+                     ImGuiDockNodeFlags_AutoHideTabBar);   /* a lone panel is a card, not a tab */
     rebuild_layout(dockspace_id);
 
-    // Mode rail (left), constant across modes
-    draw_mode_rail();
 
     // The emulated screen — pinned to the top of the stage in every mode
     GfxTexHandle tex_id = 0;
@@ -5765,14 +5798,19 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
     // Mode-specific stage body + inspector
     switch (g_mode) {
         case MODE_PIPELINE:
-            if (ImGui::Begin("Pipeline", nullptr)) draw_pipeline_view(inter);
+            ImGui::PushStyleColor(ImGuiCol_WindowBg, ZS_GROUND);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            if (ws_begin("Pipeline", nullptr)) draw_pipeline_view(inter);
             ImGui::End();
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor();
             draw_inspector_window(inter);
             break;
         case MODE_DISPLAY:
             break;  // screen fills the stage
         case MODE_FRAME:
-            if (ImGui::Begin("Frame", nullptr)) draw_frame_view(inter);
+            if (ws_begin("Frame", nullptr)) draw_frame_view(inter);
             else                                 frame_events_set_enabled(false);
             ImGui::End();
             break;
@@ -5782,13 +5820,13 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
             if (inter) draw_breakpoints_window(inter);
             break;
         case MODE_MEMORY:
-            if (ImGui::Begin("Memory", nullptr)) draw_memory_view(inter);
+            if (ws_begin("Memory", nullptr)) draw_memory_view(inter);
             ImGui::End();
             draw_registers_window(cpu);
             break;
         case MODE_AUDIO:
             if (inter) draw_spu_debug_window(&inter->spu);
-            if (ImGui::Begin("Audio Meters", nullptr)) draw_audio_meters(inter);
+            if (ws_begin("Audio Meters", nullptr)) draw_audio_meters(inter);
             ImGui::End();
             break;
         case MODE_VRAM:

@@ -43,9 +43,14 @@ Host HW, Script and the controller window were looked at).
   The session image copies them (`deploy/session/Dockerfile`).
 - **Workspace log strip**: errors, warnings and the last message in one line along the bottom, and
   a switch for the tabbed log dock, which is now closed until opened (the first ERROR opens it once).
+- **Workspace as in the design study.** The nine view modes are a row of pills under the machine bar
+  (names while they fit, icons with a tooltip below that), in place of the left rail. Every panel is
+  a card: no tab bar and no dock-menu triangle (`ws_begin`, `NoTabBar`), an 8 px gap between panels
+  and a margin around the dock. Pipeline mode is laid out as drawn there: the picture and the host
+  figures down the left, the Video and Audio lanes as two cards on the right (`ws_card_begin`).
 
 #### Changed
-- Rail is icons-only below 1500 px; section headings drop their letter-spacing before they are cut;
+- Section headings drop their letter-spacing before they are cut;
   the Pipeline verdict chip carries a shape (cross, triangle, dot) as well as a colour; audio values
   that were rose are plain text (rose stays the Audio lane's identity colour); the dock host has a
   flat ground instead of the four-corner gradient. The backquote key is drawn as `~`.

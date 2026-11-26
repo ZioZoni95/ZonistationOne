@@ -69,7 +69,9 @@ running across a switch.
   overlay sits in the bars when they are wide enough, and the quick menu is a sheet on the right
   into which the picture shrinks. Slot tiles show a picture: `savestate_save()` writes a 160x120
   `<slot>.thm` beside the state (a sidecar, state format v12 untouched) which the menu loads into
-  four ImGui user textures. The workspace's rail is icons-only under 1500 px, the log dock is
+  four ImGui user textures. The workspace's nine view modes are a row of pills under the machine
+  bar (no left rail), its panels are tab-less cards with a gap between them, Pipeline mode puts the
+  picture and host figures on the left and the two lanes as cards on the right, the log dock is
   closed until opened from the strip along the bottom (or by the first ERROR), and the machine bar's
   vitals are on screen (they were positioned off the right edge before). `ZS1_UI_TOUR` is the
   visual check for all of it; it needs a window manager under Xvfb to get a maximised window.
