@@ -24,6 +24,7 @@
 #include "interconnect.h"
 #include "event_scheduler.h"
 #include "log.h"
+#include "platform.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1396,7 +1397,9 @@ bool sio_save_memcard(MemoryCard* card) {
 
     /* Written to a temporary file and renamed over the original: a crash or a
      * kill in the middle of the write would otherwise leave a truncated card,
-     * and rename() is atomic on the same filesystem. */
+     * and the rename is atomic on the same filesystem. zs_rename_replace(), not
+     * rename(): on Windows rename() refuses an existing destination, so every
+     * save of a card after the first would fail. */
     char tmp[sizeof(card->filepath) + 8];
     snprintf(tmp, sizeof(tmp), "%s.tmp", card->filepath);
 
@@ -1408,7 +1411,7 @@ bool sio_save_memcard(MemoryCard* card) {
     size_t written = fwrite(card->data, 1, MEMCARD_SIZE, f);
     bool ok = (written == MEMCARD_SIZE) && (fflush(f) == 0);
     fclose(f);
-    if (!ok || rename(tmp, card->filepath) != 0) {
+    if (!ok || !zs_rename_replace(tmp, card->filepath)) {
         LOG_SYSTEM_ERROR("[SIO] Memory card save failed: %s", card->filepath);
         remove(tmp);
         return false;

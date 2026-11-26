@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "log.h"
+#include "../src/utils/platform.c"   /* zs_setenv/zs_unsetenv: Windows has neither POSIX call */
 
 /* Read directly by the LOG_* macros; undefined at -O0/-O1 otherwise (see dma_test.c). */
 LogLevel current_log_level = LOG_LEVEL_SILENT;
@@ -523,7 +524,7 @@ static void test_v4_yuv(void) {
     uint32_t out[192];
 
     /* Default: saturate after the sum, no wrap. */
-    unsetenv("ZS1_MDEC_WRAP9");
+    zs_unsetenv("ZS1_MDEC_WRAP9");
     g_mdec_wrap9 = -1;
     decode_y120_cr100(out);
     CHECK((out[0] & 0xFF) == 255, "[V4] default: R for Y=120 Cr=100 is %u, want 255 (saturated)", out[0] & 0xFF);
@@ -531,11 +532,11 @@ static void test_v4_yuv(void) {
           "[V4] default: G is %u", (out[0] >> 8) & 0xFF);
 
     /* ZS1_MDEC_WRAP9=1: the documented (Y+R) AND 1FFh first (mdec.md:235). */
-    setenv("ZS1_MDEC_WRAP9", "1", 1);
+    zs_setenv("ZS1_MDEC_WRAP9", "1", 1);
     g_mdec_wrap9 = -1;
     decode_y120_cr100(out);
     CHECK((out[0] & 0xFF) == 0, "[V4] WRAP9: R for Y=120 Cr=100 is %u, want 0 (260 wraps to -252)", out[0] & 0xFF);
-    unsetenv("ZS1_MDEC_WRAP9");
+    zs_unsetenv("ZS1_MDEC_WRAP9");
     g_mdec_wrap9 = -1;
 
     /* Chroma is not clipped on its own any more: a Cr block above 127 (DC level
@@ -688,17 +689,17 @@ int main(void) {
     /* [F14] bit-exactness of the restructured IDCT and colour conversion against
      * the previous structure, with the new semantics, in both yuv_to_rgb modes. */
     const RefSem new_sem = { 1, 0, 0, 1 };
-    unsetenv("ZS1_MDEC_WRAP9");
+    zs_unsetenv("ZS1_MDEC_WRAP9");
     g_mdec_wrap9 = -1;
     int bad = compare_random(&new_sem, 3000);
     CHECK(bad == 0, "[F14] %d of 3000 random streams differ from the reference (default mode)", bad);
 
     const RefSem new_sem_wrap = { 1, 0, 1, 1 };
-    setenv("ZS1_MDEC_WRAP9", "1", 1);
+    zs_setenv("ZS1_MDEC_WRAP9", "1", 1);
     g_mdec_wrap9 = -1;
     bad = compare_random(&new_sem_wrap, 1500);
     CHECK(bad == 0, "[F14] %d of 1500 random streams differ from the reference (ZS1_MDEC_WRAP9=1)", bad);
-    unsetenv("ZS1_MDEC_WRAP9");
+    zs_unsetenv("ZS1_MDEC_WRAP9");
     g_mdec_wrap9 = -1;
 #endif
     printf("mdec_test: %d checks, %d failed\n", g_checks, g_fail);

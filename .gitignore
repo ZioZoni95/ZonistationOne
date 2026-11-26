@@ -116,3 +116,8 @@ pcsx-redux/
 # Per-machine assistant configuration and slash commands.
 .claude/
 zs1_theme.txt
+
+# Windows build output (the binary, and the SDL3.dll the link step copies beside it)
+ZoniStation_One.exe
+SDL3.dll
+build.log

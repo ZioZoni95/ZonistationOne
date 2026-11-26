@@ -678,7 +678,7 @@ bool glr_init(GlRenderer* renderer) {
                  VERTEX_BUFFER_LEN * sizeof(RendererPosition), // Total buffer size in bytes
                  NULL,                         // Initial data (none)
                  GL_DYNAMIC_DRAW);             // Usage hint
-    LOG_RENDERER_DEBUG("[RENDERER] Position VBO allocated %lu bytes.", VERTEX_BUFFER_LEN * sizeof(RendererPosition));
+    LOG_RENDERER_DEBUG("[RENDERER] Position VBO allocated %zu bytes.", VERTEX_BUFFER_LEN * sizeof(RendererPosition));
     check_gl_error("After position VBO glBufferData");
 
     // --- Link Position VBO to Shader Attribute ---
@@ -708,7 +708,7 @@ bool glr_init(GlRenderer* renderer) {
 
     // Allocate storage
     glBufferData(GL_ARRAY_BUFFER, VERTEX_BUFFER_LEN * sizeof(RendererColor), NULL, GL_DYNAMIC_DRAW);
-    LOG_RENDERER_DEBUG("[RENDERER] Color VBO allocated %lu bytes.", VERTEX_BUFFER_LEN * sizeof(RendererColor));
+    LOG_RENDERER_DEBUG("[RENDERER] Color VBO allocated %zu bytes.", VERTEX_BUFFER_LEN * sizeof(RendererColor));
     check_gl_error("After color VBO glBufferData");
 
     // --- Link Color VBO to Shader Attribute ---

@@ -13,6 +13,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Which printf the format checker should assume. On MinGW `printf` means the
+ * old msvcrt one, which knows no %zu or %lld, and gcc then warns on every size_t
+ * in a log line. The UCRT runtime this tree is built against on Windows is C99
+ * conforming, so the GNU archetype is the true one there as on Linux. */
+#if defined(__MINGW32__) && defined(_UCRT)
+#define ZS1_PRINTF_ARCHETYPE gnu_printf
+#else
+#define ZS1_PRINTF_ARCHETYPE printf
+#endif
+
 // PCSX ReARMed-style logging system with component categories and rate limiting
 
 // --- Log Levels ---
@@ -71,7 +81,7 @@ bool log_should_print(LogCategory category, LogLevel level);
 /* printf-checked: a log line with a missing or mistyped argument is varargs UB, and
  * without this attribute the compiler said nothing about it. */
 void log_print(LogCategory category, LogLevel level, const char* format, ...)
-    __attribute__((format(printf, 3, 4)));
+    __attribute__((format(ZS1_PRINTF_ARCHETYPE, 3, 4)));
 
 /* The runtime level, read by the macros below before they call log_print().
  * Defined in log.c; log_set_level() is still the only writer. */

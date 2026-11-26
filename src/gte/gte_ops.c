@@ -128,7 +128,7 @@ void gte_nclip(Gte* gte) {
     int64_t mac0 = (int64_t)sx0*sy1 + (int64_t)sx1*sy2 + (int64_t)sx2*sy0
                  - (int64_t)sx0*sy2 - (int64_t)sx1*sy0 - (int64_t)sx2*sy1;
     truncate_and_set_mac(gte, 0, mac0, 0);
-    LOG_GTE_TRACE("[GTE] NCLIP Result MAC0=%ld", mac0);
+    LOG_GTE_TRACE("[GTE] NCLIP Result MAC0=%lld", (long long)mac0);   /* long is 32-bit on Windows */
 }
 
 // --- MVMVA (0x12): Matrix-Vector Multiplication ---

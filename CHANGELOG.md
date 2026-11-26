@@ -7,6 +7,78 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-26: the start screen (branch `windows-support`)
+
+Started without a BIOS on the command line — a double-click, on Windows the usual way — the binary
+used to look for a fixed `roms/bios.bin`, fail and close before the error could be read. It now
+opens a start screen in the interface's own style: BIOS images on the left, discs on the right,
+read from `roms/` and `games/`, plus the system file dialog and F5 to read the folders again.
+**Checked** on Windows (OpenGL): the screen lists the PAL BIOS with its region and Ace Combat 2 from
+`games/`, once (a first build listed it twice: found beside the working directory and beside the
+executable, which are the same folder; entries are now matched on name and size); the maintainer
+started Ace Combat 2 from it by hand and played 4108 fields (82 s emulated) before quitting from the
+quick menu, and the choice came back as "last played" on the next start; the maintainer then completed
+a whole mission of it with the keyboard; `make` with no warning from
+this project's sources; `make test`, 11 of 11; on Linux (WSL, gcc 13.3) every source compiles with
+no warning and the 11 tests pass. **Not checked:** the pad driving the screen, the file dialog,
+Vulkan, running it on Linux.
+
+#### Added
+- `run_start_screen()` in `main.c` and the screen in `debug_ui.cpp` (`debug_ui_launcher_*` in
+  `debug_ui.h`). It runs before the machine is built, so it needs no reset; with a BIOS on the
+  command line it does not run and the startup order is unchanged.
+- `bios_region_of()` (`bios.c`): the banner scan of `bios_detect_region()` without the fallback,
+  for listing images that are not loaded.
+- `zs1_launcher.txt` keeps the last BIOS and disc.
+
+#### Changed
+- `parse_args()` no longer falls back to `roms/bios.bin`; no BIOS argument means the start screen.
+
+### 2026-11-26: Windows support (branch `windows-support`)
+
+The emulator builds and runs on Windows 11 with MSYS2 UCRT64, on OpenGL and on Vulkan. Linux behaviour
+is unchanged: every difference is behind `#ifdef _WIN32` or in the new platform layer, whose Linux
+side is the POSIX call it replaces. **Checked on Windows:** `make` with no warning from this
+project's sources; `make test`, 11 of 11; both renderers start and run the machine (NVIDIA RTX 4060);
+one savestate slot written twice through a `\` path and loaded back; the PAL BIOS boots (kernel banner in the log, audio device open at 44100 Hz; picture and sound not
+confirmed by eye and ear).
+**Checked on Linux** (WSL Ubuntu 24.04, gcc 13.3): every project source compiles with no warning and
+the 11 unit tests pass, with SDL3 and Vulkan headers taken from MSYS2. **Not checked:** linking or
+running on Linux (no SDL3 in that WSL), a game on Windows, a memory card saved over an existing
+card, a DS4 on Windows, `make hwtest` on either side, a crash handler firing on Windows.
+
+#### Added
+- `include/platform.h`, `src/utils/platform.c`: `zs_mkdir`, `zs_rmdir`, `zs_rename_replace`,
+  `zs_setenv`/`zs_unsetenv`, `zs_localtime`, `zs_last_sep`.
+- `src/core/host_info.c`: a Windows implementation of the Host HW figures (registry, `RtlGetVersion`,
+  memory status, per-thread CPU from a Toolhelp snapshot with SDL's thread names).
+- `tests/platform_test.c`: rename over an existing file, directory creation, environment, both path
+  separators.
+- Makefile: Windows target detected from the compiler; `.exe`; `-mwindows` dropped (console binary,
+  `WINDOWS_GUI=1` keeps it); static GLEW and runtimes; `SDL3.dll` copied beside the binary.
+
+#### Fixed
+- **Saves after the first failed on Windows**: memory cards, savestates and thumbnails are renamed
+  over the previous file, and Windows' `rename()` refuses an existing destination.
+  `zs_rename_replace()` keeps the atomic replace on both systems.
+- Paths with `\`: the CUE's directory and the `.sbi` search (`cdrom_disc.c`), the savestate
+  directory and thumbnail name (`savestate.c`), the save toast's file name (`debug_ui.cpp`).
+- The Vulkan backend was switched off whenever `vulkan.h` was not at `/usr/include`; the header is
+  now found by asking the compiler.
+- Log format strings: `%zu` for two `size_t` (`renderer_gl.c`), `%lld` for an `int64_t`
+  (`gte_ops.c`); `long` is 32 bits on Windows. `log.h` checks formats as `gnu_printf` on MinGW UCRT.
+- `debug_ui.cpp`: an explicit bound in `draw_pinned_watches()`, for a false positive gcc raises once
+  C and C++ share one LTO unit.
+- Tests: `mdec_test`, `spu_test` and `disc_load_test` no longer need POSIX-only calls.
+
+#### Changed
+- `ZS1_GPU` logs that it has no effect on Windows and does nothing there.
+
+#### Documentation
+- `CLAUDE.md`: "Windows support" section (build, how the port is put together, what was verified,
+  traps), the platform-layer convention, and the rule that every change updates the documentation.
+- `README.md`: a Windows build section; the unit test count.
+
 ### 2026-11-26: the "Ambient" interface (branch `ccr-9859217a-86y6jq`)
 
 A new look and a few new behaviours, from the design study in the review of the same day. The

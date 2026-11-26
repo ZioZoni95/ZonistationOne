@@ -12,11 +12,11 @@
 #include "renderer.h"
 #include "event_scheduler.h"
 #include "log.h"
+#include "platform.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #define ZS1_STATE_MAGIC   0x5A533153u   /* "ZS1S" */
 /* 3: added SIOI — the SIO0 protocol state
@@ -169,21 +169,24 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
 
     /* savestates/ may not exist on a fresh clone. */
     {
-        const char* slash = strrchr(path, '/');
+        const char* slash = zs_last_sep(path);
         if (slash && slash != path) {
             char dir[512];
             size_t n = (size_t)(slash - path);
             if (n >= sizeof(dir)) n = sizeof(dir) - 1;
             memcpy(dir, path, n);
             dir[n] = '\0';
-            mkdir(dir, 0755);   /* EEXIST is fine */
+            zs_mkdir(dir);   /* already there is fine */
         }
     }
 
     /* Written beside the slot and renamed over it once complete: opening the
      * slot itself for writing truncates it first, so a crash, a full disk or a
-     * kill mid-save used to destroy the state that was there. rename() is atomic
-     * on one filesystem, the same reasoning as the memory-card save in sio.c. */
+     * kill mid-save used to destroy the state that was there. The rename is
+     * atomic on one filesystem, the same reasoning as the memory-card save in
+     * sio.c — and goes through zs_rename_replace(), because a plain rename()
+     * on Windows refuses an existing destination and failed every save after
+     * the first. */
     char tmp_path[1024];
     if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= (int)sizeof(tmp_path)) {
         LOG_SYSTEM_ERROR("[STATE] Path too long: %s", path);
@@ -271,7 +274,7 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
     /* fclose flushes the last buffer, so a full disk can surface only here. */
     bool closed = (fclose(f) == 0);
 
-    if (!ok || !closed || rename(tmp_path, path) != 0) {
+    if (!ok || !closed || !zs_rename_replace(tmp_path, path)) {
         LOG_SYSTEM_ERROR("[STATE] Write failed: %s", path);
         remove(tmp_path);
         return false;
@@ -291,7 +294,7 @@ bool savestate_thumbnail_path(const char* state_path, char* out, unsigned long n
     if (!state_path || !out || n < 8) return false;
     size_t len = strlen(state_path);
     const char* dot = strrchr(state_path, '.');
-    const char* slash = strrchr(state_path, '/');
+    const char* slash = zs_last_sep(state_path);
     if (dot && (!slash || dot > slash)) len = (size_t)(dot - state_path);
     if (len + 5 > n) return false;
     memcpy(out, state_path, len);
@@ -343,7 +346,7 @@ bool savestate_write_thumbnail(const char* state_path, const struct Interconnect
                              SAVESTATE_THUMB_H & 0xFF, SAVESTATE_THUMB_H >> 8 };
     bool ok = fwrite(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && fwrite(px, 1, sizeof(px), f) == sizeof(px);
     ok = (fclose(f) == 0) && ok;
-    if (!ok || rename(tmp, path) != 0) { remove(tmp); return false; }
+    if (!ok || !zs_rename_replace(tmp, path)) { remove(tmp); return false; }
     return true;
 }
 

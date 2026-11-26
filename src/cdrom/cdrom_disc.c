@@ -18,6 +18,7 @@
 #include "cdrom_ecm.h"
 #include "cdrom.h"
 #include "log.h"
+#include "platform.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -60,9 +61,11 @@ static void close_all_track_files(CdromDisc *disc) {
 bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
     memset(disc, 0, sizeof(*disc));
 
-    /* Build directory prefix from cue_path */
+    /* Build directory prefix from cue_path. Either separator: a path typed in a
+     * Windows shell uses '\\', and splitting on '/' alone lost the directory, so
+     * every FILE line of the CUE was looked for in the working directory. */
     char dir[512] = {0};
-    const char *last_slash = strrchr(cue_path, '/');
+    const char *last_slash = zs_last_sep(cue_path);
     if (last_slash) {
         size_t dlen = (size_t)(last_slash - cue_path + 1);
         strncpy(dir, cue_path, dlen < sizeof(dir)-1 ? dlen : sizeof(dir)-1);
@@ -442,7 +445,7 @@ static void sbi_autoload(CdromDisc *disc, const char *image_path) {
         if (n < 5) break;
         candidate[n - 4] = '\0';
         char *dot = strrchr(candidate, '.');
-        char *slash = strrchr(candidate, '/');
+        const char *slash = zs_last_sep(candidate);
         if (!dot || (slash && dot < slash)) break;
         *dot = '\0';
         if (strlen(candidate) + 5 >= sizeof(candidate)) break;
@@ -457,8 +460,8 @@ static void sbi_autoload(CdromDisc *disc, const char *image_path) {
      * would hand the drive the wrong disc's patches. */
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s", image_path);
-    char *slash = strrchr(dir, '/');
-    if (slash) *slash = '\0'; else snprintf(dir, sizeof(dir), ".");
+    const char *dir_sep = zs_last_sep(dir);
+    if (dir_sep) dir[dir_sep - dir] = '\0'; else snprintf(dir, sizeof(dir), ".");
 
     DIR *d = opendir(dir);
     if (!d) return;

@@ -55,6 +55,11 @@ bool bios_load(Bios* bios, const char* path);
 // exposed so a test can point it at an image without loading one.
 void bios_detect_region(Bios* bios);
 
+// The region letter of a BIOS_SIZE image, or 0 when its banner has none. The
+// same scan bios_detect_region() runs, without the 'A' fallback and its log
+// line, for the start screen, which lists images it has not loaded.
+char bios_region_of(const uint8_t* data);
+
 // Reads a 32-bit value from the loaded BIOS data at a specific 'offset'.
 // Handles little-endian conversion required by the MIPS architecture.
 // Based on Guide Section 2.7 load32 example [cite: 121]

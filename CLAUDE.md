@@ -5,13 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 PS1 emulator written in C. SDL3, with an OpenGL 3.3 (GLEW) and a Vulkan 1.3 backend that can be
-swapped while a game runs. Early development.
+swapped while a game runs. Early development. Runs on Linux and, since 2026-11-26, on Windows (see
+"Windows support" below; on Windows the binary is `ZoniStation_One.exe` and the one-test command is
+`make tests/bin/vram_test.exe`).
 
 ```bash
 make                    # build
 make clean && make      # clean build
-make test               # unit tests: tests/*_test.c, no SDL, BIOS or disc needed
+make test               # unit tests: tests/*_test.c, no window, BIOS or disc (SDL3 headers needed)
+make tests/bin/vram_test && tests/bin/vram_test   # one unit test
 make hwtest             # bare-metal PS-X EXEs inside the emulator, GL and Vulkan (tests/hw/)
+tests/hw/run.sh ./ZoniStation_One dma             # one hardware test (gpu mdec dma spu)
 ./ZoniStation_One roms/bios-ntsc.bin                          # BIOS menu
 ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"   # a disc
 ```
@@ -50,6 +54,109 @@ rendering difference as an emulator bug.
 one-cycle-per-instruction timing, which is the honest A/B — `VSync: timeout` then returns.
 
 BIOS: SCPH-1001 (US), SCPH-7502 (PAL). Branch: `master` (called `stable_branch` until 2026-10-03). Compiler: `gcc -std=c99`.
+There is no lint target; the check is that the build emits no warnings from this project's own sources.
+`make compile_commands` writes the language-server database.
+
+---
+
+## Windows support (since 2026-11-26)
+
+The emulator ran only on Linux until 2026-11-26. It now **builds and runs on Windows 11** (MSYS2
+UCRT64, OpenGL and Vulkan) and **Linux must keep working**: every platform difference sits behind
+`#ifdef _WIN32` with the Linux branch unchanged. Elsewhere in this file the behaviour described is
+Linux's unless a line says otherwise.
+
+### Build and run on Windows
+
+MSYS2 in `C:\msys64`, environment **UCRT64**. Packages:
+
+```bash
+pacman -S --needed make mingw-w64-ucrt-x86_64-{gcc,pkgconf,sdl3,glew,vulkan-headers,vulkan-loader,glslang} vim
+```
+
+(`vim` is for `xxd`.) Build from the *MSYS2 UCRT64* shell with the usual `make`, `make test`. From
+Git Bash or PowerShell:
+
+```bash
+MSYSTEM=UCRT64 /c/msys64/usr/bin/bash.exe -lc 'cd /c/Users/canto/Desktop/Github/ZonistationOne && make'
+```
+
+The output is `ZoniStation_One.exe` plus `SDL3.dll`, which the link step copies beside it; GLEW, the
+C/C++ runtimes and winpthread are linked statically, so those two files and `assets/` are the whole
+program. A separate WinLibs MinGW is on the Windows `PATH` and has no SDL3: do not build with it.
+
+Started without a BIOS on the command line (a double-click) it opens the **start screen**, on
+both systems — see "The two shells" below.
+
+### How the port is put together
+
+- **`include/platform.h` + `src/utils/platform.c`** hold every call that differs: `zs_mkdir`,
+  `zs_rmdir`, `zs_rename_replace`, `zs_setenv`/`zs_unsetenv`, `zs_localtime`, and the inline
+  `zs_last_sep` (either separator). On Linux each is the POSIX call it replaces. Use these, not the
+  raw calls, in anything new. `platform.c` deliberately does not include `windows.h` (it declares
+  `MoveFileExA` itself): unit tests `#include` it next to emulator sources, and `winerror.h`'s
+  `ERROR_NOT_READY` collides with `include/cdrom.h`.
+- **`rename()` onto an existing file fails on Windows.** Memory cards, savestates and thumbnails
+  save to a temp file and rename it over the old one; with plain `rename()` the first save worked
+  and every later one failed. `zs_rename_replace()` (`MoveFileExA` with `REPLACE_EXISTING |
+  WRITE_THROUGH`) keeps the atomic replace. `tests/platform_test.c` covers it.
+- **Paths split on both separators**: the CUE directory and the `.sbi` search (`cdrom_disc.c`), the
+  savestate directory and thumbnail name (`savestate.c`), the toast's basename (`debug_ui.cpp`).
+- **`host_info.c`** has a Windows half: registry (BIOS vendor/product, CPU name, product name and
+  release), `RtlGetVersion`, `GetLogicalProcessorInformationEx`, `GlobalMemoryStatusEx`,
+  `GetProcessMemoryInfo`, and a Toolhelp thread snapshot with `GetThreadTimes` and
+  `GetThreadDescription` (the names SDL gives its threads). The registry says "Windows 10" on
+  Windows 11; build 22000 or later is reported as 11.
+- **Crash handlers** (`main.c`): `signal()` for SIGSEGV/SIGFPE/SIGILL instead of `sigaction`, no
+  SIGBUS. A fault on a thread other than the main one gets no trace dump on Windows.
+- **`ZS1_GPU` does nothing on Windows** and says so in the log: PRIME/GLVND are Linux mechanisms, and
+  Windows picks the GPU per executable in Settings > System > Display > Graphics.
+- **Makefile**: Windows is detected from `$(CC) -dumpmachine` (contains `mingw`), not from `$OS`,
+  which a shell started by another program may not pass on. `-mwindows` (from `pkg-config --libs
+  sdl3`) is removed so the binary has a console; `make WINDOWS_GUI=1` keeps it. GLEW is linked as
+  `-l:libglew32.a` because `GLEW_STATIC` is defined where `glew.h` is included. The Vulkan header is
+  found by asking the compiler, which also fixed the detection for any Linux install outside
+  `/usr/include`.
+- **`log.h`'s format attribute** is `gnu_printf` on MinGW UCRT (`ZS1_PRINTF_ARCHETYPE`): with plain
+  `printf` gcc assumes the old msvcrt and warns on every `%zu`. `long` is 32 bits on Windows, so a
+  64-bit value needs `%lld` with a cast, never `%ld`.
+- **LTO covers C++ too on this toolchain** (gcc and g++ are both 16.2; on the Linux box they differ
+  and C++ is left out). That inlines C into `debug_ui.cpp` and can raise warnings Linux never sees
+  — `draw_pinned_watches()` needed an explicit bound for one.
+
+### Verified on 2026-11-26
+
+- Windows: `make` with zero warnings from this project's sources; `make test`, 11 of 11; OpenGL
+  (NVIDIA RTX 4060, driver 621.24) and Vulkan 1.3 both start and run the machine; a savestate
+  written twice to the same slot through a `\` path, then loaded; the real PAL BIOS boots
+  (`PS-X Realtime Kernel`, audio device at 44100 Hz).
+- Linux (WSL Ubuntu 24.04, gcc 13.3): all 57 project sources compile with zero warnings, using the
+  SDL3 and Vulkan headers copied from MSYS2; the 11 unit tests pass. **Not linked or run there**:
+  SDL3 is not installed in that WSL and installing it needs `sudo`.
+- Windows, by the maintainer by hand: Ace Combat 2 (Europe) started from the start screen with the
+  PAL BIOS, played 82 s emulated on OpenGL, quit from the quick menu; then a whole mission of it
+  completed with the keyboard. Windows support is considered reached as of 2026-11-26.
+- **Not verified**: other games on Windows, a memory card save over an existing card (same code path as
+  the savestate, not exercised), a DS4 on Windows, `make hwtest` (needs a MIPS cross compiler and
+  `xvfb-run`; neither exists here), a crash handler firing, `WINDOWS_GUI=1`, a non-NVIDIA GPU.
+
+### Traps on this machine
+
+- **`DOCS/` and `docs/` are the same directory here** (case-insensitive filesystem,
+  `core.ignorecase=true`). The `DOCS/` line in `.gitignore` therefore also ignores **new files under
+  `docs/`** (`git add -f`, and check with `git check-ignore -v <path>`), and the `DOCS/<file>.md:<line>`
+  citations in the code cannot resolve: the psx-spx clone cannot live at `DOCS/`. Do not clone or
+  symlink it there; `psx-spx-docs/` does not collide but is the newer clone and its line numbers can
+  differ. Neither reference checkout is on this machine yet.
+- **`core.autocrlf=true`**: every file in the working tree is CRLF, `tests/hw/run.sh` and the
+  `deploy/` scripts included (a problem if they are run from WSL on this checkout). Most files are LF
+  in the index; `git ls-files --eol` shows the CRLF ones (eleven headers in `include/`, `log.h`
+  among them). No `.gitattributes`. Do not edit files with `sed -i` from Git Bash: it rewrites CRLF
+  to LF.
+- Git Bash rewrites `/mnt/...` arguments for `wsl.exe` into Windows paths: prefix
+  `MSYS_NO_PATHCONV=1`. Inside a Git Bash heredoc a Lua `"\\"` arrives as one backslash.
+- Does not carry over to Windows: the X11/Wayland notes, the hidraw udev rule, `make hwtest` as
+  written. The `/usr/share/fonts` fallbacks are harmless; the bundled `assets/fonts/` come first.
 
 ---
 
@@ -94,6 +201,22 @@ running across a switch.
   `F5`/`F8` in the workspace are the Memory and Host HW modes, so the savestate keys there are
   `Shift+F5`/`Shift+F8`.
 - **Debug workspace** — the nine view modes, the log dock and the inspector, unchanged.
+- **Start screen** (2026-11-26) — what the window shows when the binary is started **without a BIOS
+  argument**. It runs *before the machine exists*: `main.c` brings up the window, the renderer and
+  its GPU thread, then loops `run_start_screen()` (interface only, ~60 fps) until a choice comes back,
+  and only then builds the machine. With a BIOS on the command line it never runs and the startup
+  order is exactly the old one — scripts, the cluster and `make hwtest` are unaffected, and a
+  command-line BIOS that cannot be read still exits with status 1. Two columns drawn with the quick
+  menu's own parts (`gp_btn`, keycaps, same six inputs from keyboard or pad): BIOS images on the
+  left, discs on the right. A file is listed as a BIOS when it is exactly `BIOS_SIZE` bytes (region
+  from its banner via `bios_region_of()`), as a disc when it ends in `.bin`, `.bin.ecm` or `.cue`;
+  `roms/` and `games/` are both scanned, beside the working directory and beside the executable, and
+  duplicates (same name and size) are listed once. F5 reads the folders again; "Browse..." opens
+  `SDL_ShowOpenFileDialog` (needs a portal or zenity on Linux; a toast says so when missing). The
+  chosen BIOS is loaded and the disc opened once as a check inside the loop, so a bad file comes back
+  as a message on the screen instead of ending the run. The last choice is kept in
+  `zs1_launcher.txt` (gitignored by `*.txt`). It cannot come back once a game runs: that needs the
+  missing `system_reset()`.
 
 **Nothing on either shell is typed in.** The Host HW panel and the inspector's host block read
 `/proc`, `/sys`, `uname` and the live GL and SDL device strings through `src/core/host_info.c` —
@@ -187,6 +310,7 @@ src/spu/
 src/utils/
   log.c                        — 16-category / 6-level logger
   rxi_log.c                    — rxi log backend
+  platform.c                   — the Linux/Windows differences (include/platform.h)
 
 src/debug_ui.cpp               — ImGui debug UI (C++)
 tests/*_test.c                 - unit tests, each includes the source under test (make test)
@@ -270,10 +394,27 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - Pure C (C99). C++ only in `src/debug_ui.cpp` (ImGui wrapper).
 - No `malloc` in hot paths. Structs embedded, not heap-allocated.
 - SDL3 + GLEW + OpenGL 3.3 Core. ImGui via `third_party/imgui/`.
+- Host calls that differ between Linux and Windows go through `include/platform.h` (`zs_mkdir`,
+  `zs_rename_replace`, `zs_setenv`, `zs_localtime`, `zs_last_sep`), never the raw POSIX call. Any
+  other platform difference is an `#ifdef _WIN32` with the Linux branch left as it was.
 - `inter->cpu` pointer set after CPU init via `interconnect_set_cpu()`.
 - IRQ lines are edge-triggered: `interconnect_set_irq_line(inter, IRQ_X, true/false)`.
 - Exception flow: `cpu_exception(cpu, EXCEPTION_*)` saves EPC, updates SR mode stack.
 - LLE style: BIOS syscalls run normally; A0/B0 hooks are side-channel only (no fake returns).
+
+### Documentation is part of every change (mandatory)
+
+A change is not finished until the documentation matches it. Update it in the same piece of work,
+without being asked, and before reporting the task as done:
+
+- `CHANGELOG.md` — an entry for every change, with what was checked and what was not.
+- `README.md` — whatever a user sees: build steps, dependencies, platforms, options, keys, status,
+  known issues. A new `ZS1_*` variable goes here and in this file.
+- `CLAUDE.md` — commands, architecture, traps and state. Remove or correct what the change made false.
+- The study or audit in `docs/` that covers the area, if one does. A new file there needs
+  `git add -f` while `.gitignore` still matches `docs/` on Windows.
+
+If no document needs to change, say so and why.
 
 ---
 
@@ -453,9 +594,10 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
   DownloadVRAMFromGPU).
 - **The gameplay shell cannot change what is running.** Three pieces of the shell's design are not
   implemented, and each is blocked on machine-side work rather than on interface work:
-  - **No disc library.** The disc still comes from `--game=` on the command line. `games/` is not
-    scanned and nothing in the shell can start a title; the quick menu describes the disc that was
-    loaded at startup and nothing else.
+  - **No disc library inside the running shell.** The start screen (2026-11-26) picks the BIOS and
+    the disc *before* the machine is built; once it runs, nothing in the shell can start another
+    title, because that needs the reset below. The quick menu describes the disc that was loaded at
+    startup and nothing else.
   - **No disc swap while running.** `cdrom_load_disc()` exists and would load the image, but a swap
     on hardware is a shell-open / shell-closed cycle the drive has to report — the status byte's
     bit 4 latch, the pending INT the guest is owed, and the region check that rejects a PAL disc
@@ -520,8 +662,8 @@ The project is **GPL-3.0-or-later**; every source file carries an SPDX header an
 - No multitap. No Dualshock2 pressure sensing; digital-mode transfer length does not grow when
   motors are mapped to config bytes cc..ff.
 
-`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: what exists (nothing automated),
-the four layers proposed, and the order. Read it before adding a test, and before claiming a
+`docs/TESTING_PLAN_2026-08-20.md` is authoritative for **testing**: the four layers proposed and the
+order (written before any existed; layers 1 and 2 do now, `make test` and `make hwtest`). Read it before adding a test, and before claiming a
 subsystem is verified.
 The checks the 2026-10-02 work still owes a BIOS and a disc are written as step-by-step cards, in
 Italian, in `docs/PROVE_MANUALI_2026-10-02.md`: a session that has the discs starts there.
@@ -765,7 +907,7 @@ has to be there. Re-run before a release rather than trusting this line.
   like it had no effect, which invalidated most of a session — including three "measurements" taken
   against a day-old binary. `.DEFAULT_GOAL := all` fixes it. If a change ever seems to do nothing,
   check the binary's mtime before checking the change.
-- ~~`make test` is broken~~ Fixed 2026-10-02: `make test` runs nine unit tests (tests/*_test.c)
+- ~~`make test` is broken~~ Fixed 2026-10-02: `make test` runs the unit tests (tests/*_test.c, eleven of them since `platform_test` on 2026-11-26)
   and `make hwtest` runs bare-metal PS-X EXEs inside the emulator on both renderers (tests/hw/),
   layers 1 and 2 of the testing plan. Before that **there was no automated test of any kind in this
   repository**, and there is still none at the level of a game (layer 3): every accuracy claim about

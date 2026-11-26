@@ -77,6 +77,28 @@ void debug_ui_notify_state_result(bool save, bool ok, const char* path);
 bool debug_ui_take_gfx_request(GfxDeviceRequest* out);
 void debug_ui_notify_gfx_result(int backend, int device_index, bool ok, const char* detail);
 
+/* --- start screen ----------------------------------------------------------
+ * Shown when the binary is started without a BIOS on the command line — a
+ * double-click, a shortcut. It runs before the machine exists: main.c brings up
+ * the window and the renderer, then calls debug_ui_launcher_render() once per
+ * frame until a start request comes back. The screen lists the BIOS images and
+ * disc images it finds in roms/ and games/ (beside the working directory and
+ * beside the executable), offers the system file dialog for anything else, and
+ * remembers the last choice in zs1_launcher.txt.
+ *
+ * A start request carries the BIOS path and the disc path ("" for no disc).
+ * main.c loads the BIOS; if that fails it calls debug_ui_launcher_failed() and
+ * keeps the screen up, otherwise debug_ui_launcher_done(), which saves the
+ * choice and hands the window to the gameplay shell. A quit from the screen
+ * comes back through debug_ui_take_quit_request(), as from the quick menu.
+ *
+ * With a BIOS on the command line none of this runs, so scripts, the cluster
+ * and make hwtest start exactly as before. */
+void debug_ui_launcher_render(void);
+bool debug_ui_launcher_take_start(char* bios, size_t bios_size, char* game, size_t game_size);
+void debug_ui_launcher_failed(const char* message);
+void debug_ui_launcher_done(void);
+
 #ifdef __cplusplus
 }
 #endif

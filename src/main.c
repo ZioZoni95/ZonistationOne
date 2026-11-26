@@ -40,6 +40,7 @@
 #include "frame_events.h"
 #include "savestate.h"
 #include "host_info.h"
+#include "platform.h"
 
 /* From debug_ui.cpp — returns ImDrawData* after ImGui::Render() */
 extern void* debug_ui_get_draw_data(void);
@@ -69,7 +70,9 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
         if      (strncmp(argv[i], "--game=", 7) == 0) out->game_path = argv[i] + 7;
         else if (strncmp(argv[i], "--exe=",  6) == 0) out->exe_path  = argv[i] + 6;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            printf("Usage: %s [--game=<path>] [--exe=<path>] <BIOS_PATH>\n", argv[0]);
+            printf("Usage: %s [--game=<path>] [--exe=<path>] <BIOS_PATH>\n"
+                   "Without a BIOS path the start screen opens and lists what is in roms/ and games/.\n",
+                   argv[0]);
             return false;
         } else if (!out->bios_path) {
             out->bios_path = argv[i];
@@ -78,11 +81,10 @@ static bool parse_args(int argc, char** argv, EmuArgs* out) {
             return false;
         }
     }
-    /* Generic fallback only. No BIOS image ships with this repository and none
-     * may: the path is expected on the command line, and this exists so an
-     * argument-less run fails at bios_load() with a path to point at rather
-     * than a null dereference. */
-    if (!out->bios_path) out->bios_path = "roms/bios.bin";
+    /* No BIOS on the command line is a start without arguments — a double-click,
+     * a shortcut — and opens the start screen (debug_ui.h). It used to fall
+     * back to a fixed "roms/bios.bin", which no dump is called, so such a start
+     * failed and closed its window before the error could be read. */
     return true;
 }
 
@@ -113,12 +115,21 @@ static void apply_gpu_preference(void) {
     const char* pref = getenv("ZS1_GPU");
     if (!pref) return;
 
+#ifdef _WIN32
+    /* PRIME and GLVND are Linux driver-stack mechanisms. Windows picks the GPU
+     * per application (Settings > System > Display > Graphics), and nothing set
+     * in the environment reaches that choice, so say so instead of pretending. */
+    LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=\"%s\" has no effect on Windows — choose the GPU for this "
+                    "executable in Settings > System > Display > Graphics", pref);
+    return;
+#endif
+
     if (strcmp(pref, "nvidia") == 0) {
-        setenv("__NV_PRIME_RENDER_OFFLOAD", "1",      0);
-        setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
+        zs_setenv("__NV_PRIME_RENDER_OFFLOAD", "1",      0);
+        zs_setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
         LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=nvidia — requesting the discrete GPU via PRIME offload");
     } else if (strcmp(pref, "intel") == 0) {
-        setenv("DRI_PRIME", "0", 0);
+        zs_setenv("DRI_PRIME", "0", 0);
         LOG_SYSTEM_INFO("[SYSTEM] ZS1_GPU=intel — requesting the integrated GPU");
     } else {
         LOG_SYSTEM_WARN("[SYSTEM] ZS1_GPU=\"%s\" not recognised (want \"nvidia\" or \"intel\") — "
@@ -617,6 +628,82 @@ static void inject_tty_keys(Interconnect* inter) {
     memcpy(prev, keys, sizeof(prev));
 }
 
+/* The start screen's loop: the interface alone, until a BIOS and a disc are
+ * chosen (true) or the window is closed or Quit is picked (false).
+ *
+ * The machine does not exist yet, so this loop is the main loop with the machine
+ * taken out: events go to the interface and the pad, the interface is built and
+ * handed to the GPU thread, and the start request is carried out here, where the
+ * Bios lives. A BIOS that cannot be read, or a disc image the drive cannot open,
+ * goes back to the screen as a message instead of ending the run. The disc is
+ * opened once to check it and closed again: the drive opens it for real once the
+ * machine is built (cdrom_load_disc). Paced to about 60 frames a second, since
+ * without a machine there is no audio ring to be the clock. */
+static bool run_start_screen(SdlCtx* sdl, Renderer* r, Controller* pad, Bios* bios,
+                             char* bios_path, size_t bios_n, char* game_path, size_t game_n) {
+    static CdromDisc probe;   /* a few KB of track table; static like the machine */
+    const uint64_t freq = SDL_GetPerformanceFrequency();
+    const uint64_t tick = freq / 60;
+    uint64_t next = SDL_GetPerformanceCounter() + tick;
+    char msg[1200];
+
+    for (;;) {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+            controller_process_event(pad, &ev);
+            debug_ui_process_event(&ev);
+            if (ev.type == SDL_EVENT_QUIT) {
+                LOG_SYSTEM_INFO("[SYSTEM] Quit: window closed on the start screen");
+                return false;
+            }
+            if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_ESCAPE && !ev.key.repeat)
+                (void)debug_ui_escape_pressed();
+            else if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.key == SDLK_RETURN &&
+                     (ev.key.mod & SDL_KMOD_ALT)) {
+                bool fs = (SDL_GetWindowFlags(sdl->win) & SDL_WINDOW_FULLSCREEN) != 0;
+                SDL_SetWindowFullscreen(sdl->win, !fs);
+            }
+        }
+        (void)debug_ui_filter_pad(controller_update(pad));
+
+        renderer_wait_frame_done(r);
+        debug_ui_launcher_render();
+        renderer_submit_frame(r, debug_ui_get_draw_data());
+        debug_ui_flush_logs();
+
+        if (debug_ui_take_fullscreen_request()) {
+            bool fs = (SDL_GetWindowFlags(sdl->win) & SDL_WINDOW_FULLSCREEN) != 0;
+            SDL_SetWindowFullscreen(sdl->win, !fs);
+        }
+        if (debug_ui_take_quit_request()) {
+            LOG_SYSTEM_INFO("[SYSTEM] Quit: requested from the start screen");
+            return false;
+        }
+        if (debug_ui_launcher_take_start(bios_path, bios_n, game_path, game_n)) {
+            if (!bios_load(bios, bios_path)) {
+                snprintf(msg, sizeof(msg), "The BIOS could not be read: %s", bios_path);
+                debug_ui_launcher_failed(msg);
+            } else if (game_path[0] && !cdrom_disc_load(&probe, game_path)) {
+                snprintf(msg, sizeof(msg), "The disc image could not be opened: %s", game_path);
+                debug_ui_launcher_failed(msg);
+            } else {
+                if (game_path[0]) cdrom_disc_unload(&probe);
+                debug_ui_launcher_done();
+                return true;
+            }
+        }
+
+        uint64_t now = SDL_GetPerformanceCounter();
+        if (now < next) {
+            uint64_t ms = ((next - now) * 1000ULL) / freq;
+            if (ms > 0) SDL_Delay((uint32_t)ms);
+            next += tick;
+        } else {
+            next = now + tick;
+        }
+    }
+}
+
 // --- Main ---
 int main(int argc, char* argv[]) {
     EmuArgs args;
@@ -646,7 +733,8 @@ int main(int argc, char* argv[]) {
         LOG_SYSTEM_WARN("[SYSTEM] Log level %d requested but this build compiles out every line "
                         "above level %d; rebuild with `make LOG_MAX_LEVEL=TRACE` to get TRACE lines",
                         (int)log_get_current_level(), (int)ZS1_LOG_MAX_LEVEL);
-    LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s", args.bios_path);
+    LOG_SYSTEM_INFO("[SYSTEM] ZoniStation One starting — BIOS: %s",
+                    args.bios_path ? args.bios_path : "(none given: start screen)");
 
     /* Not const: the quick menu's Video panel can change it while the machine
      * runs, through switch_gfx_backend(). */
@@ -662,6 +750,17 @@ int main(int argc, char* argv[]) {
      * opens them), so a fault in renderer or device bring-up still leaves its
      * last lines on disk. The trace dump inside them waits for g_cpu_for_trace. */
     {
+#ifdef _WIN32
+        /* No sigaction and no SIGBUS here. The C runtime turns an access
+         * violation on this thread into SIGSEGV and a floating-point fault into
+         * SIGFPE; SIGILL is never raised by Windows. signal() resets the handler
+         * to SIG_DFL before calling it, which is what sighandler_fatal() wants
+         * anyway. A fault on another thread (GPU, disc reader) goes to the OS
+         * crash path without the trace dump. */
+        signal(SIGSEGV, sighandler_fatal);
+        signal(SIGFPE,  sighandler_fatal);
+        signal(SIGILL,  sighandler_fatal);
+#else
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = sighandler_fatal;
@@ -671,6 +770,7 @@ int main(int argc, char* argv[]) {
         sigaction(SIGBUS,  &sa, NULL);
         sigaction(SIGFPE,  &sa, NULL);
         sigaction(SIGILL,  &sa, NULL);
+#endif
     }
 
     // --- Component init ---
@@ -686,7 +786,10 @@ int main(int argc, char* argv[]) {
 
     ram_init(&ram);
 
-    if (!bios_load(&bios, args.bios_path)) { shutdown_sdl(&sdl); return 1; }
+    /* From the command line a BIOS that cannot be read ends the run, as it always
+     * has: scripts, the cluster and make hwtest depend on that exit status. The
+     * start screen instead keeps asking (run_start_screen). */
+    if (args.bios_path && !bios_load(&bios, args.bios_path)) { shutdown_sdl(&sdl); return 1; }
 
     /* Bind the rendering backend before the machine is built. gpu_reset_state()
      * runs inside interconnect_init() and pushes the GP0/GP1 reset values
@@ -712,16 +815,49 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    /* No BIOS on the command line: the start screen, before the machine exists.
+     * It needs the GPU thread to put the interface on screen, so the thread starts
+     * here on this path and the machine is built once a choice comes back. With a
+     * BIOS given, none of this runs and the order below is the one it always was. */
+    bool gpu_thread_up = false;
+    bool pad_up = false;
+    static char chosen_bios[1024], chosen_game[1024];
+    if (!args.bios_path) {
+        if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, NULL);
+        renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
+        SDL_MaximizeWindow(sdl.win);
+        gpu_thread_up = true;
+        controller_init(&gamepad);   /* the screen is driven by the pad too */
+        pad_up = true;
+
+        if (!run_start_screen(&sdl, &inter.gpu.renderer, &gamepad, &bios,
+                              chosen_bios, sizeof(chosen_bios), chosen_game, sizeof(chosen_game))) {
+            renderer_stop_gpu_thread(&inter.gpu.renderer);
+            if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, sdl.ctx);
+            renderer_destroy(&inter.gpu.renderer);   /* before the ImGui context, as at the end of main */
+            debug_ui_shutdown();
+            shutdown_sdl(&sdl);
+            LOG_SYSTEM_INFO("[SYSTEM] Shutdown complete (from the start screen)");
+            return 0;
+        }
+        args.bios_path = chosen_bios;
+        args.game_path = chosen_game[0] ? chosen_game : NULL;
+        LOG_SYSTEM_INFO("[SYSTEM] Start screen: BIOS %s, disc %s", args.bios_path,
+                        args.game_path ? args.game_path : "none");
+    }
+
     interconnect_init(&inter, &bios, &ram);
 
-    /* GL only: hand the context to the GPU thread. Vulkan has no context to
-     * release — the backend owns its device outright. */
-    if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, NULL);
-    renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
+    if (!gpu_thread_up) {
+        /* GL only: hand the context to the GPU thread. Vulkan has no context to
+         * release — the backend owns its device outright. */
+        if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, NULL);
+        renderer_start_gpu_thread(&inter.gpu.renderer, sdl.win, sdl.ctx);
 
-    /* Fill the screen while keeping the titlebar's minimise/maximise/close
-     * buttons. Window-manager call only — no GL. */
-    SDL_MaximizeWindow(sdl.win);
+        /* Fill the screen while keeping the titlebar's minimise/maximise/close
+         * buttons. Window-manager call only — no GL. */
+        SDL_MaximizeWindow(sdl.win);
+    }
 
     if (args.game_path) {
         if (!cdrom_load_disc(&inter.cdrom, args.game_path))
@@ -745,7 +881,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    controller_init(&gamepad);
+    if (!pad_up) controller_init(&gamepad);
     sio_set_controller_connected(&inter.sio, true);
 
     audio_init(&inter.spu);

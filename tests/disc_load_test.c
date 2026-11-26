@@ -21,10 +21,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
+#include <time.h>
 
 #include "log.h"
+#include "../src/utils/platform.c"   /* zs_mkdir/zs_rmdir: no mkdtemp on Windows */
 
 LogLevel current_log_level = LOG_LEVEL_SILENT;
 void log_print(LogCategory category, LogLevel level, const char *format, ...) {
@@ -53,15 +53,40 @@ static void path_of(char *out, size_t n, const char *name) {
     snprintf(out, n, "%s/%s", g_dir, name);
 }
 
+/* Every file this test writes, so the directory can be emptied without a shell. */
+static const char *const g_files[] = {
+    "disc.bin", "UPPER.BIN", "Mixed.Bin", "endless.bin.ecm", "huge.bin.ecm",
+};
+
 static void remove_all(void) {
-    char cmd[300];
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_dir);
-    if (system(cmd) != 0) { /* best effort */ }
+    char p[512];
+    for (size_t i = 0; i < sizeof(g_files) / sizeof(g_files[0]); i++) {
+        path_of(p, sizeof(p), g_files[i]);
+        remove(p);
+    }
+    zs_rmdir(g_dir);
+}
+
+/* A fresh directory under the system temp dir. mkdtemp() is POSIX only, so the
+ * name is a random one, skipped if an earlier run left files under it. */
+static bool make_temp_dir(void) {
+    const char *base = getenv("TMPDIR");
+    if (!base || !*base) base = getenv("TEMP");
+    if (!base || !*base) base = "/tmp";
+    srand((unsigned)time(NULL) ^ (unsigned)clock());
+    for (int attempt = 0; attempt < 100; attempt++) {
+        snprintf(g_dir, sizeof(g_dir), "%s/zs1_disc_test_%08x", base, (unsigned)rand() * 2654435761u);
+        FILE *probe;
+        char p[512];
+        snprintf(p, sizeof(p), "%s/disc.bin", g_dir);
+        if ((probe = fopen(p, "rb")) != NULL) { fclose(probe); continue; }   /* taken */
+        if (zs_mkdir(g_dir)) return true;
+    }
+    return false;
 }
 
 int main(void) {
-    snprintf(g_dir, sizeof(g_dir), "/tmp/zs1_disc_test_XXXXXX");
-    if (!mkdtemp(g_dir)) { perror("mkdtemp"); return 2; }
+    if (!make_temp_dir()) { printf("cannot create a temporary directory\n"); return 2; }
 
     /* 20 raw sectors of zeros: enough for the loader, which only sizes the file. */
     static uint8_t bin[2352 * 20];

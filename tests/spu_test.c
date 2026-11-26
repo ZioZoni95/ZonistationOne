@@ -13,6 +13,7 @@
  */
 #define _POSIX_C_SOURCE 200809L   /* unsetenv */
 #include "log.h"
+#include "../src/utils/platform.c"   /* zs_setenv/zs_unsetenv: Windows has neither POSIX call */
 
 #include "../src/spu/spu.c"
 #include "../src/spu/spu_voice.c"
@@ -570,7 +571,7 @@ static void test_ring_target_default(void) {
 }
 
 int main(void) {
-    unsetenv("ZS1_SPU_RING_TARGET");
+    zs_unsetenv("ZS1_SPU_RING_TARGET");
     test_loop_code3_with_loop_start();
     test_loop_code0_continues();
     test_kon_keeps_preset_lsax();

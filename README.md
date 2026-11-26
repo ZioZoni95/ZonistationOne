@@ -36,6 +36,8 @@ one machine is a sample, not a compatibility claim.
 
 ## Build
 
+Linux and Windows are both supported. Linux first; Windows is [below](#windows).
+
 ```sh
 sudo apt install build-essential libglew-dev libgl1-mesa-dev
 make
@@ -70,10 +72,25 @@ Build notes:
 - `make PGO_GEN=1` then `make PGO_USE=1` build a profile-guided binary; `make LOG_MAX_LEVEL=TRACE`
   keeps TRACE logging, which is compiled out otherwise.
 
+### Windows
+
+Windows support is new (2026-11-26): the BIOS boots on OpenGL and Vulkan, and a whole mission
+of Ace Combat 2 has been played on Windows, started from the start screen, with the keyboard; the other tested games have not been run there yet. Build it with [MSYS2](https://www.msys2.org/), from the **MSYS2 UCRT64** shell:
+
+```sh
+pacman -S --needed make mingw-w64-ucrt-x86_64-{gcc,pkgconf,sdl3,glew,vulkan-headers,vulkan-loader,glslang} vim
+make
+```
+
+The result is `ZoniStation_One.exe` with `SDL3.dll` copied beside it; nothing else from MSYS2 is
+needed to run it. Double-click it to get the start screen, or start it from a terminal with the BIOS
+as argument, as on Linux. `ZS1_GPU` has no effect on Windows; choose the GPU in Settings > System > Display > Graphics.
+`make hwtest` is Linux-only.
+
 ### Tests
 
 ```sh
-make test      # 9 unit test programs, no SDL, BIOS or disc needed
+make test      # 11 unit test programs, no SDL, BIOS or disc needed
 make hwtest    # 16 bare-metal checks run inside the emulator, on OpenGL and on Vulkan
 ```
 
@@ -88,9 +105,15 @@ here were established by running a game and reading its log.
 ## Run
 
 ```sh
+./ZoniStation_One                                            # start screen
 ./ZoniStation_One roms/bios-pal.bin                          # BIOS menu
 ./ZoniStation_One roms/bios-pal.bin --game="games/game.bin"  # a disc
 ```
+
+Without arguments (or by double-click) the **start screen** opens: it lists the BIOS images and disc
+images it finds in `roms/` and `games/`, lets you browse for others, and starts the one you pick
+with the keyboard, the mouse or the pad. F5 reads the folders again; the last choice is remembered.
+Once a game runs, changing disc means quitting and starting again.
 
 You supply the BIOS and the discs; neither is in this repository. **PAL is what is tested**
 (`SCPH-7502`); a US BIOS boots to its own menu, but no NTSC disc has been run past that.
@@ -147,7 +170,7 @@ The ones to know first; `CLAUDE.md` lists them all with their history.
 | `ZS1_LOG_STDERR=1` | Also write the log to stderr |
 | `ZS1_LUA_SCRIPT=scripts/x.lua` | Run a Lua probe at startup |
 | `ZS1_FRAME_PROFILE=1` | Where each frame's time goes, plus cycles per emulated instruction (`CPI=`) |
-| `ZS1_GFX=gl\|vulkan`, `ZS1_GPU=nvidia\|intel`, `ZS1_VSYNC=0\|1\|-1` | Renderer, GPU choice on a hybrid machine (OpenGL), swap interval or present mode |
+| `ZS1_GFX=gl\|vulkan`, `ZS1_GPU=nvidia\|intel`, `ZS1_VSYNC=0\|1\|-1` | Renderer, GPU choice on a hybrid machine (OpenGL, Linux only), swap interval or present mode |
 | `ZS1_UI=gameplay\|debug`, `ZS1_UI_SCALE=<f>` | Which shell opens, interface scale |
 | `ZS1_PAD_MODE=digital\|analog\|stick`, `ZS1_PAD_SWAP_XO=1` | Boot pad mode, swap × and ○ |
 | `ZS1_SBI=<path>` | LibCrypt patch file for the mounted disc |
@@ -229,8 +252,8 @@ known defect in a tested game.
 - **Intel iGPU texture artefacts**: a fix is committed and unverified. This machine's context lands
   on the NVIDIA card, so it cannot be checked here.
 - **Not implemented:** multitap, DualShock 2 pressure sensing, texpage bit 11, BIOS ROM *data* read
-  cost, per-scanline CRTC. The gameplay shell cannot start a disc, swap a disc or reset the console
-  yet; the disc comes from `--game=`.
+  cost, per-scanline CRTC. Once a game is running the shell cannot start another disc, swap a disc
+  or reset the console yet: the disc is chosen on the start screen or with `--game=`.
 - `WARN XA sequence break` in the CDROM log can be spurious: it compares against a function-level
   `static` that a savestate load does not restore, and it does not know a legitimate change of
   interleave. It is a diagnostic only.

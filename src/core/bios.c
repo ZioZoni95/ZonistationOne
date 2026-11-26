@@ -29,26 +29,31 @@
 // The image also contains an earlier, shorter "System ROM Version" without the
 // date (a format string), so the scan keeps the last match: the banner is the
 // one at the end of the ROM.
-void bios_detect_region(Bios* bios) {
+char bios_region_of(const uint8_t* data) {
     static const char kNeedle[] = "System ROM Version ";
     const size_t nlen = sizeof(kNeedle) - 1;
 
-    bios->region = 0;
+    char region = 0;
     for (size_t i = 0; i + nlen < BIOS_SIZE; i++) {
-        if (memcmp(&bios->data[i], kNeedle, nlen) != 0) continue;
+        if (memcmp(&data[i], kNeedle, nlen) != 0) continue;
 
         // Walk to the end of the NUL-terminated string, then back over trailing
         // blanks; the region letter is the last printable character.
         size_t j = i + nlen;
         size_t end = j;
-        while (end < BIOS_SIZE && bios->data[end] >= 0x20 && bios->data[end] < 0x7F)
+        while (end < BIOS_SIZE && data[end] >= 0x20 && data[end] < 0x7F)
             end++;
-        while (end > j && bios->data[end - 1] == ' ') end--;
+        while (end > j && data[end - 1] == ' ') end--;
         if (end == j) continue;
 
-        char r = (char)bios->data[end - 1];
-        if (r == 'A' || r == 'E' || r == 'I' || r == 'J') bios->region = r;
+        char r = (char)data[end - 1];
+        if (r == 'A' || r == 'E' || r == 'I' || r == 'J') region = r;
     }
+    return region;
+}
+
+void bios_detect_region(Bios* bios) {
+    bios->region = bios_region_of(bios->data);
 
     if (!bios->region) {
         // An image whose banner cannot be read is more likely a US one than

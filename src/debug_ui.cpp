@@ -22,6 +22,9 @@
 #include <cmath>
 #include <cfloat>
 #include <ctime>
+#include <algorithm>
+#include <dirent.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -38,6 +41,8 @@ extern "C" {
 #include "host_info.h"
 #include "mdec.h"
 #include "savestate.h"
+#include "platform.h"
+#include "bios.h"
 }
 
 static bool g_disasm_follow_pc = true;
@@ -848,7 +853,7 @@ static const char* level_name(int level) {
  * The handle is flushed first, so the two files line up at the moment of the
  * snapshot instead of the streamed one trailing by up to a field's lines. */
 static void export_component_log(LogComponent& comp) {
-    mkdir("logs", 0755);
+    zs_mkdir("logs");
     char path[160];
     snprintf(path, sizeof(path), "logs/%s.snapshot.log", comp.name);
     FILE* f = fopen(path, "w");
@@ -3644,7 +3649,8 @@ static void draw_host_hw_window(Interconnect* inter) {
     }
     ImGui::Dummy(ImVec2(0, 8));
 
-    /* Per-thread CPU, as a share of one core, from /proc/self/task. The bars
+    /* Per-thread CPU, as a share of one core, from /proc/self/task on Linux and
+     * a Toolhelp thread snapshot on Windows (host_info.c). The bars
      * used to be four constants. Threads are listed as the kernel names them:
      * "GPU" is the renderer thread, "cdrom-read" the async disc reader, and the
      * one marked main is emulation plus UI. */
@@ -3675,7 +3681,11 @@ static void draw_host_hw_window(Interconnect* inter) {
     }
     if (h->thread_count == 0) {
         ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
+#ifdef _WIN32
+        ImGui::TextUnformatted("The thread snapshot is not readable here.");
+#else
         ImGui::TextUnformatted("/proc/self/task is not readable here.");
+#endif
         ImGui::PopStyleColor();
     }
 
@@ -3719,7 +3729,12 @@ static void draw_pinned_watches(void) {
 
     if (++g_watch_frame >= WATCH_EVAL_INTERVAL) {
         g_watch_frame = 0;
-        for (int i = 0; i < g_watch_count; i++)
+        /* g_watch_count never exceeds WATCH_MAX (the add button checks), but
+         * with C and C++ in one LTO unit gcc inlines lua_debug_eval_expr() here
+         * and cannot see that, and warns of a write past g_watches. The bound
+         * says it where the compiler can read it. */
+        const int n = g_watch_count < WATCH_MAX ? g_watch_count : WATCH_MAX;
+        for (int i = 0; i < n; i++)
             g_watches[i].ok = lua_debug_eval_expr(g_watches[i].expr,
                                                   g_watches[i].val, sizeof(g_watches[i].val));
     }
@@ -4081,8 +4096,11 @@ layout_done:
  * Vulkan's needs a VkDevice that renderer_init() has not built yet, so the
  * Vulkan backend brings its own half up and tears it down with the device it
  * belongs to. That is why only the OpenGL side appears below. */
+static SDL_Window* g_ui_window_live = nullptr;   /* the file dialog's parent; changes on a renderer switch */
+
 extern "C" void debug_ui_backend_init(SDL_Window* window, void* gl_context, int backend) {
     s_gfx_backend = backend;
+    g_ui_window_live = window;
     if (backend == GFX_BACKEND_VULKAN) {
         ImGui_ImplSDL3_InitForVulkan(window);
     } else {
@@ -4221,7 +4239,7 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend)
     g_log_dock_open = false;
 
     /* Open per-component log files (one file per category, lives for whole session) */
-    mkdir("logs", 0755);
+    zs_mkdir("logs");
     for (auto& comp : g_log_components) {
         char path[160];
         snprintf(path, sizeof(path), "logs/%s.log", comp.name);
@@ -4444,7 +4462,7 @@ static bool gp_slot_info(int slot, char* out, size_t n) {
     struct stat st;
     if (stat(gp_slot_path(slot), &st) != 0) return false;
     struct tm tmv;
-    localtime_r(&st.st_mtime, &tmv);
+    if (!zs_localtime(&st.st_mtime, &tmv)) return false;
     char when[32];
     strftime(when, sizeof(when), "%d %b %H:%M", &tmv);
     snprintf(out, n, "%s  %.1f MB", when, (double)st.st_size / (1024.0 * 1024.0));
@@ -5642,6 +5660,555 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
     if (g_gp_menu_open) gp_draw_menu(cpu, inter);
 }
 
+// --- start screen ---------------------------------------------------------------
+/* What the window shows when the binary is started without a BIOS on the command
+ * line: a double-click, a shortcut, a file manager. It runs before the machine
+ * exists — main.c has the window and the renderer up and nothing else — so it
+ * cannot reset or swap anything; it only decides what the machine will be built
+ * with, and main.c builds it.
+ *
+ * Same parts as the quick menu: gp_btn() controls, the same six inputs from the
+ * keyboard or the pad, the same key caps along the bottom. Two columns: the BIOS
+ * images on the left (with the quit), the discs on the right. A BIOS is chosen,
+ * a disc is started. What is listed is what is on disk, read when the screen
+ * opens and again on F5: a file is a BIOS when it is exactly BIOS_SIZE bytes, and
+ * a disc when it ends in .bin, .bin.ecm or .cue — the three forms the drive
+ * loads (cdrom_disc.c). Nothing is listed that the machine could not open. */
+
+struct LnEntry {
+    std::string path;    /* as it will be opened */
+    std::string name;    /* the file name without its image extensions */
+    std::string sub;     /* the second line: kind, size, folder */
+    char        region;  /* a BIOS's banner letter, 0 for discs or when unreadable */
+    long long   size;
+};
+
+static bool               g_ln_active     = false;
+static bool               g_ln_scanned    = false;
+static bool               g_ln_focus_set  = false;
+static std::vector<LnEntry> g_ln_bios;
+static std::vector<LnEntry> g_ln_games;
+static int                g_ln_bios_sel   = -1;
+static std::string        g_ln_last_bios, g_ln_last_game;
+static bool               g_ln_have_last  = false;
+static char               g_ln_error[256] = {0};
+static int                g_ln_nleft = 0, g_ln_nright = 0;
+static int                g_ln_right_j    = 0;      /* where the right column was left */
+static bool               g_ln_scroll     = false;  /* bring the focused control into view */
+static bool               g_ln_req        = false;
+static std::string        g_ln_req_bios, g_ln_req_game;
+
+/* The system file dialog answers on a thread of its own on some platforms, so its
+ * answer is parked here and picked up by the next frame. */
+static std::mutex         g_ln_dlg_mutex;
+static bool               g_ln_dlg_open   = false;
+static bool               g_ln_dlg_ready  = false;
+static int                g_ln_dlg_kind   = 0;      /* 1 BIOS, 2 disc */
+static std::string        g_ln_dlg_path;
+static std::string        g_ln_dlg_error;
+
+#define LN_SETTINGS_FILE "zs1_launcher.txt"
+
+static bool ln_ends_ci(const char* s, const char* suffix) {
+    size_t n = strlen(s), k = strlen(suffix);
+    return n >= k && strcasecmp(s + n - k, suffix) == 0;
+}
+
+static const char* ln_region_name(char r) {
+    switch (r) {
+        case 'A': return "NTSC-U  America";
+        case 'E': return "PAL  Europe";
+        case 'I': case 'J': return "NTSC-J  Japan";
+        default:  return "region unknown";
+    }
+}
+
+static std::string ln_size_text(long long bytes) {
+    char b[32];
+    if (bytes >= 1024LL * 1024) snprintf(b, sizeof(b), "%lld MB", bytes / (1024LL * 1024));
+    else                        snprintf(b, sizeof(b), "%lld KB", bytes / 1024LL);
+    return b;
+}
+
+/* The name a person gave the file: "Crash (E).bin.ecm" is "Crash (E)". */
+static std::string ln_display_name(const char* file) {
+    std::string n = file;
+    static const char* const exts[] = { ".bin.ecm", ".bin", ".cue", ".rom" };
+    for (const char* e : exts)
+        if (ln_ends_ci(n.c_str(), e)) { n.resize(n.size() - strlen(e)); break; }
+    return n;
+}
+
+/* The file name at the end of a path, after either separator. */
+static const char* ln_file_part(const std::string& path) {
+    const char* sep = zs_last_sep(path.c_str());
+    return sep ? sep + 1 : path.c_str();
+}
+
+static bool ln_read_bios_region(const char* path, char* region) {
+    static uint8_t buf[BIOS_SIZE];   /* once per image per scan; not a hot path */
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    size_t got = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    if (got != sizeof(buf)) return false;
+    *region = bios_region_of(buf);
+    return true;
+}
+
+/* One image, wherever it came from (a folder scan or the file dialog). Returns
+ * its index in the list it went into, or -1 when it is neither a BIOS nor a disc.
+ * The same file found twice is listed once: the working directory is usually the
+ * executable's own, and "games/x.bin" and "C:\...\games/x.bin" are then the same
+ * file under two spellings. Name and size together are what is compared, which
+ * no path canonicalisation is needed for on either system. */
+static int ln_add_file(const std::string& path, const char* file, const char* folder, int* kind = nullptr) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return -1;
+    const long long size = (long long)st.st_size;
+    const bool is_disc = ln_ends_ci(file, ".bin") || ln_ends_ci(file, ".bin.ecm") || ln_ends_ci(file, ".cue");
+
+    if (kind) *kind = 0;
+    if (size == BIOS_SIZE) {
+        if (kind) *kind = 1;
+        for (size_t i = 0; i < g_ln_bios.size(); i++)
+            if (strcasecmp(g_ln_bios[i].name.c_str(), ln_display_name(file).c_str()) == 0) return (int)i;
+        LnEntry e;
+        e.path = path;
+        e.name = ln_display_name(file);
+        e.region = 0;
+        e.size = size;
+        if (!ln_read_bios_region(path.c_str(), &e.region)) return -1;
+        e.sub = std::string(ln_region_name(e.region)) + "   " + ln_size_text(size) + "   " + folder;
+        g_ln_bios.push_back(e);
+        return (int)g_ln_bios.size() - 1;
+    }
+    if (!is_disc) return -1;
+    if (kind) *kind = 2;
+    for (size_t i = 0; i < g_ln_games.size(); i++)
+        if (g_ln_games[i].size == size && strcasecmp(ln_file_part(g_ln_games[i].path), file) == 0)
+            return (int)i;
+    LnEntry e;
+    e.path = path;
+    e.name = ln_display_name(file);
+    e.region = 0;
+    e.size = size;
+    const char* format = ln_ends_ci(file, ".ecm") ? "ECM image" : ln_ends_ci(file, ".cue") ? "CUE sheet" : "BIN image";
+    e.sub = std::string(format) + "   " + ln_size_text(size) + "   " + folder;
+    g_ln_games.push_back(e);
+    return (int)g_ln_games.size() - 1;
+}
+
+static void ln_scan_dir(const std::string& dir, const char* shown) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    while (struct dirent* ent = readdir(d)) {
+        if (ent->d_name[0] == '.') continue;
+        ln_add_file(dir + "/" + ent->d_name, ent->d_name, shown);
+    }
+    closedir(d);
+}
+
+static bool ln_name_less(const LnEntry& a, const LnEntry& b) {
+    return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+}
+
+static void ln_load_settings(void) {
+    FILE* f = fopen(LN_SETTINGS_FILE, "r");
+    if (!f) return;
+    char line[1100];
+    while (fgets(line, sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
+        if (strncmp(line, "bios=", 5) == 0) { g_ln_last_bios = line + 5; g_ln_have_last = true; }
+        if (strncmp(line, "game=", 5) == 0) { g_ln_last_game = line + 5; g_ln_have_last = true; }
+    }
+    fclose(f);
+}
+
+static void ln_save_settings(const std::string& bios, const std::string& game) {
+    FILE* f = fopen(LN_SETTINGS_FILE, "w");
+    if (!f) return;
+    fprintf(f, "bios=%s\ngame=%s\n", bios.c_str(), game.c_str());
+    fclose(f);
+}
+
+/* Read the folders again. Discs are looked for in games/ and in roms/ (people put
+ * them in either), BIOS images in both too; each folder beside the working
+ * directory and beside the executable, which differ when the binary is started
+ * from somewhere else. A .cue whose .bin of the same name is also listed is
+ * dropped: the .bin is the form every tested disc runs from. */
+static void ln_rescan(void) {
+    std::string keep_bios = (g_ln_bios_sel >= 0 && g_ln_bios_sel < (int)g_ln_bios.size())
+                          ? g_ln_bios[g_ln_bios_sel].path : g_ln_last_bios;
+    g_ln_bios.clear();
+    g_ln_games.clear();
+    const char* base = SDL_GetBasePath();
+    const char* dirs[] = { "roms", "games" };
+    for (const char* dname : dirs) {
+        ln_scan_dir(dname, dname);
+        if (base && base[0]) ln_scan_dir(std::string(base) + dname, dname);
+    }
+    for (size_t i = 0; i < g_ln_games.size(); ) {
+        const std::string& p = g_ln_games[i].path;
+        bool drop = false;
+        if (ln_ends_ci(p.c_str(), ".cue")) {
+            std::string stem = p.substr(0, p.size() - 4);
+            for (const LnEntry& o : g_ln_games)
+                if (ln_ends_ci(o.path.c_str(), ".bin") &&
+                    strcasecmp(o.path.substr(0, o.path.size() - 4).c_str(), stem.c_str()) == 0) { drop = true; break; }
+        }
+        if (drop) g_ln_games.erase(g_ln_games.begin() + (long)i); else i++;
+    }
+    std::sort(g_ln_bios.begin(), g_ln_bios.end(), ln_name_less);
+    std::sort(g_ln_games.begin(), g_ln_games.end(), ln_name_less);
+
+    g_ln_bios_sel = g_ln_bios.empty() ? -1 : 0;
+    for (size_t i = 0; i < g_ln_bios.size(); i++)
+        if (g_ln_bios[i].path == keep_bios) g_ln_bios_sel = (int)i;
+    g_ln_scanned = true;
+    g_ln_focus_set = false;
+}
+
+static void ln_start(const std::string& game) {
+    if (g_ln_bios_sel < 0 || g_ln_bios_sel >= (int)g_ln_bios.size()) {
+        snprintf(g_ln_error, sizeof(g_ln_error), "Choose a BIOS first: the console cannot start without one.");
+        gp_toast("No BIOS chosen", "pick one on the left", ZS_WARN);
+        g_gp_pane_idx = 0;
+        return;
+    }
+    g_ln_req      = true;
+    g_ln_req_bios = g_ln_bios[g_ln_bios_sel].path;
+    g_ln_req_game = game;
+    g_ln_error[0] = '\0';
+}
+
+static void SDLCALL ln_dialog_done(void* userdata, const char* const* files, int filter) {
+    (void)filter;
+    std::lock_guard<std::mutex> lock(g_ln_dlg_mutex);
+    g_ln_dlg_kind  = (int)(intptr_t)userdata;
+    g_ln_dlg_path.clear();
+    g_ln_dlg_error.clear();
+    if (!files)        g_ln_dlg_error = SDL_GetError();
+    else if (files[0]) g_ln_dlg_path  = files[0];      /* empty list: cancelled */
+    g_ln_dlg_ready = true;
+}
+
+static void ln_open_dialog(int kind) {
+    {
+        std::lock_guard<std::mutex> lock(g_ln_dlg_mutex);
+        if (g_ln_dlg_open) return;
+        g_ln_dlg_open = true;
+    }
+    /* SDL keeps the pointers until the callback, so these outlive the call. */
+    static const SDL_DialogFileFilter bios_filters[] = { { "BIOS image", "bin;rom" }, { "All files", "*" } };
+    static const SDL_DialogFileFilter disc_filters[] = { { "Disc image", "bin;ecm;cue" }, { "All files", "*" } };
+    SDL_ShowOpenFileDialog(ln_dialog_done, (void*)(intptr_t)kind, g_ui_window_live,
+                           kind == 1 ? bios_filters : disc_filters, 2, nullptr, false);
+}
+
+static void ln_poll_dialog(void) {
+    std::string path, err;
+    int kind;
+    {
+        std::lock_guard<std::mutex> lock(g_ln_dlg_mutex);
+        if (!g_ln_dlg_ready) return;
+        g_ln_dlg_ready = false;
+        g_ln_dlg_open  = false;
+        path = g_ln_dlg_path; err = g_ln_dlg_error; kind = g_ln_dlg_kind;
+    }
+    if (!err.empty()) {
+        /* Linux needs a desktop portal or zenity for this; say what to do instead. */
+        gp_toast("No file dialog here", "put the file in roms/ or games/ and press F5", ZS_WARN);
+        LOG_SYSTEM_WARN("[UI] File dialog unavailable: %s", err.c_str());
+        return;
+    }
+    if (path.empty()) return;   /* cancelled */
+    const char* sep = zs_last_sep(path.c_str());
+    const char* file = sep ? sep + 1 : path.c_str();
+    if (kind == 1) {
+        int got = 0;
+        int i = ln_add_file(path, file, "chosen", &got);
+        if (i < 0 || got != 1) {
+            snprintf(g_ln_error, sizeof(g_ln_error), "%s is not a BIOS image: a PlayStation BIOS is exactly 512 KB.", file);
+            gp_toast("Not a BIOS image", file, ZS_CRIT);
+            return;
+        }
+        g_ln_bios_sel = i;
+        g_ln_error[0] = '\0';
+        gp_toast("BIOS chosen", ln_region_name(g_ln_bios[i].region), ZS_OK);
+    } else {
+        int got = 0;
+        int i = ln_add_file(path, file, "chosen", &got);
+        if (i < 0 || got != 2) {
+            snprintf(g_ln_error, sizeof(g_ln_error), "%s is not a disc image the drive can load (.bin, .bin.ecm, .cue).", file);
+            gp_toast("Not a disc image", file, ZS_CRIT);
+            return;
+        }
+        g_ln_right_j = 1 + i;
+        ln_start(g_ln_games[i].path);
+    }
+}
+
+/* Where focus starts: on the disc played last if it is still there, else on the
+ * no-disc row; on the BIOS list when there is no BIOS at all. */
+static void ln_place_focus(void) {
+    const int nb = (int)g_ln_bios.size();
+    const int left = nb + 2;
+    if (nb == 0) { g_gp_pane_idx = 0; return; }   /* "Browse for a BIOS" */
+    int j = 0;
+    for (size_t i = 0; i < g_ln_games.size(); i++)
+        if (g_ln_have_last && g_ln_games[i].path == g_ln_last_game) j = 1 + (int)i;
+    g_ln_right_j  = j;
+    g_gp_pane_idx = left + j;
+    g_ln_scroll   = true;
+}
+
+static void ln_handle_input(void) {
+    memset(&g_nav, 0, sizeof(g_nav));
+    const uint16_t pressed = (uint16_t)(g_pad_prev & (uint16_t)~g_pad_word);
+    g_pad_prev = g_pad_word;
+    if (ImGui::GetIO().WantTextInput) return;
+    const uint16_t PAD_UP = 1u << 4, PAD_RIGHT = 1u << 5, PAD_DOWN = 1u << 6, PAD_LEFT = 1u << 7,
+                   PAD_CIRCLE = 1u << 13, PAD_CROSS = 1u << 14;
+    g_nav.up    = ImGui::IsKeyPressed(ImGuiKey_UpArrow)    || (pressed & PAD_UP);
+    g_nav.down  = ImGui::IsKeyPressed(ImGuiKey_DownArrow)  || (pressed & PAD_DOWN);
+    g_nav.left  = ImGui::IsKeyPressed(ImGuiKey_LeftArrow)  || (pressed & PAD_LEFT);
+    g_nav.right = ImGui::IsKeyPressed(ImGuiKey_RightArrow) || (pressed & PAD_RIGHT);
+    g_nav.ok    = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false) ||
+                  (pressed & PAD_CROSS);
+    g_nav.back  = ImGui::IsKeyPressed(ImGuiKey_Backspace, false) || (pressed & PAD_CIRCLE);
+    if (ImGui::IsKeyPressed(ImGuiKey_F11, false)) g_req_fullscreen = true;
+    if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
+        ln_rescan();
+        char n[64];
+        snprintf(n, sizeof(n), "%d BIOS, %d discs", (int)g_ln_bios.size(), (int)g_ln_games.size());
+        gp_toast("Folders read again", n, ZS_DATA);
+    }
+}
+
+static void ln_draw(void) {
+    const float s = g_ui_scale;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
+    ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+
+    ImGui::SetNextWindowPos(vp->WorkPos);
+    ImGui::SetNextWindowSize(vp->WorkSize);
+    ImGui::SetNextWindowViewport(vp->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ZS_GROUND);
+    ImGui::Begin("##launcher", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove |
+                 ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(3);
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 w0 = vp->WorkPos;
+    const ImVec2 w1 = ImVec2(w0.x + vp->WorkSize.x, w0.y + vp->WorkSize.y);
+    const float hh = 104.0f * s, fh = 52.0f * s, margin = 40.0f * s;
+
+    /* --- header: the emblem, the name, and what this window is running on --- */
+    dl->AddRectFilled(w0, ImVec2(w1.x, w0.y + hh), gp_col(ZS_PANEL, 1.0f));
+    dl->AddLine(ImVec2(w0.x, w0.y + hh), ImVec2(w1.x, w0.y + hh), gp_col(ZS_LINE, 1.0f));
+    draw_zs_emblem(dl, ImVec2(w0.x + margin + 28.0f * s, w0.y + hh * 0.5f), 28.0f * s, 1.0f);
+    {
+        const float tx = w0.x + margin + 72.0f * s;
+        const float ts = h1->LegacySize * 1.45f;
+        dl->AddText(h1, ts, ImVec2(tx, w0.y + 22.0f * s), gp_col(ZS_TEXT, 1.0f), "ZoniStation One");
+        char sub[160];
+        snprintf(sub, sizeof(sub), "Choose a BIOS and a disc   %s   %s",
+                 zs_platform_name(), s_gfx_backend == GFX_BACKEND_VULKAN ? "Vulkan 1.3" : "OpenGL 3.3");
+        dl->AddText(mono, mono->LegacySize * 0.95f, ImVec2(tx, w0.y + 28.0f * s + ts), gp_col(ZS_MUTED, 1.0f), sub);
+    }
+
+    /* --- the two columns --- */
+    const float top = w0.y + hh + 22.0f * s;
+    float body_h = (w1.y - fh) - top - 18.0f * s;
+    if (g_ln_error[0]) body_h -= 44.0f * s;
+    const float avail_w = vp->WorkSize.x - margin * 2.0f;
+    float left_w = avail_w * 0.38f;
+    if (left_w < 340.0f * s) left_w = 340.0f * s;
+    if (left_w > 520.0f * s) left_w = 520.0f * s;
+    const float gap = 28.0f * s;
+    const float right_w = avail_w - left_w - gap;
+
+    if (g_ln_error[0]) {
+        ImVec2 e0 = ImVec2(w0.x + margin, top), e1 = ImVec2(w1.x - margin, top + 34.0f * s);
+        dl->AddRectFilled(e0, e1, gp_col(ZS_CRIT, 0.13f), 10.0f * s);
+        dl->AddRect(e0, e1, gp_col(ZS_CRIT, 0.6f), 10.0f * s);
+        ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
+        dl->AddText(f, f->LegacySize, ImVec2(e0.x + 14.0f * s, e0.y + (34.0f * s - f->LegacySize) * 0.5f),
+                    gp_col(ZS_TEXT, 1.0f), g_ln_error);
+    }
+    const float col_top = top + (g_ln_error[0] ? 44.0f * s : 0.0f);
+
+    g_gp_focus     = 1;
+    g_gp_pane_next = 0;
+    const int focus_before = g_gp_pane_idx;
+    const int nb = (int)g_ln_bios.size();
+    char label[200];
+    ImFont* uif = g_font_ui ? g_font_ui : ImGui::GetFont();
+
+    /* Left: the BIOS images, then the dialog, then the way out. */
+    ImGui::SetCursorScreenPos(ImVec2(w0.x + margin, col_top));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    ImGui::BeginChild("##ln_left", ImVec2(left_w, body_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoNav);
+    {
+        card_header_icon("Console BIOS", ZS_DATA, draw_icon_cpu);
+        const float bw = ImGui::GetContentRegionAvail().x;
+        if (nb == 0)
+            gp_pane_text("No BIOS image in roms/. A PlayStation BIOS is the 512 KB ROM of a real "
+                         "console, dumped from your own; put it in roms/ and press F5, or browse for it.");
+        for (int i = 0; i < nb; i++) {
+            fit_text(uif, uif->LegacySize, g_ln_bios[i].name.c_str(), bw - 32.0f * s, label, sizeof(label));
+            if (gp_btn(label, g_ln_bios[i].sub.c_str(), ImVec2(bw, 60.0f * s), false, i == g_ln_bios_sel, ZS_DATA)) {
+                g_ln_bios_sel = i;
+                g_ln_error[0] = '\0';
+                g_gp_pane_idx = nb + 2 + g_ln_right_j;   /* chosen: on to the discs */
+                g_ln_scroll = true;
+            }
+            ImGui::Dummy(ImVec2(0, 2.0f * s));
+        }
+        ImGui::Dummy(ImVec2(0, 6.0f * s));
+        if (gp_btn("Browse for a BIOS...", "any 512 KB image", ImVec2(bw, 52.0f * s), false, false, ZS_DATA))
+            ln_open_dialog(1);
+        ImGui::Dummy(ImVec2(0, 8.0f * s));
+        gp_pane_text("The BIOS has to match the disc's region, as on the real console: a PAL disc "
+                     "needs a PAL BIOS. The wrong pairing stops at the BIOS menu.");
+        if (gp_btn("Quit", "", ImVec2(bw, 44.0f * s), false, false, ZS_CRIT))
+            g_req_quit = true;
+    }
+    ImGui::EndChild();
+    g_ln_nleft = g_gp_pane_next;
+
+    /* Right: no disc, every disc found, the dialog. The list scrolls. */
+    ImGui::SetCursorScreenPos(ImVec2(w0.x + margin + left_w + gap, col_top));
+    ImGui::BeginChild("##ln_right", ImVec2(right_w, body_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoNav);
+    {
+        card_header_icon("Discs", ZS_AUDIO, draw_icon_disc);
+        const float bw = ImGui::GetContentRegionAvail().x - 8.0f * s;
+        auto row = [&](const char* name, const char* sub, bool last) -> bool {
+            const int idx = g_gp_pane_next;
+            fit_text(uif, uif->LegacySize, name, bw - 32.0f * s, label, sizeof(label));
+            bool hit = gp_btn(label, sub, ImVec2(bw, 58.0f * s), false, last, ZS_AUDIO);
+            if (g_ln_scroll && idx == g_gp_pane_idx) { ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY); g_ln_scroll = false; }
+            ImGui::Dummy(ImVec2(0, 2.0f * s));
+            return hit;
+        };
+        const bool last_none = g_ln_have_last && g_ln_last_game.empty();
+        if (row("Start without a disc", "the BIOS menu: memory cards and CD player", last_none)) {
+            g_ln_right_j = 0;
+            ln_start("");
+        }
+        for (size_t i = 0; i < g_ln_games.size(); i++) {
+            const bool last = g_ln_have_last && g_ln_games[i].path == g_ln_last_game;
+            std::string sub = g_ln_games[i].sub + (last ? "   last played" : "");
+            if (row(g_ln_games[i].name.c_str(), sub.c_str(), last)) {
+                g_ln_right_j = 1 + (int)i;
+                ln_start(g_ln_games[i].path);
+            }
+        }
+        if (g_ln_games.empty())
+            gp_pane_text("No disc image in games/ or roms/. Put .bin, .bin.ecm or .cue files there and "
+                         "press F5, or browse for one. A LibCrypt disc also needs its .sbi beside it.");
+        ImGui::Dummy(ImVec2(0, 6.0f * s));
+        const int idx = g_gp_pane_next;
+        if (gp_btn("Browse for a disc image...", ".bin, .bin.ecm or .cue", ImVec2(bw, 52.0f * s), false, false, ZS_AUDIO))
+            ln_open_dialog(2);
+        if (g_ln_scroll && idx == g_gp_pane_idx) { ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY); g_ln_scroll = false; }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+    g_ln_nright = g_gp_pane_next - g_ln_nleft;
+
+    /* --- footer: the inputs, and what will start --- */
+    dl->AddLine(ImVec2(w0.x, w1.y - fh), ImVec2(w1.x, w1.y - fh), gp_col(ZS_LINE, 1.0f));
+    {
+        g_kc_panel = true;
+        ImVec2 p = ImVec2(w0.x + margin, w1.y - fh + (fh - (mono->LegacySize * 0.92f + 8.0f * s)) * 0.5f);
+        p.x = gp_keycap(dl, p, "Arrows", "Move", 1.0f);
+        p.x = gp_keycap(dl, p, "Enter", "Start", 1.0f);
+        p.x = gp_keycap(dl, p, "F5", "Read folders again", 1.0f);
+        p.x = gp_keycap(dl, p, "F11", "Fullscreen", 1.0f);
+        p.x = gp_keycap(dl, p, "Esc", "Quit", 1.0f);
+        g_kc_panel = false;
+        if (g_ln_bios_sel >= 0 && g_ln_bios_sel < nb) {
+            char who[200], fitw[200];
+            snprintf(who, sizeof(who), "BIOS  %s", g_ln_bios[g_ln_bios_sel].name.c_str());
+            const float ms = mono->LegacySize * 0.9f;
+            const float room = w1.x - margin - p.x;
+            fit_text(mono, ms, who, room, fitw, sizeof(fitw));
+            const float tw = mono->CalcTextSizeA(ms, FLT_MAX, 0.0f, fitw).x;
+            dl->AddText(mono, ms, ImVec2(w1.x - margin - tw, w1.y - fh + (fh - ms) * 0.5f),
+                        gp_col(ZS_MUTED, 1.0f), fitw);
+        }
+    }
+    ImGui::End();
+
+    /* --- navigation, now that both columns have counted their controls --- */
+    if (!g_ln_focus_set) { ln_place_focus(); g_ln_focus_set = true; return; }
+    if (g_gp_pane_idx != focus_before) return;   /* a click or a choice above moved it */
+    const int L = g_ln_nleft, R = g_ln_nright;
+    int f = g_gp_pane_idx;
+    if (f >= L + R) f = L + R - 1;
+    if (f < 0) f = 0;
+    bool right = f >= L;
+    int j = right ? f - L : f;
+    const int n = right ? R : L;
+    bool moved = false;
+    if (g_nav.up && j > 0)          { j--; moved = true; }
+    else if (g_nav.down && j < n - 1) { j++; moved = true; }
+    else if ((g_nav.left || g_nav.back) && right) {
+        right = false; j = (g_ln_bios_sel >= 0) ? g_ln_bios_sel : 0; if (j >= L) j = L - 1; moved = true;
+    } else if (g_nav.right && !right && R > 0) {
+        right = true; j = g_ln_right_j < R ? g_ln_right_j : R - 1; moved = true;
+    }
+    if (right) g_ln_right_j = j;
+    g_gp_pane_idx = right ? L + j : j;
+    if (moved) g_ln_scroll = true;
+}
+
+extern "C" void debug_ui_launcher_render(void) {
+    if (!g_ln_active) {
+        g_ln_active = true;
+        ln_load_settings();
+    }
+    if (!g_ln_scanned) ln_rescan();
+    ln_poll_dialog();
+
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    ln_handle_input();
+    ln_draw();
+    gp_draw_toasts();
+    ImGui::Render();
+}
+
+extern "C" bool debug_ui_launcher_take_start(char* bios, size_t bios_size, char* game, size_t game_size) {
+    if (!g_ln_req) return false;
+    g_ln_req = false;
+    snprintf(bios, bios_size, "%s", g_ln_req_bios.c_str());
+    snprintf(game, game_size, "%s", g_ln_req_game.c_str());
+    return true;
+}
+
+extern "C" void debug_ui_launcher_failed(const char* message) {
+    snprintf(g_ln_error, sizeof(g_ln_error), "%s", message ? message : "The machine could not start.");
+    gp_toast("Could not start", "see the message above the lists", ZS_CRIT);
+}
+
+extern "C" void debug_ui_launcher_done(void) {
+    ln_save_settings(g_ln_req_bios, g_ln_req_game);
+    g_ln_active = false;
+    g_pad_hold  = true;   /* the press that started the disc is not the game's first */
+    gp_note_input();
+}
+
 /* --- UI tour: a developer tool, not a feature ---------------------------------
  *
  * ZS1_UI_TOUR=<dir> walks the interface by itself - the gameplay HUD, every
@@ -5970,6 +6537,15 @@ extern "C" void debug_ui_shutdown(void) {
  * request as it hands it over. */
 
 extern "C" bool debug_ui_escape_pressed(void) {
+    /* The start screen: the first Escape goes to Quit, the second quits. Nothing is
+     * running yet, so there is nothing to lose, but a stray key should not close
+     * the window either. */
+    if (g_ln_active) {
+        const int quit_idx = g_ln_nleft - 1;
+        if (g_gp_pane_idx == quit_idx) g_req_quit = true;
+        else { g_gp_pane_idx = quit_idx; gp_toast("Press Esc again to quit", "", ZS_MUTED); }
+        return true;
+    }
     if (g_shell == SHELL_GAMEPLAY) {
         /* One step back each press: pane -> list -> closed. */
         if (!g_gp_menu_open)       gp_open_menu();
@@ -5991,7 +6567,7 @@ extern "C" bool debug_ui_escape_pressed(void) {
 /* True while the keyboard is the interface's and not the machine's: a text
  * field has it, or a menu or a confirmation is up. */
 extern "C" bool debug_ui_keyboard_captured(void) {
-    return ImGui::GetIO().WantTextInput || g_ws_quit_confirm ||
+    return ImGui::GetIO().WantTextInput || g_ws_quit_confirm || g_ln_active ||
            (g_shell == SHELL_GAMEPLAY && g_gp_menu_open);
 }
 
@@ -6061,7 +6637,7 @@ extern "C" void debug_ui_notify_gfx_result(int backend, int device_index, bool o
 }
 
 extern "C" void debug_ui_notify_state_result(bool save, bool ok, const char* path) {
-    const char* base = path ? strrchr(path, '/') : nullptr;
+    const char* base = path ? zs_last_sep(path) : nullptr;
     gp_toast(ok ? (save ? "State saved" : "State loaded")
                 : (save ? "Save failed" : "Load refused"),
              base ? base + 1 : (path ? path : ""),

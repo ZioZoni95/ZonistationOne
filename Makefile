@@ -14,7 +14,36 @@ INCLUDES = -Iinclude -Ithird_party/imgui -Ithird_party/imgui/backends -Ithird_pa
 SDL_CFLAGS = $(shell pkg-config --cflags sdl3)
 SDL_LIBS   = $(shell pkg-config --libs sdl3)
 
-LIBS = $(SDL_LIBS) -lGL -lGLEW -lm -lpthread
+# --- Host platform ---
+#
+# Linux is the reference platform and nothing below changes for it. Windows is
+# built from the MSYS2 UCRT64 shell (gcc, make, pkg-config, SDL3, GLEW, Vulkan
+# headers and glslang all come from pacman there). The target is asked of the
+# compiler rather than read from $OS, which a shell started from another
+# program may not pass on: what matters is what the binary is built for.
+ifneq ($(findstring mingw,$(shell $(CC) -dumpmachine 2>/dev/null)),)
+  ZS1_WINDOWS := 1
+  EXE := .exe
+  # pkg-config's SDL3 entry adds -mwindows, which builds a GUI-subsystem binary
+  # with no console: stdout, stderr and ZS1_LOG_STDERR then go nowhere when it
+  # is started from cmd or PowerShell. A console binary is what a debugging
+  # emulator wants; `make WINDOWS_GUI=1` keeps -mwindows for a release.
+  ifndef WINDOWS_GUI
+    SDL_LIBS := $(filter-out -mwindows,$(SDL_LIBS))
+  endif
+  # GLEW is linked statically because GLEW_STATIC is defined where glew.h is
+  # included (main.c, renderer_gl.h): with the import library instead, the data
+  # symbols (glewExperimental, every function pointer) would need dllimport.
+  # -l: names the archive itself, so the linker cannot pick glew32.dll.a first.
+  # The C/C++ runtimes and winpthread go in statically too, so the binary needs
+  # only SDL3.dll beside it, which the link step copies there.
+  LIBS = $(SDL_LIBS) -l:libglew32.a -lopengl32 -lm -lpsapi \
+         -static-libgcc -static-libstdc++ -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
+  SDL_DLL := $(shell pkg-config --variable=prefix sdl3 2>/dev/null)/bin/SDL3.dll
+else
+  EXE :=
+  LIBS = $(SDL_LIBS) -lGL -lGLEW -lm -lpthread
+endif
 
 # Build mode. Default is an optimised build — the emulator is an interpreter on
 # the hot path, so an unoptimised (-O0) build ran ~3-5x slower than the machine,
@@ -122,13 +151,17 @@ DEPFLAGS = -MMD -MP
 # resolves every entry point through SDL_Vulkan_LoadLibrary() at runtime, so the
 # binary still starts on a machine with no ICD, with the backend absent from the
 # picker and the reason written out.
-VK_HEADERS := $(wildcard /usr/include/vulkan/vulkan.h)
+#
+# The header is looked for by asking the compiler, not at a fixed path: MSYS2
+# keeps it in /ucrt64/include, a Vulkan SDK somewhere else again, and testing
+# /usr/include/vulkan/vulkan.h switched the backend off on every one of them.
+VK_HEADERS := $(shell echo '\#include <vulkan/vulkan.h>' | $(CC) -E -x c - >/dev/null 2>&1 && echo found)
 GLSLANG    := $(shell command -v glslangValidator 2>/dev/null)
 
 ifeq ($(strip $(VK_HEADERS)),)
-  $(info [build] Vulkan backend off: no <vulkan/vulkan.h> — install libvulkan-dev)
+  $(info [build] Vulkan backend off: no <vulkan/vulkan.h> — install libvulkan-dev (MSYS2: mingw-w64-ucrt-x86_64-vulkan-headers))
 else ifeq ($(strip $(GLSLANG)),)
-  $(info [build] Vulkan backend off: no glslangValidator — install glslang-tools)
+  $(info [build] Vulkan backend off: no glslangValidator — install glslang-tools (MSYS2: mingw-w64-ucrt-x86_64-glslang))
 else
   ENABLE_VULKAN := 1
 endif
@@ -233,7 +266,7 @@ EMU_SPU_SRCS = \
 
 # --- Utils ---
 EMU_UTIL_SRCS = \
-    src/utils/log.c src/utils/rxi_log.c
+    src/utils/log.c src/utils/rxi_log.c src/utils/platform.c
 
 # --- Emulator C sources (aggregated) ---
 EMU_C_SRCS = src/main.c \
@@ -257,7 +290,7 @@ CXXFLAGS += -DIMGUI_IMPL_VULKAN_NO_PROTOTYPES
 endif
 
 EMU_OBJS = $(EMU_C_SRCS:.c=.o) $(EMU_CXX_SRCS:.cpp=.o)
-EMU_BIN = ZoniStation_One
+EMU_BIN = ZoniStation_One$(EXE)
 
 # --- Unit tests (docs/TESTING_PLAN_2026-08-20.md, layer 1) ---
 #
@@ -266,10 +299,10 @@ EMU_BIN = ZoniStation_One
 # test needs no SDL, no GL, no BIOS and no disc. `make test` builds and runs every
 # one of them and stops at the first failure.
 UNIT_TEST_SRCS := $(wildcard tests/*_test.c)
-UNIT_TEST_BINS := $(patsubst tests/%.c,tests/bin/%,$(UNIT_TEST_SRCS))
+UNIT_TEST_BINS := $(patsubst tests/%.c,tests/bin/%$(EXE),$(UNIT_TEST_SRCS))
 TEST_CFLAGS = -std=c99 -O2 -g -Wall -Wextra -MMD -MP -Iinclude
 
-tests/bin/%: tests/%.c
+tests/bin/%$(EXE): tests/%.c
 	@mkdir -p tests/bin
 	$(CC) $(TEST_CFLAGS) -o $@ $< -lm
 
@@ -320,6 +353,14 @@ all: $(EMU_BIN)
 $(EMU_BIN): $(EMU_OBJS)
 	$(LINK) -o $@ $^ $(LDFLAGS_EMU) $(LIBS) $(LINK_CXXRT)
 
+ifdef ZS1_WINDOWS
+# The one DLL the binary still needs, beside it, so it also starts from
+# Explorer or from a shell whose PATH does not include the MSYS2 tree.
+all: SDL3.dll
+SDL3.dll: $(SDL_DLL)
+	cp "$<" $@
+endif
+
 %.o: %.c
 	$(CC) -c $< -o $@ $(CFLAGS)
 
@@ -341,7 +382,7 @@ split_log: split_log.c
 
 clean:
 	rm -rf tests/bin tests/hw/build
-	rm -f $(EMU_BIN) split_log \
+	rm -f $(EMU_BIN) SDL3.dll split_log \
 	    src/gpu/shaders/*.spv src/gpu/shaders/*.spv.h \
 	    src/*.[od] src/cpu/*.[od] src/core/*.[od] src/gpu/*.[od] src/gte/*.[od] \
 	    src/cdrom/*.[od] src/spu/*.[od] src/utils/*.[od] tests/*.[od] \
