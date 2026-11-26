@@ -990,6 +990,7 @@ bool glr_init(GlRenderer* renderer) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glBindTexture(GL_TEXTURE_2D, 0);
+        renderer->scanout_linear_applied = false;   /* a new texture starts NEAREST */
 
         glGenFramebuffers(1, &renderer->scanout_fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, renderer->scanout_fbo);
@@ -2392,6 +2393,17 @@ static int gpu_thread_main(void* userdata) {
                 glUseProgram(0);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
+            /* The presentation filter: a texture parameter, so it changes here,
+             * on the thread that owns the context, and only when asked. */
+            const bool want_linear = renderer->scanout_linear;
+            if (want_linear != renderer->scanout_linear_applied) {
+                const GLint f = want_linear ? GL_LINEAR : GL_NEAREST;
+                glBindTexture(GL_TEXTURE_2D, renderer->scanout_texture);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, f);
+                glBindTexture(GL_TEXTURE_2D, 0);
+                renderer->scanout_linear_applied = want_linear;
+            }
         }
 
         /* VRAM viewer: decode the whole unified VRAM for the debug window. Runs
@@ -2857,6 +2869,9 @@ static GfxTexHandle vt_get_display_texture(GfxImpl impl) {
 static GfxTexHandle vt_get_scanout_texture(GfxImpl impl) {
     return (GfxTexHandle)glr_get_scanout_texture(R(impl));
 }
+static void vt_set_scanout_filter(GfxImpl impl, bool linear) {
+    R(impl)->scanout_linear = linear;
+}
 static GfxTexHandle vt_get_vram_viewer_texture(GfxImpl impl) {
     return (GfxTexHandle)glr_get_vram_viewer_texture(R(impl));
 }
@@ -2900,5 +2915,6 @@ const GfxBackend gfx_backend_gl33 = {
     .get_pool_stats         = vt_get_pool_stats,
     .get_display_texture    = vt_get_display_texture,
     .get_scanout_texture    = vt_get_scanout_texture,
+    .set_scanout_filter     = vt_set_scanout_filter,
     .get_vram_viewer_texture= vt_get_vram_viewer_texture,
 };

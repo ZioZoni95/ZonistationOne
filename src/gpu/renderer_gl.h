@@ -47,6 +47,10 @@ typedef struct {
     // unpacking per depth (15bpp direct / 24bpp packed triplets).
     GLuint scanout_fbo;
     GLuint scanout_texture;   // RGB8 display-ready image
+    /* Filter ImGui scales it with: wanted (set from the main thread) and what the
+     * texture has (changed only on the GPU thread, which owns the context). */
+    volatile bool scanout_linear;
+    bool          scanout_linear_applied;
     GLuint scanout_program;
     GLuint dummy_vao;         // attribute-less VAO for the fullscreen triangle
     GLint  scanout_vram_loc;

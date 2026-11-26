@@ -1706,19 +1706,66 @@ static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
 struct ScanoutBox { bool valid; ImVec2 p0, p1, uv0, uv1; ImTextureID tex; };
 static ScanoutBox g_scanout = { false, ImVec2(0, 0), ImVec2(0, 0), ImVec2(0, 0), ImVec2(0, 0), 0 };
 
+/* How the finished picture is put in the window. Host presentation only: the
+ * emulated frame, its size and its timing are the same whatever is chosen here.
+ *   aspect   4:3 is what a PS1 drew for (a 4:3 set, whatever the pixel count);
+ *            "fill" stretches to the window; 16:9 is a 16:9 box, for a TV set
+ *            to stretch and, later, for a widescreen-rendered game.
+ *   integer  every emulated scanline the same whole number of host pixels, so
+ *            the picture has no uneven rows; the width follows the aspect and is
+ *            not a whole multiple, because PS1 pixels are not square.
+ *   linear   bilinear instead of nearest when the picture is scaled.
+ * Kept in zs1_video.txt beside zs1_theme.txt. */
+enum { VID_ASPECT_4_3 = 0, VID_ASPECT_FILL, VID_ASPECT_16_9, VID_ASPECT_COUNT };
+static const char* const g_vid_aspect_names[VID_ASPECT_COUNT] = { "4:3", "Fill", "16:9" };
+static const char* const g_vid_aspect_subs[VID_ASPECT_COUNT]  = { "as on a TV", "stretch to the window", "wide box" };
+static int  g_vid_aspect  = VID_ASPECT_4_3;
+static bool g_vid_integer = false;
+static bool g_vid_linear  = false;
+static int  g_vid_scale   = 1;       /* internal resolution, Vulkan only: 1, 2, 4 or 8 */
+static int  g_vid_renderer = -1;     /* the renderer to start on: -1 not chosen yet, else GfxBackendType */
+static bool g_vid_loaded  = false;
+static const char* const ZS_VIDEO_FILE = "zs1_video.txt";
+
+/* Defined further down, next to the HUD switches they also keep. */
+static void video_settings_load(void);
+static void video_settings_save(void);
+
+/* The saved internal resolution, for main.c to build the renderer with: the
+ * setting has to be known before the first frame, and a change after that goes
+ * through the renderer switch. */
+extern "C" uint32_t debug_ui_internal_scale(void) {
+    if (!g_vid_loaded) video_settings_load();
+    return (uint32_t)g_vid_scale;
+}
+
+/* The renderer chosen in a menu on an earlier run, or -1. ZS1_GFX still wins. */
+extern "C" int debug_ui_saved_backend(void) {
+    if (!g_vid_loaded) video_settings_load();
+    return g_vid_renderer;
+}
+
 static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 avail) {
     g_scanout.valid = false;
+    if (!g_vid_loaded) video_settings_load();
     {
         if (texture_id && inter) {
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
             uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
 
+            renderer_set_scanout_filter(&inter->gpu.renderer, g_vid_linear);
             texture_id = renderer_get_scanout_texture(&inter->gpu.renderer);
             float u0 = 0.0f, u1 = (float)vw / 1024.0f;
             float v0 = 0.0f, v1 = (float)vh / 512.0f;
 
-            // Letterbox at 4:3 — PSX always outputs to a 4:3 TV regardless of pixel count.
-            const float psx_aspect = 4.0f / 3.0f;
+            const bool pal        = (inter->gpu.vmode == Pal);
+            const int  visible_h  = pal ? 256  : 224;
+
+            /* The box the picture fills. 4:3 by default — a PS1 always drew for a
+             * 4:3 TV, whatever its pixel count — or the chosen one. */
+            const float psx_aspect = g_vid_aspect == VID_ASPECT_16_9 ? 16.0f / 9.0f
+                                   : g_vid_aspect == VID_ASPECT_FILL ? avail.x / (avail.y > 1.0f ? avail.y : 1.0f)
+                                   : 4.0f / 3.0f;
             float disp_w, disp_h;
             if (avail.x / avail.y > psx_aspect) {
                 disp_h = avail.y;
@@ -1727,8 +1774,20 @@ static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 av
                 disp_w = avail.x;
                 disp_h = disp_w / psx_aspect;
             }
-            float pad_x = (avail.x - disp_w) * 0.5f;
-            float pad_y = (avail.y - disp_h) * 0.5f;
+            /* Integer scale: the largest whole number of host pixels per visible
+             * scanline that fits, counted in framebuffer pixels so a HiDPI scale
+             * does not break it. Too small a window for even 1x keeps the fit. */
+            if (g_vid_integer && g_vid_aspect != VID_ASPECT_FILL) {
+                const float fbs = ImGui::GetIO().DisplayFramebufferScale.y > 0.0f
+                                ? ImGui::GetIO().DisplayFramebufferScale.y : 1.0f;
+                const int n = (int)floorf(disp_h * fbs / (float)visible_h);
+                if (n >= 1) {
+                    disp_h = (float)(n * visible_h) / fbs;
+                    disp_w = disp_h * psx_aspect;
+                }
+            }
+            float pad_x = floorf((avail.x - disp_w) * 0.5f);
+            float pad_y = floorf((avail.y - disp_h) * 0.5f);
 
             /* The scale is a property of the TV, not of the current range.
              *
@@ -1744,8 +1803,6 @@ static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 av
              * scanline the same size always; a narrower range then shows a border
              * and a moved range moves, which is what the hardware does — and is
              * what makes GP1(07) screen shake (:720-722) come out as a shake. */
-            const bool pal        = (inter->gpu.vmode == Pal);
-            const int  visible_h  = pal ? 256  : 224;
             const int  raster_mid = pal ? 0xA3 : 0x88;
             const int  visible_top = raster_mid - visible_h / 2;
 
@@ -4543,6 +4600,39 @@ static void gp_request_state(bool save, int slot) {
 static bool g_gp_ambient   = true;    /* the side bars take their light from the frame */
 static bool g_gp_pace_line = true;    /* the 3 px line along the top */
 
+/* Everything on the Video & HUD page, in one small text file beside zs1_theme.txt
+ * (the theme keeps its own). Unknown lines are ignored, so an older file loads. */
+static void video_settings_save(void) {
+    FILE* f = fopen(ZS_VIDEO_FILE, "w");
+    if (!f) return;
+    fprintf(f, "aspect=%d\ninteger=%d\nlinear=%d\nscale=%d\nrenderer=%d\n"
+               "hud=%d\ngraph=%d\nambient=%d\npace=%d\n",
+            g_vid_aspect, g_vid_integer ? 1 : 0, g_vid_linear ? 1 : 0, g_vid_scale, g_vid_renderer,
+            g_gp_hud_mode, g_gp_graph ? 1 : 0, g_gp_ambient ? 1 : 0, g_gp_pace_line ? 1 : 0);
+    fclose(f);
+}
+
+static void video_settings_load(void) {
+    g_vid_loaded = true;
+    FILE* f = fopen(ZS_VIDEO_FILE, "r");
+    if (!f) return;
+    char line[64];
+    int v;
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "aspect=%d", &v) == 1 && v >= 0 && v < VID_ASPECT_COUNT) g_vid_aspect = v;
+        else if (sscanf(line, "integer=%d", &v) == 1) g_vid_integer = (v != 0);
+        else if (sscanf(line, "linear=%d", &v) == 1)  g_vid_linear  = (v != 0);
+        else if (sscanf(line, "scale=%d", &v) == 1 && (v == 1 || v == 2 || v == 4 || v == 8)) g_vid_scale = v;
+        else if (sscanf(line, "renderer=%d", &v) == 1 && v >= -1 && v <= 1) g_vid_renderer = v;
+        else if (sscanf(line, "hud=%d", &v) == 1 && v >= 0 && v < GP_HUD_COUNT) g_gp_hud_mode = v;
+        else if (sscanf(line, "graph=%d", &v) == 1)   g_gp_graph     = (v != 0);
+        else if (sscanf(line, "ambient=%d", &v) == 1) g_gp_ambient   = (v != 0);
+        else if (sscanf(line, "pace=%d", &v) == 1)    g_gp_pace_line = (v != 0);
+    }
+    fclose(f);
+}
+
+
 /* Fill the bars beside the 4:3 picture with light taken from its edge. Sixteen
  * horizontal bands per side, each a single texel of the scanout stretched across
  * the bar; two quads per band whose vertex alpha rises to the band's centre and
@@ -4958,6 +5048,7 @@ static bool gp_mouse_moved(void) {
 /* Set just before a gp_btn call to put a picture over its text: a slot tile. The
  * height is what the picture takes of the tile; a null texture draws an empty frame.
  * gp_btn clears both. */
+static bool           g_gp_scroll_focus = false;   /* set when the navigation moves; gp_btn scrolls to the focus */
 static float          g_btn_pic_h   = 0.0f;
 static ImTextureData* g_btn_pic_tex = nullptr;
 static bool           g_btn_pic_blank = false;   /* an empty slot: a plain frame, no caption */
@@ -4979,6 +5070,12 @@ static bool gp_btn(const char* label, const char* sub, ImVec2 size, bool disable
     ImGui::PopID();
     if (hov && gp_mouse_moved()) { g_gp_focus = 1; g_gp_pane_idx = idx; }
     bool focused = (g_gp_focus == 1 && g_gp_pane_idx == idx);
+    /* A pane taller than the window scrolls, and the arrow keys or the D-pad
+     * can move to a control below its edge: bring that one into view. */
+    if (focused && g_gp_scroll_focus) {
+        ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY);
+        g_gp_scroll_focus = false;
+    }
 
     /* The live choice of a group is a filled accent with the theme's on-accent
      * text (13.8:1 on the default theme); it used to be a dim tint of the accent
@@ -5106,6 +5203,161 @@ static float gp_sheet_width(void) {
     if (w > 700.0f * s) w = 700.0f * s;
     if (w > vp->WorkSize.x * 0.94f) w = vp->WorkSize.x * 0.94f;
     return w;
+}
+
+/* The Video & HUD page: renderer, internal resolution, picture, theme, overlay.
+ * The quick menu shows it as a pane and the start screen as its Settings page,
+ * so every setting can be read and changed from either, by mouse, keyboard or
+ * pad. With no machine yet (inter NULL, the start screen) the live figures are
+ * left out and a renderer change is carried out by main.c's start-screen loop. */
+static void gp_video_settings(Interconnect* inter, bool start_screen) {
+    (void)start_screen;
+    const float s = g_ui_scale;
+    char buf[192];
+    const ImVec2 bsz = ImVec2((ImGui::GetContentRegionAvail().x - 10.0f * s) * 0.5f, 38.0f * s);
+    /* This reports what the machine says and offers the controls that
+     * exist. What cannot change under a running process is marked, not
+     * hidden — a GL device row that says "next launch" is worth more
+     * than a control that looks live and does nothing. */
+    const HostInfo* host = host_info_get();
+    card_header_icon("Video & HUD", ZS_DATA, draw_icon_screen);
+
+    if (inter && ImGui::BeginTable("gp_video_now", 2, ImGuiTableFlags_SizingStretchProp)) {
+        gp_row("GPU", host->gl_renderer[0] ? host->gl_renderer : "unknown",
+               host->gpu_request[0] && !host->gpu_request_honoured ? ZS_CRIT : ZS_TEXT);
+        snprintf(buf, sizeof(buf), "%ux%u  %s",
+                 inter ? inter->gpu.crtc.display_width  : 0,
+                 inter ? inter->gpu.crtc.display_height : 0,
+                 inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
+        gp_row("Output", buf, ZS_TEXT);
+        ImGui::EndTable();
+    }
+    ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+    micro_label("Theme");
+    {
+        /* One row of five: the choice is visible without scrolling. */
+        const int cols = ImGui::GetContentRegionAvail().x < 430.0f * s ? 2 : 3;   /* "Ambient Light" needs ~140 px */
+        float gap = 8.0f * s;
+        float tw = (ImGui::GetContentRegionAvail().x - gap * (float)(cols - 1)) / (float)cols;
+        for (int i = 0; i < ZS_THEME_COUNT; i++) {
+            if (i % cols) ImGui::SameLine(0, gap);
+            if (gp_btn(g_themes[i].name, g_theme == i ? "active" : "", ImVec2(tw, 50.0f * s), false,
+                       g_theme == i, g_themes[i].data)) {
+                theme_set(i, true);
+                gp_toast(g_themes[i].name, g_themes[i].blurb, g_themes[i].data);
+            }
+        }
+    }
+    ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+    micro_label("Renderer");
+    const char* vk_why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
+    struct { const char* label; GfxBackendType type; } backends[2] = {
+        { "OpenGL 3.3", GFX_BACKEND_GL33 },
+        { "Vulkan 1.3", GFX_BACKEND_VULKAN },
+    };
+    for (int i = 0; i < 2; i++) {
+        bool live    = (s_gfx_backend == (int)backends[i].type);
+        bool blocked = (backends[i].type == GFX_BACKEND_VULKAN) && vk_why;
+        if (i) ImGui::SameLine(0, 10.0f * s);
+        if (gp_btn(backends[i].label, live ? "running" : (blocked ? "unavailable" : "switch"),
+                   ImVec2(bsz.x, 50.0f * s), live || blocked || g_req_gfx, live, ZS_OK))
+            gp_request_gfx(backends[i].type, -1, (uint32_t)g_vid_scale);
+    }
+    if (vk_why) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+        ImGui::TextWrapped("Vulkan: %s", vk_why);
+        ImGui::PopStyleColor();
+    }
+
+    int ndev = 0;
+    const GfxDeviceInfo* devs = gfx_devices((GfxBackendType)s_gfx_backend, &ndev);
+    for (int i = 0; i < ndev; i++) {
+        bool live = (i == g_gfx_live_device);
+        if (gp_btn(devs[i].name, live ? "running" : (devs[i].live_switchable ? "switch" : "next launch"),
+                   ImVec2(0, 46.0f * s), live || !devs[i].live_switchable || g_req_gfx, live, ZS_OK))
+            gp_request_gfx((GfxBackendType)s_gfx_backend, i, (uint32_t)g_vid_scale);
+    }
+    if (g_req_gfx) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
+        ImGui::TextUnformatted("Switching at the end of this frame...");
+        ImGui::PopStyleColor();
+    }
+    ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+    /* How the picture sits in the window. Host presentation only; the
+     * emulated frame is the same whatever is picked (draw_scanout). */
+    micro_label("Picture");
+    {
+        const float gap = 8.0f * s;
+        const float tw = (ImGui::GetContentRegionAvail().x - gap * 2.0f) / 3.0f;
+        for (int i = 0; i < VID_ASPECT_COUNT; i++) {
+            if (i) ImGui::SameLine(0, gap);
+            if (gp_btn(g_vid_aspect_names[i], g_vid_aspect_subs[i], ImVec2(tw, 50.0f * s),
+                       false, g_vid_aspect == i, ZS_DATA)) {
+                g_vid_aspect = i;
+                video_settings_save();
+            }
+        }
+    }
+    /* Internal resolution: how many image pixels the renderer draws per
+     * PS1 pixel. Vulkan only; a change rebuilds the Vulkan backend through
+     * the renderer switch, which carries VRAM across, so the game goes on. */
+    micro_label("Internal resolution");
+    {
+        static const int   scales[4] = { 1, 2, 4, 8 };
+        static const char* names[4]  = { "1x", "2x", "4x", "8x" };
+        static const char* subs[4]   = { "native", "640x480 class", "1280x960 class", "2560x1920 class" };
+        const bool vk = (s_gfx_backend == GFX_BACKEND_VULKAN);
+        const float gap = 8.0f * s;
+        const float tw = (ImGui::GetContentRegionAvail().x - gap * 3.0f) / 4.0f;
+        for (int i = 0; i < 4; i++) {
+            if (i) ImGui::SameLine(0, gap);
+            if (gp_btn(names[i], vk ? subs[i] : "Vulkan only", ImVec2(tw, 50.0f * s),
+                       !vk || g_req_gfx, g_vid_scale == scales[i], ZS_OK) &&
+                g_vid_scale != scales[i]) {
+                g_vid_scale = scales[i];
+                video_settings_save();
+                gp_request_gfx(GFX_BACKEND_VULKAN, g_gfx_live_device, (uint32_t)g_vid_scale);
+            }
+        }
+        if (!vk)
+            gp_pane_text("OpenGL draws at the PS1's own resolution. Switch the renderer to "
+                         "Vulkan above to draw at 2x, 4x or 8x.");
+    }
+    ImGui::Dummy(ImVec2(0, 4.0f * s));
+    if (gp_btn(g_vid_integer ? "Integer scale: on" : "Integer scale: off",
+               g_vid_aspect == VID_ASPECT_FILL ? "has no effect with Fill"
+                                               : "every scanline the same height, no uneven rows",
+               ImVec2(0, 46.0f * s), false, g_vid_integer, ZS_DATA)) {
+        g_vid_integer = !g_vid_integer;
+        video_settings_save();
+    }
+    if (gp_btn(g_vid_linear ? "Filter: smooth (bilinear)" : "Filter: sharp (nearest)",
+               g_vid_linear ? "softer edges when the picture is scaled"
+                            : "every PS1 pixel a hard block",
+               ImVec2(0, 46.0f * s), false, g_vid_linear, ZS_DATA)) {
+        g_vid_linear = !g_vid_linear;
+        video_settings_save();
+    }
+    ImGui::Dummy(ImVec2(0, 6.0f * s));
+
+    micro_label("Screen");
+    if (gp_btn("Fullscreen", "F11 or Alt+Enter", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
+        g_req_fullscreen = true;
+    snprintf(buf, sizeof(buf), "Overlay: %s", g_gp_hud_names[g_gp_hud_mode]);
+    if (gp_btn(buf, "F2 cycles auto-hide, always on, off", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
+        { g_gp_hud_mode = (g_gp_hud_mode + 1) % GP_HUD_COUNT; video_settings_save(); }
+    if (gp_btn(g_gp_graph ? "Frame-time graph: on" : "Frame-time graph: off",
+               "one bar per field against the budget", ImVec2(0, 46.0f * s), false, g_gp_graph, ZS_DATA))
+        { g_gp_graph = !g_gp_graph; video_settings_save(); }
+    if (gp_btn(g_gp_ambient ? "Ambient bars: on" : "Ambient bars: off",
+               "light from the frame fills the side bars", ImVec2(0, 46.0f * s), false, g_gp_ambient, ZS_DATA))
+        { g_gp_ambient = !g_gp_ambient; video_settings_save(); }
+    if (gp_btn(g_gp_pace_line ? "Rhythm line: on" : "Rhythm line: off",
+               "3 px along the top, one segment per field", ImVec2(0, 46.0f * s), false, g_gp_pace_line, ZS_DATA))
+        { g_gp_pace_line = !g_gp_pace_line; video_settings_save(); }
 }
 
 static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
@@ -5328,95 +5580,9 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                          "Cross to confirm, Circle to go back; Select + Start opens it from a game.");
             break;
         }
-        case GP_VIDEO: {
-            /* This reports what the machine says and offers the controls that
-             * exist. What cannot change under a running process is marked, not
-             * hidden — a GL device row that says "next launch" is worth more
-             * than a control that looks live and does nothing. */
-            const HostInfo* host = host_info_get();
-            card_header_icon("Video & HUD", ZS_DATA, draw_icon_screen);
-
-            if (ImGui::BeginTable("gp_video_now", 2, ImGuiTableFlags_SizingStretchProp)) {
-                gp_row("GPU", host->gl_renderer[0] ? host->gl_renderer : "unknown",
-                       host->gpu_request[0] && !host->gpu_request_honoured ? ZS_CRIT : ZS_TEXT);
-                snprintf(buf, sizeof(buf), "%ux%u  %s",
-                         inter ? inter->gpu.crtc.display_width  : 0,
-                         inter ? inter->gpu.crtc.display_height : 0,
-                         inter && inter->gpu.display_depth == D24Bits ? "24bpp" : "15bpp");
-                gp_row("Output", buf, ZS_TEXT);
-                ImGui::EndTable();
-            }
-            ImGui::Dummy(ImVec2(0, 6.0f * s));
-
-            micro_label("Theme");
-            {
-                /* One row of five: the choice is visible without scrolling. */
-                const int cols = ImGui::GetContentRegionAvail().x < 430.0f * s ? 2 : 3;   /* "Ambient Light" needs ~140 px */
-                float gap = 8.0f * s;
-                float tw = (ImGui::GetContentRegionAvail().x - gap * (float)(cols - 1)) / (float)cols;
-                for (int i = 0; i < ZS_THEME_COUNT; i++) {
-                    if (i % cols) ImGui::SameLine(0, gap);
-                    if (gp_btn(g_themes[i].name, g_theme == i ? "active" : "", ImVec2(tw, 50.0f * s), false,
-                               g_theme == i, g_themes[i].data)) {
-                        theme_set(i, true);
-                        gp_toast(g_themes[i].name, g_themes[i].blurb, g_themes[i].data);
-                    }
-                }
-            }
-            ImGui::Dummy(ImVec2(0, 6.0f * s));
-
-            micro_label("Renderer");
-            const char* vk_why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
-            struct { const char* label; GfxBackendType type; } backends[2] = {
-                { "OpenGL 3.3", GFX_BACKEND_GL33 },
-                { "Vulkan 1.3", GFX_BACKEND_VULKAN },
-            };
-            for (int i = 0; i < 2; i++) {
-                bool live    = (s_gfx_backend == (int)backends[i].type);
-                bool blocked = (backends[i].type == GFX_BACKEND_VULKAN) && vk_why;
-                if (i) ImGui::SameLine(0, 10.0f * s);
-                if (gp_btn(backends[i].label, live ? "running" : (blocked ? "unavailable" : "switch"),
-                           ImVec2(bsz.x, 50.0f * s), live || blocked || g_req_gfx, live, ZS_OK))
-                    gp_request_gfx(backends[i].type, -1, g_req_gfx_what.internal_scale);
-            }
-            if (vk_why) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
-                ImGui::TextWrapped("Vulkan: %s", vk_why);
-                ImGui::PopStyleColor();
-            }
-
-            int ndev = 0;
-            const GfxDeviceInfo* devs = gfx_devices((GfxBackendType)s_gfx_backend, &ndev);
-            for (int i = 0; i < ndev; i++) {
-                bool live = (i == g_gfx_live_device);
-                if (gp_btn(devs[i].name, live ? "running" : (devs[i].live_switchable ? "switch" : "next launch"),
-                           ImVec2(0, 46.0f * s), live || !devs[i].live_switchable || g_req_gfx, live, ZS_OK))
-                    gp_request_gfx((GfxBackendType)s_gfx_backend, i, g_req_gfx_what.internal_scale);
-            }
-            if (g_req_gfx) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
-                ImGui::TextUnformatted("Switching at the end of this frame...");
-                ImGui::PopStyleColor();
-            }
-            ImGui::Dummy(ImVec2(0, 6.0f * s));
-
-            micro_label("Screen");
-            if (gp_btn("Fullscreen", "F11 or Alt+Enter", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
-                g_req_fullscreen = true;
-            snprintf(buf, sizeof(buf), "Overlay: %s", g_gp_hud_names[g_gp_hud_mode]);
-            if (gp_btn(buf, "F2 cycles auto-hide, always on, off", ImVec2(0, 46.0f * s), false, false, ZS_DATA))
-                g_gp_hud_mode = (g_gp_hud_mode + 1) % GP_HUD_COUNT;
-            if (gp_btn(g_gp_graph ? "Frame-time graph: on" : "Frame-time graph: off",
-                       "one bar per field against the budget", ImVec2(0, 46.0f * s), false, g_gp_graph, ZS_DATA))
-                g_gp_graph = !g_gp_graph;
-            if (gp_btn(g_gp_ambient ? "Ambient bars: on" : "Ambient bars: off",
-                       "light from the frame fills the side bars", ImVec2(0, 46.0f * s), false, g_gp_ambient, ZS_DATA))
-                g_gp_ambient = !g_gp_ambient;
-            if (gp_btn(g_gp_pace_line ? "Rhythm line: on" : "Rhythm line: off",
-                       "3 px along the top, one segment per field", ImVec2(0, 46.0f * s), false, g_gp_pace_line, ZS_DATA))
-                g_gp_pace_line = !g_gp_pace_line;
+        case GP_VIDEO:
+            gp_video_settings(inter, false);
             break;
-        }
         case GP_MACHINE: {
             const HostInfo* host = host_info_get();
             host_info_sample();
@@ -5511,6 +5677,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
         else if (g_nav.right) { if (i % cols != cols - 1 && i + 1 < g_gp_pane_count) i++; }
         else if (g_nav.up)    { if (i - cols >= 0) i -= cols; }
         else if (g_nav.down)  { i = (i + cols < g_gp_pane_count) ? i + cols : g_gp_pane_count - 1; }
+        if (i != g_gp_pane_idx) g_gp_scroll_focus = true;
         g_gp_pane_idx = i;
     }
 }
@@ -5695,6 +5862,7 @@ static char               g_ln_error[256] = {0};
 static int                g_ln_nleft = 0, g_ln_nright = 0;
 static int                g_ln_right_j    = 0;      /* where the right column was left */
 static bool               g_ln_scroll     = false;  /* bring the focused control into view */
+static bool               g_ln_settings   = false;  /* the right column shows Settings instead of the discs */
 static bool               g_ln_req        = false;
 static std::string        g_ln_req_bios, g_ln_req_game;
 
@@ -5954,7 +6122,7 @@ static void ln_poll_dialog(void) {
  * no-disc row; on the BIOS list when there is no BIOS at all. */
 static void ln_place_focus(void) {
     const int nb = (int)g_ln_bios.size();
-    const int left = nb + 2;
+    const int left = nb + 3;   /* BIOS rows, Browse, Settings, Quit */
     if (nb == 0) { g_gp_pane_idx = 0; return; }   /* "Browse for a BIOS" */
     int j = 0;
     for (size_t i = 0; i < g_ln_games.size(); i++)
@@ -6069,8 +6237,11 @@ static void ln_draw(void) {
             if (gp_btn(label, g_ln_bios[i].sub.c_str(), ImVec2(bw, 60.0f * s), false, i == g_ln_bios_sel, ZS_DATA)) {
                 g_ln_bios_sel = i;
                 g_ln_error[0] = '\0';
-                g_gp_pane_idx = nb + 2 + g_ln_right_j;   /* chosen: on to the discs */
+                g_gp_pane_idx = nb + 3 + g_ln_right_j;   /* chosen: on to the discs */
                 g_ln_scroll = true;
+                /* The Enter that chose it must not also start the disc the
+                 * focus has just landed on, later in this same frame. */
+                memset(&g_nav, 0, sizeof(g_nav));
             }
             ImGui::Dummy(ImVec2(0, 2.0f * s));
         }
@@ -6080,6 +6251,18 @@ static void ln_draw(void) {
         ImGui::Dummy(ImVec2(0, 8.0f * s));
         gp_pane_text("The BIOS has to match the disc's region, as on the real console: a PAL disc "
                      "needs a PAL BIOS. The wrong pairing stops at the BIOS menu.");
+        /* Every setting of the Video & HUD page, here too, before anything runs:
+         * the right column swaps the discs for it. */
+        if (gp_btn(g_ln_settings ? "Settings: open" : "Settings",
+                   "renderer, resolution, picture, theme, overlay",
+                   ImVec2(bw, 52.0f * s), false, g_ln_settings, ZS_DATA)) {
+            g_ln_settings = !g_ln_settings;
+            g_ln_right_j  = 0;
+            g_gp_pane_idx = nb + 3;   /* the first control of the right column */
+            g_ln_scroll = g_gp_scroll_focus = true;
+            memset(&g_nav, 0, sizeof(g_nav));   /* one press, one action */
+        }
+        ImGui::Dummy(ImVec2(0, 4.0f * s));
         if (gp_btn("Quit", "", ImVec2(bw, 44.0f * s), false, false, ZS_CRIT))
             g_req_quit = true;
     }
@@ -6089,7 +6272,18 @@ static void ln_draw(void) {
     /* Right: no disc, every disc found, the dialog. The list scrolls. */
     ImGui::SetCursorScreenPos(ImVec2(w0.x + margin + left_w + gap, col_top));
     ImGui::BeginChild("##ln_right", ImVec2(right_w, body_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoNav);
-    {
+    if (g_ln_settings) {
+        card_header_icon("Settings", ZS_DATA, draw_icon_screen);
+        if (gp_btn("Back to the discs", "the settings are kept as they are", ImVec2(0, 46.0f * s),
+                   false, false, ZS_AUDIO)) {
+            g_ln_settings = false;
+            g_ln_right_j  = 0;
+            g_ln_focus_set = false;   /* back on the disc played last */
+            memset(&g_nav, 0, sizeof(g_nav));
+        }
+        ImGui::Dummy(ImVec2(0, 6.0f * s));
+        gp_video_settings(nullptr, true);
+    } else {
         card_header_icon("Discs", ZS_AUDIO, draw_icon_disc);
         const float bw = ImGui::GetContentRegionAvail().x - 8.0f * s;
         auto row = [&](const char* name, const char* sub, bool last) -> bool {
@@ -6132,7 +6326,7 @@ static void ln_draw(void) {
         g_kc_panel = true;
         ImVec2 p = ImVec2(w0.x + margin, w1.y - fh + (fh - (mono->LegacySize * 0.92f + 8.0f * s)) * 0.5f);
         p.x = gp_keycap(dl, p, "Arrows", "Move", 1.0f);
-        p.x = gp_keycap(dl, p, "Enter", "Start", 1.0f);
+        p.x = gp_keycap(dl, p, "Enter", g_ln_settings ? "Select" : "Start", 1.0f);
         p.x = gp_keycap(dl, p, "F5", "Read folders again", 1.0f);
         p.x = gp_keycap(dl, p, "F11", "Fullscreen", 1.0f);
         p.x = gp_keycap(dl, p, "Esc", "Quit", 1.0f);
@@ -6170,7 +6364,7 @@ static void ln_draw(void) {
     }
     if (right) g_ln_right_j = j;
     g_gp_pane_idx = right ? L + j : j;
-    if (moved) g_ln_scroll = true;
+    if (moved) g_ln_scroll = g_gp_scroll_focus = true;
 }
 
 extern "C" void debug_ui_launcher_render(void) {
@@ -6631,6 +6825,7 @@ extern "C" void debug_ui_notify_gfx_result(int backend, int device_index, bool o
                                            const char* detail) {
     s_gfx_backend     = backend;
     g_gfx_live_device = device_index;
+    if (ok && g_vid_renderer != backend) { g_vid_renderer = backend; video_settings_save(); }
     gp_toast(ok ? "Renderer switched" : "Switch failed — kept the old renderer",
              detail ? detail : (backend == GFX_BACKEND_VULKAN ? "Vulkan 1.3" : "OpenGL 3.3"),
              ok ? ZS_OK : ZS_CRIT);

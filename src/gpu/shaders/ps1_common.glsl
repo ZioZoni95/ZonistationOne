@@ -8,7 +8,7 @@
 // is the cheapest way to carry per-batch state and removes the per-uniform
 // location bookkeeping the GL backend keeps in its struct.
 //
-// 56 bytes; the Vulkan guaranteed minimum is 128.
+// 60 bytes; the Vulkan guaranteed minimum is 128.
 
 layout(push_constant) uniform PS1Push {
     ivec2 offset;          // GP0(E5) drawing offset, added to every vertex
@@ -20,4 +20,7 @@ layout(push_constant) uniform PS1Push {
     int   stp_mode;        // -1 off, 0 opaque pass (discard STP=1), 1 blend pass (discard STP=0)
     int   set_mask;        // GP0(E6).0 — force bit 15 on every pixel drawn
     int   mask_test;       // GP0(E6).1 — skip pixels whose destination bit 15 is set
+    int   scale;           // internal resolution: the VRAM image is 1024*scale x 512*scale.
+                           // Texture and CLUT addresses stay in PS1 units and are
+                           // multiplied here; gl_FragCoord is already in image pixels.
 } pc;

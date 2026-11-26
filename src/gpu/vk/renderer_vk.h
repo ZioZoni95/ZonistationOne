@@ -108,11 +108,24 @@ typedef struct {
     bool      initialized;
 
     /* Images. vram is the one VRAM: render target, upload target and sample
-     * source at once, which is why it lives in GENERAL layout permanently. */
+     * source at once, which is why it lives in GENERAL layout permanently.
+     *
+     * Internal resolution: vram and scanout are 1024*scale x 512*scale, and
+     * every PS1 halfword is a scale x scale block of vram. The CPU side never
+     * sees that. Uploads land in vram_native (1024x512, PS1 units) and are
+     * blitted up with NEAREST, so a block holds one value; readbacks are
+     * blitted down into vram_native (the sample at each block's centre) and
+     * copied from there, so the CPU still reads 1024x512 halfwords. At scale 1
+     * vram_native is not created and the copies go straight to vram, exactly as
+     * before. Chosen at init (GfxDeviceRequest.internal_scale); a change goes
+     * through the backend switch, which carries VRAM across. */
+    uint32_t  scale;
     VkrImage  vram;
+    VkrImage  vram_native;
     VkrImage  scanout;
     VkrImage  viewer;
     VkSampler sampler;
+    VkSampler sampler_linear;   /* only for ImGui drawing the scanout with bilinear filtering */
 
     /* Descriptors: one layout (a combined image sampler), one set pointing at
      * the VRAM image, shared by all three passes because all three sample it. */
@@ -152,6 +165,8 @@ typedef struct {
 
     /* ImGui's descriptor set for each image it draws, created once. */
     VkDescriptorSet imgui_scanout_set;
+    VkDescriptorSet imgui_scanout_set_linear;   /* the same image through sampler_linear */
+    bool            scanout_linear;             /* which of the two ImGui is handed */
     VkDescriptorSet imgui_vram_set;
     VkDescriptorSet imgui_viewer_set;
 

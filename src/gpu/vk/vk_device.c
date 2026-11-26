@@ -135,6 +135,12 @@ static void query_caps(VkPhysicalDevice pd, VkCaps* caps) {
                             has_device_extension(pd, VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME);
     caps->raster_order_access =
         has_device_extension(pd, VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME);
+
+    VkPhysicalDeviceProperties p;
+    vkGetPhysicalDeviceProperties(pd, &p);
+    caps->wide_lines     = f2.features.wideLines == VK_TRUE;
+    caps->line_width_max = caps->wide_lines ? p.limits.lineWidthRange[1] : 1.0f;
+    caps->max_image_2d   = p.limits.maxImageDimension2D;
 }
 
 /* Preference order when nothing was asked for: discrete, then integrated, then
@@ -238,8 +244,10 @@ static bool pick_physical_device(VkContext* c, int wanted) {
                       VK_API_VERSION_MAJOR(c->api_version),
                       VK_API_VERSION_MINOR(c->api_version),
                       VK_API_VERSION_PATCH(c->api_version));
-    LOG_RENDERER_INFO("[VK] caps: pixel_interlock=%d dual_src_blend=%d raster_order=%d",
-                      c->caps.pixel_interlock, c->caps.dual_src_blend, c->caps.raster_order_access);
+    LOG_RENDERER_INFO("[VK] caps: pixel_interlock=%d dual_src_blend=%d raster_order=%d "
+                      "wide_lines=%d (max %.1f) max_image_2d=%u",
+                      c->caps.pixel_interlock, c->caps.dual_src_blend, c->caps.raster_order_access,
+                      c->caps.wide_lines, (double)c->caps.line_width_max, c->caps.max_image_2d);
     return true;
 }
 
@@ -268,18 +276,24 @@ static bool create_logical_device(VkContext* c) {
         .fragmentShaderPixelInterlock = c->caps.pixel_interlock ? VK_TRUE : VK_FALSE,
     };
     /* Dynamic rendering and synchronization2 are 1.3 core, but still have to be
-     * switched on explicitly through the feature chain. */
+     * switched on explicitly through the feature chain. So does
+     * shaderDemoteToHelperInvocation, which every 1.3 device must support: glslang
+     * compiles the fragment shader's `discard` for a 1.3 target as a demote, and
+     * without the feature that shader was invalid SPIR-V on every device (the
+     * validation layer said so at each start). */
     VkPhysicalDeviceVulkan13Features v13 = {
         .sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext            = c->caps.pixel_interlock ? &interlock : NULL,
         .dynamicRendering = VK_TRUE,
         .synchronization2 = VK_TRUE,
+        .shaderDemoteToHelperInvocation = VK_TRUE,
     };
     VkPhysicalDeviceFeatures2 f2 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &v13,
     };
     f2.features.dualSrcBlend = c->caps.dual_src_blend ? VK_TRUE : VK_FALSE;
+    f2.features.wideLines    = c->caps.wide_lines     ? VK_TRUE : VK_FALSE;
 
     VkDeviceCreateInfo dci = {
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,

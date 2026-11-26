@@ -36,7 +36,13 @@ uint to16(vec4 t) {
     return r | (g << 5) | (b << 10) | (a << 15);
 }
 
-uint vram_read(ivec2 p) { return to16(texelFetch(vram_texture, p, 0)); }
+// Two kinds of address. A texel or CLUT entry is named in PS1 units, and at an
+// internal resolution of N each PS1 halfword is an N x N block of the image: an
+// upload fills the block with one value, so its top-left sample is the halfword.
+// A destination pixel (the mask test) is named by gl_FragCoord, which is already
+// in image pixels and must not be scaled again.
+uint vram_read(ivec2 p)    { return to16(texelFetch(vram_texture, p * pc.scale, 0)); }
+uint vram_read_px(ivec2 p) { return to16(texelFetch(vram_texture, p, 0)); }
 
 vec3 psx_to_rgb(uint raw) {
     return vec3(float( raw        & 0x1Fu) / 31.0,
@@ -49,7 +55,7 @@ void main() {
     // halfword already has bit 15 set, which is how a game protects sprites it
     // has drawn from being overpainted.
     if (pc.mask_test == 1) {
-        uint dst = vram_read(ivec2(gl_FragCoord.xy));
+        uint dst = vram_read_px(ivec2(gl_FragCoord.xy));
         if ((dst & 0x8000u) != 0u) discard;
     }
 
@@ -92,7 +98,15 @@ void main() {
             uint index    = (raw_word >> ((u & 1u) * 8u)) & 0xFFu;
             raw_color     = vram_read(ivec2(clut_x + index, clut_y));
         } else {                                 // 15bpp direct (depth 2 or 3)
-            raw_color     = vram_read(ivec2(page_x + u, page_y + v));
+            // A direct texel needs no decode, so at an internal resolution the
+            // sample inside its block can follow the fraction of the texture
+            // coordinate: a texture the game rendered itself (a framebuffer
+            // effect, a rendered sprite) then keeps the resolution it was drawn
+            // at. An uploaded texture has the same value in every sample of the
+            // block, so for it this is the same texel. At 1x the offset is 0.
+            ivec2 sub = clamp(ivec2(fract(tex_coord) * float(pc.scale)),
+                              ivec2(0), ivec2(pc.scale - 1));
+            raw_color = vram_read_px(ivec2(page_x + u, page_y + v) * pc.scale + sub);
         }
 
         // Fully black and STP clear is the PS1's transparent texel.
@@ -118,8 +132,11 @@ void main() {
             -3,  1, -4,  0,
              3, -1,  2, -2
         );
-        int   dx   = int(mod(gl_FragCoord.x, 4.0));
-        int   dy   = int(mod(gl_FragCoord.y, 4.0));
+        // The 4x4 pattern is in PS1 pixels, so at an internal resolution each
+        // cell covers scale x scale image pixels and the picture dithers the
+        // way the console did instead of in a finer pattern.
+        int   dx   = (int(gl_FragCoord.x) / pc.scale) & 3;
+        int   dy   = (int(gl_FragCoord.y) / pc.scale) & 3;
         float doff = float(dither_table[dy * 4 + dx]) / 255.0;
         vec3  c_d  = clamp(final_color.rgb + vec3(doff), 0.0, 1.0);
         final_color.rgb = floor(c_d * 255.0 / 8.0) / 31.0;

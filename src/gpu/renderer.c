@@ -265,6 +265,10 @@ GfxTexHandle renderer_get_scanout_texture(Renderer* renderer) {
     if (!LIVE(renderer)) return 0;
     return renderer->vt->get_scanout_texture(renderer->impl);
 }
+void renderer_set_scanout_filter(Renderer* renderer, bool linear) {
+    if (!LIVE(renderer)) return;
+    renderer->vt->set_scanout_filter(renderer->impl, linear);
+}
 GfxTexHandle renderer_get_vram_viewer_texture(Renderer* renderer) {
     if (!LIVE(renderer)) return 0;
     return renderer->vt->get_vram_viewer_texture(renderer->impl);

@@ -149,7 +149,16 @@ static void apply_gpu_preference(void) {
  * recreate the window rather than just the context. */
 static GfxBackendType pick_backend(void) {
     const char* want = getenv("ZS1_GFX");
-    if (!want) return GFX_BACKEND_GL33;
+    if (!want) {
+        /* No variable: the renderer last chosen in a menu (zs1_video.txt), if
+         * it can come up here; OpenGL otherwise, as before. */
+        if (debug_ui_saved_backend() == (int)GFX_BACKEND_VULKAN) {
+            const char* why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
+            if (!why) return GFX_BACKEND_VULKAN;
+            LOG_SYSTEM_WARN("[SYSTEM] Vulkan was chosen last time but is unavailable: %s", why);
+        }
+        return GFX_BACKEND_GL33;
+    }
     if (!strcmp(want, "vulkan") || !strcmp(want, "vk")) {
         const char* why = gfx_backend_unavailable_reason(GFX_BACKEND_VULKAN);
         if (why) {
@@ -639,8 +648,10 @@ static void inject_tty_keys(Interconnect* inter) {
  * opened once to check it and closed again: the drive opens it for real once the
  * machine is built (cdrom_load_disc). Paced to about 60 frames a second, since
  * without a machine there is no audio ring to be the clock. */
-static bool run_start_screen(SdlCtx* sdl, Renderer* r, Controller* pad, Bios* bios,
+static bool run_start_screen(SdlCtx* sdl, Interconnect* inter, GfxBackendType* backend, int* gfx_device,
+                             Controller* pad, Bios* bios,
                              char* bios_path, size_t bios_n, char* game_path, size_t game_n) {
+    Renderer* r = &inter->gpu.renderer;
     static CdromDisc probe;   /* a few KB of track table; static like the machine */
     const uint64_t freq = SDL_GetPerformanceFrequency();
     const uint64_t tick = freq / 60;
@@ -678,6 +689,23 @@ static bool run_start_screen(SdlCtx* sdl, Renderer* r, Controller* pad, Bios* bi
         if (debug_ui_take_quit_request()) {
             LOG_SYSTEM_INFO("[SYSTEM] Quit: requested from the start screen");
             return false;
+        }
+        /* The Settings page can change the renderer, its GPU or the internal
+         * resolution before anything runs. Same switch as in a game: the
+         * machine is not built yet, so there is nothing in VRAM to carry and
+         * the drawing state it re-sends is reset again by interconnect_init(). */
+        {
+            GfxDeviceRequest req;
+            if (debug_ui_take_gfx_request(&req)) {
+                bool ok = switch_gfx_backend(sdl, inter, backend, gfx_device, &req);
+                const HostInfo* hi = host_info_get();
+                debug_ui_notify_gfx_result((int)*backend, *gfx_device, ok,
+                                           hi->gl_renderer[0] ? hi->gl_renderer : NULL);
+                if (!ok && !r->impl) {
+                    LOG_SYSTEM_ERROR("[SYSTEM] No renderer left after the switch — stopping");
+                    return false;
+                }
+            }
         }
         if (debug_ui_launcher_take_start(bios_path, bios_n, game_path, game_n)) {
             if (!bios_load(bios, bios_path)) {
@@ -809,7 +837,11 @@ int main(int argc, char* argv[]) {
      * meant the four setters gpu_reset_state() calls (gpu.c:661-668) landed on
      * a renderer that did not exist yet; running init first means they land on
      * the live backend instead of on its pre-init state. */
-    if (!renderer_init(&inter.gpu.renderer, sdl.win)) {
+    /* The saved internal resolution goes in from the first frame (Vulkan only;
+     * OpenGL ignores it). ZS1_SCALE overrides it for one run. */
+    GfxDeviceRequest start_req = { backend, -1, debug_ui_internal_scale() };
+    if (getenv("ZS1_SCALE")) start_req.internal_scale = (uint32_t)atoi(getenv("ZS1_SCALE"));
+    if (!renderer_init_ex(&inter.gpu.renderer, sdl.win, &start_req)) {
         LOG_SYSTEM_ERROR("[SYSTEM] Renderer init failed");
         shutdown_sdl(&sdl);
         return 1;
@@ -830,7 +862,7 @@ int main(int argc, char* argv[]) {
         controller_init(&gamepad);   /* the screen is driven by the pad too */
         pad_up = true;
 
-        if (!run_start_screen(&sdl, &inter.gpu.renderer, &gamepad, &bios,
+        if (!run_start_screen(&sdl, &inter, &backend, &gfx_device, &gamepad, &bios,
                               chosen_bios, sizeof(chosen_bios), chosen_game, sizeof(chosen_game))) {
             renderer_stop_gpu_thread(&inter.gpu.renderer);
             if (backend != GFX_BACKEND_VULKAN) SDL_GL_MakeCurrent(sdl.win, sdl.ctx);

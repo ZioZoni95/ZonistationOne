@@ -28,6 +28,12 @@ typedef struct {
                               * what GL needed glTextureBarrier for */
     bool dual_src_blend;     /* collapses the two-pass semi-transparent textured draw */
     bool raster_order_access;/* VK_EXT_rasterization_order_attachment_access */
+    /* For the internal resolution: lines wider than one pixel (so a PS1 line
+     * stays one *PS1* pixel wide at 4x), and the largest image there may be
+     * (VRAM at scale S is 1024S x 512S). */
+    bool     wide_lines;
+    float    line_width_max;
+    uint32_t max_image_2d;
 } VkCaps;
 
 typedef struct {

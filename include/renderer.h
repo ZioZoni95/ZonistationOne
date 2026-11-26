@@ -106,6 +106,8 @@ void renderer_wait_frame_done(Renderer* renderer);
 GfxTexHandle renderer_get_display_texture(Renderer* renderer);
 /* The display-ready image produced by the scanout pass (what the screen shows). */
 GfxTexHandle renderer_get_scanout_texture(Renderer* renderer);
+/* Nearest (false) or bilinear (true) when the scanout image is scaled to the window. */
+void renderer_set_scanout_filter(Renderer* renderer, bool linear);
 void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GfxTexHandle renderer_get_vram_viewer_texture(Renderer* renderer);

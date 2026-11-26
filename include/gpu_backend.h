@@ -165,6 +165,13 @@ typedef struct GfxBackend {
     GfxTexHandle (*get_display_texture)(GfxImpl impl);
     GfxTexHandle (*get_scanout_texture)(GfxImpl impl);
     GfxTexHandle (*get_vram_viewer_texture)(GfxImpl impl);
+
+    /* How the scanout image is filtered when the interface scales it to the
+     * window: false = nearest (every PS1 pixel a hard block, the default), true
+     * = bilinear. Only the host-side presentation changes; the emulated picture
+     * does not. Called every frame by the interface, so a backend switch needs
+     * nothing re-sent. */
+    void (*set_scanout_filter)(GfxImpl impl, bool linear);
 } GfxBackend;
 
 /* The registry. renderer.c picks one of these at init. A backend that was not

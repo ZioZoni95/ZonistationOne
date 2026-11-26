@@ -7,6 +7,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-26: internal resolution on Vulkan, and settings everywhere (branch `feature/graphics`)
+
+**Checked** on Windows (RTX 4060): Ace Combat 2 at 4x and 8x, 16:9 fullscreen at 2560x1440, 50 fps
+with the GPU at 21-37%; the Vulkan validation layer reports nothing at 1x, 4x or 8x; four renderer
+switches starting from 8x carried VRAM across; the start screen's Settings page by keyboard
+(scrolls to the focused control); `make` with no warning, `make test` 11 of 11; every source
+compiles on Linux (WSL). **Not checked:** other games at a high resolution, the pad on the Settings
+page, running on Linux.
+
+#### Added
+- Internal resolution 1x/2x/4x/8x on Vulkan (`GfxDeviceRequest.internal_scale`, `ZS1_SCALE`):
+  scaled VRAM and scanout, uploads blitted up and readbacks blitted down through a native image,
+  so the CPU side, savestates and the renderer switch are unchanged. Lines one PS1 pixel wide
+  (`wideLines`).
+- The whole Video & HUD page is also the start screen's Settings page; the quick menu pane scrolls
+  to the control the keyboard or pad moves to. The renderer, the internal resolution and the
+  overlay switches are now saved in `zs1_video.txt`, and the next start uses them.
+
+#### Fixed
+- Vulkan: ImGui's buffers, pipeline, sampler and descriptor sets were destroyed while the last
+  frame still used them, at every shutdown and renderer switch (validation errors).
+- Vulkan: `shaderDemoteToHelperInvocation` was not enabled, so the fragment shader's `discard`
+  was invalid SPIR-V on every device.
+- Vulkan: the descriptor pool had no room for the sampler and sampled-image sets ImGui allocates.
+- Start screen: Enter on a BIOS also started the disc the focus moved to in the same frame.
+
+### 2026-11-26: picture settings (branch `feature/graphics`)
+
+First step of the graphics work (output, then internal resolution on Vulkan, then widescreen). How
+the finished picture sits in the window is now a choice, on both renderers: aspect 4:3 (the
+default, unchanged), Fill or 16:9; integer scale; nearest or bilinear filtering. Host presentation
+only: the emulated frame, its size and its timing do not change. **Checked** on Windows with the PAL
+BIOS: 16:9 with bilinear on OpenGL, 4:3 with integer scale on Vulkan, by screenshot; `make` with no
+warning from this project's sources; `make test`, 11 of 11; on Linux (WSL) every source compiles
+with no warning. **Not checked:** running it on Linux, a renderer switch with bilinear on, HiDPI with integer scale, the debug workspace's Display mode.
+
+#### Added
+- Video & HUD > Picture in the quick menu; the choice is kept in `zs1_video.txt`.
+- `set_scanout_filter` in the backend vtable (`renderer_set_scanout_filter`): GL changes the scanout
+  texture's filter on its GPU thread; Vulkan keeps a second ImGui descriptor for the scanout through
+  a linear sampler.
+
+#### Documentation
+- `CLAUDE.md`: the NVIDIA overlay note (its "problem with NVIDIA software" notice after a run is not
+  an emulator crash as far as could be seen).
+
 ### 2026-11-26: the start screen (branch `windows-support`)
 
 Started without a BIOS on the command line — a double-click, on Windows the usual way — the binary

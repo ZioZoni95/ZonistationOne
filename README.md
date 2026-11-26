@@ -160,6 +160,14 @@ context, and the platform limits (OpenGL needs X11 here, Vulkan on an Intel iGPU
 [docs/RENDERERS_AND_CONTROLLERS.md](docs/RENDERERS_AND_CONTROLLERS.md). On a hybrid-graphics laptop
 check the `GL driver in use` line in `logs/System.log` before judging a rendering difference.
 
+**Settings** are on the start screen (the Settings button) and in the quick menu (**Esc → Video &
+HUD**), the same page in both, by mouse, keyboard or pad: theme, renderer and GPU, **internal
+resolution 1x/2x/4x/8x (Vulkan only)**, picture 4:3 / Fill / 16:9, integer scale, sharp or smooth
+filter, and the overlay switches. Everything is kept in `zs1_video.txt`, the renderer included, and
+the next start uses it. A higher internal resolution redraws the 3D at that many times the PS1's
+pixels; above the monitor's resolution with the smooth filter it doubles as anti-aliasing
+(supersampling). 2D art and FMV stay at their own resolution.
+
 ### Environment variables
 
 The ones to know first; `CLAUDE.md` lists them all with their history.
@@ -181,6 +189,7 @@ The ones to know first; `CLAUDE.md` lists them all with their history.
 | `ZS1_DMA_STALL=doc`, `ZS1_RAM_LOAD_STALL=<n>`, `ZS1_DMA_GPU_PACE=legacy` | Timing models: documented DMA cost (opt-in, changes emulated timing), RAM load cost, GPU DMA pacing |
 | `ZS1_CD_XA_HOLD=1`, `ZS1_MDEC_WRAP9=1`, `ZS1_FORCE_READBACK=1`, `ZS1_DISPLAY_LATCH=1` | Restore the older behaviour of one fix, for an A/B |
 | `ZS1_VK_VALIDATE=1`, `ZS1_GFX_SWITCH_TEST=<n>` | Vulkan validation layer, flip the renderer every `n` fields |
+| `ZS1_SCALE=1\|2\|4\|8` | Internal resolution for this run (Vulkan), over the saved one |
 
 **Never quote a speed figure from a run with `ZS1_LOG_STDERR`, debug logging, a Lua probe or a
 breakpoint active.** The instrumentation costs more than what it measures.

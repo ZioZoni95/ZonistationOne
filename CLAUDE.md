@@ -157,6 +157,18 @@ both systems — see "The two shells" below.
   `MSYS_NO_PATHCONV=1`. Inside a Git Bash heredoc a Lua `"\\"` arrives as one backslash.
 - Does not carry over to Windows: the X11/Wayland notes, the hidraw udev rule, `make hwtest` as
   written. The `/usr/share/fonts` fallbacks are harmless; the bundled `assets/fonts/` come first.
+- **Simulated keys from PowerShell**: `SendKeys` sends arrows without a scancode, and ImGui's SDL3
+  backend then reads them as keypad keys, so the menus ignore them while Enter works. Use
+  `keybd_event` with `MapVirtualKey(vk, 0)` and the extended flag for arrows. Vulkan validation on
+  Windows: `pacman -S mingw-w64-ucrt-x86_64-vulkan-validation-layers`, then
+  `VK_ADD_LAYER_PATH=C:\msys64\ucrt64\bin ZS1_VK_VALIDATE=1`, with `VK_LAYER_LOG_FILENAME` for a file.
+- **The NVIDIA overlay (ShadowPlay) injects into the emulator** and registers it as a game
+  (`C:\ProgramData\NVIDIA Corporation\ShadowPlay\CaptureCore.log`: `Added new app ... game[1]`). On
+  2026-11-26 a run was followed by the NVIDIA app's "a problem occurred with NVIDIA software, send
+  logs?" notice, raised by `NVDisplay.Container`'s crash reporter. Nothing restarted, the Windows
+  event log had no crash, and the emulator's own shutdown completed; attributed to the overlay and
+  set aside by the maintainer. Do not chase it as an emulator bug without new evidence (a non-zero
+  exit code, or the notice with the in-game overlay turned off).
 
 ---
 
@@ -495,6 +507,17 @@ If no document needs to change, say so and why.
     `offsetof(Gpu, renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two
     pointers moved both boundaries by the same amount. Verified: a state saved and reloaded across
     the change restores PC and cycle exactly and the machine runs on.
+- **Internal resolution (Vulkan only, 2026-11-26)**: `GfxDeviceRequest.internal_scale` = 1/2/4/8
+  (saved in `zs1_video.txt`, `ZS1_SCALE` for one run; a change goes through the renderer switch).
+  VRAM and scanout images are 1024S x 512S; each PS1 halfword is an S x S block. The CPU never sees
+  that: uploads go into a 1024x512 `vram_native` image and are blitted up (NEAREST), readbacks are
+  blitted down into it and copied from there, so `read_vram_rect`, savestates and the backend switch
+  still deal in 1024x512 halfwords. Shaders take `scale` in their push constants: texture and CLUT
+  addresses are PS1 units times S, the mask test reads `gl_FragCoord` as is, dither is in PS1
+  pixels, 24bpp scanout is decoded at 1x, and a 15bpp texel samples the sub-pixel its UV fraction
+  points at (render-to-texture keeps its resolution). Lines are S pixels wide via `wideLines`.
+  `ZS1_DUMP_FRAME` is 1x only. OpenGL stays at 1x as the accuracy reference. Checked with the
+  validation layer at 1x, 4x and 8x and across four GL/Vulkan switches from 8x.
 - **Vulkan 1.3 is the second backend** (`src/gpu/vk/`, since 2026-08-25), and it is swapped **live**
   from the quick menu's *Video* entry. Things about it that cost time to learn:
   - **`renderer_upload_vram()` is a no-op on Vulkan, on purpose.** GL records the whole-VRAM upload
@@ -609,11 +632,14 @@ If no document needs to change, say so and why.
     only looks like a reset. Whoever adds it should treat the BIOS boot path as the reference —
     `main.c` builds the machine once today, and the reset has to reach the drive, the SPU's RAM and
     the event queue, not just the CPU.
-- **The shell's settings are read-only where the machine has no setter.** Volume, scanlines, scaling
-  mode and crop appear in the interface study's design and are not in the shell: the renderer has no
-  runtime switch for any of them, and reverb is guest state (SPUCNT), not a host preference. The
-  quick menu shows what the machine reports and offers the controls that do exist — pad mode,
-  savestate slots, the workspace, quit.
+- **The shell's settings are read-only where the machine has no setter.** Volume, scanlines and
+  crop appear in the interface study's design and are not in the shell, and reverb is guest state
+  (SPUCNT), not a host preference. The scaling mode *is* there since 2026-11-26 (Video & HUD >
+  Picture: aspect 4:3 / Fill / 16:9, integer scale, nearest or bilinear, in `zs1_video.txt`): it is
+  host presentation, done in `draw_scanout()` plus one backend call, `set_scanout_filter`, which GL
+  applies on its GPU thread and Vulkan answers with a second ImGui descriptor through a linear
+  sampler. The interface re-sends the filter every frame, so a renderer switch needs nothing
+  carried over.
 
 - **The only game-level bug known today: in `Dino Crisis (E)`'s in-engine 3D cutscenes some character
   voices still arrive after the ambient sound** (reported 2026-10-03, right at the start of the game;

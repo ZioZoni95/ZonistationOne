@@ -50,20 +50,23 @@ typedef struct {
     float   screen_scale[2];
     int32_t tex_window[4];
     int32_t use_texture, raw_texture, dither_enable, stp_mode, set_mask, mask_test;
-} VkrPs1Push;                      /* 56 bytes */
+    int32_t scale;                 /* internal resolution */
+} VkrPs1Push;                      /* 60 bytes */
 
 typedef struct {
     int32_t disp_off[2];
     int32_t disp_size[2];
     int32_t depth24;
-} VkrScanoutPush;                  /* 20 bytes */
+    int32_t scale;
+} VkrScanoutPush;                  /* 24 bytes */
 
 typedef struct {
     int32_t clut[2];
     int32_t _pad[2];               /* ivec3 flags starts on a 16-byte boundary */
     int32_t flags[3];
     int32_t mode;
-} VkrViewerPush;                   /* 32 bytes */
+    int32_t scale;
+} VkrViewerPush;                   /* 36 bytes */
 
 #define VK_TRY(expr, what)                                                  \
     do {                                                                    \
@@ -244,6 +247,47 @@ static void vkr_barrier_vram_feedback(VkCommandBuffer cmd, VkrImage* vram) {
                          0, 0, NULL, 0, NULL, 1, &b);
 }
 
+/* vram_native sits in GENERAL for its whole life and is only ever touched by
+ * transfers; this orders one transfer against the next. */
+static void vkr_barrier_native(VkCommandBuffer cmd, VkrImage* native,
+                               VkAccessFlags src_access, VkAccessFlags dst_access) {
+    VkImageMemoryBarrier b = {
+        .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask       = src_access,
+        .dstAccessMask       = dst_access,
+        .oldLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = native->image,
+        .subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+    };
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &b);
+}
+
+/* A NEAREST blit between a rect in PS1 units in vram_native and the same rect,
+ * scaled, in vram. Up (native -> vram) fills every block with its halfword; down
+ * (vram -> native) takes the sample at the centre of each block. Both images
+ * stay in GENERAL. */
+static void vkr_blit_native(VkRenderer* r, VkCommandBuffer cmd, bool up,
+                            uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    const int32_t S = (int32_t)r->scale;
+    const VkOffset3D n0 = { (int32_t)x, (int32_t)y, 0 };
+    const VkOffset3D n1 = { (int32_t)(x + w), (int32_t)(y + h), 1 };
+    const VkOffset3D v0 = { (int32_t)x * S, (int32_t)y * S, 0 };
+    const VkOffset3D v1 = { (int32_t)(x + w) * S, (int32_t)(y + h) * S, 1 };
+    VkImageBlit bl = {
+        .srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+    };
+    bl.srcOffsets[0] = up ? n0 : v0;  bl.srcOffsets[1] = up ? n1 : v1;
+    bl.dstOffsets[0] = up ? v0 : n0;  bl.dstOffsets[1] = up ? v1 : n1;
+    vkCmdBlitImage(cmd, up ? r->vram_native.image : r->vram.image, VK_IMAGE_LAYOUT_GENERAL,
+                   up ? r->vram.image : r->vram_native.image, VK_IMAGE_LAYOUT_GENERAL,
+                   1, &bl, VK_FILTER_NEAREST);
+}
+
 static VkShaderModule vkr_shader(VkRenderer* r, const unsigned char* code, size_t len) {
     VkShaderModuleCreateInfo ci = {
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -324,7 +368,7 @@ static bool vkr_create_pipeline(VkRenderer* r,
                                 VkPrimitiveTopology topology,
                                 const VkVertexInputBindingDescription* binding,
                                 const VkVertexInputAttributeDescription* attrs, uint32_t n_attrs,
-                                VkrBlend blend,
+                                VkrBlend blend, bool dynamic_line_width,
                                 VkPipeline* out) {
     VkPipelineShaderStageCreateInfo stages[2] = {
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -367,11 +411,13 @@ static bool vkr_create_pipeline(VkRenderer* r,
         .attachmentCount = 1,
         .pAttachments    = &ba,
     };
-    VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
-                              VK_DYNAMIC_STATE_BLEND_CONSTANTS };
+    /* Line width is dynamic on the line pipelines only, so a line can be drawn
+     * one PS1 pixel wide at any internal resolution (vkr_exec_batch). */
+    VkDynamicState dyn[4] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR,
+                              VK_DYNAMIC_STATE_BLEND_CONSTANTS, VK_DYNAMIC_STATE_LINE_WIDTH };
     VkPipelineDynamicStateCreateInfo ds = {
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-        .dynamicStateCount = 3,
+        .dynamicStateCount = dynamic_line_width ? 4u : 3u,
         .pDynamicStates    = dyn,
     };
     /* Dynamic rendering: no VkRenderPass, no VkFramebuffer, and the target
@@ -425,17 +471,17 @@ static bool vkr_create_pipelines(VkRenderer* r) {
     for (int b = 0; b < VKR_BLEND_COUNT && ok; b++) {
         ok = ok && vkr_create_pipeline(r, ps1_vs, ps1_fs, r->ps1_layout, r->vram.format,
                                        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                                       &binding, attrs, 4, (VkrBlend)b, &r->ps1_tri[b]);
+                                       &binding, attrs, 4, (VkrBlend)b, false, &r->ps1_tri[b]);
         ok = ok && vkr_create_pipeline(r, ps1_vs, ps1_fs, r->ps1_layout, r->vram.format,
                                        VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
-                                       &binding, attrs, 4, (VkrBlend)b, &r->ps1_line[b]);
+                                       &binding, attrs, 4, (VkrBlend)b, true, &r->ps1_line[b]);
     }
     ok = ok && vkr_create_pipeline(r, full_vs, scan_fs, r->scanout_layout, r->scanout.format,
                                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                                   NULL, NULL, 0, VKR_BLEND_OFF, &r->scanout_pipe);
+                                   NULL, NULL, 0, VKR_BLEND_OFF, false, &r->scanout_pipe);
     ok = ok && vkr_create_pipeline(r, full_vs, view_fs, r->viewer_layout, r->viewer.format,
                                    VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                                   NULL, NULL, 0, VKR_BLEND_OFF, &r->viewer_pipe);
+                                   NULL, NULL, 0, VKR_BLEND_OFF, false, &r->viewer_pipe);
 
     vkDestroyShaderModule(r->ctx.device, ps1_vs,  NULL);
     vkDestroyShaderModule(r->ctx.device, ps1_fs,  NULL);
@@ -467,14 +513,19 @@ static bool vkr_create_descriptors(VkRenderer* r) {
     /* One pool for this backend's single set and for every texture ImGui wants
      * to draw. FREE_DESCRIPTOR_SET is set because ImGui's backend frees the
      * sets it made for textures that go away. */
-    VkDescriptorPoolSize sizes[1] = {
+    /* ImGui's Vulkan backend also allocates sets with separate SAMPLER and
+     * SAMPLED_IMAGE bindings from this pool; without sizes for those the
+     * validation layer warned at every start, and a driver may refuse them. */
+    VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 128 },
+        { VK_DESCRIPTOR_TYPE_SAMPLER,                16 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          16 },
     };
     VkDescriptorPoolCreateInfo pci = {
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .flags         = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = 128,
-        .poolSizeCount = 1,
+        .poolSizeCount = 3,
         .pPoolSizes    = sizes,
     };
     VK_TRY(vkCreateDescriptorPool(r->ctx.device, &pci, NULL, &r->desc_pool),
@@ -600,6 +651,10 @@ static bool vkr_initial_transitions(VkRenderer* r) {
     vkr_image_barrier(cmd, &r->vram, VK_IMAGE_LAYOUT_GENERAL, 0,
                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT,
                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT);
+    if (r->vram_native.image)
+        vkr_image_barrier(cmd, &r->vram_native, VK_IMAGE_LAYOUT_GENERAL, 0,
+                          VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     vkr_image_barrier(cmd, &r->scanout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0,
                       VK_ACCESS_SHADER_READ_BIT,
                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
@@ -622,15 +677,36 @@ bool vkr_init(VkRenderer* r, SDL_Window* window, const GfxDeviceRequest* req) {
     int device_index = req ? req->device_index : -1;
     if (!vk_context_create(&r->ctx, window, device_index)) return false;
 
-    /* RGBA8_UNORM at 1024x512, exactly the GL backend's vram_tex: PS1 halfwords
-     * stored 5:5:5:1 expanded to 8 bits per channel, alpha carrying the mask
-     * bit. Same format, same expansion, same size — the parity check between
-     * the backends is a byte comparison or it is nothing. */
-    if (!vkr_image_create(r, &r->vram, VKR_VRAM_W, VKR_VRAM_H, VK_FORMAT_R8G8B8A8_UNORM,
+    /* Internal resolution: 1, 2, 4 or 8, and no more than the device's largest
+     * image allows (VRAM at scale S is 1024S wide). Anything else is taken as the
+     * nearest lower power of two, so a typed-in 3 is 2 rather than a refusal. */
+    {
+        uint32_t want = (req && req->internal_scale) ? req->internal_scale : 1u;
+        uint32_t s = 1;
+        while (s * 2 <= want && s * 2 <= 8 &&
+               (uint64_t)VKR_VRAM_W * s * 2 <= (uint64_t)r->ctx.caps.max_image_2d)
+            s *= 2;
+        r->scale = s;
+        if (s != want)
+            LOG_RENDERER_WARN("[VK] internal resolution %ux asked for, %ux used", want, s);
+    }
+    const uint32_t S = r->scale;
+
+    /* RGBA8_UNORM, exactly the GL backend's vram_tex: PS1 halfwords stored
+     * 5:5:5:1 expanded to 8 bits per channel, alpha carrying the mask bit. At
+     * scale 1 it is 1024x512 like GL's, and the parity check between the
+     * backends is a byte comparison or it is nothing. */
+    if (!vkr_image_create(r, &r->vram, VKR_VRAM_W * S, VKR_VRAM_H * S, VK_FORMAT_R8G8B8A8_UNORM,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                           VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
         return false;
-    if (!vkr_image_create(r, &r->scanout, VKR_VRAM_W, VKR_VRAM_H, VK_FORMAT_R8G8B8A8_UNORM,
+    /* Transfers only; SAMPLED is there because vkr_image_create() makes a view
+     * for every image, and a view needs a usage a view can serve. */
+    if (S > 1 && !vkr_image_create(r, &r->vram_native, VKR_VRAM_W, VKR_VRAM_H, VK_FORMAT_R8G8B8A8_UNORM,
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                   VK_IMAGE_USAGE_SAMPLED_BIT))
+        return false;
+    if (!vkr_image_create(r, &r->scanout, VKR_VRAM_W * S, VKR_VRAM_H * S, VK_FORMAT_R8G8B8A8_UNORM,
                           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT))
         return false;
@@ -653,6 +729,11 @@ bool vkr_init(VkRenderer* r, SDL_Window* window, const GfxDeviceRequest* req) {
         .borderColor  = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
     };
     VK_TRY(vkCreateSampler(r->ctx.device, &sci, NULL, &r->sampler), "vkCreateSampler");
+    /* The same, filtered: what the interface scales the finished picture with
+     * when bilinear presentation is chosen. The rasteriser never sees it. */
+    sci.magFilter = VK_FILTER_LINEAR;
+    sci.minFilter = VK_FILTER_LINEAR;
+    VK_TRY(vkCreateSampler(r->ctx.device, &sci, NULL, &r->sampler_linear), "vkCreateSampler (linear)");
 
     VkPipelineCacheCreateInfo pcc = { .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
     VK_TRY(vkCreatePipelineCache(r->ctx.device, &pcc, NULL, &r->pipe_cache), "vkCreatePipelineCache");
@@ -674,7 +755,8 @@ bool vkr_init(VkRenderer* r, SDL_Window* window, const GfxDeviceRequest* req) {
 
     memset(s_frame, 0, sizeof(s_frame));
     r->initialized = true;
-    LOG_RENDERER_INFO("[VK] backend initialised on %s", r->ctx.device_name);
+    LOG_RENDERER_INFO("[VK] backend initialised on %s, internal resolution %ux (VRAM %ux%u)",
+                      r->ctx.device_name, S, VKR_VRAM_W * S, VKR_VRAM_H * S);
     return true;
 }
 
@@ -711,8 +793,10 @@ void vkr_destroy(VkRenderer* r) {
     if (r->cmd_pool) vkDestroyCommandPool(r->ctx.device, r->cmd_pool, NULL);
 
     if (r->sampler) vkDestroySampler(r->ctx.device, r->sampler, NULL);
+    if (r->sampler_linear) vkDestroySampler(r->ctx.device, r->sampler_linear, NULL);
     vkr_image_destroy(r, &r->viewer);
     vkr_image_destroy(r, &r->scanout);
+    vkr_image_destroy(r, &r->vram_native);
     vkr_image_destroy(r, &r->vram);
 
     vk_context_destroy(&r->ctx);
@@ -1088,7 +1172,7 @@ static int            s_rb_staged_slot = -1;
 static uint32_t       s_rb_staged_vtx, s_rb_staged_pool;
 
 
-static void vkr_fill_ps1_push(const VkrBatch* b, int stp_mode, VkrPs1Push* out) {
+static void vkr_fill_ps1_push(const VkRenderer* r, const VkrBatch* b, int stp_mode, VkrPs1Push* out) {
     out->offset[0] = b->offset_x;
     out->offset[1] = b->offset_y;
     out->screen_scale[0] = b->screen_w * 0.5f;
@@ -1100,6 +1184,7 @@ static void vkr_fill_ps1_push(const VkrBatch* b, int stp_mode, VkrPs1Push* out) 
     out->stp_mode      = stp_mode;
     out->set_mask      = b->set_mask    ? 1 : 0;
     out->mask_test     = b->mask_test   ? 1 : 0;
+    out->scale         = (int32_t)r->scale;
 }
 
 static void vkr_begin_vram_rendering(VkRenderer* r, VkCommandBuffer cmd, bool* active) {
@@ -1113,13 +1198,16 @@ static void vkr_begin_vram_rendering(VkRenderer* r, VkCommandBuffer cmd, bool* a
     };
     VkRenderingInfo ri = {
         .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea           = { { 0, 0 }, { VKR_VRAM_W, VKR_VRAM_H } },
+        .renderArea           = { { 0, 0 }, { r->vram.w, r->vram.h } },
         .layerCount           = 1,
         .colorAttachmentCount = 1,
         .pColorAttachments    = &att,
     };
     vkCmdBeginRendering(cmd, &ri);
-    VkViewport vp = { 0.0f, 0.0f, (float)VKR_VRAM_W, (float)VKR_VRAM_H, 0.0f, 1.0f };
+    /* The whole image: the vertex shader maps PS1 coordinates to NDC over the
+     * full 1024x512 range, so at an internal resolution the same NDC lands on
+     * scale times as many pixels and nothing else has to change. */
+    VkViewport vp = { 0.0f, 0.0f, (float)r->vram.w, (float)r->vram.h, 0.0f, 1.0f };
     vkCmdSetViewport(cmd, 0, 1, &vp);
     *active = true;
 }
@@ -1135,12 +1223,24 @@ static void vkr_exec_batch(VkRenderer* r, VkCommandBuffer cmd, const VkrBatch* b
     if (!b->vertex_count) return;
     vkr_begin_vram_rendering(r, cmd, rendering);
 
+    const int32_t S = (int32_t)r->scale;
     VkRect2D sc = {
-        { b->scissor[0], b->scissor[1] },
-        { (uint32_t)b->scissor[2], (uint32_t)b->scissor[3] }
+        { b->scissor[0] * S, b->scissor[1] * S },
+        { (uint32_t)(b->scissor[2] * S), (uint32_t)(b->scissor[3] * S) }
     };
     if (sc.extent.width == 0 || sc.extent.height == 0) return;
     vkCmdSetScissor(cmd, 0, 1, &sc);
+    /* A PS1 line is one PS1 pixel wide: scale image pixels, where the device
+     * allows lines that wide (wideLines). Without it they stay one image pixel,
+     * thinner than the console drew them, and that is the only cost. */
+    if (b->is_line) {
+        float lw = 1.0f;
+        if (r->ctx.caps.wide_lines) {
+            lw = (float)S;
+            if (lw > r->ctx.caps.line_width_max) lw = r->ctx.caps.line_width_max;
+        }
+        vkCmdSetLineWidth(cmd, lw);
+    }
 
     VkDeviceSize zero = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &r->vertex_buf[slot].buffer, &zero);
@@ -1167,7 +1267,7 @@ static void vkr_exec_batch(VkRenderer* r, VkCommandBuffer cmd, const VkrBatch* b
          * reports it — but that is an optimisation to make once the two
          * backends have been proven to agree, not before. */
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set[VKR_BLEND_OFF]);
-        vkr_fill_ps1_push(b, 0, &push);
+        vkr_fill_ps1_push(r, b, 0, &push);
         vkCmdPushConstants(cmd, r->ps1_layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
@@ -1176,7 +1276,7 @@ static void vkr_exec_batch(VkRenderer* r, VkCommandBuffer cmd, const VkrBatch* b
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set[blend]);
         float bc[4] = { 0.0f, 0.0f, 0.0f, vkr_blend_constant(blend) };
         vkCmdSetBlendConstants(cmd, bc);
-        vkr_fill_ps1_push(b, 1, &push);
+        vkr_fill_ps1_push(r, b, 1, &push);
         vkCmdPushConstants(cmd, r->ps1_layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
@@ -1185,7 +1285,7 @@ static void vkr_exec_batch(VkRenderer* r, VkCommandBuffer cmd, const VkrBatch* b
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, set[blend]);
         float bc[4] = { 0.0f, 0.0f, 0.0f, vkr_blend_constant(blend) };
         vkCmdSetBlendConstants(cmd, bc);
-        vkr_fill_ps1_push(b, -1, &push);
+        vkr_fill_ps1_push(r, b, -1, &push);
         vkCmdPushConstants(cmd, r->ps1_layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
@@ -1234,8 +1334,22 @@ static void vkr_exec_vram_update(VkRenderer* r, VkCommandBuffer cmd, const VkrVr
         .imageOffset       = { u->x, u->y, 0 },
         .imageExtent       = { u->w, u->h, 1 },
     };
-    vkCmdCopyBufferToImage(cmd, r->staging_buf[slot].buffer, r->vram.image,
-                           VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    if (r->scale == 1) {
+        vkCmdCopyBufferToImage(cmd, r->staging_buf[slot].buffer, r->vram.image,
+                               VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    } else {
+        /* Internal resolution: the halfwords go into the native image at their
+         * PS1 position, then up into vram as scale x scale blocks. The first
+         * barrier waits for the previous upload's blit to finish reading. */
+        vkr_barrier_native(cmd, &r->vram_native,
+                           VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                           VK_ACCESS_TRANSFER_WRITE_BIT);
+        vkCmdCopyBufferToImage(cmd, r->staging_buf[slot].buffer, r->vram_native.image,
+                               VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+        vkr_barrier_native(cmd, &r->vram_native, VK_ACCESS_TRANSFER_WRITE_BIT,
+                           VK_ACCESS_TRANSFER_READ_BIT);
+        vkr_blit_native(r, cmd, true, u->x, u->y, u->w, u->h);
+    }
 
     VkImageMemoryBarrier b = {
         .sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -1395,6 +1509,20 @@ static void vkr_rb_record_copy(VkRenderer* r, uint16_t x, uint16_t y, uint16_t w
     vkCmdPipelineBarrier(cmd,
                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &ib);
+    /* Internal resolution: the CPU reads PS1 halfwords, so the rect is first
+     * taken down into the native image (one sample per block, NEAREST) and the
+     * copy below reads that instead. */
+    VkImage src_image = r->vram.image;
+    if (r->scale > 1) {
+        vkr_barrier_native(cmd, &r->vram_native,
+                           VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+                           VK_ACCESS_TRANSFER_WRITE_BIT);
+        if (whole) vkr_blit_native(r, cmd, false, 0, 0, VKR_VRAM_W, VKR_VRAM_H);
+        else       vkr_blit_native(r, cmd, false, x, y, w, h);
+        vkr_barrier_native(cmd, &r->vram_native, VK_ACCESS_TRANSFER_WRITE_BIT,
+                           VK_ACCESS_TRANSFER_READ_BIT);
+        src_image = r->vram_native.image;
+    }
     VkBufferImageCopy c = {
         .bufferOffset      = 0,
         .bufferRowLength   = whole ? VKR_VRAM_W : w,
@@ -1403,7 +1531,7 @@ static void vkr_rb_record_copy(VkRenderer* r, uint16_t x, uint16_t y, uint16_t w
         .imageOffset       = { whole ? 0 : x, whole ? 0 : y, 0 },
         .imageExtent       = { whole ? VKR_VRAM_W : w, whole ? VKR_VRAM_H : h, 1 },
     };
-    vkCmdCopyImageToBuffer(cmd, r->vram.image, VK_IMAGE_LAYOUT_GENERAL,
+    vkCmdCopyImageToBuffer(cmd, src_image, VK_IMAGE_LAYOUT_GENERAL,
                            r->readback_buf.buffer, 1, &c);
     VkBufferMemoryBarrier bb = {
         .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -1512,6 +1640,13 @@ static bool vkr_readback_whole(VkRenderer* r, uint16_t* vram) {
  * is no other way to run it without a person looking at a screen. */
 static void vkr_dump_scanout(VkRenderer* r, const char* path) {
     if (!r->rb_cmd || !r->readback_buf.mapped) return;
+    /* The dump is the backends' byte-for-byte parity check, which only means
+     * something at 1x: at an internal resolution the scanout is larger than the
+     * readback buffer and is not the picture the GL backend makes anyway. */
+    if (r->scale != 1) {
+        LOG_RENDERER_WARN("[VK] ZS1_DUMP_FRAME is 1x only; internal resolution is %ux, no dump", r->scale);
+        return;
+    }
     vkr_rb_begin(r);
     VkCommandBuffer cmd = r->rb_cmd;
     /* The scanout image rests in SHADER_READ_ONLY_OPTIMAL between frames; a
@@ -1624,9 +1759,13 @@ static int vkr_thread_main(void* userdata) {
                 .disp_off  = { f->disp_x, f->disp_y },
                 .disp_size = { (int32_t)dw, (int32_t)dh },
                 .depth24   = f->disp_depth24 ? 1 : 0,
+                .scale     = (int32_t)r->scale,
             };
+            /* At an internal resolution the picture is scale times larger in
+             * each direction; the interface samples the same fraction of the
+             * scanout image (dw/1024 of its width) either way. */
             vkr_fullscreen_pass(r, cmd, &r->scanout, r->scanout_pipe, r->scanout_layout,
-                                &push, sizeof(push), dw, dh, f->disp_blank);
+                                &push, sizeof(push), dw * r->scale, dh * r->scale, f->disp_blank);
         }
 
         /* VRAM viewer, for the debug workspace: only while it is on screen
@@ -1638,6 +1777,7 @@ static int vkr_thread_main(void* userdata) {
                 .clut  = { f->view.clut_x, f->view.clut_y },
                 .flags = { f->view.greyscale ? 1 : 0, f->view.show_alpha ? 1 : 0, f->view.shift24 },
                 .mode  = (int32_t)f->view.mode,
+                .scale = (int32_t)r->scale,
             };
             vkr_fullscreen_pass(r, cmd, &r->viewer, r->viewer_pipe, r->viewer_layout,
                                 &push, sizeof(push), VKR_VRAM_W, VKR_VRAM_H, false);
@@ -1867,6 +2007,13 @@ static GfxTexHandle vkr_imgui_handle(VkRenderer* r, VkDescriptorSet* cache, VkrI
 }
 
 GfxTexHandle vkr_get_scanout_texture(VkRenderer* r) {
+    if (r->scanout_linear) {
+        if (!r->initialized) return 0;
+        if (r->imgui_scanout_set_linear == VK_NULL_HANDLE)
+            r->imgui_scanout_set_linear = vk_imgui_add_texture(r->sampler_linear, r->scanout.view,
+                                                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        return (GfxTexHandle)(uintptr_t)r->imgui_scanout_set_linear;
+    }
     return vkr_imgui_handle(r, &r->imgui_scanout_set, &r->scanout);
 }
 GfxTexHandle vkr_get_vram_viewer_texture(VkRenderer* r) {
@@ -1916,8 +2063,15 @@ static bool vkvt_init(GfxImpl* impl, SDL_Window* window, const GfxDeviceRequest*
 }
 
 static void vkvt_destroy(GfxImpl impl) {
+    /* Wait for the GPU before the ImGui half goes. vk_imgui_shutdown() frees
+     * descriptor sets and destroys ImGui's buffers, pipeline and sampler, and the
+     * last submitted frame may still be using every one of them: the validation
+     * layer reported all of those, at every shutdown and every renderer switch,
+     * because the wait in vkr_destroy() came after them. */
+    VkRenderer* r = R(impl);
+    if (r->initialized) vkDeviceWaitIdle(r->ctx.device);
     vk_imgui_shutdown();
-    vkr_destroy(R(impl));
+    vkr_destroy(r);
 }
 
 static int vkvt_enumerate_devices(GfxDeviceInfo* out, int max) {
@@ -1998,6 +2152,7 @@ static void vkvt_get_pool_stats(GfxImpl impl, uint32_t* used, uint32_t* peak,
 }
 static GfxTexHandle vkvt_get_display_texture(GfxImpl impl)     { return vkr_get_display_texture(R(impl)); }
 static GfxTexHandle vkvt_get_scanout_texture(GfxImpl impl)     { return vkr_get_scanout_texture(R(impl)); }
+static void vkvt_set_scanout_filter(GfxImpl impl, bool linear)  { R(impl)->scanout_linear = linear; }
 static GfxTexHandle vkvt_get_vram_viewer_texture(GfxImpl impl) { return vkr_get_vram_viewer_texture(R(impl)); }
 
 const GfxBackend gfx_backend_vulkan = {
@@ -2039,5 +2194,6 @@ const GfxBackend gfx_backend_vulkan = {
     .get_pool_stats          = vkvt_get_pool_stats,
     .get_display_texture     = vkvt_get_display_texture,
     .get_scanout_texture     = vkvt_get_scanout_texture,
+    .set_scanout_filter      = vkvt_set_scanout_filter,
     .get_vram_viewer_texture = vkvt_get_vram_viewer_texture,
 };

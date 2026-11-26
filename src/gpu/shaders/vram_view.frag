@@ -15,12 +15,14 @@ layout(push_constant) uniform ViewerPush {
     ivec2 clut;     // CLUT position for the indexed modes
     ivec3 flags;    // x = greyscale, y = show_alpha, z = shift24 phase
     int   mode;     // 0 = 4bpp, 1 = 8bpp, 2 = 16bpp, 3 = 24bpp
+    int   scale;    // internal resolution; the viewer stays 1024x512 and reads
+                    // the top-left sample of each halfword's block
 } pc;
 
 // Same 5:5:5:1 recovery the scanout pass uses — bit 15 included, because in
 // 24bpp it is a data bit and in mask view it is the value being looked at.
 uint to16(ivec2 p) {
-    vec4 t = texelFetch(u_vram, ivec2(clamp(p.x, 0, 1023), clamp(p.y, 0, 511)), 0);
+    vec4 t = texelFetch(u_vram, ivec2(clamp(p.x, 0, 1023), clamp(p.y, 0, 511)) * pc.scale, 0);
     uint r = uint(t.r * 255.0 + 0.5) >> 3;
     uint g = uint(t.g * 255.0 + 0.5) >> 3;
     uint b = uint(t.b * 255.0 + 0.5) >> 3;

@@ -75,6 +75,14 @@ void debug_ui_notify_state_result(bool save, bool ok, const char* path);
  * actually happened — which is not always what was asked for, since a backend
  * that fails to come up is rolled back to the previous one. */
 bool debug_ui_take_gfx_request(GfxDeviceRequest* out);
+
+/* The internal resolution saved in zs1_video.txt (1, 2, 4 or 8), for main.c to
+ * build the renderer with. Vulkan uses it; OpenGL draws at 1x whatever it says. */
+uint32_t debug_ui_internal_scale(void);
+
+/* The renderer last brought up from a menu (a GfxBackendType), or -1 if none was
+ * ever chosen. main.c starts on it unless ZS1_GFX says otherwise. */
+int debug_ui_saved_backend(void);
 void debug_ui_notify_gfx_result(int backend, int device_index, bool ok, const char* detail);
 
 /* --- start screen ----------------------------------------------------------
