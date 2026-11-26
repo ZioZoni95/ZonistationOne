@@ -7,6 +7,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-26: the "Ambient" interface (branch `ccr-9859217a-86y6jq`)
+
+A new look and a few new behaviours, from the design study in the review of the same day. The
+interface is the same code (`debug_ui.cpp`, ImGui); what changed is its tokens, its shapes and where
+things sit. **Checked** with the BIOS (PAL SCPH-7502, no disc) through `ZS1_UI_TOUR` at 1280x720 and
+1920x1061, on OpenGL, dark and pale theme; on Vulkan with the menu opened by a real Escape through
+`xdotool` (the tour reads the screen back from OpenGL only), without the validation layer, which
+was not installed; `make test` (ten unit tests), `make hwtest` on both renderers, and a clean build
+with no warning from this project's sources. **Not checked:** a game (the ambient bars are subtle
+on the BIOS menu, whose edges are dark navy; a bright game will show more), a real GPU, a pad
+driving the menu, HiDPI scales, Wayland, and every workspace view in the pale theme (Pipeline, Code,
+Host HW, Script and the controller window were looked at).
+
+#### Added
+- **Ambient bars.** The black bars beside the 4:3 picture take their light from the frame: 14 bands a
+  side, three samples deep, cross-faded, from the scanout texture the picture already uses. No
+  readback, no blur pass. Setting: Video & HUD > Ambient bars.
+- **Rhythm line.** A 3 px line along the top edge, one segment per recent host loop iteration:
+  green inside the budget, amber and red above it. The fps pill (top right) opens the old detail
+  card on hover. Setting: Video & HUD > Rhythm line.
+- **The overlay lives in the bars** when they are wide enough (title and pad on the left, the key
+  list on the right); on a window with no bar it falls back to a plate over the picture.
+- **Quick menu as a sheet** on the right: the picture shrinks into the space that is left, so the
+  game stays visible beside the video settings. A selection pill that slides, drawn icons, the live
+  choice as a filled accent (13.8:1 on the default theme, where it used to be a dim tint at 2.3:1).
+- **Slot pictures.** `savestate_save()` writes `<slot>.thm`, 160x120 RGB, beside the state;
+  the Save and Load pages show it. A sidecar, so the state format (v12) did not change and a state
+  with no picture loads as before.
+- **Themes `Ambient` (default) and `Ambient Light`**; the five older themes are unchanged and a
+  saved choice is kept. Severity colours and the text colour on an accent fill are now part of a
+  theme (amber that reads on dark does not on white).
+- **Bundled fonts** (`assets/fonts/`: Inter, JetBrains Mono, both OFL, licences beside them),
+  looked for next to the executable, then the working directory, then the system faces as before.
+  The session image copies them (`deploy/session/Dockerfile`).
+- **Workspace log strip**: errors, warnings and the last message in one line along the bottom, and
+  a switch for the tabbed log dock, which is now closed until opened (the first ERROR opens it once).
+
+#### Changed
+- Rail is icons-only below 1500 px; section headings drop their letter-spacing before they are cut;
+  the Pipeline verdict chip carries a shape (cross, triangle, dot) as well as a colour; audio values
+  that were rose are plain text (rose stays the Audio lane's identity colour); the dock host has a
+  flat ground instead of the four-corner gradient. The backquote key is drawn as `~`.
+- Rounder shapes: panels 12, controls 9, tabs and scrollbars fully rounded.
+
+#### Fixed
+- **The machine bar's vitals (Speed, Fields/s, Frame, Audio queue, Drift) were never on screen.**
+  `SameLine(0, width - vitals)` counts from the end of the last button, not from the window's left
+  edge, so they were placed a whole bar-width to the right. They are now positioned from the edge,
+  left out when there is no room, and `vital()` is drawn in a fixed box (the old stack of three
+  lines was taller than the 52 px bar).
+- The pad drawing in the controller window had its labels in the theme's grey, which is dark on a
+  pale theme and vanished into the pad; the pad is a dark object, so they are a fixed light grey.
+
 ### 2026-11-26: code-review fixes (branch `ccr-9859217a-86y6jq`)
 
 Eight low-risk fixes from a review of the tree. Checked without a BIOS or a disc: `make test` (ten

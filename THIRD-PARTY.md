@@ -19,6 +19,15 @@ project's *code* is derivation. Only the second kind is listed here.
 | Dear ImGui | `third_party/imgui/` | ocornut/imgui | MIT |
 | Lua 5.4 | `third_party/lua/` | lua.org | MIT |
 | rxi log | `src/utils/rxi_log.c`, `include/rxi_log.h` | rxi/log.c | MIT |
+| Inter (Regular, SemiBold) | `assets/fonts/Inter-*.otf` | rsms/inter | SIL OFL 1.1 |
+| JetBrains Mono (Regular) | `assets/fonts/JetBrainsMono-Regular.ttf` | JetBrains/JetBrainsMono | SIL OFL 1.1 |
+
+The two fonts are data, not code: the interface loads them at runtime from `assets/fonts/`
+(next to the executable, then the working directory) and falls back to the system faces when they
+are missing. The OFL allows bundling and redistributing them with software; the licence texts
+travel beside them (`LICENSE-Inter.txt`, `LICENSE-JetBrainsMono.txt`, taken from the Debian packages
+`fonts-inter` and `fonts-jetbrains-mono`). They are unmodified, so the Reserved Font Name clause is
+not engaged.
 
 MIT is permissive and imposes only attribution, which the file headers carry.
 

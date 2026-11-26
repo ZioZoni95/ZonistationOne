@@ -278,6 +278,72 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
     }
     LOG_SYSTEM_INFO("[STATE] Saved %s (%ld bytes, PC=0x%08x, cycle=%u)",
                     path, bytes, cpu->pc, inter->cpu_cycle_counter);
+    /* The VRAM readback above left gpu.vram.data current, which is what the picture
+     * is taken from. A missing picture is not a failed save. */
+    if (!savestate_write_thumbnail(path, inter))
+        LOG_SYSTEM_DEBUG("[STATE] No thumbnail written for %s", path);
+    return true;
+}
+
+/* --- thumbnail ------------------------------------------------------------ */
+
+bool savestate_thumbnail_path(const char* state_path, char* out, unsigned long n) {
+    if (!state_path || !out || n < 8) return false;
+    size_t len = strlen(state_path);
+    const char* dot = strrchr(state_path, '.');
+    const char* slash = strrchr(state_path, '/');
+    if (dot && (!slash || dot > slash)) len = (size_t)(dot - state_path);
+    if (len + 5 > n) return false;
+    memcpy(out, state_path, len);
+    memcpy(out + len, ".thm", 5);
+    return true;
+}
+
+static uint16_t vram_rd16(const uint8_t* base, uint32_t byte_off) {
+    uint16_t v;
+    memcpy(&v, base + (byte_off & (VRAM_SIZE - 1)), sizeof(v));   /* no aliased uint16_t* into a byte array */
+    return v;
+}
+
+bool savestate_write_thumbnail(const char* state_path, const struct Interconnect* inter) {
+    char path[512], tmp[520];
+    if (!inter || !savestate_thumbnail_path(state_path, path, sizeof(path))) return false;
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+
+    const Gpu* g = &inter->gpu;
+    const uint32_t dw = g->crtc.display_width  > 0 ? g->crtc.display_width  : 320;
+    const uint32_t dh = g->crtc.display_height > 0 ? g->crtc.display_height : 240;
+    const uint32_t x0 = g->display_vram_x_start, y0 = g->display_vram_y_start;
+    const bool deep = (g->display_depth == D24Bits);
+
+    static uint8_t px[SAVESTATE_THUMB_W * SAVESTATE_THUMB_H * 3];
+    for (uint32_t ty = 0; ty < SAVESTATE_THUMB_H; ty++) {
+        const uint32_t y = (y0 + ty * dh / SAVESTATE_THUMB_H) & 0x1FF;
+        for (uint32_t tx = 0; tx < SAVESTATE_THUMB_W; tx++) {
+            uint8_t* o = px + (ty * SAVESTATE_THUMB_W + tx) * 3;
+            if (g->display_disabled) { o[0] = o[1] = o[2] = 0; continue; }
+            const uint32_t sx = tx * dw / SAVESTATE_THUMB_W;
+            if (deep) {   /* 24 bpp: three bytes a pixel, x counted in pixels from the 16-bit origin */
+                const uint32_t b = y * 2048u + x0 * 2u + sx * 3u;
+                o[0] = g->vram.data[b & (VRAM_SIZE - 1)];
+                o[1] = g->vram.data[(b + 1) & (VRAM_SIZE - 1)];
+                o[2] = g->vram.data[(b + 2) & (VRAM_SIZE - 1)];
+            } else {      /* 15 bpp: 0BBBBBGGGGGRRRRR */
+                const uint16_t v = vram_rd16(g->vram.data, y * 2048u + ((x0 + sx) & 0x3FF) * 2u);
+                o[0] = (uint8_t)(((v >> 0)  & 31) * 255 / 31);
+                o[1] = (uint8_t)(((v >> 5)  & 31) * 255 / 31);
+                o[2] = (uint8_t)(((v >> 10) & 31) * 255 / 31);
+            }
+        }
+    }
+
+    FILE* f = fopen(tmp, "wb");
+    if (!f) return false;
+    const uint8_t hdr[8] = { 'Z', 'T', 'H', '1', SAVESTATE_THUMB_W & 0xFF, SAVESTATE_THUMB_W >> 8,
+                             SAVESTATE_THUMB_H & 0xFF, SAVESTATE_THUMB_H >> 8 };
+    bool ok = fwrite(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && fwrite(px, 1, sizeof(px), f) == sizeof(px);
+    ok = (fclose(f) == 0) && ok;
+    if (!ok || rename(tmp, path) != 0) { remove(tmp); return false; }
     return true;
 }
 

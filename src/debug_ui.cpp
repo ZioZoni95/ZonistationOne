@@ -37,6 +37,7 @@ extern "C" {
 #include "controller.h"
 #include "host_info.h"
 #include "mdec.h"
+#include "savestate.h"
 }
 
 static bool g_disasm_follow_pc = true;
@@ -65,9 +66,13 @@ static ImVec4 ZS_MUTED     = COL(0x94, 0xA3, 0xB8);   // Cool slate gray
 static ImVec4 ZS_FAINT     = COL(0x64, 0x74, 0x8B);
 static ImVec4 ZS_DATA      = COL(0x00, 0xF0, 0xFF);   // Neon Cyan
 static ImVec4 ZS_AUDIO     = COL(0xFF, 0x2E, 0x7E);   // Neon Rose
-static const ImVec4 ZS_OK        = COL(0x10, 0xB9, 0x81);   // Emerald Green
-static const ImVec4 ZS_WARN      = COL(0xF5, 0x9E, 0x0B);   // Amber Gold
-static const ImVec4 ZS_CRIT      = COL(0xEF, 0x44, 0x44);   // Vibrant Red
+/* Severity and the colour of text on an accent fill belong to the theme too: the
+ * values that read on a dark ground (amber #F59E0B) fail on a white one (2.1:1). */
+static ImVec4 ZS_OK        = COL(0x10, 0xB9, 0x81);   // Emerald Green
+static ImVec4 ZS_WARN      = COL(0xF5, 0x9E, 0x0B);   // Amber Gold
+static ImVec4 ZS_CRIT      = COL(0xEF, 0x44, 0x44);   // Vibrant Red
+static ImVec4 ZS_ON_ACCENT = COL(0x0A, 0x0D, 0x14);   // text drawn on a ZS_DATA fill
+static bool   g_theme_light = false;
 static ImVec4 ZS_RAIL_BG   = COL(0x0F, 0x14, 0x20);
 static ImVec4 ZS_DOCK_BG   = COL(0x0D, 0x11, 0x1C);
 static ImVec4 ZS_MODE_ON   = COL(0x1E, 0x2A, 0x3E);
@@ -91,38 +96,57 @@ static float   g_ui_scale  = 1.0f;
 
 /* --- themes ---------------------------------------------------------------
  *
- * A theme is the thirteen neutral and accent tokens above. Severity colours
- * (ok / warn / crit) and the four PlayStation-logo hues are deliberately not
- * part of it: severity must read the same in every theme, and the logo hues
- * identify the view modes. The ImGui style colours are derived from the tokens
- * (zs_mix), so a theme is a handful of numbers, not a second style sheet. */
+ * A theme is the thirteen neutral and accent tokens above, plus the three
+ * severity colours (ok, warn, crit) and the colour of text drawn on an accent
+ * fill. Severity is in the theme because the values that read on a dark ground
+ * (amber #F59E0B) do not read on a white one. The four PlayStation-logo hues are
+ * not part of it: they identify the view modes. The ImGui style colours are
+ * derived from the tokens (zs_mix), so a theme is a handful of numbers, not a
+ * second style sheet. */
 struct ZsTheme {
     const char* name;
     const char* blurb;
     ImVec4 ground, panel, panel2, line, line_soft, text, muted, faint, data, audio, rail_bg, dock_bg, mode_on;
+    ImVec4 ok, warn, crit, on_accent;
+    bool   light;
 };
 
 static const ZsTheme g_themes[] = {
+    { "Ambient", "graphite with a soft blue accent - the default",
+      COL(0x0B,0x0D,0x12), COL(0x13,0x16,0x1D), COL(0x1A,0x1E,0x28), COL(0x2A,0x30,0x3E), COL(0x1D,0x21,0x2B),
+      COL(0xEE,0xF1,0xF6), COL(0xA3,0xAC,0xBD), COL(0x87,0x91,0xA5), COL(0x7C,0x9D,0xFF), COL(0xFF,0x7B,0xC0),
+      COL(0x0F,0x12,0x18), COL(0x0E,0x10,0x16), COL(0x22,0x28,0x36),
+      COL(0x3D,0xD5,0x98), COL(0xF5,0xB5,0x44), COL(0xFF,0x6B,0x7A), COL(0x0B,0x0D,0x12), false },
+    { "Ambient Light", "the same system on a pale ground",
+      COL(0xF2,0xF3,0xF7), COL(0xFF,0xFF,0xFF), COL(0xF6,0xF7,0xFA), COL(0xD3,0xD7,0xE0), COL(0xE4,0xE7,0xEE),
+      COL(0x12,0x15,0x1D), COL(0x4F,0x58,0x6B), COL(0x6B,0x74,0x88), COL(0x2F,0x5B,0xFF), COL(0xD6,0x33,0x8A),
+      COL(0xFF,0xFF,0xFF), COL(0xEC,0xEE,0xF3), COL(0xE4,0xE9,0xFB),
+      COL(0x0B,0x8F,0x63), COL(0xA8,0x66,0x0A), COL(0xC4,0x2B,0x3D), COL(0xFF,0xFF,0xFF), true },
     { "Neon", "cyan and rose on obsidian - the original",
       COL(0x0A,0x0D,0x14), COL(0x13,0x19,0x26), COL(0x1A,0x23,0x34), COL(0x28,0x36,0x4F), COL(0x1E,0x28,0x3C),
       COL(0xF1,0xF5,0xF9), COL(0x94,0xA3,0xB8), COL(0x64,0x74,0x8B), COL(0x00,0xF0,0xFF), COL(0xFF,0x2E,0x7E),
-      COL(0x0F,0x14,0x20), COL(0x0D,0x11,0x1C), COL(0x1E,0x2A,0x3E) },
+      COL(0x0F,0x14,0x20), COL(0x0D,0x11,0x1C), COL(0x1E,0x2A,0x3E),
+      COL(0x10,0xB9,0x81), COL(0xF5,0x9E,0x0B), COL(0xEF,0x44,0x44), COL(0x0A,0x0D,0x14), false },
     { "Amber", "the Sony boot diamond: warm gold on brown-black",
       COL(0x0E,0x0A,0x07), COL(0x1B,0x14,0x0E), COL(0x26,0x1C,0x13), COL(0x4A,0x36,0x20), COL(0x33,0x25,0x16),
       COL(0xF7,0xEC,0xDC), COL(0xB3,0x9A,0x7A), COL(0x7D,0x68,0x50), COL(0xFF,0xB0,0x20), COL(0xFF,0x5A,0x3C),
-      COL(0x14,0x0F,0x0A), COL(0x11,0x0C,0x08), COL(0x2C,0x20,0x14) },
+      COL(0x14,0x0F,0x0A), COL(0x11,0x0C,0x08), COL(0x2C,0x20,0x14),
+      COL(0x10,0xB9,0x81), COL(0xF5,0x9E,0x0B), COL(0xEF,0x44,0x44), COL(0x0A,0x0D,0x14), false },
     { "Terminal", "phosphor green, for long debugging sessions",
       COL(0x06,0x0C,0x08), COL(0x0D,0x17,0x11), COL(0x13,0x21,0x18), COL(0x24,0x40,0x2F), COL(0x19,0x2D,0x21),
       COL(0xE4,0xF6,0xE9), COL(0x8F,0xB5,0x9B), COL(0x5E,0x7F,0x6B), COL(0x39,0xFF,0x88), COL(0xFF,0xB4,0x54),
-      COL(0x0A,0x12,0x0D), COL(0x08,0x0F,0x0B), COL(0x1A,0x2E,0x22) },
+      COL(0x0A,0x12,0x0D), COL(0x08,0x0F,0x0B), COL(0x1A,0x2E,0x22),
+      COL(0x10,0xB9,0x81), COL(0xF5,0x9E,0x0B), COL(0xEF,0x44,0x44), COL(0x0A,0x0D,0x14), false },
     { "Violet", "soft indigo with a lilac accent",
       COL(0x0C,0x0A,0x14), COL(0x16,0x13,0x25), COL(0x1F,0x1A,0x33), COL(0x3A,0x31,0x59), COL(0x28,0x22,0x40),
       COL(0xF1,0xEE,0xFA), COL(0xA5,0x9D,0xC4), COL(0x71,0x69,0x8F), COL(0xB7,0x9C,0xFF), COL(0xFF,0x6F,0xB5),
-      COL(0x11,0x0E,0x1C), COL(0x0E,0x0C,0x18), COL(0x26,0x20,0x3D) },
+      COL(0x11,0x0E,0x1C), COL(0x0E,0x0C,0x18), COL(0x26,0x20,0x3D),
+      COL(0x10,0xB9,0x81), COL(0xF5,0x9E,0x0B), COL(0xEF,0x44,0x44), COL(0x0A,0x0D,0x14), false },
     { "Graphite", "neutral grey, almost no colour of its own",
       COL(0x0B,0x0B,0x0D), COL(0x17,0x17,0x1B), COL(0x20,0x20,0x26), COL(0x38,0x38,0x42), COL(0x27,0x27,0x2F),
       COL(0xF2,0xF2,0xF4), COL(0xA0,0xA0,0xAC), COL(0x6E,0x6E,0x7A), COL(0x7D,0xD3,0xFC), COL(0xF4,0x72,0xB6),
-      COL(0x12,0x12,0x16), COL(0x0F,0x0F,0x12), COL(0x2A,0x2A,0x32) },
+      COL(0x12,0x12,0x16), COL(0x0F,0x0F,0x12), COL(0x2A,0x2A,0x32),
+      COL(0x10,0xB9,0x81), COL(0xF5,0x9E,0x0B), COL(0xEF,0x44,0x44), COL(0x0A,0x0D,0x14), false },
 };
 static const int ZS_THEME_COUNT = (int)(sizeof(g_themes) / sizeof(g_themes[0]));
 static int g_theme = 0;
@@ -162,6 +186,8 @@ static void theme_set(int idx, bool persist) {
     ZS_LINE_SOFT = t.line_soft; ZS_TEXT = t.text; ZS_MUTED = t.muted; ZS_FAINT = t.faint;
     ZS_DATA = t.data; ZS_AUDIO = t.audio; ZS_RAIL_BG = t.rail_bg; ZS_DOCK_BG = t.dock_bg;
     ZS_MODE_ON = t.mode_on;
+    ZS_OK = t.ok; ZS_WARN = t.warn; ZS_CRIT = t.crit; ZS_ON_ACCENT = t.on_accent;
+    g_theme_light = t.light;
     if (ImGui::GetCurrentContext()) apply_theme_colors();
     if (persist) theme_save();
 }
@@ -184,20 +210,22 @@ static void apply_zonistation_style() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImGui::StyleColorsDark(&s);
 
-    s.WindowRounding    = 6.0f;
-    s.ChildRounding     = 8.0f;
-    s.FrameRounding     = 6.0f;
-    s.PopupRounding     = 8.0f;
-    s.GrabRounding      = 4.0f;
-    s.TabRounding       = 8.0f;
-    s.ScrollbarRounding = 6.0f;
+    /* Soft shapes: panels 12, controls 9, tabs and scrollbars fully rounded. The
+     * radii are the only thing here a theme does not change. */
+    s.WindowRounding    = 12.0f;
+    s.ChildRounding     = 12.0f;
+    s.FrameRounding     = 9.0f;
+    s.PopupRounding     = 12.0f;
+    s.GrabRounding      = 8.0f;
+    s.TabRounding       = 10.0f;
+    s.ScrollbarRounding = 12.0f;
     s.WindowBorderSize  = 1.0f;
     s.ChildBorderSize   = 1.0f;
     s.FrameBorderSize   = 1.0f;
     s.TabBorderSize     = 1.0f;
     s.WindowPadding     = ImVec2(12, 12);
-    s.FramePadding      = ImVec2(10, 5);
-    s.ItemSpacing       = ImVec2(10, 7);
+    s.FramePadding      = ImVec2(11, 6);
+    s.ItemSpacing       = ImVec2(10, 8);
     s.ItemInnerSpacing  = ImVec2(7, 5);
     s.CellPadding       = ImVec2(8, 4);
     s.GrabMinSize       = 10.0f;
@@ -257,31 +285,30 @@ static void apply_theme_colors() {
     c[ImGuiCol_TableBorderStrong]    = ZS_LINE;
     c[ImGuiCol_TableBorderLight]     = ZS_LINE_SOFT;
     c[ImGuiCol_TableRowBg]           = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_TableRowBgAlt]        = COLA(0xFF, 0xFF, 0xFF, 0.02f);
+    c[ImGuiCol_TableRowBgAlt]        = ImVec4(ZS_TEXT.x, ZS_TEXT.y, ZS_TEXT.z, 0.035f);
     c[ImGuiCol_NavHighlight]         = ZS_DATA;
 }
 
-// A tight uppercase letter-spaced micro-label — identity carried by density,
-// the way the mockup does it (no shipped webfont).
+// A tight uppercase letter-spaced micro-label: identity carried by density, no
+// shipped webfont needed. Letter-spaced only while that fits the room it has: in a
+// narrow panel (a 1280-wide workspace) "VRAM: CPU VS GPU" and "VIEW MODES" were cut
+// mid-word, so it falls back to plain capitals, and clips as the last resort.
 static void micro_label(const char* text) {
-    /* Uppercase, and letter-spaced only while it stays a label. The spacing is
-     * what carries the identity without a shipped font, but doubling every
-     * character turns a sentence-length header into a line that no longer fits
-     * its panel — so past ~30 characters the label is set plain. */
-    char up[256];
-    size_t len = strlen(text);
-    bool  spaced = len <= 30;
-    size_t n = 0;
-    for (const char* p = text; *p && n < sizeof(up) - 2; ++p) {
+    char up[256], plain[128];
+    size_t len = strlen(text), n = 0, pn = 0;
+    for (const char* p = text; *p && n < sizeof(up) - 2 && pn < sizeof(plain) - 1; ++p) {
         char ch = *p;
         if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
         up[n++] = ch;
-        if (spaced && p[1]) up[n++] = ' ';
+        plain[pn++] = ch;
+        if (p[1]) up[n++] = ' ';
     }
-    up[n] = '\0';
+    up[n] = '\0'; plain[pn] = '\0';
     if (g_font_h1) ImGui::PushFont(g_font_h1);
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const bool spaced = len <= 30 && ImGui::CalcTextSize(up).x <= avail;
     ImGui::PushStyleColor(ImGuiCol_Text, ZS_FAINT);
-    ImGui::TextUnformatted(up);
+    ImGui::TextUnformatted(spaced ? up : plain);
     ImGui::PopStyleColor();
     if (g_font_h1) ImGui::PopFont();
 }
@@ -654,10 +681,30 @@ static std::mutex g_log_mutex;
 
 static const char* level_name(int level);  /* fwd */
 
+/* Counted at the sink, for the log strip: how many errors and warnings there have
+ * been, and the last of either. The per-category windows keep the lines. */
+static uint32_t g_log_errors = 0, g_log_warns = 0;
+static char     g_log_last[200] = {0};
+static int      g_log_last_level = 0, g_log_last_cat = 0;
+static bool     g_log_dock_open = false;      /* the tabbed log dock along the bottom */
+static bool     g_log_auto_opened = false;
+
+static void log_dock_set(bool open) {
+    g_log_dock_open = open;
+    for (auto& c : g_log_components) c.is_open = open;
+    g_layout_dirty = true;
+}
+
 static void log_sink_callback(int category, int level, const char* msg, void* udata) {
     (void)udata;
     std::lock_guard<std::mutex> lock(g_log_mutex);
     if (category < 0 || category >= LOG_CAT_COUNT) return;
+    if (level == LOG_LEVEL_ERROR || level == LOG_LEVEL_WARN) {
+        if (level == LOG_LEVEL_ERROR) g_log_errors++; else g_log_warns++;
+        snprintf(g_log_last, sizeof(g_log_last), "%s", msg);
+        g_log_last_level = level;
+        g_log_last_cat = category;
+    }
     LogComponent& comp = g_log_components[(size_t)category];
 
     /* O(1): overwrite the slot the sequence maps to and let the oldest fall off
@@ -1066,7 +1113,7 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
     }
 
     ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.4f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ZS_WARN);
     ImGui::Text("  PC: %08X", cpu->current_pc);
     ImGui::PopStyleColor();
 
@@ -1120,13 +1167,13 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
                 rmin.x = ImGui::GetWindowPos().x + ImGui::GetScrollX();
                 ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
                                 rmin.y + ImGui::GetTextLineHeightWithSpacing() };
-                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(70, 70, 0, 130));
+                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, ImGui::GetColorU32(ImVec4(ZS_WARN.x, ZS_WARN.y, ZS_WARN.z, 0.22f)));
             } else if (has_bp && bp_en) {
                 ImVec2 rmin = ImGui::GetCursorScreenPos();
                 rmin.x = ImGui::GetWindowPos().x + ImGui::GetScrollX();
                 ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
                                 rmin.y + ImGui::GetTextLineHeightWithSpacing() };
-                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(70, 0, 0, 100));
+                ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, ImGui::GetColorU32(ImVec4(ZS_CRIT.x, ZS_CRIT.y, ZS_CRIT.z, 0.20f)));
             }
 
             // BP marker (clickable dot)
@@ -1148,7 +1195,7 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
 
             // Arrow + address + disasm
             if (is_pc) {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f,1.0f,0.2f,1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, g_theme_light ? ZS_TEXT : ZS_WARN);
                 ImGui::Text("▶ %08X  %08X  %s", addr, raw, dis);
                 ImGui::PopStyleColor();
             } else {
@@ -1223,7 +1270,7 @@ static void draw_disasm_window(Cpu* cpu, Interconnect* inter) {
                     rmin.x = ImGui::GetWindowPos().x;
                     ImVec2 rmax = { rmin.x + ImGui::GetWindowWidth(),
                                     rmin.y + ImGui::GetTextLineHeightWithSpacing() };
-                    ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, IM_COL32(80, 20, 0, 180));
+                    ImGui::GetWindowDrawList()->AddRectFilled(rmin, rmax, ImGui::GetColorU32(ImVec4(ZS_WARN.x, ZS_WARN.y, ZS_WARN.z, 0.32f)));
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
                     ImGui::Text(">>> [%4u] %08X  %08X  %s", row, pc, ins, dis ? dis : "?");
                     ImGui::PopStyleColor();
@@ -1317,7 +1364,7 @@ static void draw_spu_debug_window(Spu* spu) {
 
                 ImGui::TableNextColumn();
                 if (active)
-                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", s_adsr_state_names[voice->adsr_state & 0x7]);
+                    ImGui::TextColored(ZS_OK, "%s", s_adsr_state_names[voice->adsr_state & 0x7]);
                 else
                     ImGui::TextDisabled("Off");
 
@@ -1636,7 +1683,14 @@ static void draw_vram_viewer_window(Renderer* renderer, Interconnect* inter) {
 // Draw the emulated screen into `avail`, letterboxed at 4:3 and placed by the
 // GP1(07) scanline range. Both shells call this: the debug stage puts it in a
 // dock node, the gameplay shell gives it the whole window.
+/* Where the last draw_scanout() put the picture, in screen coordinates, and the
+ * part of the texture it shows. The gameplay shell reads it to fill the side
+ * bars with light taken from the frame and to place its overlay in the bars. */
+struct ScanoutBox { bool valid; ImVec2 p0, p1, uv0, uv1; ImTextureID tex; };
+static ScanoutBox g_scanout = { false, ImVec2(0, 0), ImVec2(0, 0), ImVec2(0, 0), ImVec2(0, 0), 0 };
+
 static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 avail) {
+    g_scanout.valid = false;
     {
         if (texture_id && inter) {
             uint16_t vw = inter->gpu.crtc.display_width  > 0 ? inter->gpu.crtc.display_width  : 320;
@@ -1703,6 +1757,12 @@ static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 av
                                            ImGui::GetCursorPosY() + pad_y + top_off));
                 ImGui::Image((void*)(intptr_t)texture_id, ImVec2(disp_w, img_h),
                              ImVec2(u0, v0), ImVec2(u1, v1));
+                g_scanout.valid = true;
+                g_scanout.p0  = ImGui::GetItemRectMin();
+                g_scanout.p1  = ImGui::GetItemRectMax();
+                g_scanout.uv0 = ImVec2(u0, v0);
+                g_scanout.uv1 = ImVec2(u1, v1);
+                g_scanout.tex = (ImTextureID)(intptr_t)texture_id;
             }
         } else if (texture_id) {
             // Fallback: show entire FBO Y-flipped
@@ -1720,7 +1780,7 @@ static void gp_row(const char* k, const char* v, ImVec4 col);
  * that describe what is being scanned out, which the Display mode used to make
  * you read off the Pipeline cards. */
 static void draw_display_info(Interconnect* inter, ImVec2 size) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, COLA(0x0F, 0x14, 0x1F, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, zs_mix(ZS_GROUND, ZS_PANEL, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f * g_ui_scale, 10.0f * g_ui_scale));
     ImGui::BeginChild("##dispinfo", size, ImGuiChildFlags_AlwaysUseWindowPadding);
     micro_label("Scanout");
@@ -1783,21 +1843,33 @@ static void draw_ps1_display(GfxTexHandle texture_id, Interconnect* inter) {
 // A vital: uppercase micro-label, a tabular value, a thin fill bar underneath.
 static void vital(const char* label, const char* value, ImVec4 vcol,
                   float frac, ImVec4 barcol) {
-    ImGui::BeginGroup();
-    micro_label(label);
-    ImGui::PushStyleColor(ImGuiCol_Text, vcol);
-    ImGui::TextUnformatted(value);
-    ImGui::PopStyleColor();
-
+    /* Label, value and a hairline meter in a fixed 88 x 40 box, drawn rather than
+     * laid out: the old version stacked a letter-spaced micro-label over a text line
+     * over a bar, which is taller than the 52 px bar it sits in and wider than its
+     * own column, and clipped both. Never noticed, because the group was positioned
+     * off-screen (see the vitals code in draw_machine_bar). */
+    const float s = g_ui_scale;
+    ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+    ImFont* ui   = g_font_ui   ? g_font_ui   : ImGui::GetFont();
+    const float w = 88.0f * s, h = 40.0f * s;
     ImVec2 p = ImGui::GetCursorScreenPos();
-    float w = 84.0f, h = 3.0f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(ZS_LINE_SOFT), 2.0f);
+
+    char up[48]; size_t n = 0;
+    for (const char* q = label; *q && n < sizeof(up) - 1; ++q) up[n++] = (*q >= 'a' && *q <= 'z') ? (char)(*q - 32) : *q;
+    up[n] = '\0';
+    const float ls = mono->LegacySize * 0.74f;
+    dl->PushClipRect(p, ImVec2(p.x + w, p.y + h), true);
+    dl->AddText(mono, ls, p, ImGui::GetColorU32(ZS_FAINT), up);
+    dl->AddText(ui, ui->LegacySize * 0.98f, ImVec2(p.x, p.y + ls + 2.0f * s), ImGui::GetColorU32(vcol), value);
+    dl->PopClipRect();
+
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
-    dl->AddRectFilled(p, ImVec2(p.x + w * frac, p.y + h), ImGui::GetColorU32(barcol), 2.0f);
-    ImGui::Dummy(ImVec2(w, h + 2.0f));
-    ImGui::EndGroup();
+    const float by = p.y + h - 3.0f * s, bw = w - 8.0f * s;
+    dl->AddRectFilled(ImVec2(p.x, by), ImVec2(p.x + bw, by + 3.0f * s), ImGui::GetColorU32(ZS_LINE), 2.0f);
+    dl->AddRectFilled(ImVec2(p.x, by), ImVec2(p.x + bw * frac, by + 3.0f * s), ImGui::GetColorU32(barcol), 2.0f);
+    ImGui::Dummy(ImVec2(w, h));
 }
 
 /* Width a chip will take, so the machine bar can decide what fits before it
@@ -1863,15 +1935,11 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, zs_mix(ZS_GROUND, ZS_PANEL, 0.85f));
     ImGui::BeginChild("##MachineBar", ImVec2(0, 52), false, ImGuiWindowFlags_NoScrollbar);
 
-    // Multi-color linear gradient background across top header
+    // A flat surface with a hairline under it: the bar is chrome, not a feature.
     ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 p1 = ImVec2(p0.x + ImGui::GetContentRegionAvail().x, p0.y + 52.0f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    {
-        ImU32 hi = ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.45f));
-        ImU32 lo = ImGui::GetColorU32(zs_mix(ZS_GROUND, ZS_PANEL, 0.60f));
-        dl->AddRectFilledMultiColor(p0, p1, hi, lo, lo, hi);
-    }
+    dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ZS_PANEL));
     dl->AddLine(ImVec2(p0.x, p1.y - 1.0f), ImVec2(p1.x, p1.y - 1.0f), ImGui::GetColorU32(ZS_LINE), 1.0f);
 
     // Brand + video-mode subtitle
@@ -1941,25 +2009,25 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
         ImGui::PopStyleColor();
         ImDrawList* dl = ImGui::GetWindowDrawList();
         if (icon_fn) {
-            icon_fn(dl, ImVec2(p0.x + 8.0f, p0.y + (h - 10.0f) * 0.5f), 10.0f, IM_COL32(255, 255, 255, 255));
+            icon_fn(dl, ImVec2(p0.x + 8.0f, p0.y + (h - 10.0f) * 0.5f), 10.0f, ImGui::GetColorU32(ZS_TEXT));
         }
         float ty = p0.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-        dl->AddText(ImVec2(p0.x + 22.0f, ty), IM_COL32(241, 245, 249, 255), label);
+        dl->AddText(ImVec2(p0.x + 22.0f, ty), ImGui::GetColorU32(ZS_TEXT), label);
         return res;
     };
 
     if (dbg) {
         if (!dbg->paused) {
-            if (draw_icon_btn("Pause F10", "##pause_btn", draw_icon_pause, COLA(0x38, 0xB0, 0x00, 0.25f))) {
+            if (draw_icon_btn("Pause F10", "##pause_btn", draw_icon_pause, ImVec4(ZS_OK.x, ZS_OK.y, ZS_OK.z, 0.22f))) {
                 dbg->paused = true;
             }
         } else {
-            if (draw_icon_btn("Run F10", "##run_btn", draw_icon_play, COLA(0x00, 0x82, 0x98, 0.35f))) {
+            if (draw_icon_btn("Run F10", "##run_btn", draw_icon_play, ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.26f))) {
                 dbg->paused = false;
                 g_disasm_follow_pc = true;
             }
             ImGui::SameLine();
-            if (draw_icon_btn("Step F11", "##step_btn", draw_icon_step, COLA(0xE4, 0x3B, 0x44, 0.35f))) {
+            if (draw_icon_btn("Step F11", "##step_btn", draw_icon_step, ImVec4(ZS_CRIT.x, ZS_CRIT.y, ZS_CRIT.z, 0.24f))) {
                 g_step_pending = true;
             }
         }
@@ -1967,11 +2035,11 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
     }
     if (ImGui::Button("Menu")) ImGui::OpenPopup("##ctrl");
     ImGui::SameLine();
-    if (draw_icon_btn("Controls", "##ctrl_btn", draw_icon_gamepad, COLA(0x16, 0x20, 0x30, 0.6f))) {
+    if (draw_icon_btn("Controls", "##ctrl_btn", draw_icon_gamepad, ImVec4(ZS_PANEL2.x, ZS_PANEL2.y, ZS_PANEL2.z, 0.9f))) {
         g_show_controller_mapping = true;
     }
     ImGui::SameLine();
-    if (draw_icon_btn("Gameplay  `", "##shell_btn", draw_icon_play, COLA(0x00, 0x82, 0x98, 0.35f))) {
+    if (draw_icon_btn("Gameplay  ~", "##shell_btn", draw_icon_play, ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.26f))) {
         g_shell = SHELL_GAMEPLAY;
     }
 
@@ -2006,47 +2074,53 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
             if (ImGui::RadioButton(g_themes[i].name, g_theme == i)) theme_set(i, true);
         ImGui::Separator();
         micro_label("Logs");
-        if (ImGui::MenuItem("Open all"))  for (auto& c : g_log_components) c.is_open = true;
-        if (ImGui::MenuItem("Close all")) for (auto& c : g_log_components) c.is_open = false;
+        if (ImGui::MenuItem(g_log_dock_open ? "Hide the log dock" : "Show the log dock")) log_dock_set(!g_log_dock_open);
         if (ImGui::MenuItem("Snapshot all to logs/")) export_all_logs();
         ImGui::EndPopup();
     }
 
-    // Vitals, right-aligned
-    float vitals_w = 5 * 96.0f * g_ui_scale;
-    float avail = ImGui::GetContentRegionAvail().x;
-    if (avail > vitals_w) ImGui::SameLine(0, avail - vitals_w);
-    else ImGui::SameLine();
+    // Vitals, right-aligned.
+    //
+    // SameLine(offset) counts from the window's left edge; the old SameLine(0, spacing)
+    // counted from the end of the last button, so "width minus the vitals" put them a
+    // whole bar-width off the right edge and they were never on screen. They are shown
+    // when there is room between the last button and the edge, and left out when not.
+    const float vitals_w = 5.0f * 94.0f * g_ui_scale;
+    const float vx = ImGui::GetWindowContentRegionMax().x - vitals_w - 8.0f * g_ui_scale;
+    const float last_end = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+    if (vx > last_end + 16.0f * g_ui_scale) {
+        ImGui::SameLine(vx);
 
-    // Speed: fields presented per real second against the mode's nominal rate.
-    // Not 1000/frame_ms — see field_rate_hz(); one iteration's reciprocal swings
-    // by ±20% around a mean the machine is hitting exactly.
-    double hz_now  = field_rate_hz(inter);
-    double hz_nom  = nominal_hz(inter);
-    double speed   = (hz_nom > 0.1) ? (hz_now / hz_nom) * 100.0 : 0.0;
-    char sbuf[16]; snprintf(sbuf, sizeof(sbuf), "%.0f%%", speed);
-    ImVec4 scol = speed >= 98.0 ? ZS_OK : (speed >= 90.0 ? ZS_WARN : ZS_CRIT);
-    vital("Speed", sbuf, scol, (float)(speed / 100.0), scol);
+        // Speed: fields presented per real second against the mode's nominal rate.
+        // Not 1000/frame_ms — see field_rate_hz(); one iteration's reciprocal swings
+        // by ±20% around a mean the machine is hitting exactly.
+        double hz_now  = field_rate_hz(inter);
+        double hz_nom  = nominal_hz(inter);
+        double speed   = (hz_nom > 0.1) ? (hz_now / hz_nom) * 100.0 : 0.0;
+        char sbuf[16]; snprintf(sbuf, sizeof(sbuf), "%.0f%%", speed);
+        ImVec4 scol = speed >= 98.0 ? ZS_OK : (speed >= 90.0 ? ZS_WARN : ZS_CRIT);
+        vital("Speed", sbuf, scol, (float)(speed / 100.0), scol);
 
-    ImGui::SameLine();
-    char rbuf[24]; snprintf(rbuf, sizeof(rbuf), "%.1f / %.1f", hz_now, hz_nom);
-    vital("Fields/s", rbuf, ZS_DATA, (float)(hz_nom > 0.1 ? hz_now / hz_nom : 0.0), ZS_DATA);
+        ImGui::SameLine();
+        char rbuf[24]; snprintf(rbuf, sizeof(rbuf), "%.1f / %.1f", hz_now, hz_nom);
+        vital("Fields/s", rbuf, ZS_DATA, (float)(hz_nom > 0.1 ? hz_now / hz_nom : 0.0), ZS_DATA);
 
-    ImGui::SameLine();
-    char fbuf[24]; snprintf(fbuf, sizeof(fbuf), "%.1f ms", g_vit_frame_ema);
-    float ffrac = g_vit_budget_ms > 0.001 ? (float)(g_vit_frame_ema / g_vit_budget_ms) : 0.0f;
-    ImVec4 fcol = ffrac <= 1.0f ? ZS_OK : ZS_WARN;
-    vital("Frame", fbuf, ZS_TEXT, ffrac, fcol);
+        ImGui::SameLine();
+        char fbuf[24]; snprintf(fbuf, sizeof(fbuf), "%.1f ms", g_vit_frame_ema);
+        float ffrac = g_vit_budget_ms > 0.001 ? (float)(g_vit_frame_ema / g_vit_budget_ms) : 0.0f;
+        ImVec4 fcol = ffrac <= 1.0f ? ZS_OK : ZS_WARN;
+        vital("Frame", fbuf, ZS_TEXT, ffrac, fcol);
 
-    ImGui::SameLine();
-    char abuf[16]; snprintf(abuf, sizeof(abuf), "%d", g_vit_aq);
-    vital("Audio queue", abuf, ZS_AUDIO,
-          (float)g_vit_aq / (float)(g_vit_aq_target ? g_vit_aq_target : 2048), ZS_AUDIO);
+        ImGui::SameLine();
+        char abuf[16]; snprintf(abuf, sizeof(abuf), "%d", g_vit_aq);
+        vital("Audio queue", abuf, ZS_TEXT,
+              (float)g_vit_aq / (float)(g_vit_aq_target ? g_vit_aq_target : 2048), ZS_AUDIO);
 
-    ImGui::SameLine();
-    char dbuf[16]; snprintf(dbuf, sizeof(dbuf), "%+.2f%%", g_vit_drift);
-    ImVec4 dcol = (g_vit_drift > -0.5 && g_vit_drift < 0.5) ? ZS_OK : ZS_WARN;
-    vital("Drift", dbuf, dcol, 0.5f + (float)(g_vit_drift / 4.0), dcol);
+        ImGui::SameLine();
+        char dbuf[16]; snprintf(dbuf, sizeof(dbuf), "%+.2f%%", g_vit_drift);
+        ImVec4 dcol = (g_vit_drift > -0.5 && g_vit_drift < 0.5) ? ZS_OK : ZS_WARN;
+        vital("Drift", dbuf, dcol, 0.5f + (float)(g_vit_drift / 4.0), dcol);
+    }
 
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -2055,6 +2129,12 @@ static void draw_machine_bar(Cpu* cpu, Interconnect* inter) {
 // ---------------------------------------------------------------------------
 // Mode rail — Pipeline / Display / Frame / Code / Memory / Audio / VRAM / Script
 // ---------------------------------------------------------------------------
+
+/* The rail goes to icons alone below this window width: at 1280 it took 140 px,
+ * cut its own heading and let "Host HW" touch its key. */
+static bool ws_rail_compact(void) {
+    return ImGui::GetMainViewport()->WorkSize.x < 1500.0f * g_ui_scale;
+}
 
 static void draw_mode_rail() {
     /* The rail is the only window in its dock node, so its tab was an empty
@@ -2066,14 +2146,16 @@ static void draw_mode_rail() {
                       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
                       ImGuiWindowFlags_NoScrollWithMouse)) { ImGui::End(); return; }
 
-    micro_label("View Modes");
-    ImGui::Dummy(ImVec2(0, 4.0f));
+    const float s = g_ui_scale;
+    const bool compact = ImGui::GetWindowWidth() < 112.0f * s;
+    if (compact) ImGui::Dummy(ImVec2(0, 6.0f * s));
+    else { micro_label("Modes"); ImGui::Dummy(ImVec2(0, 4.0f * s)); }
 
     for (int i = 0; i < MODE_COUNT; i++) {
         bool on = (g_mode == i);
         ImVec2 p0 = ImGui::GetCursorScreenPos();
         float row_w = ImGui::GetContentRegionAvail().x;
-        float row_h = 32.0f;
+        float row_h = 34.0f * s;
         ImVec2 p1 = ImVec2(p0.x + row_w, p0.y + row_h);
 
         ImGui::PushID(i);
@@ -2090,46 +2172,46 @@ static void draw_mode_rail() {
         }
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
-
+        /* One filled pill for the live mode, a faint one under the pointer. The
+         * mode's own logo hue stays on its icon. */
         if (on) {
-            ImU32 hi = ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.55f));
-            ImU32 lo = ImGui::GetColorU32(zs_mix(ZS_GROUND, ZS_PANEL2, 0.60f));
-            dl->AddRectFilledMultiColor(p0, p1, hi, lo, lo, hi);
-            dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.70f)), 4.0f, 0, 1.0f);
-            dl->AddRectFilled(ImVec2(p0.x + 2.0f, p0.y + 4.0f),
-                              ImVec2(p0.x + 5.0f, p0.y + row_h - 4.0f),
-                              ImGui::GetColorU32(g_modes[i].symbol_col), 2.0f);
+            dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.17f)), 11.0f * s);
+            dl->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(ZS_DATA.x, ZS_DATA.y, ZS_DATA.z, 0.55f)), 11.0f * s, 0, 1.0f);
         } else if (hovered) {
-            dl->AddRectFilled(p0, p1, IM_COL32(30, 42, 60, 180), 4.0f);
-        } else {
-            dl->AddRectFilled(p0, p1, IM_COL32(14, 19, 28, 120), 4.0f);
+            dl->AddRectFilled(p0, p1, ImGui::GetColorU32(zs_mix(ZS_PANEL2, ZS_LINE, 0.4f)), 11.0f * s);
         }
 
-        // Draw crisp PlayStation Vector Icon at x = p0.x + 20
-        ImVec2 icon_center = ImVec2(p0.x + 20.0f, p0.y + row_h * 0.5f);
+        ImVec2 icon_center = compact ? ImVec2((p0.x + p1.x) * 0.5f, p0.y + row_h * 0.5f)
+                                     : ImVec2(p0.x + 20.0f * s, p0.y + row_h * 0.5f);
         ImU32 icon_col = ImGui::GetColorU32(on ? g_modes[i].symbol_col : ZS_MUTED);
+        const float ir = 6.0f * s, it = 1.7f;
         switch (i) {
-            case MODE_PIPELINE: draw_icon_flow(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_DISPLAY:  draw_icon_screen(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_FRAME:    draw_icon_clock(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_CODE:     draw_icon_cpu(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_MEMORY:   draw_icon_ram(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_AUDIO:    draw_icon_wave(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_VRAM:     draw_icon_gpu(dl, icon_center, 5.5f, icon_col, 1.6f); break;
-            case MODE_HOST:     draw_ps_chip(dl, icon_center, 5.5f, icon_col, 1.8f); break;
-            case MODE_SCRIPT:   draw_ps_terminal(dl, icon_center, 5.5f, icon_col, 1.8f); break;
+            case MODE_PIPELINE: draw_icon_flow(dl, icon_center, ir, icon_col, it); break;
+            case MODE_DISPLAY:  draw_icon_screen(dl, icon_center, ir, icon_col, it); break;
+            case MODE_FRAME:    draw_icon_clock(dl, icon_center, ir, icon_col, it); break;
+            case MODE_CODE:     draw_icon_cpu(dl, icon_center, ir, icon_col, it); break;
+            case MODE_MEMORY:   draw_icon_ram(dl, icon_center, ir, icon_col, it); break;
+            case MODE_AUDIO:    draw_icon_wave(dl, icon_center, ir, icon_col, it); break;
+            case MODE_VRAM:     draw_icon_gpu(dl, icon_center, ir, icon_col, it); break;
+            case MODE_HOST:     draw_ps_chip(dl, icon_center, ir, icon_col, it + 0.2f); break;
+            case MODE_SCRIPT:   draw_ps_terminal(dl, icon_center, ir, icon_col, it + 0.2f); break;
             default: break;
         }
 
-        // Mode Title
-        float text_y = p0.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f;
-        dl->AddText(ImVec2(p0.x + 36.0f, text_y), ImGui::GetColorU32(on ? ZS_TEXT : ZS_MUTED), g_modes[i].name);
-
-        // Key Shortcut (F1..F9)
-        dl->AddText(ImVec2(p0.x + row_w - 24.0f, text_y), ImGui::GetColorU32(ZS_FAINT), g_modes[i].key);
+        if (compact) {
+            if (hovered) ImGui::SetTooltip("%s   %s", g_modes[i].name, g_modes[i].key);
+        } else {
+            float text_y = p0.y + (row_h - ImGui::GetTextLineHeight()) * 0.5f;
+            dl->AddText(ImVec2(p0.x + 40.0f * s, text_y), ImGui::GetColorU32(on ? ZS_TEXT : ZS_MUTED), g_modes[i].name);
+            ImFont* mf = g_font_mono ? g_font_mono : ImGui::GetFont();
+            float ks = mf->LegacySize * 0.92f;
+            float kw = mf->CalcTextSizeA(ks, FLT_MAX, 0.0f, g_modes[i].key).x;
+            dl->AddText(mf, ks, ImVec2(p1.x - kw - 12.0f * s, p0.y + (row_h - ks) * 0.5f),
+                        ImGui::GetColorU32(ZS_FAINT), g_modes[i].key);
+        }
 
         ImGui::PopID();
-        ImGui::Dummy(ImVec2(0, 3.0f));
+        ImGui::Dummy(ImVec2(0, 2.0f * s));
     }
 
     ImGui::End();
@@ -2225,15 +2307,32 @@ static void pipe_lane(const char* title, const char* sub, ImVec4 accent, ZsIconF
     ImGui::PopStyleColor();
     {
         ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
-        float tw = mono->CalcTextSizeA(mono->LegacySize * 0.9f, FLT_MAX, 0.0f, verdict).x + 18.0f * s;
+        /* A shape as well as a colour, so the verdict does not depend on telling red
+         * from rose: a cross for a fault, a triangle for attention, a dot otherwise. */
+        float tw = mono->CalcTextSizeA(mono->LegacySize * 0.9f, FLT_MAX, 0.0f, verdict).x + 34.0f * s;
         ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - tw);
         ImVec2 c0 = ImGui::GetCursorScreenPos();
         ImDrawList* hdl = ImGui::GetWindowDrawList();
-        hdl->AddRectFilled(c0, ImVec2(c0.x + tw, c0.y + mono->LegacySize + 4.0f * s),
-                           ImGui::GetColorU32(ImVec4(vcol.x, vcol.y, vcol.z, 0.16f)), 4.0f * s);
-        hdl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(c0.x + 9.0f * s, c0.y + 2.0f * s),
+        const float ch = mono->LegacySize + 8.0f * s;
+        hdl->AddRectFilled(c0, ImVec2(c0.x + tw, c0.y + ch),
+                           ImGui::GetColorU32(ImVec4(vcol.x, vcol.y, vcol.z, worst >= 2 ? 0.20f : 0.14f)), ch * 0.5f);
+        {
+            const ImVec2 gc = ImVec2(c0.x + 14.0f * s, c0.y + ch * 0.5f);
+            const float gr = 4.2f * s;
+            const ImU32 gcol = ImGui::GetColorU32(vcol);
+            if (worst == 3) {
+                hdl->AddLine(ImVec2(gc.x - gr, gc.y - gr), ImVec2(gc.x + gr, gc.y + gr), gcol, 1.8f * s);
+                hdl->AddLine(ImVec2(gc.x - gr, gc.y + gr), ImVec2(gc.x + gr, gc.y - gr), gcol, 1.8f * s);
+            } else if (worst == 2) {
+                hdl->AddTriangle(ImVec2(gc.x, gc.y - gr), ImVec2(gc.x + gr * 1.15f, gc.y + gr * 0.85f),
+                                 ImVec2(gc.x - gr * 1.15f, gc.y + gr * 0.85f), gcol, 1.6f * s);
+            } else {
+                hdl->AddCircleFilled(gc, 3.2f * s, gcol, 12);
+            }
+        }
+        hdl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(c0.x + 26.0f * s, c0.y + (ch - mono->LegacySize * 0.9f) * 0.5f),
                      ImGui::GetColorU32(vcol), verdict);
-        ImGui::Dummy(ImVec2(tw, mono->LegacySize + 4.0f * s));
+        ImGui::Dummy(ImVec2(tw, ch));
     }
     ImGui::Dummy(ImVec2(0, 2.0f * s));
 
@@ -2823,7 +2922,7 @@ static void draw_audio_meters(Interconnect* inter) {
         kv("Ring drops", dr, spu->dropped_samples ? ZS_WARN : ZS_FAINT);
         bool rev = (spu->control & SPU_CTRL_REVERB_ENABLE);
         char rv[32]; snprintf(rv, sizeof(rv), "%s (SPUCNT %04X)", rev ? "on" : "off", spu->control);
-        kv("Reverb", rv, rev ? ZS_AUDIO : ZS_FAINT);
+        kv("Reverb", rv, rev ? ZS_TEXT : ZS_FAINT);
         ImGui::EndTable();
     }
 }
@@ -2976,7 +3075,9 @@ static int draw_dualshock(Controller* ctrl, uint16_t state, SioPadMode mode, flo
     const ImU32 shell_lo = IM_COL32(26, 33, 48, 255);
     const ImU32 edge     = IM_COL32(70, 86, 118, 255);
     const ImU32 well     = IM_COL32(16, 21, 32, 255);
-    const ImU32 text_col = ImGui::GetColorU32(ZS_MUTED);
+    /* The pad is a dark object whatever the theme, so what is written on it is a fixed
+     * light grey: ZS_MUTED turns dark on a pale theme and vanished into the body. */
+    const ImU32 text_col = IM_COL32(176, 186, 204, 255);
 
     /* --- shell: one moulded silhouette ---
      *
@@ -3500,7 +3601,7 @@ static void draw_host_hw_window(Interconnect* inter) {
 
     card_header_icon("Audio device", ZS_AUDIO, draw_icon_wave);
     if (ImGui::BeginTable("hosthw_audio", 2, ImGuiTableFlags_SizingStretchProp)) {
-        kv("Driver", h->audio_driver, ZS_AUDIO);
+        kv("Driver", h->audio_driver, ZS_TEXT);
         if (h->audio_freq > 0) {
             snprintf(buf, sizeof(buf), "%d Hz, %d ch", h->audio_freq, h->audio_channels);
             kv("Device format", buf, ZS_TEXT);
@@ -3511,7 +3612,7 @@ static void draw_host_hw_window(Interconnect* inter) {
             kv("Device format", "no device open", ZS_FAINT);
         }
         snprintf(buf, sizeof(buf), "%d / %d samples", g_vit_aq, g_vit_aq_target);
-        kv("Emulator ring", buf, ZS_AUDIO);
+        kv("Emulator ring", buf, ZS_TEXT);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 8));
@@ -3615,9 +3716,9 @@ static void draw_pinned_watches(void) {
             ImVec4 col = w.ok ? tile_cols[i & 3] : ZS_CRIT;
 
             dl->AddRectFilledMultiColor(p0, p1,
-                IM_COL32(22, 30, 44, 255), IM_COL32(14, 19, 28, 255),
-                IM_COL32(14, 19, 28, 255), IM_COL32(22, 30, 44, 255));
-            dl->AddRect(p0, p1, IM_COL32(40, 56, 82, 255), 6.0f);
+                ImGui::GetColorU32(ZS_PANEL2), ImGui::GetColorU32(ZS_PANEL),
+                ImGui::GetColorU32(ZS_PANEL), ImGui::GetColorU32(ZS_PANEL2));
+            dl->AddRect(p0, p1, ImGui::GetColorU32(ZS_LINE), 10.0f);
             dl->AddRectFilled(p0, ImVec2(p0.x + 3.0f, p1.y), ImGui::GetColorU32(col), 3.0f);
 
             /* Text is clipped to the tile: a long expression or value is cut at
@@ -3710,7 +3811,7 @@ static void draw_inspector_window(Interconnect* inter) {
                      host_info_audio_latency_ms());
         else
             snprintf(hb, sizeof(hb), "%s (no device)", host->audio_driver);
-        kv("Audio", hb, ZS_AUDIO);
+        kv("Audio", hb, ZS_TEXT);
         ImGui::EndTable();
     }
     ImGui::Dummy(ImVec2(0, 6));
@@ -3768,6 +3869,87 @@ static void draw_inspector_window(Interconnect* inter) {
     ImGui::End();
 }
 
+/* One line along the bottom: how many errors and warnings there have been, the last
+ * of either, and the switch for the tabbed log dock. The dock is closed by default
+ * (it was empty at INFO and took a quarter of the screen); the first ERROR opens it
+ * once, so a failure is not missed by a closed panel. */
+static void draw_log_strip(float h) {
+    const float s = g_ui_scale;
+    uint32_t errs, warns; int lvl, cat; char last[200];
+    {
+        std::lock_guard<std::mutex> lock(g_log_mutex);
+        errs = g_log_errors; warns = g_log_warns; lvl = g_log_last_level; cat = g_log_last_cat;
+        snprintf(last, sizeof(last), "%s", g_log_last);
+    }
+    if (errs > 0 && !g_log_auto_opened) { g_log_auto_opened = true; if (!g_log_dock_open) log_dock_set(true); }
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ZS_PANEL);
+    ImGui::BeginChild("##LogStrip", ImVec2(0, h), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetCursorScreenPos();
+    const float W = ImGui::GetContentRegionAvail().x;
+    ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
+    const float fs = mono->LegacySize * 0.95f, ph = fs + 12.0f * s;
+    const float y = p0.y + (h - ph) * 0.5f;
+    dl->AddLine(p0, ImVec2(p0.x + W, p0.y), ImGui::GetColorU32(ZS_LINE), 1.0f);
+
+    float x = p0.x + 14.0f * s;
+    auto pill = [&](const char* txt, ImVec4 col, bool lit) {
+        float tw = mono->CalcTextSizeA(fs, FLT_MAX, 0.0f, txt).x, pw = tw + 28.0f * s;
+        ImVec2 a(x, y), b(x + pw, y + ph);
+        dl->AddRectFilled(a, b, ImGui::GetColorU32(ImVec4(col.x, col.y, col.z, lit ? 0.16f : 0.06f)), ph * 0.5f);
+        dl->AddRect(a, b, ImGui::GetColorU32(ImVec4(col.x, col.y, col.z, lit ? 0.5f : 0.25f)), ph * 0.5f);
+        const ImVec2 gc(a.x + 13.0f * s, a.y + ph * 0.5f);
+        const ImU32 gcol = ImGui::GetColorU32(lit ? col : ZS_FAINT);
+        if (col.x == ZS_CRIT.x && col.y == ZS_CRIT.y) {      /* a cross for errors, a triangle for warnings */
+            dl->AddLine(ImVec2(gc.x - 3.5f * s, gc.y - 3.5f * s), ImVec2(gc.x + 3.5f * s, gc.y + 3.5f * s), gcol, 1.7f * s);
+            dl->AddLine(ImVec2(gc.x - 3.5f * s, gc.y + 3.5f * s), ImVec2(gc.x + 3.5f * s, gc.y - 3.5f * s), gcol, 1.7f * s);
+        } else {
+            dl->AddTriangle(ImVec2(gc.x, gc.y - 4.0f * s), ImVec2(gc.x + 4.6f * s, gc.y + 3.4f * s),
+                            ImVec2(gc.x - 4.6f * s, gc.y + 3.4f * s), gcol, 1.5f * s);
+        }
+        dl->AddText(mono, fs, ImVec2(a.x + 24.0f * s, a.y + (ph - fs) * 0.5f), ImGui::GetColorU32(lit ? col : ZS_MUTED), txt);
+        x += pw + 8.0f * s;
+    };
+    char b1[32], b2[32];
+    snprintf(b1, sizeof(b1), "%u error%s", errs, errs == 1 ? "" : "s");
+    snprintf(b2, sizeof(b2), "%u warning%s", warns, warns == 1 ? "" : "s");
+    pill(b1, ZS_CRIT, errs > 0);
+    pill(b2, ZS_WARN, warns > 0);
+
+    /* The switch, right-aligned. */
+    const char* sw = g_log_dock_open ? "Hide logs" : "Show logs";
+    const float swtw = mono->CalcTextSizeA(fs, FLT_MAX, 0.0f, sw).x, swpw = swtw + 30.0f * s;
+    ImVec2 sa(p0.x + W - swpw - 14.0f * s, y), sb(sa.x + swpw, y + ph);
+    ImGui::SetCursorScreenPos(sa);
+    if (ImGui::InvisibleButton("##logsw", ImVec2(swpw, ph))) log_dock_set(!g_log_dock_open);
+    const bool hov = ImGui::IsItemHovered();
+    dl->AddRectFilled(sa, sb, ImGui::GetColorU32(hov ? zs_mix(ZS_PANEL2, ZS_LINE, 0.5f) : ZS_PANEL2), ph * 0.5f);
+    dl->AddRect(sa, sb, ImGui::GetColorU32(ZS_LINE), ph * 0.5f);
+    dl->AddText(mono, fs, ImVec2(sa.x + 14.0f * s, sa.y + (ph - fs) * 0.5f), ImGui::GetColorU32(ZS_TEXT), sw);
+    {   /* a chevron that points where the dock will go */
+        const float cx = sb.x - 12.0f * s, cy = sa.y + ph * 0.5f, k = 3.4f * s;
+        const float d = g_log_dock_open ? 1.0f : -1.0f;
+        dl->AddLine(ImVec2(cx - k, cy - d * k * 0.5f), ImVec2(cx, cy + d * k * 0.5f), ImGui::GetColorU32(ZS_MUTED), 1.5f * s);
+        dl->AddLine(ImVec2(cx, cy + d * k * 0.5f), ImVec2(cx + k, cy - d * k * 0.5f), ImGui::GetColorU32(ZS_MUTED), 1.5f * s);
+    }
+
+    /* The last error or warning, as much of it as fits. */
+    if (last[0]) {
+        char line[260];
+        snprintf(line, sizeof(line), "[%s] %s", log_category_name((LogCategory)cat), last);
+        const float x0 = x + 6.0f * s, x1 = sa.x - 12.0f * s;
+        if (x1 - x0 > 60.0f * s) {
+            dl->PushClipRect(ImVec2(x0, y), ImVec2(x1, y + ph), true);
+            dl->AddText(mono, fs, ImVec2(x0, y + (ph - fs) * 0.5f),
+                        ImGui::GetColorU32(lvl == LOG_LEVEL_ERROR ? ZS_CRIT : ZS_MUTED), line);
+            dl->PopClipRect();
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+}
+
 // ---------------------------------------------------------------------------
 // Per-mode dock layout — rebuilt when the mode changes. The emulated screen is
 // pinned to the top of the stage in every mode; "Display" gives it the whole
@@ -3783,8 +3965,13 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
 
     ImGuiID root = dockspace_id;
-    ImGuiID bottom = ImGui::DockBuilderSplitNode(root, ImGuiDir_Down, 0.24f, nullptr, &root);
-    ImGuiID rail   = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left, 0.11f, nullptr, &root);
+    /* The log dock exists only while it is open (see the log strip): it is empty at
+     * INFO most of the time and took a quarter of the screen. */
+    ImGuiID bottom = 0;
+    if (g_log_dock_open) bottom = ImGui::DockBuilderSplitNode(root, ImGuiDir_Down, 0.22f, nullptr, &root);
+    const float vw = ImGui::GetMainViewport()->Size.x;
+    const float rail_ratio = ws_rail_compact() ? (68.0f * g_ui_scale) / (vw > 1.0f ? vw : 1280.0f) : 0.11f;
+    ImGuiID rail   = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left, rail_ratio, nullptr, &root);
 
     // Windows this mode wants in body (stage) and inspector.
     const char* body = nullptr;   // main mode window under the screen
@@ -3831,9 +4018,10 @@ static void rebuild_layout(ImGuiID dockspace_id) {
     if (insp)  ImGui::DockBuilderDockWindow(insp, inspector);
     if (insp2) ImGui::DockBuilderDockWindow(insp2, inspector);
 
-    // Logs tabbed along the bottom, every mode.
-    for (auto& comp : g_log_components)
-        ImGui::DockBuilderDockWindow(comp.name, bottom);
+    // Logs tabbed along the bottom, every mode, while the dock is open.
+    if (g_log_dock_open)
+        for (auto& comp : g_log_components)
+            ImGui::DockBuilderDockWindow(comp.name, bottom);
 
     ImGui::DockBuilderFinish(dockspace_id);
 }
@@ -3919,6 +4107,26 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend)
         return nullptr;
     };
 
+    /* The faces the interface is designed in ship with the emulator (assets/fonts,
+     * both under the SIL OFL, licences beside them), so it looks the same on every
+     * machine instead of taking whatever the distribution happens to have. They
+     * are looked for next to the executable first, then in the working directory;
+     * the system faces below stay as the fallback when neither has them. */
+    auto load_bundled = [&](const char* name, float px) -> ImFont* {
+        const char* base = SDL_GetBasePath();
+        char path[640];
+        const char* const roots[2] = { base ? base : "", "" };
+        for (int r = 0; r < 2; r++) {
+            snprintf(path, sizeof(path), "%sassets/fonts/%s", roots[r], name);
+            if (access(path, R_OK) == 0)
+                return io.Fonts->AddFontFromFileTTF(path, px, &font_cfg);
+        }
+        return nullptr;
+    };
+    g_font_ui   = load_bundled("Inter-Regular.otf",       16.0f * ui_scale);
+    g_font_mono = load_bundled("JetBrainsMono-Regular.ttf", 14.5f * ui_scale);
+    g_font_h1   = load_bundled("Inter-SemiBold.otf",      19.0f * ui_scale);
+
     static const char* ui_paths[] = {
         "/usr/share/fonts/truetype/inter-zorin-os/Inter-Regular.ttf",
         "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
@@ -3938,9 +4146,9 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend)
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
     };
 
-    g_font_ui   = load_first(ui_paths,       4, 16.0f * ui_scale);
-    g_font_mono = load_first(mono_paths,     4, 14.5f * ui_scale);
-    g_font_h1   = load_first(ui_semibold_paths, 4, 19.0f * ui_scale);
+    if (!g_font_ui)   g_font_ui   = load_first(ui_paths,       4, 16.0f * ui_scale);
+    if (!g_font_mono) g_font_mono = load_first(mono_paths,     4, 14.5f * ui_scale);
+    if (!g_font_h1)   g_font_h1   = load_first(ui_semibold_paths, 4, 19.0f * ui_scale);
 
     if (!g_font_ui) {
         io.Fonts->AddFontDefault();
@@ -3969,6 +4177,11 @@ extern "C" void debug_ui_init(SDL_Window* window, void* gl_context, int backend)
      * is created here in both cases and outlives either, which is what a hot
      * backend switch depends on. */
     debug_ui_backend_init(window, gl_context, backend);
+
+    /* The tabbed log dock starts closed; the log strip opens it. The files below are
+     * written either way. */
+    for (auto& c : g_log_components) c.is_open = false;
+    g_log_dock_open = false;
 
     /* Open per-component log files (one file per category, lives for whole session) */
     mkdir("logs", 0755);
@@ -4077,20 +4290,50 @@ static void draw_zs_emblem(ImDrawList* dl, ImVec2 c, float r, float a) {
     draw_ps_square  (dl, ImVec2(c.x - d, c.y), g, gp_col(ZS_PS_PINK,  a), th);
 }
 
+/* Glass over the game. These sit on whatever the picture happens to be, so they
+ * are dark in every theme; only the accents (a dot, a severity) come from it. */
+static const ImVec4 GLASS_TEXT  = ImVec4(0.93f, 0.95f, 0.97f, 1.0f);
+static const ImVec4 GLASS_MUTED = ImVec4(0.74f, 0.79f, 0.87f, 1.0f);
+static ImU32 glass_bg(float a, float k = 150.0f) { return IM_COL32(10, 12, 18, (int)(k * a)); }
+static ImU32 glass_edge(float a) { return IM_COL32(255, 255, 255, (int)(38.0f * a)); }
+
+/* Shorten a string to fit a width, ending in "...". A clip rectangle cuts a word in
+ * half ("No disc - BIOS sh"); this says that something was left out. */
+static void fit_text(ImFont* f, float size, const char* text, float max_w, char* out, size_t n) {
+    snprintf(out, n, "%s", text);
+    if (f->CalcTextSizeA(size, FLT_MAX, 0.0f, out).x <= max_w) return;
+    size_t len = strlen(out);
+    while (len > 1) {
+        len--;
+        while (len > 1 && ((unsigned char)out[len] & 0xC0) == 0x80) len--;   /* never cut inside a UTF-8 sequence */
+        char tmp[200];
+        snprintf(tmp, sizeof(tmp), "%.*s...", (int)len, text);
+        if (f->CalcTextSizeA(size, FLT_MAX, 0.0f, tmp).x <= max_w || len <= 3) { snprintf(out, n, "%s", tmp); return; }
+    }
+}
+
+/* True while a key cap is drawn on one of the interface's own panels instead of on
+ * the game: it then takes the theme's surface colours, which also reads on a pale
+ * theme, where the glass white would vanish. */
+static bool g_kc_panel = false;
+
 /* A key cap and what it does. Returns the x after it. */
 static float gp_keycap(ImDrawList* dl, ImVec2 p, const char* key, const char* label, float a) {
     ImFont* m = g_font_mono ? g_font_mono : ImGui::GetFont();
     ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
     float s  = g_ui_scale;
-    float fs = m->LegacySize * 0.90f;
+    float fs = m->LegacySize * 0.92f;
     float kw = m->CalcTextSizeA(fs, FLT_MAX, 0.0f, key).x + 12.0f * s;
-    float kh = fs + 6.0f * s;
-    dl->AddRectFilled(p, ImVec2(p.x + kw, p.y + kh), IM_COL32(26, 35, 52, (int)(235 * a)), 4.0f * s);
-    dl->AddRect(p, ImVec2(p.x + kw, p.y + kh), IM_COL32(62, 84, 120, (int)(255 * a)), 4.0f * s);
-    dl->AddText(m, fs, ImVec2(p.x + 6.0f * s, p.y + 3.0f * s), gp_col(ZS_TEXT, a), key);
-    float x = p.x + kw + 6.0f * s;
-    float ls = f->LegacySize * 0.88f;
-    dl->AddText(f, ls, ImVec2(x, p.y + (kh - ls) * 0.5f), gp_col(ZS_MUTED, a), label);
+    float kh = fs + 8.0f * s;
+    const ImVec4 tx = g_kc_panel ? ZS_TEXT  : GLASS_TEXT;
+    const ImVec4 mu = g_kc_panel ? ZS_MUTED : GLASS_MUTED;
+    dl->AddRectFilled(p, ImVec2(p.x + kw, p.y + kh),
+                      g_kc_panel ? gp_col(ZS_PANEL2, a) : IM_COL32(255, 255, 255, (int)(26 * a)), 6.0f * s);
+    dl->AddRect(p, ImVec2(p.x + kw, p.y + kh), g_kc_panel ? gp_col(ZS_LINE, a) : glass_edge(a * 1.3f), 6.0f * s);
+    dl->AddText(m, fs, ImVec2(p.x + 6.0f * s, p.y + 4.0f * s), gp_col(tx, a), key);
+    float x = p.x + kw + 7.0f * s;
+    float ls = f->LegacySize * 0.9f;
+    dl->AddText(f, ls, ImVec2(x, p.y + (kh - ls) * 0.5f), gp_col(mu, a), label);
     return x + f->CalcTextSizeA(ls, FLT_MAX, 0.0f, label).x + 16.0f * s;
 }
 
@@ -4171,6 +4414,69 @@ static bool gp_slot_info(int slot, char* out, size_t n) {
     return true;
 }
 
+/* --- slot pictures ---------------------------------------------------------
+ *
+ * savestate_save() leaves a 160x120 RGB picture beside each state (<slot>.thm).
+ * Four textures, created the first time a picture exists and rewritten in place
+ * when the file changes: a user texture is handled by the renderer backend the same
+ * way the font atlas is (WantCreate, then WantUpdates), on both OpenGL and Vulkan,
+ * and one that is never destroyed needs no retirement protocol. */
+static ImTextureData* g_gp_thumb_tex[4]   = { nullptr, nullptr, nullptr, nullptr };
+static bool           g_gp_thumb_has[4]   = { false, false, false, false };
+static time_t         g_gp_thumb_mt[4]    = { 0, 0, 0, 0 };
+static off_t          g_gp_thumb_sz[4]    = { 0, 0, 0, 0 };
+
+static void gp_thumb_refresh(int slot) {
+    char tp[160];
+    if (!savestate_thumbnail_path(gp_slot_path(slot), tp, sizeof(tp))) return;
+    struct stat st;
+    if (stat(tp, &st) != 0) { g_gp_thumb_has[slot] = false; return; }
+    if (g_gp_thumb_has[slot] && st.st_mtime == g_gp_thumb_mt[slot] && st.st_size == g_gp_thumb_sz[slot]) return;
+
+    FILE* f = fopen(tp, "rb");
+    if (!f) return;
+    unsigned char hdr[8];
+    const int W = SAVESTATE_THUMB_W, H = SAVESTATE_THUMB_H;
+    static unsigned char rgb[SAVESTATE_THUMB_W * SAVESTATE_THUMB_H * 3];
+    bool ok = fread(hdr, 1, 8, f) == 8 && memcmp(hdr, "ZTH1", 4) == 0 &&
+              (hdr[4] | (hdr[5] << 8)) == W && (hdr[6] | (hdr[7] << 8)) == H &&
+              fread(rgb, 1, sizeof(rgb), f) == sizeof(rgb);
+    fclose(f);
+    if (!ok) { g_gp_thumb_has[slot] = false; return; }
+
+    ImTextureData* tex = g_gp_thumb_tex[slot];
+    if (!tex) {
+        tex = IM_NEW(ImTextureData)();
+        tex->Create(ImTextureFormat_RGBA32, W, H);
+        ImGui::RegisterUserTexture(tex);
+        g_gp_thumb_tex[slot] = tex;
+    }
+    for (int i = 0; i < W * H; i++) {
+        unsigned char* d = tex->Pixels + i * 4;
+        d[0] = rgb[i * 3]; d[1] = rgb[i * 3 + 1]; d[2] = rgb[i * 3 + 2]; d[3] = 255;
+    }
+    if (tex->Status == ImTextureStatus_OK) {
+        ImTextureRect r = { 0, 0, (unsigned short)W, (unsigned short)H };
+        tex->Updates.push_back(r);
+        tex->UpdateRect = r;
+        tex->UsedRect = r;
+        tex->Status = ImTextureStatus_WantUpdates;
+    }
+    g_gp_thumb_has[slot] = true;
+    g_gp_thumb_mt[slot] = st.st_mtime;
+    g_gp_thumb_sz[slot] = st.st_size;
+}
+
+static void gp_thumbs_release(void) {
+    for (int i = 0; i < 4; i++) {
+        if (!g_gp_thumb_tex[i]) continue;
+        ImGui::UnregisterUserTexture(g_gp_thumb_tex[i]);
+        IM_DELETE(g_gp_thumb_tex[i]);
+        g_gp_thumb_tex[i] = nullptr;
+        g_gp_thumb_has[i] = false;
+    }
+}
+
 static void gp_request_state(bool save, int slot) {
     g_req_state = true;
     g_req_state_save = save;
@@ -4179,135 +4485,256 @@ static void gp_request_state(bool save, int slot) {
 
 // --- HUD ---------------------------------------------------------------------
 
+static bool g_gp_ambient   = true;    /* the side bars take their light from the frame */
+static bool g_gp_pace_line = true;    /* the 3 px line along the top */
+
+/* Fill the bars beside the 4:3 picture with light taken from its edge. Sixteen
+ * horizontal bands per side, each a single texel of the scanout stretched across
+ * the bar; two quads per band whose vertex alpha rises to the band's centre and
+ * falls back to zero at the neighbours, so the bands cross-fade into a smooth
+ * vertical gradient. No readback and no blur pass: it samples the texture the
+ * picture already uses, and costs 32 quads. */
+static void gp_draw_ambient(ImDrawList* dl, ImVec2 w0, ImVec2 w1) {
+    if (!g_gp_ambient || !g_scanout.valid) return;
+    const ScanoutBox& b = g_scanout;
+    const float ih = b.p1.y - b.p0.y;
+    if (ih < 8.0f) return;
+    const int   N    = 14;
+    const float step = (w1.y - w0.y) / (float)N;
+    const float k    = 1.0f;
+
+    dl->PushClipRect(w0, w1, true);
+    dl->PushTexture(ImTextureRef(b.tex));
+    for (int side = 0; side < 2; side++) {
+        const float xa = side ? b.p1.x : w0.x;        /* bar, left to right */
+        const float xb = side ? w1.x   : b.p0.x;
+        if (xb - xa < 6.0f) continue;
+        /* Three depths into the picture, composited with alphas 1, 1/2 and 1/3, which
+         * over a black ground weighs each of them about a third: an average, not the
+         * single column at the edge, which in most scenes is the darkest one. */
+        static const float depth[3] = { 0.05f, 0.17f, 0.32f }, layer_a[3] = { 1.0f, 0.5f, 0.34f };
+        for (int layer = 0; layer < 3; layer++) {
+        const float du = (b.uv1.x - b.uv0.x) * depth[layer];
+        const float u  = side ? b.uv1.x - du : b.uv0.x + du;
+        for (int i = 0; i < N; i++) {
+            const float yc = w0.y + ((float)i + 0.5f) * step;
+            float t = (yc - b.p0.y) / ih; t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+            const ImVec2 uv(u, b.uv0.y + t * (b.uv1.y - b.uv0.y));
+            for (int half = 0; half < 2; half++) {
+                const float ya = half ? yc : yc - step, yb = half ? yc + step : yc;
+                const float va = half ? 1.0f : 0.0f, vb = half ? 0.0f : 1.0f;
+                /* Alpha varies along y only: a product of two ramps is not bilinear, and
+                 * split into triangles it shows as diagonal wedges. The fall-off across
+                 * the bar is a separate veil below. */
+                auto col = [&](float av) {
+                    return IM_COL32((int)(255.0f * k), (int)(255.0f * k), (int)(255.0f * k),
+                                    (int)(255.0f * av * layer_a[layer]));
+                };
+                dl->PrimReserve(6, 4);
+                const ImDrawIdx idx = (ImDrawIdx)dl->_VtxCurrentIdx;
+                dl->PrimWriteIdx(idx); dl->PrimWriteIdx((ImDrawIdx)(idx + 1)); dl->PrimWriteIdx((ImDrawIdx)(idx + 2));
+                dl->PrimWriteIdx(idx); dl->PrimWriteIdx((ImDrawIdx)(idx + 2)); dl->PrimWriteIdx((ImDrawIdx)(idx + 3));
+                dl->PrimWriteVtx(ImVec2(xa, ya), uv, col(va));
+                dl->PrimWriteVtx(ImVec2(xb, ya), uv, col(va));
+                dl->PrimWriteVtx(ImVec2(xb, yb), uv, col(vb));
+                dl->PrimWriteVtx(ImVec2(xa, yb), uv, col(vb));
+            }
+        }
+        }
+    }
+    dl->PopTexture();
+
+    /* The veil: the light is held back near the picture's edge and falls away to
+     * the window's. It also keeps the overlay text, which sits in the bars, readable
+     * over a bright frame (a white logo sampled into the bar). */
+    for (int side = 0; side < 2; side++) {
+        const float xa = side ? b.p1.x : w0.x, xb = side ? w1.x : b.p0.x;
+        if (xb - xa < 6.0f) continue;
+        const ImU32 near_c = IM_COL32(0, 0, 0, g_theme_light ? 70 : 105);
+        const ImU32 far_c  = IM_COL32(0, 0, 0, g_theme_light ? 150 : 215);
+        if (side) dl->AddRectFilledMultiColor(ImVec2(xa, w0.y), ImVec2(xb, w1.y), near_c, far_c, far_c, near_c);
+        else      dl->AddRectFilledMultiColor(ImVec2(xa, w0.y), ImVec2(xb, w1.y), far_c, near_c, near_c, far_c);
+    }
+    dl->PopClipRect();
+}
+
+/* The rhythm line: one segment per recent host loop iteration, left to right,
+ * green while the field fits its budget, amber and red above it. It replaces the
+ * stats card as the thing that is always there, and takes 3 px of the top edge. */
+static void gp_draw_pace_line(ImDrawList* dl, ImVec2 w0, ImVec2 w1, float a) {
+    if (!g_gp_pace_line || a <= 0.01f) return;
+    const float h = 3.0f * g_ui_scale;
+    const float seg = (w1.x - w0.x) / (float)ZS_FT_SAMPLES;
+    for (int i = 0; i < ZS_FT_SAMPLES; i++) {
+        const float v = g_ft[(g_ft_head + i) % ZS_FT_SAMPLES];
+        ImVec4 c = ZS_FAINT;
+        if (v > 0.0f && g_vit_budget_ms > 0.001) {
+            const double over = (double)v / g_vit_budget_ms;
+            c = over > 1.8 ? ZS_CRIT : (over > 1.35 ? ZS_WARN : ZS_OK);
+        }
+        dl->AddRectFilled(ImVec2(w0.x + seg * (float)i, w0.y), ImVec2(w0.x + seg * (float)(i + 1) + 0.6f, w0.y + h),
+                          gp_col(c, a * 0.92f));
+    }
+}
+
 static void gp_draw_hud(Interconnect* inter, float alpha) {
-    if (alpha <= 0.01f) return;
     float s = g_ui_scale;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImVec2 w0 = vp->WorkPos, w1 = ImVec2(w0.x + vp->WorkSize.x, w0.y + vp->WorkSize.y);
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+
+    /* The line is the one part that stays when the rest has faded. */
+    const float line_a = (g_gp_menu_open || g_gp_hud_mode == GP_HUD_OFF) ? 0.0f : (alpha > 0.55f ? alpha : 0.55f);
+    gp_draw_pace_line(dl, w0, w1, line_a);
+    if (alpha <= 0.01f) return;
 
     bool   pal   = inter && inter->gpu.vmode == Pal;
     double hz    = nominal_hz(inter);
-    /* Fields per real second, counted over half a second — see field_rate_hz(). */
-    double fps   = field_rate_hz(inter);
+    double fps   = field_rate_hz(inter);   /* fields per real second over half a second */
     double speed = (hz > 0.1) ? (fps / hz) * 100.0 : 0.0;
     ImVec4 scol  = speed >= 98.0 ? ZS_OK : (speed >= 90.0 ? ZS_WARN : ZS_CRIT);
 
     SioPadMode pad = inter ? sio_get_pad_mode(&inter->sio) : SIO_PAD_DIGITAL;
     ImVec4 led = (pad == SIO_PAD_ANALOG) ? ZS_CRIT : (pad == SIO_PAD_STICK) ? ZS_OK : ZS_FAINT;
 
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
-    ImFont* h1   = g_font_h1 ? g_font_h1 : ImGui::GetFont();
+    ImFont* ui   = g_font_ui   ? g_font_ui   : ImGui::GetFont();
+    ImFont* h1   = g_font_h1   ? g_font_h1   : ImGui::GetFont();
+    const float ms = mono->LegacySize * 1.02f;
 
-    /* --- top right: the performance block --- */
-    float pad_in = 12.0f * s;
-    float big    = 30.0f * s;
-    float small  = mono->LegacySize * 0.92f;
-    /* The second line carries the field time and region on the left and the pad
-     * mode on the right; the block is as wide as both need, not a fixed 244. */
-    char  line2[64];
-    snprintf(line2, sizeof(line2), "%.1f ms  %s %.2f Hz", g_vit_frame_ema, pal ? "PAL" : "NTSC", hz);
-    const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
-    float line2_w = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, line2).x;
-    float pname_w = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, pname).x;
-    float w = pad_in * 2.0f + 2.0f * s + line2_w + 22.0f * s + pname_w + 12.0f * s;
-    if (w < 244.0f * s) w = 244.0f * s;
-    float gh     = g_gp_graph ? 30.0f * s : 0.0f;
-    float h      = pad_in * 2.0f + big + 4.0f * s + small + (g_gp_graph ? gh + 9.0f * s : 0.0f);
+    /* The picture is 4:3 in a wider window: the bars either side are where the
+     * overlay lives. With no bar to speak of (a 4:3 window, a stretched mode) it
+     * falls back to sitting on the picture, with a plate behind it. */
+    const float lbar = g_scanout.valid ? g_scanout.p0.x - w0.x : 0.0f;
+    const float rbar = g_scanout.valid ? w1.x - g_scanout.p1.x : 0.0f;
+    const bool  bars = lbar >= 150.0f * s && rbar >= 130.0f * s;
+    char b[96];
 
-    ImVec2 p1 = ImVec2(vp->WorkPos.x + vp->WorkSize.x - 18.0f * s, vp->WorkPos.y + 18.0f * s + h);
-    ImVec2 p0 = ImVec2(p1.x - w, p1.y - h);
-    dl->AddRectFilled(p0, p1, IM_COL32(8, 11, 18, (int)(215 * alpha)), 8.0f * s);
-    dl->AddRect(p0, p1, IM_COL32(40, 56, 82, (int)(255 * alpha)), 8.0f * s);
-    dl->AddRectFilled(ImVec2(p0.x, p0.y + 8.0f * s), ImVec2(p0.x + 3.0f * s, p1.y - 8.0f * s),
-                      gp_col(scol, alpha), 2.0f);
+    /* --- the pill, top right: the one number that matters --- */
+    snprintf(b, sizeof(b), speed >= 98.0 ? "%.1f fps" : "%.1f fps  %.0f%%", fps, speed);
+    float tw = mono->CalcTextSizeA(ms, FLT_MAX, 0.0f, b).x;
+    float ph = ms + 14.0f * s, pw = tw + 34.0f * s;
+    ImVec2 pp0 = ImVec2(w1.x - 14.0f * s - pw, w0.y + 14.0f * s);
+    ImVec2 pp1 = ImVec2(pp0.x + pw, pp0.y + ph);
+    dl->AddRectFilled(pp0, pp1, glass_bg(alpha), ph * 0.5f);
+    dl->AddRect(pp0, pp1, glass_edge(alpha), ph * 0.5f);
+    dl->AddCircleFilled(ImVec2(pp0.x + 14.0f * s, pp0.y + ph * 0.5f), 3.6f * s, gp_col(scol, alpha), 12);
+    dl->AddText(mono, ms, ImVec2(pp0.x + 24.0f * s, pp0.y + (ph - ms) * 0.5f), gp_col(GLASS_TEXT, alpha), b);
 
-    float x = p0.x + pad_in + 2.0f * s;
-    float y = p0.y + pad_in;
-    char b[64];
-
-    snprintf(b, sizeof(b), "%.1f", fps);
-    dl->AddText(h1, big, ImVec2(x, y), gp_col(ZS_TEXT, alpha), b);
-    float fw = h1->CalcTextSizeA(big, FLT_MAX, 0.0f, b).x;
-    dl->AddText(mono, small, ImVec2(x + fw + 6.0f * s, y + big - small - 4.0f * s),
-                gp_col(ZS_FAINT, alpha), "FPS");
-
-    snprintf(b, sizeof(b), "%.0f%%", speed);
-    float sfs = big * 0.72f;
-    float sw  = h1->CalcTextSizeA(sfs, FLT_MAX, 0.0f, b).x;
-    dl->AddText(h1, sfs, ImVec2(p1.x - pad_in - sw, y + big - sfs - 2.0f * s), gp_col(scol, alpha), b);
-    y += big + 4.0f * s;
-
-    dl->AddText(mono, small, ImVec2(x, y), gp_col(ZS_MUTED, alpha), line2);
-    float nw = pname_w;
-    dl->AddText(mono, small, ImVec2(p1.x - pad_in - nw, y), gp_col(ZS_MUTED, alpha), pname);
-    dl->AddCircleFilled(ImVec2(p1.x - pad_in - nw - 9.0f * s, y + small * 0.5f), 4.0f * s,
-                        gp_col(led, alpha), 12);
-    y += small + 9.0f * s;
-
-    /* Frame-time graph: one bar per host loop iteration against the field
-     * budget (the line at half height). A single iteration swings around the
-     * mean by design — the pacing wait quantises to the millisecond — so the
-     * warning colours start well above the budget, not at it. */
-    if (g_gp_graph && g_vit_budget_ms > 0.001) {
-        float gw = w - pad_in * 2.0f - 2.0f * s;
-        float bw = gw / (float)ZS_FT_SAMPLES;
-        float top = (float)(g_vit_budget_ms * 2.0);
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + gw, y + gh), IM_COL32(14, 19, 30, (int)(200 * alpha)), 3.0f);
-        for (int i = 0; i < ZS_FT_SAMPLES; i++) {
-            float v = g_ft[(g_ft_head + i) % ZS_FT_SAMPLES];
-            if (v <= 0.0f) continue;
-            float r = v / top; if (r > 1.0f) r = 1.0f;
-            double over = (double)v / g_vit_budget_ms;
-            ImVec4 c = over > 1.8 ? ZS_CRIT : (over > 1.35 ? ZS_WARN : ZS_DATA);
-            dl->AddRectFilled(ImVec2(x + bw * (float)i, y + gh * (1.0f - r)),
-                              ImVec2(x + bw * (float)(i + 1), y + gh), gp_col(c, alpha * 0.85f));
-        }
-        dl->AddLine(ImVec2(x, y + gh * 0.5f), ImVec2(x + gw, y + gh * 0.5f),
-                    IM_COL32(148, 163, 184, (int)(110 * alpha)), 1.0f);
-    }
-
-    /* --- top left: what is running --- */
+    /* Hovering it opens the detail: the old stats card, field time, region, the
+     * pad and the frame-time bars. */
+    ImVec2 hv0 = ImVec2(pp0.x - 6.0f * s, pp0.y - 6.0f * s), hv1 = ImVec2(pp1.x + 6.0f * s, pp1.y + 6.0f * s);
+    float open = 0.0f;
     {
-        float er = 17.0f * s;
-        ImVec2 c = ImVec2(vp->WorkPos.x + 20.0f * s + er, vp->WorkPos.y + 20.0f * s + er);
-        draw_zs_emblem(dl, c, er, alpha);
-        const char* title = (g_disc_name[0] && strcmp(g_disc_name, "n/a")) ? g_disc_name
-                                                                            : "No disc - BIOS shell";
-        float ts = h1->LegacySize;
-        dl->AddText(h1, ts, ImVec2(c.x + er + 10.0f * s + 1.0f, c.y - ts * 0.95f + 1.0f),
-                    IM_COL32(0, 0, 0, (int)(200 * alpha)), title);
-        dl->AddText(h1, ts, ImVec2(c.x + er + 10.0f * s, c.y - ts * 0.95f), gp_col(ZS_TEXT, alpha), title);
-        snprintf(b, sizeof(b), "ZONISTATION ONE   SLOT %d", g_gp_slot);
-        dl->AddText(mono, small, ImVec2(c.x + er + 10.0f * s, c.y + 3.0f * s), gp_col(ZS_DATA, alpha * 0.9f), b);
+        static float s_open = 0.0f;
+        const bool hot = ImGui::IsMouseHoveringRect(hv0, hv1, false) ||
+                         (s_open > 0.5f && ImGui::IsMouseHoveringRect(ImVec2(pp0.x - 8.0f * s, pp1.y), ImVec2(w1.x, pp1.y + 200.0f * s), false));
+        s_open += ((hot ? 1.0f : 0.0f) - s_open) * 0.28f;
+        if (s_open < 0.01f) s_open = 0.0f;
+        open = s_open;
+    }
+    if (open > 0.02f) {
+        const float a = alpha * open;
+        float pad_in = 12.0f * s, big = 28.0f * s, small = ms;
+        float w = 268.0f * s;
+        float gh = g_gp_graph ? 30.0f * s : 0.0f;
+        float h = pad_in * 2.0f + big + 6.0f * s + small * 2.0f + 8.0f * s + (g_gp_graph ? gh + 8.0f * s : 0.0f);
+        ImVec2 c1 = ImVec2(w1.x - 14.0f * s, pp1.y + 8.0f * s + h);
+        ImVec2 c0 = ImVec2(c1.x - w, c1.y - h);
+        dl->AddRectFilled(c0, c1, glass_bg(a, 215.0f), 14.0f * s);
+        dl->AddRect(c0, c1, glass_edge(a), 14.0f * s);
+        float x = c0.x + pad_in + 2.0f * s, y = c0.y + pad_in;
+        snprintf(b, sizeof(b), "%.1f", fps);
+        dl->AddText(h1, big, ImVec2(x, y), gp_col(GLASS_TEXT, a), b);
+        float fw = h1->CalcTextSizeA(big, FLT_MAX, 0.0f, b).x;
+        dl->AddText(mono, small, ImVec2(x + fw + 6.0f * s, y + big - small - 3.0f * s), gp_col(GLASS_MUTED, a), "fps");
+        snprintf(b, sizeof(b), "%.0f%%", speed);
+        float sfs = big * 0.72f, sw = h1->CalcTextSizeA(sfs, FLT_MAX, 0.0f, b).x;
+        dl->AddText(h1, sfs, ImVec2(c1.x - pad_in - sw, y + big - sfs - 1.0f * s), gp_col(scol, a), b);
+        y += big + 6.0f * s;
+        snprintf(b, sizeof(b), "%.1f of %.1f ms", g_vit_frame_ema, g_vit_budget_ms);
+        dl->AddText(mono, small, ImVec2(x, y), gp_col(GLASS_MUTED, a), b);
+        y += small + 2.0f * s;
+        snprintf(b, sizeof(b), "%s %.2f Hz", pal ? "PAL" : "NTSC", hz);
+        dl->AddText(mono, small, ImVec2(x, y), gp_col(GLASS_MUTED, a), b);
+        const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
+        float pw2 = mono->CalcTextSizeA(small, FLT_MAX, 0.0f, pname).x;
+        dl->AddText(mono, small, ImVec2(c1.x - pad_in - pw2, y), gp_col(GLASS_MUTED, a), pname);
+        dl->AddCircleFilled(ImVec2(c1.x - pad_in - pw2 - 9.0f * s, y + small * 0.5f), 3.6f * s, gp_col(led, a), 12);
+        y += small + 8.0f * s;
+        if (g_gp_graph && g_vit_budget_ms > 0.001) {
+            float gw = w - pad_in * 2.0f - 2.0f * s, bw = gw / (float)ZS_FT_SAMPLES;
+            float top = (float)(g_vit_budget_ms * 2.0);
+            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + gw, y + gh), IM_COL32(255, 255, 255, (int)(14 * a)), 6.0f * s);
+            for (int i = 0; i < ZS_FT_SAMPLES; i++) {
+                float v = g_ft[(g_ft_head + i) % ZS_FT_SAMPLES];
+                if (v <= 0.0f) continue;
+                float r = v / top; if (r > 1.0f) r = 1.0f;
+                double over = (double)v / g_vit_budget_ms;
+                ImVec4 c = over > 1.8 ? ZS_CRIT : (over > 1.35 ? ZS_WARN : ZS_OK);
+                dl->AddRectFilled(ImVec2(x + bw * (float)i, y + gh * (1.0f - r)),
+                                  ImVec2(x + bw * (float)(i + 1), y + gh), gp_col(c, a * 0.9f));
+            }
+        }
     }
 
-    /* --- bottom left: what the keys do --- */
-    if (!g_gp_menu_open) {
-        ImVec2 p = ImVec2(vp->WorkPos.x + 20.0f * s,
-                          vp->WorkPos.y + vp->WorkSize.y - 20.0f * s - (mono->LegacySize * 0.90f + 6.0f * s));
-        /* A plate behind the strip: over a bright picture (a white logo, a menu
-         * screen) the muted labels vanished. The plate is sized from the same
-         * measurements the keycaps use, so it cannot drift from them. */
-        {
-            static const char* const cap_keys[8]   = { "Esc", "F5", "F8", "F6 F7", "F10", "F11", "F2", "`" };
-            static const char* const cap_labels[8] = { "Menu", "Save", "Load", "Slot", "Pause", "Fullscreen", "HUD", "Debug" };
-            ImFont* uif = g_font_ui ? g_font_ui : ImGui::GetFont();
-            float fsz = mono->LegacySize * 0.90f, lsz = uif->LegacySize * 0.88f, tot = 0.0f;
-            for (int i = 0; i < 8; i++)
-                tot += mono->CalcTextSizeA(fsz, FLT_MAX, 0.0f, cap_keys[i]).x + 12.0f * s + 6.0f * s +
-                       uif->CalcTextSizeA(lsz, FLT_MAX, 0.0f, cap_labels[i]).x + 16.0f * s;
-            dl->AddRectFilled(ImVec2(p.x - 10.0f * s, p.y - 7.0f * s),
-                              ImVec2(p.x + tot - 6.0f * s, p.y + fsz + 6.0f * s + 7.0f * s),
-                              IM_COL32(6, 9, 15, (int)(190 * alpha)), 8.0f * s);
+    /* --- what is running, top left --- */
+    {
+        const char* title = (g_disc_name[0] && strcmp(g_disc_name, "n/a")) ? g_disc_name : "No disc - BIOS shell";
+        float ts = h1->LegacySize * 1.08f;
+        float x = w0.x + 18.0f * s, y = w0.y + 20.0f * s;
+        float avail_w = bars ? lbar - 32.0f * s : 360.0f * s;
+        float er = 15.0f * s;
+        if (!bars) {   /* on the picture: a plate so it reads over anything */
+            float tw2 = h1->CalcTextSizeA(ts, FLT_MAX, 0.0f, title).x;
+            if (tw2 > avail_w) tw2 = avail_w;
+            dl->AddRectFilled(ImVec2(x - 10.0f * s, y - 8.0f * s),
+                              ImVec2(x + er * 2.0f + 12.0f * s + tw2 + 12.0f * s, y + er * 2.0f + 8.0f * s),
+                              glass_bg(alpha, 170.0f), 14.0f * s);
         }
-        p.x = gp_keycap(dl, p, "Esc", "Menu", alpha);
-        p.x = gp_keycap(dl, p, "F5", "Save", alpha);
-        p.x = gp_keycap(dl, p, "F8", "Load", alpha);
-        p.x = gp_keycap(dl, p, "F6 F7", "Slot", alpha);
-        p.x = gp_keycap(dl, p, "F10", "Pause", alpha);
-        p.x = gp_keycap(dl, p, "F11", "Fullscreen", alpha);
-        p.x = gp_keycap(dl, p, "F2", "HUD", alpha);
-        p.x = gp_keycap(dl, p, "`", "Debug", alpha);
+        draw_zs_emblem(dl, ImVec2(x + er, y + er), er, alpha);
+        float tx = bars ? x : x + er * 2.0f + 12.0f * s;
+        float ty = bars ? y + er * 2.0f + 10.0f * s : y + er - ts * 0.5f - 7.0f * s;
+        char shown[200];
+        fit_text(h1, ts, title, avail_w, shown, sizeof(shown));
+        dl->PushClipRect(ImVec2(tx, ty - 2.0f * s), ImVec2(tx + avail_w, ty + ts * 2.6f + 2.0f * s), true);
+        dl->AddText(h1, ts, ImVec2(tx, ty), gp_col(GLASS_TEXT, alpha), shown);
+        snprintf(b, sizeof(b), "SLOT %d  %s", g_gp_slot, pal ? "PAL" : "NTSC");
+        dl->AddText(mono, ms * 0.92f, ImVec2(tx, ty + ts + 4.0f * s), gp_col(ZS_DATA, alpha * 0.95f), b);
+        dl->PopClipRect();
+    }
+
+    /* --- the pad, bottom left, in the bar --- */
+    if (bars) {
+        const char* pname = inter ? sio_pad_mode_name(pad) : "pad";
+        float tw3 = mono->CalcTextSizeA(ms, FLT_MAX, 0.0f, pname).x;
+        float ph3 = ms + 14.0f * s, pw3 = tw3 + 34.0f * s;
+        ImVec2 q0 = ImVec2(w0.x + 16.0f * s, w1.y - 16.0f * s - ph3), q1 = ImVec2(q0.x + pw3, q0.y + ph3);
+        dl->AddRectFilled(q0, q1, glass_bg(alpha), ph3 * 0.5f);
+        dl->AddRect(q0, q1, glass_edge(alpha), ph3 * 0.5f);
+        dl->AddCircleFilled(ImVec2(q0.x + 14.0f * s, q0.y + ph3 * 0.5f), 3.6f * s, gp_col(led, alpha), 12);
+        dl->AddText(mono, ms, ImVec2(q0.x + 24.0f * s, q0.y + (ph3 - ms) * 0.5f), gp_col(GLASS_TEXT, alpha), pname);
+    }
+
+    /* --- what the keys do --- */
+    if (!g_gp_menu_open) {
+        static const char* const keys[8]   = { "Esc", "F5", "F8", "F6 F7", "F10", "F11", "F2", "~" };
+        static const char* const labels[8] = { "Menu", "Save", "Load", "Slot", "Pause", "Full", "HUD", "Debug" };
+        if (bars) {   /* a column in the right bar */
+            float rowh = ms + 8.0f * s + 7.0f * s;
+            float x = g_scanout.p1.x + 16.0f * s;
+            float y = w1.y - 16.0f * s - rowh * 8.0f + 7.0f * s;
+            for (int i = 0; i < 8; i++) gp_keycap(dl, ImVec2(x, y + rowh * (float)i), keys[i], labels[i], alpha);
+        } else {      /* a strip along the bottom, on a plate */
+            float fsz = ms * 0.86f / 0.92f, lsz = ui->LegacySize * 0.9f, tot = 0.0f;
+            for (int i = 0; i < 8; i++)
+                tot += mono->CalcTextSizeA(fsz, FLT_MAX, 0.0f, keys[i]).x + 12.0f * s + 7.0f * s +
+                       ui->CalcTextSizeA(lsz, FLT_MAX, 0.0f, labels[i]).x + 16.0f * s;
+            ImVec2 p = ImVec2(w0.x + 20.0f * s, w1.y - 20.0f * s - (fsz + 8.0f * s));
+            dl->AddRectFilled(ImVec2(p.x - 12.0f * s, p.y - 8.0f * s), ImVec2(p.x + tot - 6.0f * s, p.y + fsz + 16.0f * s),
+                              glass_bg(alpha, 170.0f), 14.0f * s);
+            for (int i = 0; i < 8; i++) p.x = gp_keycap(dl, p, keys[i], labels[i], alpha);
+        }
     }
 }
 
@@ -4319,19 +4746,19 @@ static void gp_draw_paused(void) {
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImFont* h1 = g_font_h1 ? g_font_h1 : ImGui::GetFont();
-    float fs = h1->LegacySize * 1.15f;
-    const char* t = "PAUSED";
+    float fs = h1->LegacySize * 0.95f;
+    const char* t = "Paused";
     float tw = h1->CalcTextSizeA(fs, FLT_MAX, 0.0f, t).x;
-    float w = tw + 150.0f * s, h = fs + 18.0f * s;
-    ImVec2 p0 = ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + 22.0f * s);
+    float w = tw + 168.0f * s, h = fs + 20.0f * s;
+    ImVec2 p0 = ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, vp->WorkPos.y + 26.0f * s);
     ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
-    dl->AddRectFilled(p0, p1, IM_COL32(8, 11, 18, 230), h * 0.5f);
-    dl->AddRect(p0, p1, gp_col(ZS_WARN, 0.9f), h * 0.5f, 0, 1.5f);
-    float bx = p0.x + 18.0f * s, by = p0.y + 9.0f * s;
-    dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + 4.0f * s, by + fs), gp_col(ZS_WARN, 1.0f));
-    dl->AddRectFilled(ImVec2(bx + 8.0f * s, by), ImVec2(bx + 12.0f * s, by + fs), gp_col(ZS_WARN, 1.0f));
-    dl->AddText(h1, fs, ImVec2(bx + 22.0f * s, by), gp_col(ZS_TEXT, 1.0f), t);
-    gp_keycap(dl, ImVec2(bx + 34.0f * s + tw, by + 1.0f * s), "F10", "Resume", 1.0f);
+    dl->AddRectFilled(p0, p1, glass_bg(1.0f, 225.0f), h * 0.5f);
+    dl->AddRect(p0, p1, gp_col(ZS_WARN, 0.8f), h * 0.5f, 0, 1.4f * s);
+    float bx = p0.x + 20.0f * s, by = p0.y + 10.0f * s;
+    dl->AddRectFilled(ImVec2(bx, by + 1.0f * s), ImVec2(bx + 4.0f * s, by + fs - 1.0f * s), gp_col(ZS_WARN, 1.0f), 2.0f * s);
+    dl->AddRectFilled(ImVec2(bx + 9.0f * s, by + 1.0f * s), ImVec2(bx + 13.0f * s, by + fs - 1.0f * s), gp_col(ZS_WARN, 1.0f), 2.0f * s);
+    dl->AddText(h1, fs, ImVec2(bx + 24.0f * s, by), gp_col(GLASS_TEXT, 1.0f), t);
+    gp_keycap(dl, ImVec2(bx + 38.0f * s + tw, by + 1.0f * s), "F10", "Resume", 1.0f);
 }
 
 static void gp_draw_toasts(void) {
@@ -4340,9 +4767,10 @@ static void gp_draw_toasts(void) {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
     ImFont* m = g_font_mono ? g_font_mono : f;
+    float s = g_ui_scale;
     double now = ImGui::GetTime();
 
-    float y = vp->WorkPos.y + vp->WorkSize.y - 70.0f * g_ui_scale;
+    float y = vp->WorkPos.y + vp->WorkSize.y - 28.0f * s;
     for (int i = g_gp_toast_count - 1; i >= 0; i--) {
         GpToast& t = g_gp_toasts[i];
         double age = now - t.born;
@@ -4351,37 +4779,81 @@ static void gp_draw_toasts(void) {
             g_gp_toast_count--;
             continue;
         }
-        float a = (age > 2.4) ? (float)(1.0 - (age - 2.4) / 0.6) : 1.0f;
+        float a_out = (age > 2.4) ? (float)(1.0 - (age - 2.4) / 0.6) : 1.0f;
+        float a_in  = age < 0.18 ? (float)(age / 0.18) : 1.0f;
+        float a = a_out * a_in;
+        float lift = (1.0f - a_in) * 10.0f * s;
 
-        float fs = f->LegacySize;
+        float fs = f->LegacySize, ss = m->LegacySize * 0.86f;
         float msg_w = f->CalcTextSizeA(fs, FLT_MAX, 0.0f, t.msg).x;
-        float sub_w = t.sub[0] ? m->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0.0f, t.sub).x : 0.0f;
-        float w = (msg_w > sub_w ? msg_w : sub_w) + 28.0f * g_ui_scale;
-        float h = fs + (t.sub[0] ? fs * 0.95f : 0.0f) + 16.0f * g_ui_scale;
+        float sub_w = t.sub[0] ? m->CalcTextSizeA(ss, FLT_MAX, 0.0f, t.sub).x : 0.0f;
+        float w = (msg_w > sub_w ? msg_w : sub_w) + 52.0f * s;
+        float h = fs + (t.sub[0] ? ss + 4.0f * s : 0.0f) + 20.0f * s;
 
-        ImVec2 p1 = ImVec2(vp->WorkPos.x + vp->WorkSize.x - 18.0f * g_ui_scale, y);
-        ImVec2 p0 = ImVec2(p1.x - w, y - h);
-        dl->AddRectFilled(p0, p1, IM_COL32(19, 25, 36, (int)(240 * a)), 5.0f);
-        dl->AddRect(p0, p1, IM_COL32(40, 56, 82, (int)(255 * a)), 5.0f);
+        ImVec2 p0 = ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f, y - h + lift);
+        ImVec2 p1 = ImVec2(p0.x + w, p0.y + h);
+        dl->AddRectFilled(p0, p1, glass_bg(a, 225.0f), 16.0f * s);
+        dl->AddRect(p0, p1, glass_edge(a), 16.0f * s);
         ImVec4 lc = t.col; lc.w = a;
-        dl->AddRectFilled(p0, ImVec2(p0.x + 3.0f, p1.y), ImGui::GetColorU32(lc), 2.0f);
-
-        ImVec4 tc = ZS_TEXT; tc.w = a;
-        dl->AddText(f, fs, ImVec2(p0.x + 12.0f * g_ui_scale, p0.y + 7.0f * g_ui_scale),
-                    ImGui::GetColorU32(tc), t.msg);
-        if (t.sub[0]) {
-            ImVec4 sc = ZS_FAINT; sc.w = a;
-            dl->AddText(m, fs * 0.85f,
-                        ImVec2(p0.x + 12.0f * g_ui_scale, p0.y + 7.0f * g_ui_scale + fs),
-                        ImGui::GetColorU32(sc), t.sub);
-        }
-        y = p0.y - 8.0f * g_ui_scale;
+        dl->AddCircleFilled(ImVec2(p0.x + 18.0f * s, p0.y + h * 0.5f), 4.0f * s, ImGui::GetColorU32(lc), 12);
+        dl->AddText(f, fs, ImVec2(p0.x + 32.0f * s, p0.y + 10.0f * s), gp_col(GLASS_TEXT, a), t.msg);
+        if (t.sub[0])
+            dl->AddText(m, ss, ImVec2(p0.x + 32.0f * s, p0.y + 10.0f * s + fs + 3.0f * s), gp_col(GLASS_MUTED, a), t.sub);
+        y = p0.y - 8.0f * s;
     }
 }
 
 // --- quick menu ---------------------------------------------------------------
 
-struct GpMenuItem { const char* label; const char* key; bool danger; };
+/* Menu icons, drawn like the rest of the set: centre, radius, colour, stroke. */
+static void draw_icon_resume(ImDrawList* dl, ImVec2 c, float r, ImU32 col, float th) {
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(c.x - r * 0.55f, c.y - r * 0.8f));
+    dl->PathLineTo(ImVec2(c.x + r * 0.8f,  c.y));
+    dl->PathLineTo(ImVec2(c.x - r * 0.55f, c.y + r * 0.8f));
+    dl->PathStroke(col, ImDrawFlags_Closed | ImDrawFlags_RoundCornersAll, th);
+}
+static void draw_icon_save(ImDrawList* dl, ImVec2 c, float r, ImU32 col, float th) {
+    /* a memory card: a body with one clipped corner and a label */
+    const float x0 = c.x - r * 0.8f, x1 = c.x + r * 0.8f, y0 = c.y - r, y1 = c.y + r, k = r * 0.5f;
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(x0, y0)); dl->PathLineTo(ImVec2(x1 - k, y0)); dl->PathLineTo(ImVec2(x1, y0 + k));
+    dl->PathLineTo(ImVec2(x1, y1)); dl->PathLineTo(ImVec2(x0, y1));
+    dl->PathStroke(col, ImDrawFlags_Closed, th);
+    dl->AddRect(ImVec2(c.x - r * 0.42f, c.y + r * 0.05f), ImVec2(c.x + r * 0.42f, c.y + r * 0.62f), col, r * 0.12f, 0, th);
+}
+static void draw_icon_load(ImDrawList* dl, ImVec2 c, float r, ImU32 col, float th) {
+    /* an arrow dropping into a tray */
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(c.x - r, c.y + r * 0.1f)); dl->PathLineTo(ImVec2(c.x - r, c.y + r));
+    dl->PathLineTo(ImVec2(c.x + r, c.y + r));        dl->PathLineTo(ImVec2(c.x + r, c.y + r * 0.1f));
+    dl->PathStroke(col, 0, th);
+    dl->AddLine(ImVec2(c.x, c.y - r), ImVec2(c.x, c.y + r * 0.45f), col, th);
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(c.x - r * 0.5f, c.y - r * 0.05f)); dl->PathLineTo(ImVec2(c.x, c.y + r * 0.5f));
+    dl->PathLineTo(ImVec2(c.x + r * 0.5f, c.y - r * 0.05f));
+    dl->PathStroke(col, 0, th);
+}
+static void draw_icon_power(ImDrawList* dl, ImVec2 c, float r, ImU32 col, float th) {
+    const float pi = 3.14159265f, gap = 0.62f;
+    dl->PathClear();
+    dl->PathArcTo(c, r * 0.92f, -pi * 0.5f + gap, -pi * 0.5f + 2.0f * pi - gap, 24);
+    dl->PathStroke(col, 0, th);
+    dl->AddLine(ImVec2(c.x, c.y - r), ImVec2(c.x, c.y - r * 0.05f), col, th);
+}
+static void draw_icon_code(ImDrawList* dl, ImVec2 c, float r, ImU32 col, float th) {
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(c.x - r * 0.45f, c.y - r * 0.6f)); dl->PathLineTo(ImVec2(c.x - r, c.y));
+    dl->PathLineTo(ImVec2(c.x - r * 0.45f, c.y + r * 0.6f));
+    dl->PathStroke(col, 0, th);
+    dl->PathClear();
+    dl->PathLineTo(ImVec2(c.x + r * 0.45f, c.y - r * 0.6f)); dl->PathLineTo(ImVec2(c.x + r, c.y));
+    dl->PathLineTo(ImVec2(c.x + r * 0.45f, c.y + r * 0.6f));
+    dl->PathStroke(col, 0, th);
+    dl->AddLine(ImVec2(c.x + r * 0.2f, c.y - r * 0.85f), ImVec2(c.x - r * 0.2f, c.y + r * 0.85f), col, th);
+}
+
+struct GpMenuItem { const char* label; const char* key; bool danger; ZsIconFn icon; };
 
 /* Named, because the pane below and the navigation both switch on the index
  * and a bare number breaks silently the moment an entry is inserted. */
@@ -4391,14 +4863,14 @@ enum {
 };
 
 static const GpMenuItem g_gp_items[] = {
-    { "Resume",           "Esc",  false },
-    { "Save state",       "F5",   false },
-    { "Load state",       "F8",   false },
-    { "Controllers",      "",     false },
-    { "Video & HUD",      "",     false },
-    { "Machine",          "",     false },
-    { "Debug workspace",  "`",    false },
-    { "Quit",             "",     true  },
+    { "Resume",           "Esc",  false, draw_icon_resume },
+    { "Save state",       "F5",   false, draw_icon_save   },
+    { "Load state",       "F8",   false, draw_icon_load   },
+    { "Controllers",      "",     false, draw_icon_pad    },
+    { "Video & HUD",      "",     false, draw_icon_screen },
+    { "Machine",          "",     false, draw_icon_cpu    },
+    { "Debug workspace",  "~",    false, draw_icon_code   },
+    { "Quit",             "",     true,  draw_icon_power  },
 };
 static const int GP_ITEM_COUNT = (int)(sizeof(g_gp_items) / sizeof(g_gp_items[0]));
 
@@ -4428,8 +4900,19 @@ static bool gp_mouse_moved(void) {
  * widget, so nothing in a pane is reachable by the mouse alone. A disabled
  * control still takes focus (the cursor has to be able to cross it) and never
  * fires. `on` marks the live choice of a group. */
+/* Set just before a gp_btn call to put a picture over its text: a slot tile. The
+ * height is what the picture takes of the tile; a null texture draws an empty frame.
+ * gp_btn clears both. */
+static float          g_btn_pic_h   = 0.0f;
+static ImTextureData* g_btn_pic_tex = nullptr;
+static bool           g_btn_pic_blank = false;   /* an empty slot: a plain frame, no caption */
+
 static bool gp_btn(const char* label, const char* sub, ImVec2 size, bool disabled, bool on, ImVec4 accent) {
     float s = g_ui_scale;
+    const float pic_h = g_btn_pic_h;
+    ImTextureData* pic = g_btn_pic_tex;
+    const bool pic_blank = g_btn_pic_blank;
+    g_btn_pic_h = 0.0f; g_btn_pic_tex = nullptr; g_btn_pic_blank = false;
     int idx = g_gp_pane_next++;
     if (size.x <= 0.0f) size.x = ImGui::GetContentRegionAvail().x;
 
@@ -4442,27 +4925,55 @@ static bool gp_btn(const char* label, const char* sub, ImVec2 size, bool disable
     if (hov && gp_mouse_moved()) { g_gp_focus = 1; g_gp_pane_idx = idx; }
     bool focused = (g_gp_focus == 1 && g_gp_pane_idx == idx);
 
+    /* The live choice of a group is a filled accent with the theme's on-accent
+     * text (13.8:1 on the default theme); it used to be a dim tint of the accent
+     * on the panel, which read worse than the choices that were not selected. A
+     * control that cannot act right now (a device that needs a restart) is drawn
+     * quieter but stays legible: its sub line says why. */
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    float a = disabled ? 0.45f : 1.0f;
-    dl->AddRectFilled(p0, p1, gp_col(on ? ZS_MODE_ON : ZS_PANEL2, focused ? 1.0f : 0.85f), 6.0f * s);
-    if (focused) {
-        dl->AddRectFilled(p0, p1, gp_col(accent, 0.10f), 6.0f * s);
-        dl->AddRect(p0, p1, gp_col(accent, 0.95f), 6.0f * s, 0, 1.6f * s);
+    const float rr = 11.0f * s;
+    const float a  = disabled && !on ? 0.72f : 1.0f;
+    const bool ring = on && pic_h > 0.0f;   /* a tile with a picture is marked by an outline: a filled one is too loud */
+    if (ring) {
+        dl->AddRectFilled(p0, p1, gp_col(zs_mix(ZS_PANEL2, accent, 0.14f), 1.0f), rr);
+        dl->AddRect(p0, p1, gp_col(accent, 1.0f), rr, 0, 2.2f * s);
+    } else if (on) {
+        dl->AddRectFilled(p0, p1, gp_col(accent, focused ? 1.0f : 0.94f), rr);
     } else {
-        dl->AddRect(p0, p1, gp_col(on ? accent : ZS_LINE, on ? 0.55f : 1.0f), 6.0f * s);
+        dl->AddRectFilled(p0, p1, gp_col(focused ? zs_mix(ZS_PANEL2, ZS_LINE, 0.35f) : ZS_PANEL2, 1.0f), rr);
+        dl->AddRect(p0, p1, gp_col(ZS_LINE, 1.0f), rr);
     }
-    if (on) dl->AddRectFilled(ImVec2(p0.x + 4.0f * s, p0.y + 7.0f * s),
-                              ImVec2(p0.x + 7.0f * s, p1.y - 7.0f * s), gp_col(accent, 1.0f), 2.0f);
+    if (focused)
+        dl->AddRect(ImVec2(p0.x - 2.0f * s, p0.y - 2.0f * s), ImVec2(p1.x + 2.0f * s, p1.y + 2.0f * s),
+                    gp_col(on ? ZS_TEXT : accent, 0.95f), rr + 2.0f * s, 0, 2.0f * s);
 
     ImFont* f = g_font_ui ? g_font_ui : ImGui::GetFont();
     ImFont* m = g_font_mono ? g_font_mono : f;
     float fs = f->LegacySize, ss = m->LegacySize * 0.88f;
     float th = fs + ((sub && sub[0]) ? ss + 3.0f * s : 0.0f);
     float tx = p0.x + 16.0f * s, ty = p0.y + (size.y - th) * 0.5f;
+    if (pic_h > 0.0f) {
+        ImVec2 t0 = ImVec2(p0.x + 5.0f * s, p0.y + 5.0f * s), t1 = ImVec2(p1.x - 5.0f * s, p0.y + pic_h);
+        if (pic && pic->Status != ImTextureStatus_WantCreate && pic->TexID != ImTextureID_Invalid) {
+            dl->AddImageRounded(pic->GetTexRef(), t0, t1, ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, 8.0f * s);
+        } else {
+            dl->AddRectFilled(t0, t1, gp_col(ZS_GROUND, 0.7f), 8.0f * s);
+            if (!pic_blank) {
+                const char* none = pic ? "loading" : "no picture";
+                ImVec2 sz = m->CalcTextSizeA(ss, FLT_MAX, 0.0f, none);
+                dl->AddText(m, ss, ImVec2((t0.x + t1.x - sz.x) * 0.5f, (t0.y + t1.y - sz.y) * 0.5f),
+                            gp_col(ZS_FAINT, 0.9f), none);
+            }
+        }
+        ty = p0.y + pic_h + (size.y - pic_h - th) * 0.5f;
+    }
+    const bool filled = on && !ring;
+    const ImVec4 label_c = filled ? ZS_ON_ACCENT : (ring ? accent : ZS_TEXT);
+    const ImVec4 sub_c   = filled ? ZS_ON_ACCENT : ZS_MUTED;
     dl->PushClipRect(p0, p1, true);
-    dl->AddText(f, fs, ImVec2(tx, ty), gp_col(on ? accent : ZS_TEXT, a), label);
+    dl->AddText(f, fs, ImVec2(tx, ty), gp_col(label_c, a), label);
     if (sub && sub[0])
-        dl->AddText(m, ss, ImVec2(tx, ty + fs + 3.0f * s), gp_col(ZS_MUTED, a), sub);
+        dl->AddText(m, ss, ImVec2(tx, ty + fs + 3.0f * s), gp_col(sub_c, filled ? 0.78f : a), sub);
     dl->PopClipRect();
 
     if (focused && g_nav.ok) clicked = true;
@@ -4490,6 +5001,12 @@ static void gp_draw_slots(bool save_mode) {
 
     float gap = 10.0f * s;
     float bw = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+    /* The pictures are looked for twice a second, not every frame. */
+    {
+        static double s_last = -10.0;
+        if (ImGui::GetTime() - s_last > 0.5) { for (int i = 0; i < 4; i++) gp_thumb_refresh(i); s_last = ImGui::GetTime(); }
+    }
+    const float pic_h = (bw - 10.0f * s) * 0.75f + 5.0f * s;
     for (int i = 0; i < 4; i++) {
         if (i % 2) ImGui::SameLine(0, gap);
         char info[80];
@@ -4499,7 +5016,10 @@ static void gp_draw_slots(bool save_mode) {
         snprintf(label, sizeof(label), "Slot %d%s", i, i == g_gp_slot ? "   F5 / F8" : "");
         const char* sub = armed ? (save_mode ? "Press again to overwrite" : "Press again to load")
                                 : (exists ? info : "empty");
-        if (gp_btn(label, sub, ImVec2(bw, 66.0f * s), !save_mode && !exists,
+        g_btn_pic_h   = pic_h;
+        g_btn_pic_tex = (exists && g_gp_thumb_has[i]) ? g_gp_thumb_tex[i] : nullptr;
+        g_btn_pic_blank = !exists;
+        if (gp_btn(label, sub, ImVec2(bw, pic_h + 56.0f * s), !save_mode && !exists,
                    i == g_gp_slot, armed ? ZS_WARN : ZS_DATA)) {
             if (save_mode && (!exists || armed)) {
                 g_gp_slot = i; g_gp_arm_kind = 0;
@@ -4518,6 +5038,21 @@ static void gp_draw_slots(bool save_mode) {
     }
 }
 
+/* How far the quick menu's sheet has slid in, 0 to 1. The picture shrinks into the
+ * space the sheet leaves (draw_gameplay_shell), so the game stays visible beside it
+ * and a change to the video settings shows. Opens eased, closes at once. */
+static float g_gp_sheet_t = 0.0f;
+
+static float gp_sheet_width(void) {
+    const float s = g_ui_scale;
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    float w = vp->WorkSize.x * 0.36f;
+    if (w < 560.0f * s) w = 560.0f * s;
+    if (w > 700.0f * s) w = 700.0f * s;
+    if (w > vp->WorkSize.x * 0.94f) w = vp->WorkSize.x * 0.94f;
+    return w;
+}
+
 static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
     (void)cpu;
     float s = g_ui_scale;
@@ -4526,78 +5061,98 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
     ImFont* mono = g_font_mono ? g_font_mono : ImGui::GetFont();
     ImFont* ui   = g_font_ui ? g_font_ui : ImGui::GetFont();
 
-    ImVec2 size = ImVec2(vp->WorkSize.x * 0.80f, vp->WorkSize.y * 0.76f);
-    if (size.x > 1060.0f * s) size.x = 1060.0f * s;
-    if (size.y > 660.0f * s)  size.y = 660.0f * s;
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - size.x) * 0.5f,
-                                   vp->WorkPos.y + (vp->WorkSize.y - size.y) * 0.5f));
+    const float full = gp_sheet_width();
+    const float ease = 1.0f - powf(1.0f - g_gp_sheet_t, 3.0f);
+    ImVec2 size = ImVec2(full, vp->WorkSize.y);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - full * ease, vp->WorkPos.y));
     ImGui::SetNextWindowSize(size);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f * s);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, COLA(0x0B, 0x0F, 0x18, 0.97f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ZS_LINE);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(ZS_PANEL.x, ZS_PANEL.y, ZS_PANEL.z, 0.985f));
     bool open = ImGui::Begin("##gp_menu", nullptr,
                       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse);
-    ImGui::PopStyleColor(2);
+    ImGui::PopStyleColor(1);
     ImGui::PopStyleVar(3);
     if (!open) { ImGui::End(); return; }
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 w0 = ImGui::GetWindowPos();
     ImVec2 w1 = ImVec2(w0.x + size.x, w0.y + size.y);
-    float hh = 70.0f * s, fh = 38.0f * s;
+    float hh = 84.0f * s, fh = 46.0f * s;
     bool pal = inter && inter->gpu.vmode == Pal;
     char buf[192];
 
+    dl->AddLine(ImVec2(w0.x, w0.y), ImVec2(w0.x, w1.y), gp_col(ZS_LINE, 1.0f));
+
     /* Header: the emblem, what is running, and the state of the machine. */
-    dl->AddRectFilledMultiColor(ImVec2(w0.x + 1, w0.y + 1), ImVec2(w1.x - 1, w0.y + hh),
-        gp_col(ZS_DATA, 0.13f), gp_col(ZS_AUDIO, 0.09f),
-        gp_col(ZS_AUDIO, 0.02f), gp_col(ZS_DATA, 0.02f));
-    dl->AddLine(ImVec2(w0.x, w0.y + hh), ImVec2(w1.x, w0.y + hh), gp_col(ZS_LINE, 1.0f));
-    dl->AddRectFilled(ImVec2(w0.x + 18.0f * s, w0.y + hh - 2.0f), ImVec2(w0.x + 150.0f * s, w0.y + hh + 1.0f),
-                      gp_col(ZS_DATA, 1.0f));
-    draw_zs_emblem(dl, ImVec2(w0.x + 42.0f * s, w0.y + hh * 0.5f), 22.0f * s, 1.0f);
+    draw_zs_emblem(dl, ImVec2(w0.x + 22.0f * s + 20.0f * s, w0.y + hh * 0.5f), 20.0f * s, 1.0f);
     {
         const char* title = (g_disc_name[0] && strcmp(g_disc_name, "n/a")) ? g_disc_name
                                                                             : "No disc - BIOS shell";
-        float ts = h1->LegacySize * 1.25f;
-        float tx = w0.x + 78.0f * s;
-        dl->PushClipRect(ImVec2(tx, w0.y), ImVec2(w1.x - 190.0f * s, w0.y + hh), true);
-        dl->AddText(h1, ts, ImVec2(tx, w0.y + 13.0f * s), gp_col(ZS_TEXT, 1.0f), title);
-        snprintf(buf, sizeof(buf), "ZONISTATION ONE   %s   %s", pal ? "PAL" : "NTSC", g_bios_name);
-        dl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(tx, w0.y + 15.0f * s + ts),
-                    gp_col(ZS_FAINT, 1.0f), buf);
+        float ts = h1->LegacySize * 1.12f;
+        float tx = w0.x + 22.0f * s + 40.0f * s + 16.0f * s;
+        const char* st = "Paused";
+        float ss = mono->LegacySize * 0.92f;
+        float sw = mono->CalcTextSizeA(ss, FLT_MAX, 0.0f, st).x;
+        float pw = sw + 36.0f * s, ph = ss + 14.0f * s;
+        ImVec2 c0 = ImVec2(w1.x - 22.0f * s - pw, w0.y + (hh - ph) * 0.5f), c1 = ImVec2(c0.x + pw, c0.y + ph);
+
+        char shown[200];
+        fit_text(h1, ts, title, c0.x - 14.0f * s - tx, shown, sizeof(shown));
+        dl->PushClipRect(ImVec2(tx, w0.y), ImVec2(c0.x - 10.0f * s, w0.y + hh), true);
+        dl->AddText(h1, ts, ImVec2(tx, w0.y + 17.0f * s), gp_col(ZS_TEXT, 1.0f), shown);
+        snprintf(buf, sizeof(buf), "%s   %s", pal ? "PAL" : "NTSC", g_bios_name);
+        dl->AddText(mono, mono->LegacySize * 0.9f, ImVec2(tx, w0.y + 21.0f * s + ts), gp_col(ZS_MUTED, 1.0f), buf);
         dl->PopClipRect();
 
-        const char* st = "MACHINE PAUSED";
-        float ss = mono->LegacySize * 0.9f;
-        float sw = mono->CalcTextSizeA(ss, FLT_MAX, 0.0f, st).x;
-        ImVec2 c0 = ImVec2(w1.x - 22.0f * s - sw - 20.0f * s, w0.y + hh * 0.5f - ss * 0.5f - 5.0f * s);
-        ImVec2 c1 = ImVec2(w1.x - 22.0f * s, c0.y + ss + 10.0f * s);
-        dl->AddRectFilled(c0, c1, gp_col(ZS_WARN, 0.12f), 4.0f * s);
-        dl->AddRect(c0, c1, gp_col(ZS_WARN, 0.7f), 4.0f * s);
-        dl->AddText(mono, ss, ImVec2(c0.x + 10.0f * s, c0.y + 5.0f * s), gp_col(ZS_WARN, 1.0f), st);
+        dl->AddRectFilled(c0, c1, gp_col(ZS_WARN, 0.14f), ph * 0.5f);
+        dl->AddRect(c0, c1, gp_col(ZS_WARN, 0.55f), ph * 0.5f);
+        dl->AddCircleFilled(ImVec2(c0.x + 14.0f * s, c0.y + ph * 0.5f), 3.6f * s, gp_col(ZS_WARN, 1.0f), 12);
+        dl->AddText(mono, ss, ImVec2(c0.x + 24.0f * s, c0.y + (ph - ss) * 0.5f), gp_col(ZS_WARN, 1.0f), st);
     }
+    dl->AddLine(ImVec2(w0.x, w0.y + hh), ImVec2(w1.x, w0.y + hh), gp_col(ZS_LINE, 1.0f));
 
     /* --- the list --- */
     bool list_ok = (g_gp_focus == 0 && g_nav.ok);
-    float list_w = 236.0f * s;
+    float list_w = 228.0f * s;
     float body_h = size.y - hh - fh;
     ImGui::SetCursorScreenPos(ImVec2(w0.x, w0.y + hh + 1.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f * s, 12.0f * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f * s, 14.0f * s));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 3.0f * s));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::BeginChild("##gp_list", ImVec2(list_w, body_h - 1.0f), ImGuiChildFlags_AlwaysUseWindowPadding,
                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
     {
         ImDrawList* ldl = ImGui::GetWindowDrawList();
+        /* The row pitch is the style's own item spacing, read here: the 3 px pushed
+         * around BeginChild above is gone by the time the rows are laid out, and a
+         * pill moved by a guessed pitch drifts further from its row at every step. */
+        const float rh = 42.0f * s, rgap = ImGui::GetStyle().ItemSpacing.y;
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float  rw = ImGui::GetContentRegionAvail().x;
+
+        /* The selection is one pill that slides between rows, not a fill that
+         * switches: the row index it is drawn at chases the selected one. */
+        static float s_pill = 0.0f;
+        s_pill += ((float)g_gp_menu_idx - s_pill) * 0.4f;
+        if (fabsf(s_pill - (float)g_gp_menu_idx) < 0.004f) s_pill = (float)g_gp_menu_idx;
+        {
+            const bool  danger = g_gp_items[g_gp_menu_idx].danger;
+            const ImVec4 acc = danger ? ZS_CRIT : ZS_DATA;
+            const float k = (g_gp_focus == 0) ? 1.0f : 0.5f;
+            ImVec2 q0 = ImVec2(origin.x, origin.y + s_pill * (rh + rgap));
+            ImVec2 q1 = ImVec2(q0.x + rw, q0.y + rh);
+            ldl->AddRectFilled(q0, q1, gp_col(acc, 0.17f * k), 12.0f * s);
+            if (g_gp_focus == 0) ldl->AddRect(q0, q1, gp_col(acc, 0.6f), 12.0f * s, 0, 1.2f * s);
+        }
         for (int i = 0; i < GP_ITEM_COUNT; i++) {
             ImVec2 p0 = ImGui::GetCursorScreenPos();
-            float rw = ImGui::GetContentRegionAvail().x, rh = 38.0f * s;
             ImVec2 p1 = ImVec2(p0.x + rw, p0.y + rh);
             ImGui::PushID(i);
             bool click = ImGui::InvisibleButton("##it", ImVec2(rw, rh));
@@ -4613,22 +5168,20 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             if (click) list_ok = true;
 
             bool sel = (i == g_gp_menu_idx);
-            ImVec4 acc = g_gp_items[i].danger ? ZS_CRIT : ZS_DATA;
-            if (sel) {
-                float k = (g_gp_focus == 0) ? 1.0f : 0.45f;
-                ldl->AddRectFilledMultiColor(p0, p1, gp_col(acc, 0.26f * k), gp_col(acc, 0.03f * k),
-                                             gp_col(acc, 0.03f * k), gp_col(acc, 0.26f * k));
-                ldl->AddRectFilled(p0, ImVec2(p0.x + 3.0f * s, p1.y), gp_col(acc, k));
-            }
+            const bool danger = g_gp_items[i].danger;
+            ImVec4 ic = sel ? (danger ? ZS_CRIT : ZS_DATA) : (danger ? zs_mix(ZS_MUTED, ZS_CRIT, 0.5f) : ZS_MUTED);
+            if (g_gp_items[i].icon)
+                g_gp_items[i].icon(ldl, ImVec2(p0.x + 24.0f * s, p0.y + rh * 0.5f), 8.0f * s, gp_col(ic, 1.0f), 1.6f * s);
             float fs = ui->LegacySize;
-            ldl->AddText(ui, fs, ImVec2(p0.x + 16.0f * s, p0.y + (rh - fs) * 0.5f),
-                         gp_col(sel ? (g_gp_items[i].danger ? ZS_CRIT : ZS_TEXT) : ZS_MUTED, 1.0f),
-                         g_gp_items[i].label);
+            ldl->AddText(ui, fs, ImVec2(p0.x + 46.0f * s, p0.y + (rh - fs) * 0.5f),
+                         gp_col(sel ? (danger ? ZS_CRIT : ZS_TEXT) : ZS_MUTED, 1.0f), g_gp_items[i].label);
             if (g_gp_items[i].key[0]) {
-                float ks = mono->LegacySize * 0.88f;
-                float kw = mono->CalcTextSizeA(ks, FLT_MAX, 0.0f, g_gp_items[i].key).x;
-                ldl->AddText(mono, ks, ImVec2(p1.x - kw - 10.0f * s, p0.y + (rh - ks) * 0.5f),
-                             gp_col(ZS_FAINT, 1.0f), g_gp_items[i].key);
+                float ks = mono->LegacySize * 0.84f;
+                float kw = mono->CalcTextSizeA(ks, FLT_MAX, 0.0f, g_gp_items[i].key).x + 12.0f * s;
+                ImVec2 k0 = ImVec2(p1.x - kw - 10.0f * s, p0.y + (rh - ks - 8.0f * s) * 0.5f);
+                ImVec2 k1 = ImVec2(k0.x + kw, k0.y + ks + 8.0f * s);
+                ldl->AddRect(k0, k1, gp_col(ZS_LINE, 1.0f), 6.0f * s);
+                ldl->AddText(mono, ks, ImVec2(k0.x + 6.0f * s, k0.y + 4.0f * s), gp_col(ZS_FAINT, 1.0f), g_gp_items[i].key);
             }
         }
     }
@@ -4638,13 +5191,15 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
     /* --- the pane --- */
     ImGui::SetCursorScreenPos(ImVec2(w0.x + list_w + 1.0f, w0.y + hh + 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22.0f * s, 16.0f * s));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     ImGui::BeginChild("##gp_pane", ImVec2(size.x - list_w - 2.0f, body_h - 1.0f),
                       ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoNav);
+    ImGui::PopStyleColor();
     ImGui::PopStyleVar();
 
     g_gp_pane_next = 0;
     g_gp_pane_cols = 1;
-    ImVec2 bsz = ImVec2(200.0f * s, 38.0f * s);
+    ImVec2 bsz = ImVec2((ImGui::GetContentRegionAvail().x - 10.0f * s) * 0.5f, 38.0f * s);   /* two to a row, whatever the pane's width */
 
     switch (g_gp_menu_idx) {
         case GP_RESUME: {  /* the session, from counters that already exist */
@@ -4670,7 +5225,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                 gp_row("Disc", buf, ZS_TEXT);
                 if (halted) snprintf(buf, sizeof(buf), "paused  (%d samples queued)", g_vit_aq);
                 else        snprintf(buf, sizeof(buf), "%d / %d samples queued", g_vit_aq, g_vit_aq_target);
-                gp_row("Audio", buf, halted ? ZS_MUTED : ZS_AUDIO);
+                gp_row("Audio", buf, halted ? ZS_MUTED : ZS_TEXT);
                 snprintf(buf, sizeof(buf), "Slot %d", g_gp_slot);
                 gp_row("Quick state", buf, ZS_DATA);
                 ImGui::EndTable();
@@ -4741,10 +5296,11 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             micro_label("Theme");
             {
                 /* One row of five: the choice is visible without scrolling. */
+                const int cols = ImGui::GetContentRegionAvail().x < 430.0f * s ? 2 : 3;   /* "Ambient Light" needs ~140 px */
                 float gap = 8.0f * s;
-                float tw = (ImGui::GetContentRegionAvail().x - gap * (float)(ZS_THEME_COUNT - 1)) / (float)ZS_THEME_COUNT;
+                float tw = (ImGui::GetContentRegionAvail().x - gap * (float)(cols - 1)) / (float)cols;
                 for (int i = 0; i < ZS_THEME_COUNT; i++) {
-                    if (i) ImGui::SameLine(0, gap);
+                    if (i % cols) ImGui::SameLine(0, gap);
                     if (gp_btn(g_themes[i].name, g_theme == i ? "active" : "", ImVec2(tw, 50.0f * s), false,
                                g_theme == i, g_themes[i].data)) {
                         theme_set(i, true);
@@ -4798,6 +5354,12 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
             if (gp_btn(g_gp_graph ? "Frame-time graph: on" : "Frame-time graph: off",
                        "one bar per field against the budget", ImVec2(0, 46.0f * s), false, g_gp_graph, ZS_DATA))
                 g_gp_graph = !g_gp_graph;
+            if (gp_btn(g_gp_ambient ? "Ambient bars: on" : "Ambient bars: off",
+                       "light from the frame fills the side bars", ImVec2(0, 46.0f * s), false, g_gp_ambient, ZS_DATA))
+                g_gp_ambient = !g_gp_ambient;
+            if (gp_btn(g_gp_pace_line ? "Rhythm line: on" : "Rhythm line: off",
+                       "3 px along the top, one segment per field", ImVec2(0, 46.0f * s), false, g_gp_pace_line, ZS_DATA))
+                g_gp_pace_line = !g_gp_pace_line;
             break;
         }
         case GP_MACHINE: {
@@ -4822,7 +5384,7 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
                              host->audio_driver, host->audio_freq, host_info_audio_latency_ms());
                 else
                     snprintf(buf, sizeof(buf), "%s (no device)", host->audio_driver);
-                gp_row("Audio device", buf, ZS_AUDIO);
+                gp_row("Audio device", buf, ZS_TEXT);
                 snprintf(buf, sizeof(buf), "%.0f%% of one core, %.0f MB",
                          host->process_cpu_pct, host->rss_mb);
                 gp_row("Host cost", buf, ZS_TEXT);
@@ -4858,13 +5420,15 @@ static void gp_draw_menu(Cpu* cpu, Interconnect* inter) {
     ImGui::EndChild();
 
     /* --- footer: the same six inputs, named for both devices --- */
-    dl->AddLine(ImVec2(w0.x, w1.y - fh), ImVec2(w1.x, w1.y - fh), gp_col(ZS_LINE_SOFT, 1.0f));
+    dl->AddLine(ImVec2(w0.x, w1.y - fh), ImVec2(w1.x, w1.y - fh), gp_col(ZS_LINE, 1.0f));
     {
-        ImVec2 p = ImVec2(w0.x + 18.0f * s, w1.y - fh + (fh - (mono->LegacySize * 0.90f + 6.0f * s)) * 0.5f);
-        p.x = gp_keycap(dl, p, "Arrows / D-pad", "Move", 1.0f);
-        p.x = gp_keycap(dl, p, "Enter / Cross", "Select", 1.0f);
-        p.x = gp_keycap(dl, p, "Esc / Circle", "Back", 1.0f);
+        g_kc_panel = true;
+        ImVec2 p = ImVec2(w0.x + 20.0f * s, w1.y - fh + (fh - (mono->LegacySize * 0.92f + 8.0f * s)) * 0.5f);
+        p.x = gp_keycap(dl, p, "Arrows", "Move", 1.0f);
+        p.x = gp_keycap(dl, p, "Enter", "Select", 1.0f);
+        p.x = gp_keycap(dl, p, "Esc", "Back", 1.0f);
         p.x = gp_keycap(dl, p, "Start", "Resume", 1.0f);
+        g_kc_panel = false;
     }
     ImGui::End();
 
@@ -4985,7 +5549,20 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
                  ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
 
     GfxTexHandle tex_id = inter ? renderer_get_display_texture(&inter->gpu.renderer) : 0;
-    draw_scanout(tex_id, inter, ImGui::GetContentRegionAvail());
+    /* The quick menu is a sheet on the right: the picture shrinks into what is left,
+     * so the game stays visible beside it. Opens eased, closes at once. */
+    if (g_gp_menu_open) { g_gp_sheet_t += (1.0f - g_gp_sheet_t) * 0.30f; if (g_gp_sheet_t > 0.995f) g_gp_sheet_t = 1.0f; }
+    else                  g_gp_sheet_t = 0.0f;
+    const float sheet_e = 1.0f - powf(1.0f - g_gp_sheet_t, 3.0f);
+    const float sheet_w = gp_sheet_width() * sheet_e;
+    ImVec2 scan_avail = ImGui::GetContentRegionAvail();
+    scan_avail.x -= sheet_w;
+    draw_scanout(tex_id, inter, scan_avail);
+    {
+        ImVec2 a = ImGui::GetWindowPos();
+        gp_draw_ambient(ImGui::GetWindowDrawList(), a,
+                        ImVec2(a.x + ImGui::GetWindowWidth(), a.y + ImGui::GetWindowHeight()));
+    }
 
     /* The veil goes on this window's own draw list. Not the foreground one,
      * which is painted over every window and would put the menu itself in
@@ -4993,8 +5570,8 @@ static void draw_gameplay_shell(Cpu* cpu, Interconnect* inter) {
      * Here it lands above the picture and below the menu window. */
     if (g_gp_menu_open) {
         ImVec2 a = ImGui::GetWindowPos();
-        ImVec2 b = ImVec2(a.x + ImGui::GetWindowWidth(), a.y + ImGui::GetWindowHeight());
-        ImGui::GetWindowDrawList()->AddRectFilled(a, b, IM_COL32(4, 6, 10, 185));
+        ImVec2 b = ImVec2(a.x + ImGui::GetWindowWidth() - sheet_w, a.y + ImGui::GetWindowHeight());
+        ImGui::GetWindowDrawList()->AddRectFilled(a, b, IM_COL32(4, 6, 10, 96));
     }
 
     ImGui::End();
@@ -5148,31 +5725,33 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
         ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-        ImGuiWindowFlags_NoNavFocus;
+        ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
     ImGui::Begin("##DockHost", nullptr, dock_flags);
     ImGui::PopStyleVar(3);
 
-    // Render PlayStation Boot Screen Inspired Ambient Background Gradient (Sony Amber Diamond & PS Red/Yellow/Teal/Blue)
+    // One flat ground. The four-corner boot-screen gradient that used to be here
+    // was dark by construction, which a pale theme cannot have under it.
     ImDrawList* bg_dl = ImGui::GetWindowDrawList();
     ImVec2 vp_p0 = viewport->WorkPos;
     ImVec2 vp_p1 = ImVec2(vp_p0.x + viewport->WorkSize.x, vp_p0.y + viewport->WorkSize.y);
-
-    // 4-corner multi-color gradient inspired by Sony Computer Entertainment boot screen & PS logo
-    bg_dl->AddRectFilledMultiColor(vp_p0, vp_p1,
-        IM_COL32(38, 22, 10, 255),   // Top-left (Sony Diamond Gold Amber Glow)
-        IM_COL32(42, 12, 16, 255),   // Top-right (PlayStation Logo Red Glow)
-        IM_COL32(8, 18, 32, 255),    // Bottom-right (PlayStation Royal Blue Glow)
-        IM_COL32(6, 22, 26, 255));   // Bottom-left (PlayStation Teal/Green Glow)
-
-    // Smooth obsidian dark theme overlay for high contrast
-    bg_dl->AddRectFilledMultiColor(vp_p0, vp_p1,
-        IM_COL32(10, 13, 20, 215), IM_COL32(6, 8, 14, 245),
-        IM_COL32(6, 8, 14, 245), IM_COL32(10, 13, 20, 215));
+    bg_dl->AddRectFilled(vp_p0, vp_p1, ImGui::GetColorU32(ZS_GROUND));
 
     draw_machine_bar(cpu, inter);
 
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
-    ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    /* The window width decides whether the rail is icons or labels; crossing the
+     * threshold (a resize, a maximise) rebuilds the layout once. */
+    {
+        static int s_rail_class = -1;
+        const int cls = ws_rail_compact() ? 1 : 0;
+        if (cls != s_rail_class) { s_rail_class = cls; g_layout_dirty = true; }
+    }
+    const float log_strip_h = 40.0f * g_ui_scale;
+    /* The strip and the item spacing above and below the dockspace come out of its
+     * height, or the host window overflows by a few pixels and grows a scrollbar. */
+    ImGui::DockSpace(dockspace_id,
+                     ImVec2(0.0f, ImGui::GetContentRegionAvail().y - log_strip_h - ImGui::GetStyle().ItemSpacing.y * 2.0f),
+                     ImGuiDockNodeFlags_None);
     rebuild_layout(dockspace_id);
 
     // Mode rail (left), constant across modes
@@ -5231,6 +5810,8 @@ extern "C" void debug_ui_render(void* cpu_ptr, void* interconnect_ptr) {
 
     // Controller remapping & input tester window
     draw_controller_mapping_window();
+
+    draw_log_strip(log_strip_h);
 
     ImGui::End(); // DockHost
 
@@ -5342,6 +5923,7 @@ extern "C" void debug_ui_shutdown(void) {
         }
     }
     debug_ui_backend_shutdown();
+    gp_thumbs_release();
     ImGui::DestroyContext();
 }
 

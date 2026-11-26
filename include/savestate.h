@@ -32,4 +32,14 @@ struct Interconnect;
 bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inter);
 bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inter);
 
+/* A picture of what was on screen, for the slot tiles: 160x120, RGB, written beside
+ * the state as <slot>.thm ("ZTH1", two little-endian u16 for width and height, then
+ * the pixels). It is a sidecar and not a section of the state, so the state format
+ * (v12) is untouched and a state with no picture loads exactly as before.
+ * savestate_save() calls it after a successful write; it is best effort. */
+#define SAVESTATE_THUMB_W 160
+#define SAVESTATE_THUMB_H 120
+bool savestate_thumbnail_path(const char* state_path, char* out, unsigned long n);
+bool savestate_write_thumbnail(const char* state_path, const struct Interconnect* inter);
+
 #endif /* SAVESTATE_H */

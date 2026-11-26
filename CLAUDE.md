@@ -60,6 +60,19 @@ time with the backquote key (`` ` ``), Shift+F1, the *Gameplay* button on the ma
 quick menu's *Debug workspace*. `ZS1_UI=debug` opens straight into the workspace. The machine keeps
 running across a switch.
 
+- **Interface refresh, 2026-11-26** (CHANGELOG, block of that date). The look is the "Ambient"
+  system: theme tokens (13 colours plus ok/warn/crit and the colour of text on an accent fill) in
+  `ZsTheme`, the default theme `Ambient`, a pale `Ambient Light`, the old five unchanged; a choice
+  already saved in `zs1_theme.txt` is kept. Fonts are bundled (`assets/fonts/`, OFL). In the
+  gameplay shell the bars beside the 4:3 picture are filled with light sampled from the frame
+  (`gp_draw_ambient`, no readback), a 3 px rhythm line runs along the top (`gp_draw_pace_line`), the
+  overlay sits in the bars when they are wide enough, and the quick menu is a sheet on the right
+  into which the picture shrinks. Slot tiles show a picture: `savestate_save()` writes a 160x120
+  `<slot>.thm` beside the state (a sidecar, state format v12 untouched) which the menu loads into
+  four ImGui user textures. The workspace's rail is icons-only under 1500 px, the log dock is
+  closed until opened from the strip along the bottom (or by the first ERROR), and the machine bar's
+  vitals are on screen (they were positioned off the right edge before). `ZS1_UI_TOUR` is the
+  visual check for all of it; it needs a window manager under Xvfb to get a maximised window.
 - **Gameplay shell** — the emulated screen and nothing else. A HUD (fps, speed, host frame ms,
   region and refresh, the pad's LED, a frame-time graph) fades out after ~3 s and returns for the
   pointer and for the shell's own keys — not for game keys; `F2` cycles it auto-hide / always on /

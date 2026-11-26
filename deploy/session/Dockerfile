@@ -66,6 +66,8 @@ COPY --from=builder /usr/local/lib/libSDL3.so* /usr/local/lib/
 RUN ldconfig
 
 COPY --from=builder /src/ZoniStation_One /opt/zs1/ZoniStation_One
+# The interface faces (OFL), looked for next to the executable.
+COPY --from=builder /src/assets /opt/zs1/assets
 COPY deploy/session/entrypoint.sh /opt/zs1/entrypoint.sh
 # Dropped into noVNC's own web root so websockify serves it — the picture and
 # the audio player end up on one page without a second HTTP server.
