@@ -180,9 +180,18 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
         }
     }
 
-    FILE* f = fopen(path, "wb");
+    /* Written beside the slot and renamed over it once complete: opening the
+     * slot itself for writing truncates it first, so a crash, a full disk or a
+     * kill mid-save used to destroy the state that was there. rename() is atomic
+     * on one filesystem, the same reasoning as the memory-card save in sio.c. */
+    char tmp_path[1024];
+    if (snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path) >= (int)sizeof(tmp_path)) {
+        LOG_SYSTEM_ERROR("[STATE] Path too long: %s", path);
+        return false;
+    }
+    FILE* f = fopen(tmp_path, "wb");
     if (!f) {
-        LOG_SYSTEM_ERROR("[STATE] Cannot open %s for writing", path);
+        LOG_SYSTEM_ERROR("[STATE] Cannot open %s for writing", tmp_path);
         return false;
     }
 
@@ -237,6 +246,7 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
         LOG_SYSTEM_ERROR("[STATE] SIO protocol state is %zu bytes, staging buffer is %zu — "
                          "raise SIO_INTERNAL_MAX", sio_sz, sizeof(sio_blk));
         fclose(f);
+        remove(tmp_path);
         return false;
     }
     sio_save_internal_state(sio_blk);
@@ -258,10 +268,12 @@ bool savestate_save(const char* path, struct Cpu* cpu, struct Interconnect* inte
     ok = ok && put_section(f, T_MDEC, &inter->mdec, sizeof(Mdec));
 
     long bytes = ftell(f);
-    fclose(f);
+    /* fclose flushes the last buffer, so a full disk can surface only here. */
+    bool closed = (fclose(f) == 0);
 
-    if (!ok) {
+    if (!ok || !closed || rename(tmp_path, path) != 0) {
         LOG_SYSTEM_ERROR("[STATE] Write failed: %s", path);
+        remove(tmp_path);
         return false;
     }
     LOG_SYSTEM_INFO("[STATE] Saved %s (%ld bytes, PC=0x%08x, cycle=%u)",
@@ -410,6 +422,9 @@ bool savestate_load(const char* path, struct Cpu* cpu, struct Interconnect* inte
     inter->dma.inter           = dma_inter;
     inter->timers_state.inter  = tmr_inter;
     inter->cdrom.inter         = cdr_inter;
+
+    /* A code address from the file is only valid in the process that wrote it. */
+    gpu_restore_command_method(&inter->gpu);
 
     /* The drive's idea of what is in it comes from the hardware in front of us,
      * never from the file — the identity check above only proved they agree. */

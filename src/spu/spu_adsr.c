@@ -31,8 +31,8 @@ static void adsr_init_tables(void) {
     if (adsr_tables_ready) return;
     for (int n = 0; n < 128; n++) {
         adsr_denominator[n]   = (n < 48) ? 1 : (1 << ((n >> 2) - 11));
-        adsr_numerator_inc[n] = (n < 48) ? (7 - (n & 3)) << (11 - (n >> 2)) : (7 - (n & 3));
-        adsr_numerator_dec[n] = (n < 48) ? (-8 + (n & 3)) << (11 - (n >> 2)) : (-8 + (n & 3));
+        adsr_numerator_inc[n] = (n < 48) ? (7 - (n & 3)) * (1 << (11 - (n >> 2))) : (7 - (n & 3));
+        adsr_numerator_dec[n] = (n < 48) ? (-8 + (n & 3)) * (1 << (11 - (n >> 2))) : (-8 + (n & 3));
     }
     adsr_tables_ready = 1;
 }

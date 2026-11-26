@@ -7,6 +7,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-26: code-review fixes (branch `ccr-9859217a-86y6jq`)
+
+Eight low-risk fixes from a review of the tree. Checked without a BIOS or a disc: `make test` (ten
+unit tests, also built with `-fsanitize=address,undefined -fno-sanitize-recover`), `make hwtest` on
+OpenGL and Vulkan under Xvfb, a full `make` with no warning from this project's own sources, and an
+`emu.save_state` / `emu.load_state` round trip from a Lua probe. Not run: a game, the BIOS menu, and
+a savestate written by one process and loaded by another (the case the GP0 fix is for).
+
+#### Fixed
+- **A savestate written mid-GP0-command held a code address.** `Gpu::gp0_command_method` is a function
+  pointer, saved raw; loaded into another process it pointed at nothing and the command that completed
+  next jumped there. It is re-derived from the saved opcode after a load (`gpu_restore_command_method`).
+- **Three log lines had a missing argument** (`gpu.c` GP1 unhandled, `gpu_commands.c` GP0 unhandled and
+  the command-buffer overflow): varargs UB. `log_print` now carries `format(printf)`, so the compiler
+  checks every `LOG_*` call from here on.
+- **A command-buffer overflow no longer calls `exit()`.** The word is dropped and logged.
+- **The savestate is written to `<slot>.tmp` and renamed over the slot**, and `fclose` is checked. It used to
+  truncate the slot first, so a full disk or a kill mid-save destroyed the state that was there.
+- **`DISC.BIN` (upper case) loaded as a CUE and reported "BIOS-only mode".** `.bin` and `.bin.ecm` are
+  matched ignoring case.
+- **ECM block headers are bounded**: at most five bytes and 32 bits, and a run whose output does not fit
+  32 bits is refused. Before, a file of continuation bytes shifted past the width of the type.
+- **Signed left shifts that were undefined** in `mdec.c` (`sign_extend9/10`), `spu_adsr.c` (rate tables)
+  and `spu_mixing.c` (noise clock). Same values, defined arithmetic.
+- **`dma_test` and `mdec_test` did not link below `-O2`** (no `current_log_level`), which made them
+  unusable under sanitizers and with `make DEBUG=1`.
+
+#### Added
+- `tests/disc_load_test.c`: upper/mixed-case `.BIN`, and the two ECM cases above. Fails on the old code
+  under UBSan.
+
 ### 2026-11-14: Lua `emu.write_u8/u16/u32` (branch `feature/lua-memory-write`)
 
 A probe can now write guest memory, to force game state (a stage number, a flag) from a script, for
