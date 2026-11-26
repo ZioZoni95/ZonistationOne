@@ -70,8 +70,11 @@ bool cdrom_disc_load(CdromDisc *disc, const char *cue_path) {
 
     /* Accept a bare .bin or .bin.ecm path for quick testing */
     size_t plen = strlen(cue_path);
-    bool is_bin    = (plen >= 4 && strcmp(cue_path + plen - 4, ".bin") == 0);
-    bool is_bin_ecm = (plen >= 8 && strcmp(cue_path + plen - 8, ".bin.ecm") == 0);
+    /* Case-insensitive: dumps from Windows tools are often DISC.BIN, and a miss
+     * here sends the binary image to the CUE parser, which finds no tracks and
+     * reports a "BIOS-only mode" that looks like a disc bug. */
+    bool is_bin    = (plen >= 4 && strcasecmp(cue_path + plen - 4, ".bin") == 0);
+    bool is_bin_ecm = (plen >= 8 && strcasecmp(cue_path + plen - 8, ".bin.ecm") == 0);
     if (is_bin || is_bin_ecm) {
         FILE *bin = fopen(cue_path, "rb");
         if (!bin) { LOG_CDROM_ERROR("[CDROM] Cannot open BIN: %s", cue_path); return false; }

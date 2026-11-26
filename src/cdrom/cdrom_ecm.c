@@ -44,20 +44,27 @@ static int read_type_count(FILE *fp, int *type, uint32_t *raw_num, uint32_t *cou
     if (c == EOF) return 0;
 
     *type   = c & 3;
-    uint32_t num = (uint32_t)((c >> 2) & 0x1F);
+    uint64_t num = (uint64_t)((c >> 2) & 0x1F);
     int bits = 5;
     int bytes = 1;
 
+    /* The count is a 32-bit value in at most five bytes (5 + 4 x 7 bits, the
+     * last carrying 6). A longer run of continuation bytes, or a value past 32
+     * bits, is a corrupt header: the shift below used to keep going into
+     * undefined territory on a file of 0xFF bytes. 0 means "stop reading", the
+     * same as an EOF, so the index keeps what it built before this point. */
     while (c & 0x80) {
+        if (bits > 26) return 0;
         c = fgetc(fp);
         if (c == EOF) return 0;
-        num |= ((uint32_t)(c & 0x7F)) << bits;
+        num |= ((uint64_t)(c & 0x7F)) << bits;
         bits += 7;
         bytes++;
     }
+    if (num > 0xFFFFFFFFu) return 0;
 
-    *raw_num = num;
-    *count   = num + 1;
+    *raw_num = (uint32_t)num;
+    *count   = (uint32_t)num + 1u;
     return bytes;
 }
 
@@ -110,6 +117,10 @@ static bool build_runs(EcmDecoder *dec) {
             fseek(fp, (long)count, SEEK_CUR);
         } else {
             uint32_t comp_size = ECM_SECTOR_COMP_SIZE[type];
+            /* out_len is 32 bits; a run that does not fit is not a real image
+             * (a whole CD is ~360k sectors, a run is far shorter), and wrapping
+             * it would leave the run table disagreeing with the file. */
+            if ((uint64_t)count * ECM_MODELLED_PAYLOAD > 0xFFFFFFFFu) return false;
             if (!runs_push(dec, (uint8_t)type, payload, count, count * ECM_MODELLED_PAYLOAD))
                 return false;
             fseek(fp, (long)comp_size * (long)count, SEEK_CUR);

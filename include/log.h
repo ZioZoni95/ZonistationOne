@@ -68,7 +68,10 @@ void log_set_output_file(const char* filename);
 bool log_should_print(LogCategory category, LogLevel level);
 
 // Internal logging function
-void log_print(LogCategory category, LogLevel level, const char* format, ...);
+/* printf-checked: a log line with a missing or mistyped argument is varargs UB, and
+ * without this attribute the compiler said nothing about it. */
+void log_print(LogCategory category, LogLevel level, const char* format, ...)
+    __attribute__((format(printf, 3, 4)));
 
 /* The runtime level, read by the macros below before they call log_print().
  * Defined in log.c; log_set_level() is still the only writer. */

@@ -11,6 +11,8 @@ logs/
 *.txt
 # ...but licence notices must ship: MIT requires them to be present.
 !**/LICENSE.txt
+# ...and the licences of the bundled fonts (assets/fonts, OFL requires them to travel).
+!assets/fonts/*.txt
 
 # ROM files / BIOS images (copyrighted — do not distribute)
 roms/

@@ -482,7 +482,7 @@ void gpu_gp1(Gpu* gpu, uint32_t command) {
             gp1_get_gpu_info(gpu, command);
             break;
         default:
-            LOG_GPU_WARN("[GPU] Unhandled GP1 opcode 0x%02x (cmd 0x%08x) @ 0x%08x", opcode, command);
+            LOG_GPU_WARN("[GPU] Unhandled GP1 opcode 0x%02x (cmd 0x%08x)", opcode, command);
             break;
     }
 }

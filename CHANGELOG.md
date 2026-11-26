@@ -7,6 +7,95 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-26: the "Ambient" interface (branch `ccr-9859217a-86y6jq`)
+
+A new look and a few new behaviours, from the design study in the review of the same day. The
+interface is the same code (`debug_ui.cpp`, ImGui); what changed is its tokens, its shapes and where
+things sit. **Checked** with the BIOS (PAL SCPH-7502, no disc) through `ZS1_UI_TOUR` at 1280x720 and
+1920x1061, on OpenGL, dark and pale theme; on Vulkan with the menu opened by a real Escape through
+`xdotool` (the tour reads the screen back from OpenGL only), without the validation layer, which
+was not installed; `make test` (ten unit tests), `make hwtest` on both renderers, and a clean build
+with no warning from this project's sources. **Not checked:** a game (the ambient bars are subtle
+on the BIOS menu, whose edges are dark navy; a bright game will show more), a real GPU, a pad
+driving the menu, HiDPI scales, Wayland, and every workspace view in the pale theme (Pipeline, Code,
+Host HW, Script and the controller window were looked at).
+
+#### Added
+- **Ambient bars.** The black bars beside the 4:3 picture take their light from the frame: 14 bands a
+  side, three samples deep, cross-faded, from the scanout texture the picture already uses. No
+  readback, no blur pass. Setting: Video & HUD > Ambient bars.
+- **Rhythm line.** A 3 px line along the top edge, one segment per recent host loop iteration:
+  green inside the budget, amber and red above it. The fps pill (top right) opens the old detail
+  card on hover. Setting: Video & HUD > Rhythm line.
+- **The overlay lives in the bars** when they are wide enough (title and pad on the left, the key
+  list on the right); on a window with no bar it falls back to a plate over the picture.
+- **Quick menu as a sheet** on the right: the picture shrinks into the space that is left, so the
+  game stays visible beside the video settings. A selection pill that slides, drawn icons, the live
+  choice as a filled accent (13.8:1 on the default theme, where it used to be a dim tint at 2.3:1).
+- **Slot pictures.** `savestate_save()` writes `<slot>.thm`, 160x120 RGB, beside the state;
+  the Save and Load pages show it. A sidecar, so the state format (v12) did not change and a state
+  with no picture loads as before.
+- **Themes `Ambient` (default) and `Ambient Light`**; the five older themes are unchanged and a
+  saved choice is kept. Severity colours and the text colour on an accent fill are now part of a
+  theme (amber that reads on dark does not on white).
+- **Bundled fonts** (`assets/fonts/`: Inter, JetBrains Mono, both OFL, licences beside them),
+  looked for next to the executable, then the working directory, then the system faces as before.
+  The session image copies them (`deploy/session/Dockerfile`).
+- **Workspace log strip**: errors, warnings and the last message in one line along the bottom, and
+  a switch for the tabbed log dock, which is now closed until opened (the first ERROR opens it once).
+- **Workspace as in the design study.** The nine view modes are a row of pills under the machine bar
+  (names while they fit, icons with a tooltip below that), in place of the left rail. Every panel is
+  a card: no tab bar and no dock-menu triangle (`ws_begin`, `NoTabBar`), an 8 px gap between panels
+  and a margin around the dock. Pipeline mode is laid out as drawn there: the picture and the host
+  figures down the left, the Video and Audio lanes as two cards on the right (`ws_card_begin`).
+
+#### Changed
+- Section headings drop their letter-spacing before they are cut;
+  the Pipeline verdict chip carries a shape (cross, triangle, dot) as well as a colour; audio values
+  that were rose are plain text (rose stays the Audio lane's identity colour); the dock host has a
+  flat ground instead of the four-corner gradient. The backquote key is drawn as `~`.
+- Rounder shapes: panels 12, controls 9, tabs and scrollbars fully rounded.
+
+#### Fixed
+- **The machine bar's vitals (Speed, Fields/s, Frame, Audio queue, Drift) were never on screen.**
+  `SameLine(0, width - vitals)` counts from the end of the last button, not from the window's left
+  edge, so they were placed a whole bar-width to the right. They are now positioned from the edge,
+  left out when there is no room, and `vital()` is drawn in a fixed box (the old stack of three
+  lines was taller than the 52 px bar).
+- The pad drawing in the controller window had its labels in the theme's grey, which is dark on a
+  pale theme and vanished into the pad; the pad is a dark object, so they are a fixed light grey.
+
+### 2026-11-26: code-review fixes (branch `ccr-9859217a-86y6jq`)
+
+Eight low-risk fixes from a review of the tree. Checked without a BIOS or a disc: `make test` (ten
+unit tests, also built with `-fsanitize=address,undefined -fno-sanitize-recover`), `make hwtest` on
+OpenGL and Vulkan under Xvfb, a full `make` with no warning from this project's own sources, and an
+`emu.save_state` / `emu.load_state` round trip from a Lua probe. Not run: a game, the BIOS menu, and
+a savestate written by one process and loaded by another (the case the GP0 fix is for).
+
+#### Fixed
+- **A savestate written mid-GP0-command held a code address.** `Gpu::gp0_command_method` is a function
+  pointer, saved raw; loaded into another process it pointed at nothing and the command that completed
+  next jumped there. It is re-derived from the saved opcode after a load (`gpu_restore_command_method`).
+- **Three log lines had a missing argument** (`gpu.c` GP1 unhandled, `gpu_commands.c` GP0 unhandled and
+  the command-buffer overflow): varargs UB. `log_print` now carries `format(printf)`, so the compiler
+  checks every `LOG_*` call from here on.
+- **A command-buffer overflow no longer calls `exit()`.** The word is dropped and logged.
+- **The savestate is written to `<slot>.tmp` and renamed over the slot**, and `fclose` is checked. It used to
+  truncate the slot first, so a full disk or a kill mid-save destroyed the state that was there.
+- **`DISC.BIN` (upper case) loaded as a CUE and reported "BIOS-only mode".** `.bin` and `.bin.ecm` are
+  matched ignoring case.
+- **ECM block headers are bounded**: at most five bytes and 32 bits, and a run whose output does not fit
+  32 bits is refused. Before, a file of continuation bytes shifted past the width of the type.
+- **Signed left shifts that were undefined** in `mdec.c` (`sign_extend9/10`), `spu_adsr.c` (rate tables)
+  and `spu_mixing.c` (noise clock). Same values, defined arithmetic.
+- **`dma_test` and `mdec_test` did not link below `-O2`** (no `current_log_level`), which made them
+  unusable under sanitizers and with `make DEBUG=1`.
+
+#### Added
+- `tests/disc_load_test.c`: upper/mixed-case `.BIN`, and the two ECM cases above. Fails on the old code
+  under UBSan.
+
 ### 2026-11-14: Lua `emu.write_u8/u16/u32` (branch `feature/lua-memory-write`)
 
 A probe can now write guest memory, to force game state (a stage number, a flag) from a script, for

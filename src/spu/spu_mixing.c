@@ -50,7 +50,7 @@ static inline uint32_t noise_parity(uint32_t level) {
 
 static void noise_tick(Spu* spu) {
     uint32_t clock = (spu->control >> 8) & 0x3F;
-    uint32_t level = (0x8000 >> (clock >> 2)) << 16;
+    uint32_t level = (uint32_t)(0x8000 >> (clock >> 2)) << 16;
 
     spu->noise_count += 0x10000 + noise_freq_add[clock & 3];
     if ((spu->noise_count & 0xFFFF) >= noise_freq_add[4]) {

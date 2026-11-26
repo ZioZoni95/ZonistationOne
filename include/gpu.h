@@ -238,6 +238,8 @@ double gpu_hblank_hz(const Gpu* gpu);
 // These are non-static to allow cross-file access; not part of the public API.
 void gpu_clear_cmd_buf(Gpu* gpu);
 void gpu_push_cmd_word(Gpu* gpu, uint32_t word);
+/* Re-derive gp0_command_method from the saved opcode after a savestate load. */
+void gpu_restore_command_method(Gpu* gpu);
 void gpu_update_display_mapping(Gpu* gpu);
 
 #endif // GPU_H

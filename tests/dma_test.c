@@ -18,6 +18,9 @@
 #include <stdio.h>
 #include "log.h"
 
+/* The LOG_* macros read this directly; only an optimising build used to drop the
+ * reads, so without a definition the test did not link at -O0/-O1 (sanitizers, DEBUG=1). */
+LogLevel current_log_level = LOG_LEVEL_SILENT;
 void log_print(LogCategory category, LogLevel level, const char* format, ...) {
     (void)category; (void)level; (void)format;
 }

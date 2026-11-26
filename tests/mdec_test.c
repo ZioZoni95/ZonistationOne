@@ -43,6 +43,8 @@
 #include <string.h>
 #include "log.h"
 
+/* Read directly by the LOG_* macros; undefined at -O0/-O1 otherwise (see dma_test.c). */
+LogLevel current_log_level = LOG_LEVEL_SILENT;
 void log_print(LogCategory category, LogLevel level, const char* format, ...) {
     (void)category; (void)level; (void)format;
 }

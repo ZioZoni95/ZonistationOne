@@ -118,9 +118,12 @@ void gpu_clear_cmd_buf(Gpu* gpu) {
 
 void gpu_push_cmd_word(Gpu* gpu, uint32_t word) {
     if (gpu->gp0_command_buffer.count >= MAX_GPU_COMMAND_WORDS) {
-        LOG_GPU_ERROR("[GPU] FATAL: GP0 Command Buffer Overflow! Opcode: 0x%02x @ 0x%08x",
-                      gpu->gp0_current_opcode);
-        exit(EXIT_FAILURE);
+        /* The word is dropped, not the process: the overflow can come from a
+         * guest sending a command longer than any real one, or from a corrupt
+         * savestate, and neither is a reason to close the window. */
+        LOG_GPU_ERROR("[GPU] GP0 command buffer overflow, word 0x%08x dropped (opcode 0x%02x)",
+                      word, gpu->gp0_current_opcode);
+        return;
     }
     gpu->gp0_command_buffer.buffer[gpu->gp0_command_buffer.count++] = word;
 }
@@ -1663,6 +1666,21 @@ static const Gp0TableEntry gp0_table[256] = {
     // 0x03-0x1E and unhandled: NULL handler = NOP
 };
 
+/* Put back the handler of a GP0 command that was in flight when a savestate was
+ * written. gp0_command_method is a code address, so what the file holds is
+ * meaningful only to the process that wrote it: loaded into another one (the
+ * binary is position-independent) it points at nothing, and the command that
+ * completes next jumps there. The handler is a pure function of the opcode, and
+ * the opcode is saved, so it is derived rather than trusted. With no command
+ * pending nothing reads the field before the next command start overwrites it,
+ * so it is cleared. */
+void gpu_restore_command_method(Gpu* gpu) {
+    if (gpu->gp0_mode == GP0_MODE_COMMAND && gpu->gp0_words_remaining > 0)
+        gpu->gp0_command_method = gp0_table[gpu->gp0_current_opcode].handler;
+    else
+        gpu->gp0_command_method = NULL;
+}
+
 // ---------------------------------------------------------------------------
 // GP0 word processor (the dispatch engine)
 // ---------------------------------------------------------------------------
@@ -1770,7 +1788,7 @@ static void gpu_gp0_handle_word(Gpu* gpu, uint32_t word) {
         if (entry.handler == NULL) {
             // Unhandled — NOP and consume 1 word
             if (gp0_cmd_count <= 20 || gp0_cmd_count % 5000 == 0)
-                LOG_GPU_WARN("[GPU] Unhandled GP0 opcode 0x%02x (cmd 0x%08x) #%u @ 0x%08x", opcode, word, gp0_cmd_count);
+                LOG_GPU_WARN("[GPU] Unhandled GP0 opcode 0x%02x (cmd 0x%08x) #%u", opcode, word, gp0_cmd_count);
             gpu_push_cmd_word(gpu, word);
             return;
         }

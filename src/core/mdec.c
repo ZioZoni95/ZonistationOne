@@ -142,8 +142,11 @@ static uint32_t mdec_get_status(const Mdec* m) {
 /* -------------------------------------------------------------------------
  * Helpers
  * ---------------------------------------------------------------------- */
-static inline int32_t sign_extend10(int32_t v) { return (v << 22) >> 22; }
-static inline int32_t sign_extend9 (int32_t v) { return (v << 23) >> 23; }
+/* The left shift goes through uint32_t: shifting a set bit into the sign bit of an
+ * int is undefined, and a negative operand more so. The arithmetic right shift
+ * that sign-extends is implementation-defined and arithmetic on every target here. */
+static inline int32_t sign_extend10(int32_t v) { return (int32_t)((uint32_t)v << 22) >> 22; }
+static inline int32_t sign_extend9 (int32_t v) { return (int32_t)((uint32_t)v << 23) >> 23; }
 static inline int32_t clamp_s32(int32_t v, int32_t lo, int32_t hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }
