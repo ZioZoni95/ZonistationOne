@@ -50,6 +50,7 @@ typedef struct {
     /* Filter ImGui scales it with: wanted (set from the main thread) and what the
      * texture has (changed only on the GPU thread, which owns the context). */
     volatile bool scanout_linear;
+    volatile int  dither_style;   /* GFX_DITHER_*; at 1x only OFF differs from the console */
     bool          scanout_linear_applied;
     GLuint scanout_program;
     GLuint dummy_vao;         // attribute-less VAO for the fullscreen triangle

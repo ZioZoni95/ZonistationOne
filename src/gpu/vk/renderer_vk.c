@@ -677,15 +677,15 @@ bool vkr_init(VkRenderer* r, SDL_Window* window, const GfxDeviceRequest* req) {
     int device_index = req ? req->device_index : -1;
     if (!vk_context_create(&r->ctx, window, device_index)) return false;
 
-    /* Internal resolution: 1, 2, 4 or 8, and no more than the device's largest
-     * image allows (VRAM at scale S is 1024S wide). Anything else is taken as the
-     * nearest lower power of two, so a typed-in 3 is 2 rather than a refusal. */
+    /* Internal resolution: any integer 1..VKR_MAX_SCALE, and no more than the
+     * device's largest image allows (VRAM at scale S is 1024S wide). Nothing
+     * here needs a power of two: every use of S is a multiply (blits, scissor,
+     * line width, the shaders' texel addresses), so 3x or 5x is as exact as 4x. */
     {
         uint32_t want = (req && req->internal_scale) ? req->internal_scale : 1u;
-        uint32_t s = 1;
-        while (s * 2 <= want && s * 2 <= 8 &&
-               (uint64_t)VKR_VRAM_W * s * 2 <= (uint64_t)r->ctx.caps.max_image_2d)
-            s *= 2;
+        uint32_t s = want < 1u ? 1u : (want > VKR_MAX_SCALE ? VKR_MAX_SCALE : want);
+        while (s > 1 && (uint64_t)VKR_VRAM_W * s > (uint64_t)r->ctx.caps.max_image_2d)
+            s--;
         r->scale = s;
         if (s != want)
             LOG_RENDERER_WARN("[VK] internal resolution %ux asked for, %ux used", want, s);
@@ -1180,7 +1180,10 @@ static void vkr_fill_ps1_push(const VkRenderer* r, const VkrBatch* b, int stp_mo
     for (int i = 0; i < 4; i++) out->tex_window[i] = b->tex_window[i];
     out->use_texture   = b->textured    ? 1 : 0;
     out->raw_texture   = b->raw_texture ? 1 : 0;
-    out->dither_enable = b->dither      ? 1 : 0;
+    /* 0 = no dither, 1 = in PS1 pixels (the console's), 2 = in image pixels. */
+    out->dither_enable = !b->dither                               ? 0
+                       : r->dither_style == GFX_DITHER_OFF  ? 0
+                       : r->dither_style == GFX_DITHER_FINE ? 2 : 1;
     out->stp_mode      = stp_mode;
     out->set_mask      = b->set_mask    ? 1 : 0;
     out->mask_test     = b->mask_test   ? 1 : 0;
@@ -2153,6 +2156,7 @@ static void vkvt_get_pool_stats(GfxImpl impl, uint32_t* used, uint32_t* peak,
 static GfxTexHandle vkvt_get_display_texture(GfxImpl impl)     { return vkr_get_display_texture(R(impl)); }
 static GfxTexHandle vkvt_get_scanout_texture(GfxImpl impl)     { return vkr_get_scanout_texture(R(impl)); }
 static void vkvt_set_scanout_filter(GfxImpl impl, bool linear)  { R(impl)->scanout_linear = linear; }
+static void vkvt_set_dither_style(GfxImpl impl, int style)      { R(impl)->dither_style = style; }
 static GfxTexHandle vkvt_get_vram_viewer_texture(GfxImpl impl) { return vkr_get_vram_viewer_texture(R(impl)); }
 
 const GfxBackend gfx_backend_vulkan = {
@@ -2195,5 +2199,6 @@ const GfxBackend gfx_backend_vulkan = {
     .get_display_texture     = vkvt_get_display_texture,
     .get_scanout_texture     = vkvt_get_scanout_texture,
     .set_scanout_filter      = vkvt_set_scanout_filter,
+    .set_dither_style        = vkvt_set_dither_style,
     .get_vram_viewer_texture = vkvt_get_vram_viewer_texture,
 };

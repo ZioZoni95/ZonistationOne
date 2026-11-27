@@ -1500,7 +1500,8 @@ static void glr_draw_gl(GlRenderer* renderer, const GpuBatch* b, GlrReplay* ctx)
                     b->tex_window[0], b->tex_window[1], b->tex_window[2], b->tex_window[3]);
         memcpy(ctx->tex_window, b->tex_window, sizeof(ctx->tex_window));
     }
-    const int dither = b->dither_enabled ? 1 : 0, set_mask = b->set_mask_enabled ? 1 : 0;
+    const int dither = (b->dither_enabled && renderer->dither_style != GFX_DITHER_OFF) ? 1 : 0;
+    const int set_mask = b->set_mask_enabled ? 1 : 0;
     const int mask_test = b->mask_test_enabled ? 1 : 0, use_tex = b->texture_enabled ? 1 : 0;
     const int raw = b->raw_texture_enabled ? 1 : 0;
     if (renderer->uniform_dither_loc >= 0 && (!ctx->uni_valid || ctx->dither != dither))
@@ -2872,6 +2873,9 @@ static GfxTexHandle vt_get_scanout_texture(GfxImpl impl) {
 static void vt_set_scanout_filter(GfxImpl impl, bool linear) {
     R(impl)->scanout_linear = linear;
 }
+static void vt_set_dither_style(GfxImpl impl, int style) {
+    R(impl)->dither_style = style;
+}
 static GfxTexHandle vt_get_vram_viewer_texture(GfxImpl impl) {
     return (GfxTexHandle)glr_get_vram_viewer_texture(R(impl));
 }
@@ -2916,5 +2920,6 @@ const GfxBackend gfx_backend_gl33 = {
     .get_display_texture    = vt_get_display_texture,
     .get_scanout_texture    = vt_get_scanout_texture,
     .set_scanout_filter     = vt_set_scanout_filter,
+    .set_dither_style       = vt_set_dither_style,
     .get_vram_viewer_texture= vt_get_vram_viewer_texture,
 };

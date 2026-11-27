@@ -7,6 +7,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### 2026-11-27: every internal resolution from 1x to 9x, in a drop-down (branch `feature/graphics`)
+
+The Vulkan renderer took only 1x/2x/4x/8x and rounded anything else down to a power of two, so a
+1080p screen had to choose between 4x (960 lines, short of the screen) and 8x (1920, twice the
+work). Nothing in the backend needed a power of two — every use of the scale is a multiply — so
+the clamp now accepts any integer up to 16 (`VKR_MAX_SCALE`) and as large as the device's largest
+image allows, and the menu offers 1x to 9x with the picture each one gives for a 320x240 game and
+the display it suits (3x 720p, 5x 1080p, 6x 1440p, 9x 4K). The entry that fills the current window
+is marked "this window". The choice is a drop-down made of the menu's own buttons, so it opens and
+picks with the keyboard or the pad as well as the mouse (an ImGui combo answers only the mouse).
+
+**Checked** on Windows (RTX 4060), Ace Combat 2 hangar savestate: 3x and 6x start with VRAM at
+3072x1536 and 6144x3072 and render clean edges, same as 2x/4x/8x; the drop-down opened by mouse,
+moved with the arrow keys from 8x to 3x, Enter switched the renderer live and the picture redrew at
+3x once the game resumed. `make` with no warning from project sources. **Not checked:** the pad on
+the drop-down, the validation layer at a non-power-of-two scale, scales above 9 (`ZS1_SCALE` only),
+Linux.
+
+Seen in the same comparison: with aspect "Fill" the picture is stretched to the window's shape
+(a setting, not changed).
+
+#### Added: a dither choice (Video & HUD > Dither)
+The PS1's 4x4 dither is drawn in PS1 pixels, so at a high internal resolution it showed as a coarse
+grid of S x S blocks on every gradient (the hangar floor at 8x, measured from screenshots). New
+host setting, saved as `dither=` in `zs1_video.txt`, through one backend call `set_dither_style`
+sent every frame like the scanout filter: **Auto** (default: the console's pattern at 1x, none above
+it), **Console** (PS1 pixels, the old behaviour at every scale), **Fine** (the pattern in image
+pixels), **Off** (no dither and no 15-bit cut, "true colour"). OpenGL is 1x, so only Off changes
+anything there. Default at 1x is unchanged, so the GL/Vulkan parity dump is unaffected.
+**Checked:** builds without warnings, `make test`. **Not checked:** each style on screen (written
+just before the session ended), the pad on the new row.
+
 ### 2026-11-26: internal resolution on Vulkan, and settings everywhere (branch `feature/graphics`)
 
 **Checked** on Windows (RTX 4060): Ace Combat 2 at 4x and 8x, 16:9 fullscreen at 2560x1440, 50 fps

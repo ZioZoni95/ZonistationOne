@@ -172,7 +172,16 @@ typedef struct GfxBackend {
      * does not. Called every frame by the interface, so a backend switch needs
      * nothing re-sent. */
     void (*set_scanout_filter)(GfxImpl impl, bool linear);
+    /* How the PS1's 4x4 dither is drawn when a primitive asks for it (a host
+     * preference, never guest state): GFX_DITHER_CONSOLE keeps the pattern in
+     * PS1 pixels, so at an internal resolution each cell is scale x scale image
+     * pixels; GFX_DITHER_FINE puts it in image pixels; GFX_DITHER_OFF neither
+     * dithers nor quantises to 15 bits ("true colour"). At 1x the first two are
+     * the same picture. Called every frame by the interface, like the filter. */
+    void (*set_dither_style)(GfxImpl impl, int style);
 } GfxBackend;
+
+enum { GFX_DITHER_CONSOLE = 0, GFX_DITHER_FINE = 1, GFX_DITHER_OFF = 2, GFX_DITHER_COUNT };
 
 /* The registry. renderer.c picks one of these at init. A backend that was not
  * compiled in is absent from the table rather than present and failing, so the

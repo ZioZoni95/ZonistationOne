@@ -125,7 +125,9 @@ void main() {
                                             : vec4(tex_rgb * color * 2.0, mask_a);
     }
 
-    if (pc.dither_enable == 1) {
+    // dither_enable: 0 none, 1 in PS1 pixels (as the console), 2 in image
+    // pixels (the host's "fine" choice; the same picture at 1x).
+    if (pc.dither_enable != 0) {
         const int dither_table[16] = int[16](
             -4,  0, -3,  1,
              2, -2,  3, -1,
@@ -135,8 +137,9 @@ void main() {
         // The 4x4 pattern is in PS1 pixels, so at an internal resolution each
         // cell covers scale x scale image pixels and the picture dithers the
         // way the console did instead of in a finer pattern.
-        int   dx   = (int(gl_FragCoord.x) / pc.scale) & 3;
-        int   dy   = (int(gl_FragCoord.y) / pc.scale) & 3;
+        int   cell = (pc.dither_enable == 2) ? 1 : pc.scale;
+        int   dx   = (int(gl_FragCoord.x) / cell) & 3;
+        int   dy   = (int(gl_FragCoord.y) / cell) & 3;
         float doff = float(dither_table[dy * 4 + dx]) / 255.0;
         vec3  c_d  = clamp(final_color.rgb + vec3(doff), 0.0, 1.0);
         final_color.rgb = floor(c_d * 255.0 / 8.0) / 31.0;

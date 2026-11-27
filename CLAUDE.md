@@ -507,14 +507,17 @@ If no document needs to change, say so and why.
     `offsetof(Gpu, renderer)` and `sizeof(Renderer)`, so shrinking `Renderer` from ~1 MB to two
     pointers moved both boundaries by the same amount. Verified: a state saved and reloaded across
     the change restores PC and cycle exactly and the machine runs on.
-- **Internal resolution (Vulkan only, 2026-11-26)**: `GfxDeviceRequest.internal_scale` = 1/2/4/8
+- **Internal resolution (Vulkan only, 2026-11-26)**: `GfxDeviceRequest.internal_scale` = any integer
+  1..16 (`VKR_MAX_SCALE`, and no wider than `maxImageDimension2D`; the menu's drop-down offers 1..9
+  since 2026-11-27 — nothing needs a power of two, every use of the scale is a multiply)
   (saved in `zs1_video.txt`, `ZS1_SCALE` for one run; a change goes through the renderer switch).
   VRAM and scanout images are 1024S x 512S; each PS1 halfword is an S x S block. The CPU never sees
   that: uploads go into a 1024x512 `vram_native` image and are blitted up (NEAREST), readbacks are
   blitted down into it and copied from there, so `read_vram_rect`, savestates and the backend switch
   still deal in 1024x512 halfwords. Shaders take `scale` in their push constants: texture and CLUT
   addresses are PS1 units times S, the mask test reads `gl_FragCoord` as is, dither is in PS1
-  pixels, 24bpp scanout is decoded at 1x, and a 15bpp texel samples the sub-pixel its UV fraction
+  pixels unless the host's dither choice says otherwise (`set_dither_style`, 2026-11-27: Auto =
+  console at 1x and none above, since a PS1-pixel pattern at 8x is a visible block grid), 24bpp scanout is decoded at 1x, and a 15bpp texel samples the sub-pixel its UV fraction
   points at (render-to-texture keeps its resolution). Lines are S pixels wide via `wideLines`.
   `ZS1_DUMP_FRAME` is 1x only. OpenGL stays at 1x as the accuracy reference. Checked with the
   validation layer at 1x, 4x and 8x and across four GL/Vulkan switches from 8x.

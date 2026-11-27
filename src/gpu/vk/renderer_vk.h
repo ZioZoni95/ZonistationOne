@@ -17,6 +17,9 @@
 
 #define VKR_VRAM_W 1024
 #define VKR_VRAM_H 512
+/* Largest internal resolution: VRAM and scanout are 16384x8192 RGBA8 there,
+ * 512 MB each, and 16384 is the usual maxImageDimension2D on desktop GPUs. */
+#define VKR_MAX_SCALE 16u
 
 /* Recording limits, sized like the GL backend's so a frame that fits there fits
  * here and an A/B never diverges because one side dropped work the other kept. */
@@ -167,6 +170,7 @@ typedef struct {
     VkDescriptorSet imgui_scanout_set;
     VkDescriptorSet imgui_scanout_set_linear;   /* the same image through sampler_linear */
     bool            scanout_linear;             /* which of the two ImGui is handed */
+    int             dither_style;               /* GFX_DITHER_*, read when a batch is recorded */
     VkDescriptorSet imgui_vram_set;
     VkDescriptorSet imgui_viewer_set;
 

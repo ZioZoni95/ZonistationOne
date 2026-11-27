@@ -269,6 +269,10 @@ void renderer_set_scanout_filter(Renderer* renderer, bool linear) {
     if (!LIVE(renderer)) return;
     renderer->vt->set_scanout_filter(renderer->impl, linear);
 }
+void renderer_set_dither_style(Renderer* renderer, int style) {
+    if (!LIVE(renderer)) return;
+    renderer->vt->set_dither_style(renderer->impl, style);
+}
 GfxTexHandle renderer_get_vram_viewer_texture(Renderer* renderer) {
     if (!LIVE(renderer)) return 0;
     return renderer->vt->get_vram_viewer_texture(renderer->impl);

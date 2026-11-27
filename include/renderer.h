@@ -108,6 +108,7 @@ GfxTexHandle renderer_get_display_texture(Renderer* renderer);
 GfxTexHandle renderer_get_scanout_texture(Renderer* renderer);
 /* Nearest (false) or bilinear (true) when the scanout image is scaled to the window. */
 void renderer_set_scanout_filter(Renderer* renderer, bool linear);
+void renderer_set_dither_style(Renderer* renderer, int style);   /* GFX_DITHER_* */
 void   renderer_set_vram_view_params(Renderer* renderer, const VramViewParams* p);
 void   renderer_update_vram_viewer(Renderer* renderer, const uint8_t* vram_bytes);
 GfxTexHandle renderer_get_vram_viewer_texture(Renderer* renderer);

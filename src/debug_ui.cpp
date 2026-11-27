@@ -1722,8 +1722,17 @@ static const char* const g_vid_aspect_subs[VID_ASPECT_COUNT]  = { "as on a TV", 
 static int  g_vid_aspect  = VID_ASPECT_4_3;
 static bool g_vid_integer = false;
 static bool g_vid_linear  = false;
-static int  g_vid_scale   = 1;       /* internal resolution, Vulkan only: 1, 2, 4 or 8 */
+static int  g_vid_scale   = 1;       /* internal resolution, Vulkan only: 1..16 (the menu offers 1..9) */
 static int  g_vid_renderer = -1;     /* the renderer to start on: -1 not chosen yet, else GfxBackendType */
+/* Dither: VID_DITHER_AUTO is the console's pattern at 1x and none above it,
+ * where a pattern in PS1 pixels reads as a coarse grid; the other three are
+ * GFX_DITHER_* plus one, as chosen. */
+enum { VID_DITHER_AUTO = 0, VID_DITHER_CONSOLE, VID_DITHER_FINE, VID_DITHER_OFF, VID_DITHER_COUNT };
+static int  g_vid_dither  = VID_DITHER_AUTO;
+static int vid_dither_style(void) {
+    if (g_vid_dither == VID_DITHER_AUTO) return g_vid_scale > 1 ? GFX_DITHER_OFF : GFX_DITHER_CONSOLE;
+    return g_vid_dither - 1;
+}
 static bool g_vid_loaded  = false;
 static const char* const ZS_VIDEO_FILE = "zs1_video.txt";
 
@@ -1754,6 +1763,7 @@ static void draw_scanout(GfxTexHandle texture_id, Interconnect* inter, ImVec2 av
             uint16_t vh = inter->gpu.crtc.display_height > 0 ? inter->gpu.crtc.display_height : 240;
 
             renderer_set_scanout_filter(&inter->gpu.renderer, g_vid_linear);
+            renderer_set_dither_style(&inter->gpu.renderer, vid_dither_style());
             texture_id = renderer_get_scanout_texture(&inter->gpu.renderer);
             float u0 = 0.0f, u1 = (float)vw / 1024.0f;
             float v0 = 0.0f, v1 = (float)vh / 512.0f;
@@ -4606,8 +4616,9 @@ static void video_settings_save(void) {
     FILE* f = fopen(ZS_VIDEO_FILE, "w");
     if (!f) return;
     fprintf(f, "aspect=%d\ninteger=%d\nlinear=%d\nscale=%d\nrenderer=%d\n"
-               "hud=%d\ngraph=%d\nambient=%d\npace=%d\n",
+               "dither=%d\nhud=%d\ngraph=%d\nambient=%d\npace=%d\n",
             g_vid_aspect, g_vid_integer ? 1 : 0, g_vid_linear ? 1 : 0, g_vid_scale, g_vid_renderer,
+            g_vid_dither,
             g_gp_hud_mode, g_gp_graph ? 1 : 0, g_gp_ambient ? 1 : 0, g_gp_pace_line ? 1 : 0);
     fclose(f);
 }
@@ -4622,8 +4633,9 @@ static void video_settings_load(void) {
         if (sscanf(line, "aspect=%d", &v) == 1 && v >= 0 && v < VID_ASPECT_COUNT) g_vid_aspect = v;
         else if (sscanf(line, "integer=%d", &v) == 1) g_vid_integer = (v != 0);
         else if (sscanf(line, "linear=%d", &v) == 1)  g_vid_linear  = (v != 0);
-        else if (sscanf(line, "scale=%d", &v) == 1 && (v == 1 || v == 2 || v == 4 || v == 8)) g_vid_scale = v;
+        else if (sscanf(line, "scale=%d", &v) == 1 && v >= 1 && v <= 16) g_vid_scale = v;
         else if (sscanf(line, "renderer=%d", &v) == 1 && v >= -1 && v <= 1) g_vid_renderer = v;
+        else if (sscanf(line, "dither=%d", &v) == 1 && v >= 0 && v < VID_DITHER_COUNT) g_vid_dither = v;
         else if (sscanf(line, "hud=%d", &v) == 1 && v >= 0 && v < GP_HUD_COUNT) g_gp_hud_mode = v;
         else if (sscanf(line, "graph=%d", &v) == 1)   g_gp_graph     = (v != 0);
         else if (sscanf(line, "ambient=%d", &v) == 1) g_gp_ambient   = (v != 0);
@@ -5306,25 +5318,79 @@ static void gp_video_settings(Interconnect* inter, bool start_screen) {
      * the renderer switch, which carries VRAM across, so the game goes on. */
     micro_label("Internal resolution");
     {
-        static const int   scales[4] = { 1, 2, 4, 8 };
-        static const char* names[4]  = { "1x", "2x", "4x", "8x" };
-        static const char* subs[4]   = { "native", "640x480 class", "1280x960 class", "2560x1920 class" };
+        /* Every integer from 1x to 9x. The sub-label is the picture a 320x240
+         * game is drawn at, and the target display it fills: 240 lines times
+         * the scale is 720 at 3x, 1080 at 4.5x (so 5x), 1440 at 6x, 2160 at 9x.
+         * The one marked "this window" is the smallest scale whose picture is
+         * at least as tall as the window, past which more only supersamples. */
+        static const char* names[9] = { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x", "9x" };
+        static const char* subs[9]  = { "native 320x240", "640x480", "960x720 - 720p",
+                                        "1280x960", "1600x1200 - 1080p", "1920x1440 - 1440p",
+                                        "2240x1680", "2560x1920", "2880x2160 - 4K" };
+        const ImGuiIO& io = ImGui::GetIO();
+        const float win_px = io.DisplaySize.y * io.DisplayFramebufferScale.y;
+        int fit = (int)((win_px + 239.0f) / 240.0f);
+        if (fit < 1) fit = 1;
+        if (fit > 9) fit = 9;
         const bool vk = (s_gfx_backend == GFX_BACKEND_VULKAN);
-        const float gap = 8.0f * s;
-        const float tw = (ImGui::GetContentRegionAvail().x - gap * 3.0f) / 4.0f;
-        for (int i = 0; i < 4; i++) {
-            if (i) ImGui::SameLine(0, gap);
-            if (gp_btn(names[i], vk ? subs[i] : "Vulkan only", ImVec2(tw, 50.0f * s),
-                       !vk || g_req_gfx, g_vid_scale == scales[i], ZS_OK) &&
-                g_vid_scale != scales[i]) {
-                g_vid_scale = scales[i];
-                video_settings_save();
-                gp_request_gfx(GFX_BACKEND_VULKAN, g_gfx_live_device, (uint32_t)g_vid_scale);
+        /* A drop-down built from the menu's own buttons, not an ImGui combo:
+         * the quick menu is driven by six inputs from the keyboard or the pad
+         * through gp_btn, and a combo popup would answer only to the mouse.
+         * The header shows the current scale; activating it opens the list
+         * under it and moves the focus onto the current entry. */
+        static bool open = false;
+        if (!vk || g_req_gfx) open = false;
+        char head[32], sub[80];
+        const int cur = g_vid_scale >= 1 && g_vid_scale <= 9 ? g_vid_scale : 0;
+        snprintf(head, sizeof(head), "%dx", g_vid_scale);
+        if (!vk)       snprintf(sub, sizeof(sub), "Vulkan only");
+        else if (cur)  snprintf(sub, sizeof(sub), "%s%s  -  %s", subs[cur - 1],
+                                cur == fit ? ", this window" : "", open ? "close" : "change");
+        else           snprintf(sub, sizeof(sub), "set outside the menu  -  %s", open ? "close" : "change");
+        const int head_idx = g_gp_pane_next;
+        if (gp_btn(head, sub, ImVec2(0, 50.0f * s), !vk || g_req_gfx, false, ZS_OK)) {
+            open = !open;
+            if (open && g_gp_focus == 1) {
+                g_gp_pane_idx = head_idx + (cur ? cur : 1);
+                g_gp_scroll_focus = true;
+            }
+        }
+        if (open) {
+            for (int i = 0; i < 9; i++) {
+                snprintf(sub, sizeof(sub), "%s%s", subs[i], i + 1 == fit ? ", this window" : "");
+                if (gp_btn(names[i], sub, ImVec2(0, 40.0f * s), false, g_vid_scale == i + 1, ZS_OK)) {
+                    open = false;
+                    g_gp_pane_idx = head_idx;
+                    if (g_vid_scale != i + 1) {
+                        g_vid_scale = i + 1;
+                        video_settings_save();
+                        gp_request_gfx(GFX_BACKEND_VULKAN, g_gfx_live_device, (uint32_t)g_vid_scale);
+                    }
+                }
             }
         }
         if (!vk)
             gp_pane_text("OpenGL draws at the PS1's own resolution. Switch the renderer to "
-                         "Vulkan above to draw at 2x, 4x or 8x.");
+                         "Vulkan above to draw at 2x to 9x.");
+    }
+    /* Dither: the PS1 dithers shaded and blended primitives with a 4x4 pattern
+     * before cutting colour to 15 bits. At 1x that is the console's look; at a
+     * higher internal resolution the same pattern in PS1 pixels becomes a coarse
+     * grid of scale x scale blocks on every gradient. */
+    micro_label("Dither");
+    {
+        static const char* names[VID_DITHER_COUNT] = { "Auto", "Console", "Fine", "Off" };
+        static const char* subs[VID_DITHER_COUNT]  = { "console at 1x, off above", "4x4 in PS1 pixels",
+                                                       "4x4 in screen pixels", "true colour, no banding cut" };
+        const float gap = 8.0f * s;
+        const float tw = (ImGui::GetContentRegionAvail().x - gap * 3.0f) / 4.0f;
+        for (int i = 0; i < VID_DITHER_COUNT; i++) {
+            if (i) ImGui::SameLine(0, gap);
+            if (gp_btn(names[i], subs[i], ImVec2(tw, 50.0f * s), false, g_vid_dither == i, ZS_DATA)) {
+                g_vid_dither = i;
+                video_settings_save();
+            }
+        }
     }
     ImGui::Dummy(ImVec2(0, 4.0f * s));
     if (gp_btn(g_vid_integer ? "Integer scale: on" : "Integer scale: off",
